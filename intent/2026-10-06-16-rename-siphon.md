@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 16
 author: olafkfreund
 ---
@@ -90,3 +90,9 @@ There are about 300 references in all.
 3. **How long the aliases live:** one release (until v0.2.0) and then
    remove them? Proposal: yes.
 4. **Order:** this before #15's implementation (proposal), or after?
+
+## Decisions at approval (2026-10-06)
+
+The owner approved the proposals: repo `olafkfreund/siphon`; migrate state
+to `/var/lib/siphon`; aliases until v0.2.0; this rename lands before #15's
+implementation.
