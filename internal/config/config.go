@@ -74,13 +74,15 @@ func (s *Secret) UnmarshalYAML(n *yaml.Node) error { s.Ref = n.Value; return nil
 func (s Secret) isSet() bool { return s.Ref != "" }
 
 type Config struct {
-	Server   Server              `yaml:"server"`
-	Limits   Limits              `yaml:"limits"`
-	Sources  map[string]*Source  `yaml:"sources"`
-	Rules    []Rule              `yaml:"rules"`
-	Agents   map[string]*Agent   `yaml:"agents"`
-	Routines map[string]*Routine `yaml:"routines"`
-	Units    []string            `yaml:"units"`
+	Server  Server             `yaml:"server"`
+	Limits  Limits             `yaml:"limits"`
+	Sources map[string]*Source `yaml:"sources"`
+	Rules   []Rule             `yaml:"rules"`
+	Agents  map[string]*Agent  `yaml:"agents"`
+	// Credentials are logins agentgw owns: subscription (store files) or, with api_key, an API key.
+	Credentials map[string]*Credential `yaml:"credentials"`
+	Routines    map[string]*Routine    `yaml:"routines"`
+	Units       []string               `yaml:"units"`
 
 	resolveErrs []error
 }
@@ -151,7 +153,20 @@ type Action struct {
 	Routine string   `yaml:"routine"`
 }
 
+// Credential is a subscription login (no api_key) or an API key for one provider.
+type Credential struct {
+	Provider    string `yaml:"provider"` // claude|codex|agy
+	APIKey      Secret `yaml:"api_key"`
+	Concurrency int    `yaml:"concurrency"` // parallel jobs on this login, default 1
+}
+
+var kinds = []string{"claude", "codex", "agy"}
+
 type Agent struct {
+	Kind       string `yaml:"kind"` // claude (default)|codex|agy
+	Credential string `yaml:"credential"`
+	Command    string `yaml:"command"` // binary path override
+	// Deprecated: use kind and command.
 	Runner       []string `yaml:"runner"`
 	Prompt       string   `yaml:"prompt"`
 	MCP          []string `yaml:"mcp"`
@@ -228,12 +243,46 @@ func Parse(b []byte) (*Config, error) {
 		if a == nil {
 			continue
 		}
+		if a.Kind == "" {
+			a.Kind = "claude"
+		}
+		if len(a.Runner) > 0 && a.Command == "" {
+			a.Command = a.Runner[0]
+		}
 		if a.Approve == nil {
 			t := true
 			a.Approve = &t
 		}
 		if a.Timeout == 0 {
 			a.Timeout = Duration(10 * time.Minute)
+		}
+	}
+	for _, cr := range c.Credentials {
+		if cr != nil && cr.Concurrency == 0 {
+			cr.Concurrency = 1
+		}
+	}
+	for _, name := range sortedKeys(c.Agents) {
+		a := c.Agents[name]
+		if a == nil || a.Credential != "" {
+			continue
+		}
+		if a.APIKeyFile != "" {
+			if c.Credentials == nil {
+				c.Credentials = map[string]*Credential{}
+			}
+			a.Credential = "_apikey_" + name
+			c.Credentials[a.Credential] = &Credential{Provider: a.Kind, APIKey: Secret{Ref: "file:" + a.APIKeyFile}, Concurrency: 1}
+			continue
+		}
+		var only []string
+		for _, cn := range sortedKeys(c.Credentials) {
+			if cr := c.Credentials[cn]; cr != nil && cr.Provider == a.Kind && !cr.APIKey.isSet() {
+				only = append(only, cn)
+			}
+		}
+		if len(only) == 1 {
+			a.Credential = only[0]
 		}
 	}
 	for _, s := range c.secretPtrs() {
@@ -259,6 +308,11 @@ func Parse(b []byte) (*Config, error) {
 // are handled separately: they may be plain literals unless the name looks secret.
 func (c *Config) secretPtrs() []*Secret {
 	out := []*Secret{&c.Server.Token}
+	for _, name := range sortedKeys(c.Credentials) {
+		if cr := c.Credentials[name]; cr != nil {
+			out = append(out, &cr.APIKey)
+		}
+	}
 	for _, name := range sortedKeys(c.Sources) {
 		if s := c.Sources[name]; s != nil {
 			out = append(out, &s.Secret)
@@ -329,7 +383,41 @@ func (c *Config) Warnings() []string {
 			w = append(w, fmt.Sprintf("source %s: bearer token sent over plain http to a non-loopback host", name))
 		}
 	}
+	for _, name := range sortedKeys(c.Agents) {
+		a := c.Agents[name]
+		if a == nil {
+			continue
+		}
+		if len(a.Runner) > 0 {
+			w = append(w, fmt.Sprintf("agent %s: runner is deprecated, use kind and command", name))
+			if len(a.Runner) > 1 {
+				w = append(w, fmt.Sprintf("agent %s: runner arguments after the binary are ignored", name))
+			}
+		}
+		add := func(f string, a ...any) { w = append(w, fmt.Sprintf("agent %s: ", name)+fmt.Sprintf(f, a...)) }
+		if a.Kind == "codex" || a.Kind == "agy" {
+			add("built-in shell tools can't be disabled (%s runs %s)", a.Kind, map[string]string{"codex": "read-only", "agy": "in a sandbox in plan mode"}[a.Kind])
+		}
+		if a.Kind == "agy" && len(a.AllowedTools) > 0 {
+			add("tool allowlist not enforced (only MCP server scoping)")
+		}
+		if a.Kind != "claude" && a.MaxTurns > 0 {
+			add("max_turns not enforced")
+		}
+		if a.Kind != "claude" && a.MaxBudgetUSD > 0 {
+			add("max_budget_usd not enforced")
+		}
+	}
 	return w
+}
+
+// AgentCredential returns the agent's credential name and entry, or "", nil.
+func (c *Config) AgentCredential(agent string) (string, *Credential) {
+	a := c.Agents[agent]
+	if a == nil || a.Credential == "" {
+		return "", nil
+	}
+	return a.Credential, c.Credentials[a.Credential]
 }
 
 func loopbackListen(addr string) bool {
@@ -454,6 +542,22 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	for _, name := range sortedKeys(c.Credentials) {
+		cr := c.Credentials[name]
+		p := "credentials." + name
+		switch {
+		case cr == nil:
+			add("%s: empty", p)
+		case !slices.Contains(kinds, cr.Provider):
+			add("%s: provider must be claude, codex or agy, got %q", p, cr.Provider)
+		case cr.Concurrency < 1:
+			add("%s: concurrency must be >= 1", p)
+		}
+		if cr != nil && cr.APIKey.isSet() && !strings.HasPrefix(cr.APIKey.Ref, "env:") && !strings.HasPrefix(cr.APIKey.Ref, "file:") {
+			add("%s: api_key must be env:NAME or file:/path", p)
+		}
+	}
+
 	for _, name := range sortedKeys(c.Agents) {
 		a := c.Agents[name]
 		p := "agents." + name
@@ -473,6 +577,24 @@ func (c *Config) Validate() error {
 		}
 		if len(a.Runner) > 0 && strings.Contains(a.Runner[0], "{{") {
 			add("%s: runner[0] must not be templated", p)
+		}
+		if strings.Contains(a.Command, "{{") {
+			add("%s: command must not be templated", p)
+		}
+		if !slices.Contains(kinds, a.Kind) {
+			add("%s: kind must be claude, codex or agy, got %q", p, a.Kind)
+		} else if len(a.Runner) > 0 && a.Kind != "claude" {
+			add("%s: runner implies kind claude, got %s", p, a.Kind)
+		}
+		if a.Credential == "" {
+			// Pre-credentials configs (claude, none declared) keep their ambient login until step 5.
+			if a.Kind != "claude" || len(c.Credentials) > 0 {
+				add("%s: credential is required (no unique %s subscription credential to default to)", p, a.Kind)
+			}
+		} else if cr := c.Credentials[a.Credential]; cr == nil {
+			add("%s: unknown credential %q", p, a.Credential)
+		} else if cr.Provider != a.Kind {
+			add("%s: credential %q is for %s, agent kind is %s", p, a.Credential, cr.Provider, a.Kind)
 		}
 		if a.APIKeyFile != "" && !safePath.MatchString(a.APIKeyFile) {
 			add("%s: api_key_file must be an absolute path of [A-Za-z0-9/._-]", p)
