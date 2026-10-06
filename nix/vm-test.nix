@@ -155,7 +155,7 @@ pkgs.testers.runNixOSTest {
         (pkgs.writeShellScriptBin "claude" ''
           f="$HOME/.claude/.credentials.json"
           [ -f "$f" ] || { echo "no login at $f" >&2; exit 2; }
-          for p in /var/lib/agentgw/credentials/claude-max/credentials.json /var/lib/agentgw/credentials/chatgpt/auth.json /var/lib/agentgw/credentials/google/antigravity-oauth-token; do cat "$p" >/dev/null 2>&1 && echo LEAK; done; [ -e /etc/codex ] && echo ETC-VISIBLE
+          for p in /var/lib/agentgw/credentials/claude-max/credentials.json /var/lib/agentgw/credentials/chatgpt/auth.json /var/lib/agentgw/credentials/google/antigravity-oauth-token; do cat "$p" >/dev/null 2>&1 && echo LEAK; done; [ -n "$(ls -A /etc/codex 2>/dev/null)" ] && echo ETC-VISIBLE
           cat >/dev/null
           printf '%s' '{"claudeAiOauth":{"accessToken":"a2","refreshToken":"refreshed-claude","expiresAt":4102444800000}}' > "$f"
           echo '{"type":"result","result":"claude ok"}'
@@ -163,7 +163,7 @@ pkgs.testers.runNixOSTest {
         (pkgs.writeShellScriptBin "codex" ''
           f="$CODEX_HOME/auth.json"
           [ -f "$f" ] || { echo "no login at $f" >&2; exit 2; }
-          for p in /var/lib/agentgw/credentials/claude-max/credentials.json /var/lib/agentgw/credentials/chatgpt/auth.json /var/lib/agentgw/credentials/google/antigravity-oauth-token; do cat "$p" >/dev/null 2>&1 && echo LEAK; done; [ -e /etc/codex ] && echo ETC-VISIBLE
+          for p in /var/lib/agentgw/credentials/claude-max/credentials.json /var/lib/agentgw/credentials/chatgpt/auth.json /var/lib/agentgw/credentials/google/antigravity-oauth-token; do cat "$p" >/dev/null 2>&1 && echo LEAK; done; [ -n "$(ls -A /etc/codex 2>/dev/null)" ] && echo ETC-VISIBLE
           cat >/dev/null
           printf '%s' '{"tokens":{"id_token":"x","access_token":"h.eyJleHAiOjQxMDI0NDQ4MDB9.s","refresh_token":"refreshed-codex","account_id":"a"}}' > "$f"
           echo "codex ok"
@@ -171,7 +171,7 @@ pkgs.testers.runNixOSTest {
         (pkgs.writeShellScriptBin "agy" ''
           f="$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
           [ -f "$f" ] || { echo "no login at $f" >&2; exit 2; }
-          for p in /var/lib/agentgw/credentials/claude-max/credentials.json /var/lib/agentgw/credentials/chatgpt/auth.json /var/lib/agentgw/credentials/google/antigravity-oauth-token; do cat "$p" >/dev/null 2>&1 && echo LEAK; done; [ -e /etc/codex ] && echo ETC-VISIBLE
+          for p in /var/lib/agentgw/credentials/claude-max/credentials.json /var/lib/agentgw/credentials/chatgpt/auth.json /var/lib/agentgw/credentials/google/antigravity-oauth-token; do cat "$p" >/dev/null 2>&1 && echo LEAK; done; [ -n "$(ls -A /etc/codex 2>/dev/null)" ] && echo ETC-VISIBLE
           printf '%s' '{"token":{"access_token":"a2","token_type":"Bearer","refresh_token":"refreshed-agy","expiry":"2100-01-01T00:00:00Z"},"auth_method":"oauth"}' > "$f"
           echo '{"status":"OK","response":"agy ok"}'
         '')

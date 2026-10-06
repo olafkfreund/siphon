@@ -19,6 +19,13 @@ let
   } cfg.settings;
   configFile = yaml.generate "agentgw.yaml" settings;
   units = settings.units or [ ];
+  agentEtcDirs = [
+    "claude-code"
+    "codex"
+    "gemini"
+    "antigravity"
+  ];
+  etcManaged = d: lib.any (k: k == d || lib.hasPrefix "${d}/" k) (lib.attrNames config.environment.etc);
 in
 {
   options.services.agentgw = {
@@ -162,12 +169,10 @@ in
         TasksMax = 256;
         # System-wide agent CLI config must not reach agents: managed hooks,
         # instructions or extra MCP servers there would bypass the allowlist.
-        InaccessiblePaths = [
-          "-/etc/claude-code"
-          "-/etc/codex"
-          "-/etc/gemini"
-          "-/etc/antigravity"
-        ];
+        # NixOS-managed dirs get an empty read-only tmpfs (the CLI sees no
+        # config, rather than an unreadable one); others are made inaccessible.
+        TemporaryFileSystem = map (d: "/etc/${d}:ro") (lib.filter etcManaged agentEtcDirs);
+        InaccessiblePaths = map (d: "-/etc/${d}") (lib.filter (d: !etcManaged d) agentEtcDirs);
         PrivateTmp = true;
         ProtectSystem = "strict";
         ProtectHome = true;

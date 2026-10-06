@@ -183,3 +183,29 @@ Revert the merge commit. The old `runner`/`api_key_file` configs keep working th
   - **Not verified (need the owner):** `claude setup-token` with `CLAUDE_CODE_OAUTH_TOKEN`, an agy API key with `GEMINI_API_KEY`, and API-key runs per provider. The README now labels these "not yet verified".
   - README corrections: the re-login and quota messages now match the code, and the claim that "validate rejects agy API key" (never implemented) is removed.
   - **Observation:** `/etc/codex/hooks` (system-wide codex config) ran during the codex job. System `/etc` CLI config applies inside the sandbox too, and the README says so.
+- Full review (fresh Opus; 0 critical, 4 high, 7 medium, 9 low; FIFO hang and legacy-config break reproduced). All fixed:
+  - **Codex lane:**
+    - H1: FIFO-safe reads with O_NONBLOCK and a regular-file check.
+    - H4: agy ERROR status fails the run.
+    - M2: legacy Claude runs keep `--bare`.
+    - M5: Codex MCP config moved to a private `config.toml`, off argv.
+    - M6: the classifier uses structured errors and stderr, never stdout.
+    - M7: broader masking, including refreshed values.
+    - L2, L3: write-back errors skipped; capped reads.
+    - L8: plain cmd under `sandbox: none` keeps HOME.
+    - O1: dead `APIKeyFile` path removed.
+    - O2: adapters get the real HOME.
+    - Coverage restored.
+  - **coder lane:**
+    - H2: typed re-marshal, `SameAccount`, `.prev` backups, `Save(wrote, err)`, and `ValidateFor` rejecting an API-key-only subscription file.
+    - M1: the exemption counts declared credentials only.
+    - L7: credential names validated, `_apikey_` reserved.
+    - H3/M5/L8/L9 README corrections, including the explicit refresh-token exfiltration risk and its mitigations.
+  - **Opus:**
+    - Write-back account check (audit `credential_writeback_rejected`), and audit only real writes.
+    - M4: a busy login requeues plain agent jobs (5 s); routine steps still wait.
+    - M3: agent CLI `/etc` dirs are hidden. NixOS-managed ones get an empty read-only tmpfs (a plain `InaccessiblePaths` left the `/etc/codex` symlink visible, and the VM test caught it); others get `InaccessiblePaths`.
+    - L5: explicit store paths in the VM probe.
+    - L1: devenv follows nixos-unstable (Go 1.26.8), `go.mod` is back to 1.26.8, and `devenv test` runs `-race`.
+  - Not changed: L6 (two DBs in one dir sharing `credentials/`; documented as unsupported).
+  - Results: VM test 8/8; `go test -race` green; `devenv test` green.
