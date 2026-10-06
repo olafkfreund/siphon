@@ -39,9 +39,10 @@ type AgentOptions struct {
 }
 
 type AgentResult struct {
-	Exit   int
-	Output []byte
-	Stdout []byte
+	Exit      int
+	Output    []byte
+	Stdout    []byte
+	Writeback map[int][]byte
 }
 
 func RunAgent(ctx context.Context, o AgentOptions) (AgentResult, error) {
@@ -50,8 +51,8 @@ func RunAgent(ctx context.Context, o AgentOptions) (AgentResult, error) {
 	if err != nil {
 		return AgentResult{Exit: -1}, err
 	}
-	exit, output, stdout, err := runCommand(ctx, argv, sandbox, o.Secrets, prompt, true)
-	return AgentResult{Exit: exit, Output: output, Stdout: stdout}, err
+	exit, output, stdout, writeback, err := runCommand(ctx, argv, sandbox, o.Secrets, prompt, true)
+	return AgentResult{Exit: exit, Output: output, Stdout: stdout, Writeback: writeback}, err
 }
 
 func agentArgv(o AgentOptions) ([]string, []byte, SandboxOptions, error) {
