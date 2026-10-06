@@ -10,7 +10,7 @@ source of truth, and one SQLite file holds the state.
 sources            rules                        actions
 mcp      ─┐        when: <expr>                 cmd      argv, sandboxed
 http     ─┼──────▶ on: edge | each      ──────▶ unit     starts an allowlisted systemd unit and waits for it
-webhook  ─┘        cooldown, repeat             agent    claude (or any argv runner), tool allowlist
+webhook  ─┘        cooldown, repeat             agent    claude, codex or agy on a subscription login
                                                 routine  ordered steps: if, retry, approve, continue_on_error
 ```
 
@@ -119,6 +119,8 @@ All commands that read the config take `-config <file>` (default `agentgw.yaml`)
 | `agentgw run-once [-config f]` | Poll every source once, evaluate rules, run the jobs. Holds the DB lock. |
 | `agentgw serve [-config f]` | The daemon: pollers, webhook endpoints, workers, portal and API. Holds the DB lock. |
 | `agentgw jobs ls [-config f] [-state s]` | List jobs (newest first). |
+| `agentgw credentials import [-config f] [-token-stdin] <name>` | Read a login file (or, with `-token-stdin`, a Claude setup-token) from stdin, check its shape and store it. |
+| `agentgw credentials ls [-config f]` | List stored logins: name, provider, token expiry, last write-back. Never prints secrets. |
 | `agentgw approve [-config f] [-by name] <job id>` | Approve a pending job (`-by` defaults to `$USER`). |
 | `agentgw deny [-config f] [-by name] <job id>` | Deny a pending job. |
 | `agentgw schema` | Print the JSON Schema for `agentgw.yaml`. |
@@ -155,6 +157,99 @@ yaml-language-server:
 See [`examples/agentgw.yaml`](examples/agentgw.yaml) for every source type, rule
 mode and action type, plus a routine with retry and approval. To add a new kind
 of source, see [`docs/adding-a-source.md`](docs/adding-a-source.md).
+
+## Agents and subscriptions
+
+An agent runs a coding-agent CLI inside the same systemd sandbox as `cmd`
+actions. **Subscription logins are the default**; API keys stay supported.
+Three kinds exist: `claude` (default), `codex` and `agy` (Antigravity).
+
+```yaml
+credentials:
+  claude-max: { provider: claude }
+  chatgpt:    { provider: codex }
+  google:     { provider: agy }
+  openai-key: { provider: codex, api_key: "file:/run/credentials/agentgw.service/openai" }
+
+agents:
+  triage:
+    kind: codex                  # claude (default) | codex | agy
+    credential: chatgpt          # optional if exactly one subscription credential of that kind exists
+    command: /run/current-system/sw/bin/codex   # optional binary override
+    prompt: "..."
+```
+
+### Import a login
+
+Log in on a host where the CLI works, then import the login file as the
+service user. The file is read from stdin, so this works across users. The
+store is `<dir of server.db>/credentials/<name>/` (mode 0700), which the
+sandbox never sees; agentgw hands each run only the files it needs.
+
+| Provider | Log in | Import |
+|---|---|---|
+| claude | `claude` (then `/login`) | `sudo -u agentgw agentgw credentials import -config <path> claude-max < ~/.claude/.credentials.json` |
+| claude, non-rotating | `claude setup-token` | `... credentials import -config <path> -token-stdin claude-max` (paste the token on stdin) |
+| codex | `codex login` | `sudo -u agentgw agentgw credentials import -config <path> chatgpt < ~/.codex/auth.json` |
+| agy | `agy` (sign in) | `sudo -u agentgw agentgw credentials import -config <path> google < ~/.gemini/antigravity-cli/antigravity-oauth-token` |
+
+Import checks the file's shape. For Claude only the `claudeAiOauth` object is
+kept (MCP OAuth entries are dropped). `agentgw credentials ls -config <path>`
+shows name, provider, token expiry and last write-back, never a secret.
+
+### What each kind can enforce
+
+| Control | claude | codex | agy |
+|---|---|---|---|
+| Built-in tools off | yes (`--tools ""`) | no: runs read-only (`-s read-only`) | no: plan mode plus `--sandbox` |
+| Exact MCP tool allowlist | yes | yes (`enabled_tools`, per-tool approval) | no: only the listed MCP servers are configured |
+| `max_turns`, `max_budget_usd` | yes | no (timeout only) | no (`--print-timeout` and timeout) |
+| Prompt delivery | stdin | stdin | one `--print=<prompt>` argv element |
+
+`agentgw validate` prints one warning per agent for each control its kind
+cannot enforce. Nothing is refused: the systemd sandbox remains the outer
+boundary. Every kind's result reaches `agent-result` rules as
+`{"kind", "result": <final text>, "raw": <the CLI's JSON, or null>}`.
+
+### Refresh, write-back and concurrency
+
+CLIs refresh their tokens while running. After each run agentgw copies a
+changed login file back into the store, but only if the store still holds the
+bytes the run started with (compare-and-swap under a per-credential lock);
+otherwise the copy with the later token expiry wins. Write-back bytes never
+enter job output, and credential contents are masked in it.
+`credentials.<name>.concurrency` (default **1**) limits concurrent runs per
+login so two runs never race a rotating refresh token; extra jobs wait.
+
+If a login stops working, the job fails with
+`credential <name> needs re-login: <command>` and the audit log records
+`credential_reauth`. Log in again and re-import. Quota errors are reported as
+`quota/rate limit: ...` and are not treated as auth failures.
+
+### API keys
+
+Set `api_key: env:NAME` or `file:/path` on the credential. Claude runs with
+`--bare` and `ANTHROPIC_API_KEY`; codex gets `{"OPENAI_API_KEY": ...}` in its
+`auth.json` with `forced_login_method=api`; agy uses `GEMINI_API_KEY` (if the
+CLI does not honour it, `validate` rejects an agy API-key credential).
+
+### Subscriptions and terms
+
+Automated or headless use of a consumer subscription may be restricted by the
+provider's terms. Read Anthropic's consumer terms of service and usage policy,
+OpenAI's terms of use, and Google's terms of service and the Antigravity
+terms before pointing a subscription at an unattended agent. Compliance is the
+operator's responsibility.
+
+### Migrating from `runner:` and `api_key_file:`
+
+- `runner: [claude, ...]` still works as a deprecated alias for
+  `kind: claude` with `command: <runner[0]>`; arguments after the binary are
+  ignored, and `validate` warns about both. Replace it with `kind`/`command`.
+- `api_key_file: /path` still works: it becomes an implicit API-key credential
+  for the agent's kind. Prefer a `credentials:` entry with `api_key: file:/path`.
+- On NixOS add the CLIs to `services.agentgw.agentPackages` so the action
+  unit can find them.
 
 ## Security notes
 

@@ -158,3 +158,7 @@ Revert the merge commit. The old `runner`/`api_key_file` configs keep working th
   - `Save` infers the provider from the file name.
   - Semaphore size is fixed at the first `Acquire`, so changing concurrency needs a restart.
   - Step 5 must `Validate` written-back bytes before `Save`.
+- Step 7:
+  - Written ahead of steps 4–5 against the approved decisions.
+  - Step 8 must confirm or correct three README claims: the `claude setup-token` path, agy `GEMINI_API_KEY`, and the exact re-login message.
+  - The README had no previous agent-auth section, so "Agents and subscriptions" is new.
