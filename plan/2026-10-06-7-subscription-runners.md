@@ -147,3 +147,14 @@ Each step is one commit; cite "Plan step N". Run `nix develop -c go test -race .
 ## Rollback
 
 Revert the merge commit. The old `runner`/`api_key_file` configs keep working through the aliases, so rolling forward and back needs no config change. To remove imported logins, delete the credentials dir.
+
+## Deviations log
+
+- Step 2:
+  - A missing credential is not an error for legacy configs (kind claude, no `credentials:` anywhere, no explicit credential), so the existing job tests keep passing. **Step 5 removes this exemption** when the pipeline uses credentials.
+  - `runner` combined with a non-claude kind is an error.
+- Step 3:
+  - Added `Put` (an unconditional write on import, removing the provider's other login file), `Info` (expiry and mtime for `ls`) and `ReadLimited` (1 MiB import cap).
+  - `Save` infers the provider from the file name.
+  - Semaphore size is fixed at the first `Acquire`, so changing concurrency needs a restart.
+  - Step 5 must `Validate` written-back bytes before `Save`.

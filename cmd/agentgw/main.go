@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"syscall"
 	"text/tabwriter"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/olafkfreund/MCP-AgentGateway/internal/action"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/config"
+	"github.com/olafkfreund/MCP-AgentGateway/internal/cred"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/job"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/rule"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/source"
@@ -38,6 +40,8 @@ commands:
   serve [-config f]                       run the daemon
   jobs ls [-config f] [-state s]          list jobs
   approve|deny [-config f] [-by n] <id>   decide a pending job
+  credentials import [-config f] [-token-stdin] <name>   store a login read from stdin
+  credentials ls [-config f]              list stored logins (no secrets)
   schema                                  print the JSON Schema for agentgw.yaml
   version                                 print the version
 `
@@ -85,6 +89,8 @@ func main() {
 		err = decide(cmd == "approve", args)
 	case "serve":
 		err = serve(ctx, args)
+	case "credentials":
+		err = credentials(args)
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
@@ -315,4 +321,77 @@ func serve(ctx context.Context, args []string) error {
 		return errors.Join(serveErr, herr)
 	}
 	return errors.Join(serveErr, shutErr)
+}
+
+func credentials(args []string) error {
+	if len(args) == 0 || (args[0] != "import" && args[0] != "ls") {
+		return errors.New("usage: agentgw credentials import [-config f] [-token-stdin] <name> | credentials ls [-config f]")
+	}
+	fs := flag.NewFlagSet("credentials "+args[0], flag.ContinueOnError)
+	path := fs.String("config", "agentgw.yaml", "config file")
+	token := fs.Bool("token-stdin", false, "stdin is a bare token (claude setup-token)")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	cfg, err := config.Load(*path)
+	if err != nil {
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	st := cred.StoreFor(cfg)
+	if args[0] == "ls" {
+		tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(tw, "NAME\tPROVIDER\tEXPIRES\tLAST-WRITE")
+		names := make([]string, 0, len(cfg.Credentials))
+		for n := range cfg.Credentials {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			c := cfg.Credentials[name]
+			exp, wrote := "-", "-"
+			if c.APIKey.Ref == "" {
+				exp, wrote = "not imported", "-"
+				if e, w, err := st.Info(name); err == nil {
+					exp, wrote = tstr(e), tstr(w)
+				}
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", name, c.Provider, exp, wrote)
+		}
+		return tw.Flush()
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: agentgw credentials import [-config f] [-token-stdin] <name> < loginfile")
+	}
+	name := fs.Arg(0)
+	c := cfg.Credentials[name]
+	if c == nil || c.APIKey.Ref != "" {
+		return fmt.Errorf("credential %q is not a subscription credential in the config", name)
+	}
+	raw, err := cred.ReadLimited(os.Stdin)
+	if err != nil {
+		return err
+	}
+	kind := cred.ImportFile
+	if *token {
+		kind = cred.ImportToken
+	}
+	file, b, err := cred.Validate(c.Provider, kind, raw)
+	if err != nil {
+		return err
+	}
+	if err := st.Put(name, file, b); err != nil {
+		return err
+	}
+	fmt.Printf("imported %s (%s), expires %s\n", name, c.Provider, tstr(cred.Expiry(c.Provider, file, b)))
+	return nil
+}
+
+func tstr(t time.Time) string {
+	if t.IsZero() {
+		return "unknown"
+	}
+	return t.Format(time.RFC3339)
 }
