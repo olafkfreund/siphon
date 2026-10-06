@@ -222,3 +222,10 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
 
 - Greenfield repo; nothing is deployed. To roll back a step, `git revert` its commit; each step is one commit.
 - No host is changed by this plan. Deploying the NixOS module to a real host is a separate, approved change; it is removed by disabling `services.agentgw.enable` and rebuilding. The state is `/var/lib/agentgw` and can be deleted.
+
+## Deviations log
+
+- Step 2:
+  - `auth.oauth` on MCP sources is deferred; v1 supports `auth.bearer` only (the spec listed OAuth via go-sdk). `KnownFields` rejects `oauth` until a later step adds it.
+  - Added source fields `method`, `headers`, `body`, `signature_header` and `timestamp_header`, and `rule.approve`.
+  - `Load` does not fail on an unresolved `env:`/`file:` ref; `Validate` reports it, so all errors are listed at once.
