@@ -344,7 +344,12 @@ func TestAPIAuthFailuresRateLimited(t *testing.T) {
 func TestHooksUnauthenticated(t *testing.T) {
 	hit := ""
 	e := newEnv(t, func(o *Options) {
-		o.Hooks = map[string]http.Handler{"gh": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hit = r.PathValue("source"); w.WriteHeader(202) })}
+		o.Hooks = func(n string) http.Handler {
+			if n != "gh" {
+				return nil
+			}
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hit = r.PathValue("source"); w.WriteHeader(202) })
+		}
 	})
 	if w := e.do("POST", "/hook/gh", nil, nil); w.Code != 202 || hit != "gh" {
 		t.Fatal(w.Code, hit)

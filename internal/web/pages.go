@@ -67,7 +67,7 @@ func (s *server) jobDetail(id int64) (*jobView, bool, error) {
 		if ag, ok := p.Agents[a.Agent]; ok {
 			v.Agent = &ag
 		} else {
-			v.Agent = s.Cfg.Agents[a.Agent]
+			v.Agent = s.Config().Agents[a.Agent]
 		}
 		if v.Agent != nil {
 			if pr, err := action.RenderPrompt(v.Agent.Prompt, p.Env); err == nil {
@@ -75,7 +75,7 @@ func (s *server) jobDetail(id int64) (*jobView, bool, error) {
 			} else {
 				v.Prompt = "(cannot render: " + err.Error() + ")"
 			}
-			v.CanReach, _ = s.Cfg.AgentEgress(v.Agent)
+			v.CanReach, _ = s.Config().AgentEgress(v.Agent)
 		}
 	case a.Routine != "":
 		v.Kind, v.Target = "routine", a.Routine
@@ -136,9 +136,9 @@ type loginView struct {
 }
 
 func (s *server) logins() []loginView {
-	st := cred.StoreFor(s.Cfg)
+	st := cred.StoreFor(s.Config())
 	out := []loginView{}
-	for name, c := range s.Cfg.Credentials {
+	for name, c := range s.Config().Credentials {
 		v := loginView{Name: name, Provider: providerName[c.Provider], Type: "Subscription", Expiry: "not imported", ExpiryClass: "cancelled", Written: "—"}
 		if c.APIKey.Ref != "" {
 			v.Type, v.Expiry = "API key", "no expiry"
@@ -184,17 +184,17 @@ type egressBlocked struct {
 
 func (s *server) egress() (*egressView, error) {
 	v := &egressView{}
-	names := make([]string, 0, len(s.Cfg.Agents))
-	for n := range s.Cfg.Agents {
+	names := make([]string, 0, len(s.Config().Agents))
+	for n := range s.Config().Agents {
 		names = append(names, n)
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		hosts, on := s.Cfg.AgentEgress(s.Cfg.Agents[n])
+		hosts, on := s.Config().AgentEgress(s.Config().Agents[n])
 		v.Lists = append(v.Lists, egressList{"agent", n, on, hosts})
 	}
-	for _, r := range s.Cfg.Rules {
-		if hosts, on := s.Cfg.RuleEgress(r); on {
+	for _, r := range s.Config().Rules {
+		if hosts, on := s.Config().RuleEgress(r); on {
 			v.Lists = append(v.Lists, egressList{"rule", r.Name, true, hosts})
 		}
 	}

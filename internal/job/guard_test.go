@@ -58,7 +58,7 @@ rules:
 	}
 	t.Cleanup(func() { st.Close() })
 	now := time.Unix(1_700_000_000, 0)
-	return &Pipeline{Cfg: cfg, Store: st, Now: func() time.Time { now = now.Add(time.Minute); return now }}
+	return New(cfg, st, func() time.Time { now = now.Add(time.Minute); return now })
 }
 
 func count(t *testing.T, p *Pipeline, q string) int {
@@ -184,7 +184,7 @@ rules:
 		t.Fatal(err)
 	}
 	defer st.Close()
-	p := &Pipeline{Cfg: cfg, Store: st, Now: time.Now}
+	p := New(cfg, st, time.Now)
 	ctx := context.Background()
 	if _, _, err := p.HandleEvent(ctx, rule.Event{Source: "m2", Data: map[string]any{}}, false); err != nil {
 		t.Fatal(err)

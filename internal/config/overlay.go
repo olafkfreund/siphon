@@ -71,6 +71,9 @@ func Effective(file []byte, items []Item) ([]byte, map[Key]Provenance, error) {
 				return nil, nil, fmt.Errorf("overlay: %s %q: invalid YAML %v", it.Kind, it.Name, err)
 			}
 			body = d.Content[0]
+			if n := mapGet(body, "name"); it.Kind == "rules" && n != nil && n.Value != it.Name {
+				return nil, nil, fmt.Errorf("overlay: rule name %q does not match item %q", n.Value, it.Name)
+			}
 		}
 		sec := mapGet(root, it.Kind)
 		if sec == nil || sec.Kind == yaml.ScalarNode { // absent or `kind:` (null)

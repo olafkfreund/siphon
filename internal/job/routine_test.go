@@ -47,9 +47,8 @@ func newRT(t *testing.T, yaml string) *rt {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	r.p = &Pipeline{Cfg: cfg, Store: st, Now: func() time.Time { return r.now },
-		rnd: func() float64 { return 0.5 }, // jitter factor exactly 1.0
-	}
+	r.p = New(cfg, st, func() time.Time { return r.now })
+	r.p.rnd = func() float64 { return 0.5 } // jitter factor exactly 1.0
 	return r
 }
 
@@ -388,8 +387,8 @@ routines:
 		t.Fatalf("agent step must pause for approval: %s log=%q out=%s", j.State, r.logged(), j.Output)
 	}
 	// An agent with approve: false and no step-level approve does not gate.
-	if r.p.stepNeedsApproval(config.Step{Agent: "quiet"}, nil) || !r.p.stepNeedsApproval(config.Step{Agent: "fix"}, nil) ||
-		!r.p.stepNeedsApproval(config.Step{Agent: "quiet", Approve: true}, nil) || r.p.stepNeedsApproval(config.Step{Cmd: []string{"x"}}, nil) {
+	if stepNeedsApproval(r.p.Config(), config.Step{Agent: "quiet"}, nil) || !stepNeedsApproval(r.p.Config(), config.Step{Agent: "fix"}, nil) ||
+		!stepNeedsApproval(r.p.Config(), config.Step{Agent: "quiet", Approve: true}, nil) || stepNeedsApproval(r.p.Config(), config.Step{Cmd: []string{"x"}}, nil) {
 		t.Fatal("stepNeedsApproval")
 	}
 }
@@ -402,7 +401,7 @@ routines:
 	id := r.fire(1)
 	r.run()
 	// The config changes while the job waits: a step is inserted and approve dropped.
-	r.p.Cfg.Routines["r"].Steps = []config.Step{
+	r.p.Config().Routines["r"].Steps = []config.Step{
 		{ID: "x", Cmd: []string{"REC-never", "x"}}, {ID: "a", Cmd: []string{"false"}}, {ID: "b", Cmd: []string{"false"}},
 	}
 	r.p.Decide(id, true, "olaf")
@@ -473,7 +472,7 @@ rules:
 routines:
   r: { steps: [ { id: a, cmd: [REC, a] }, { id: b, agent: fix } ] }
 `)
-	r.p.Cfg.Limits.AgentRunsPerDay = 1
+	r.p.Config().Limits.AgentRunsPerDay = 1
 	r.fire(1)
 	_, ids, err := r.p.HandleEvent(context.Background(), rule.Event{Source: "s", Data: map[string]any{"id": 2}}, false)
 	if err != nil || len(ids) != 0 {
@@ -492,7 +491,7 @@ limits: { agent_runs_per_day: 1 }
 routines:
   r: { steps: [ { id: a, cmd: [REC, a] } ] }
 `)
-	r.p.Cfg.Limits.AgentRunsPerDay = 1
+	r.p.Config().Limits.AgentRunsPerDay = 1
 	r.fire(1)
 	r.fire(2)
 	r.fire(3)

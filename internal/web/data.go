@@ -43,7 +43,7 @@ func (s *server) sources() ([]sourceView, error) {
 		return nil, err
 	}
 	out := []sourceView{}
-	for name, src := range s.Cfg.Sources {
+	for name, src := range s.Config().Sources {
 		v := sourceView{Name: name, Type: src.Type}
 		if src.Type != "webhook" {
 			v.Poll = time.Duration(src.Poll).String()
@@ -91,13 +91,13 @@ func (s *server) rules() ([]ruleView, error) {
 		return nil, err
 	}
 	out := []ruleView{}
-	for _, r := range s.Cfg.Rules {
+	for _, r := range s.Config().Rules {
 		on := r.On
 		if on == "" {
 			on = "edge"
 		}
 		v := ruleView{Name: r.Name, Source: r.Source, When: r.When, On: on, Action: actionSummary(r.Action), Enabled: !off[r.Name], Overridden: off[r.Name]}
-		if src := s.Cfg.Sources[r.Source]; src != nil {
+		if src := s.Config().Sources[r.Source]; src != nil {
 			v.SourceType = src.Type
 		} else if r.Source == "agent-result" {
 			v.SourceType = "agent results"
@@ -115,7 +115,7 @@ func (s *server) rules() ([]ruleView, error) {
 }
 
 func (s *server) hasRule(name string) bool {
-	for _, r := range s.Cfg.Rules {
+	for _, r := range s.Config().Rules {
 		if r.Name == name {
 			return true
 		}
@@ -155,7 +155,7 @@ func (s *server) dashboard(srcs []sourceView) (*dashView, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := &dashView{Dashboard: d, AgentCap: s.Cfg.Limits.AgentRunsPerDay, Running: d.Counts["running"], Failed: d.Counts["failed"]}
+	v := &dashView{Dashboard: d, AgentCap: s.Config().Limits.AgentRunsPerDay, Running: d.Counts["running"], Failed: d.Counts["failed"]}
 	for _, n := range d.Counts {
 		v.Total += n
 	}

@@ -129,3 +129,10 @@ func TestLoadWithOverlayResolvesDB(t *testing.T) {
 		t.Fatalf("%+v %v", c, err)
 	}
 }
+
+func TestOverlayRuleNameMismatch(t *testing.T) {
+	_, _, err := Effective([]byte(base), []Item{{Kind: "rules", Name: "r1", YAML: "name: other\nsource: a"}})
+	if err == nil || !strings.Contains(err.Error(), `rule name "other" does not match item "r1"`) {
+		t.Fatalf("%v", err)
+	}
+}

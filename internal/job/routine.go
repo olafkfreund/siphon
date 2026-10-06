@@ -46,14 +46,14 @@ type progress struct {
 
 // stepNeedsApproval: a step gates on its own approve flag, and an agent step
 // also on the agent's approve (default true), like an agent rule action does.
-func (p *Pipeline) stepNeedsApproval(st config.Step, agents map[string]config.Agent) bool {
+func stepNeedsApproval(cfg *config.Config, st config.Step, agents map[string]config.Agent) bool {
 	if st.Approve {
 		return true
 	}
 	if st.Agent == "" {
 		return false
 	}
-	a := p.agentDef(st.Agent, agents)
+	a := agentDef(cfg, st.Agent, agents)
 	return a == nil || a.Approve == nil || *a.Approve
 }
 
@@ -63,7 +63,7 @@ func (p *Pipeline) stepNeedsApproval(st config.Step, agents map[string]config.Ag
 // resumes without re-running finished steps (at-least-once for the step that
 // was interrupted). A failed step with retries left re-queues the job with a
 // backoff instead of sleeping in the worker.
-func (p *Pipeline) runRoutine(ctx context.Context, j store.QueuedJob, pl Payload) (string, int, string) {
+func (p *Pipeline) runRoutine(ctx context.Context, cfg *config.Config, j store.QueuedJob, pl Payload) (string, int, string) {
 	steps := pl.Steps
 	if len(steps) == 0 {
 		return "failed", -1, "routine snapshot missing from job " + pl.Action.Routine
@@ -110,10 +110,10 @@ func (p *Pipeline) runRoutine(ctx context.Context, j store.QueuedJob, pl Payload
 				continue
 			}
 		}
-		if p.stepNeedsApproval(st, pl.Agents) && i != approved {
+		if stepNeedsApproval(cfg, st, pl.Agents) && i != approved {
 			return p.pauseRoutine(j, i, st.ID, prog)
 		}
-		res := p.execOnce(ctx, j, st, env, pl.Agents)
+		res := p.execOnce(ctx, cfg, j, st, env, pl.Agents)
 		if ctx.Err() != nil && res.Exit == -1 {
 			// Interrupted: don't record it; the job stays running for the startup requeue.
 			return "failed", -1, marshalProgress(prog)
@@ -231,7 +231,7 @@ func (p *Pipeline) backoff(base time.Duration, factor float64, n int) time.Durat
 	return time.Duration(d * (0.8 + 0.4*r()))
 }
 
-func (p *Pipeline) execOnce(ctx context.Context, j store.QueuedJob, st config.Step, env map[string]any, agents map[string]config.Agent) stepResult {
+func (p *Pipeline) execOnce(ctx context.Context, cfg *config.Config, j store.QueuedJob, st config.Step, env map[string]any, agents map[string]config.Agent) stepResult {
 	timeout := time.Duration(st.Timeout)
 	if timeout <= 0 {
 		timeout = defaultStepTimeout
@@ -245,14 +245,14 @@ func (p *Pipeline) execOnce(ctx context.Context, j store.QueuedJob, st config.St
 		if err != nil {
 			return stepResult{Exit: -1, Output: err.Error()}
 		}
-		opts := p.sandbox(timeout)
-		allow, on := p.ruleEgress(j.Rule) // cmd steps follow their rule's egress
-		egEnv, finish, eerr := p.egressFor(j.ID, allow, on)
+		opts := sandbox(cfg, timeout)
+		allow, on := ruleEgress(cfg, j.Rule) // cmd steps follow their rule's egress
+		egEnv, finish, eerr := p.egressFor(cfg, j.ID, allow, on)
 		if eerr != nil {
 			return stepResult{Exit: -1, Output: eerr.Error()}
 		}
 		opts.Egress = egEnv
-		code, o, so, err := action.RunCmdSplit(ctx, argv, opts, p.Cfg.Secrets())
+		code, o, so, err := action.RunCmdSplit(ctx, argv, opts, cfg.Secrets())
 		exit, out, stdout = code, string(o)+finish(), so
 		if err != nil {
 			out += err.Error()
@@ -265,7 +265,7 @@ func (p *Pipeline) execOnce(ctx context.Context, j store.QueuedJob, st config.St
 		actx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 		var state string
-		state, exit, out, stdout = p.agentExec(actx, j, Payload{Action: config.Action{Agent: st.Agent}, Env: env, Agents: agents}, true)
+		state, exit, out, stdout = p.agentExec(actx, cfg, j, Payload{Action: config.Action{Agent: st.Agent}, Env: env, Agents: agents}, true)
 		if state != "done" && exit == 0 {
 			exit = -1
 		}

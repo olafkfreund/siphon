@@ -16,7 +16,7 @@ import (
 // rather than requeue jobs that may still be running.
 func TestOrphanStopFailureRefusesStart(t *testing.T) {
 	p, _ := subPipeline(t, "cat >/dev/null; echo ok\n")
-	p.Cfg.Server.Sandbox = "systemd"
+	p.Config().Server.Sandbox = "systemd"
 	orig := stopOrphans
 	stopOrphans = func(context.Context) error { return errors.New("polkit said no") }
 	t.Cleanup(func() { stopOrphans = orig })
@@ -45,7 +45,7 @@ func TestOrphanStopFailureRefusesStart(t *testing.T) {
 // instead of reporting done with the result silently lost.
 func TestAgentResultCommitFailureFailsJob(t *testing.T) {
 	p, _ := subPipeline(t, "cat >/dev/null; echo answer\n")
-	p.Cfg.Rules = append(p.Cfg.Rules, config.Rule{Name: "follow", Source: config.AgentResultSource,
+	p.Config().Rules = append(p.Config().Rules, config.Rule{Name: "follow", Source: config.AgentResultSource,
 		AllowAgentEvents: true, When: "true", Action: config.Action{Cmd: []string{"echo", "x"}}})
 	if _, err := p.Store.DB.Exec(`CREATE TRIGGER boom BEFORE INSERT ON jobs WHEN NEW.rule='follow'
 		BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
@@ -64,7 +64,7 @@ func TestQueuedJobUsesSnapshottedAgent(t *testing.T) {
 	if _, _, err := p.HandleEvent(context.Background(), rule.Event{Source: "s", Data: map[string]any{"id": 60}}, false); err != nil {
 		t.Fatal(err)
 	}
-	p.Cfg.Agents["fix"].Prompt = "EDITED after enqueue" // operator edits config while the job waits
+	p.Config().Agents["fix"].Prompt = "EDITED after enqueue" // operator edits config while the job waits
 	if _, err := p.RunQueued(context.Background()); err != nil {
 		t.Fatal(err)
 	}

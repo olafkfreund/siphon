@@ -229,7 +229,7 @@ func rulesTest(ctx context.Context, args []string) error {
 	}
 	defer st.Close()
 	cfg.Rules = []config.Rule{*r}
-	p := &job.Pipeline{Cfg: cfg, Store: st, Now: time.Now}
+	p := job.New(cfg, st, time.Now)
 	fires, _, evalErr := p.HandleEvent(ctx, rule.Event{Source: r.Source, Headers: headers, Data: data}, true)
 
 	type out struct {
@@ -274,7 +274,7 @@ func runOnce(ctx context.Context, args []string) error {
 		return err
 	}
 	defer st.Close()
-	if err := (&job.Pipeline{Cfg: cfg, Store: st, Now: time.Now}).RunOnce(ctx); err != nil {
+	if err := job.New(cfg, st, time.Now).RunOnce(ctx); err != nil {
 		return errors.New(string(action.Mask([]byte(err.Error()), cfg.Secrets())))
 	}
 	return nil
@@ -368,7 +368,7 @@ func serve(ctx context.Context, args []string) error {
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		Handler: web.New(web.Options{
-			Token: cfg.Server.Token.Value, Store: st, Cfg: cfg, Decide: p.Decide,
+			Token: cfg.Server.Token.Value, Store: st, Config: p.Config, Apply: p.Apply, Decide: p.Decide,
 			Hooks: p.Webhooks(), Now: time.Now,
 		}),
 	}

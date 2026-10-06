@@ -73,7 +73,7 @@ func runAgentJob(t *testing.T, p *Pipeline, id int) (state, output string) {
 		t.Fatal(err)
 	}
 	tx.Commit()
-	state, _, output, _ = p.agentExec(context.Background(), store.QueuedJob{ID: jid}, Payload{Action: config.Action{Agent: "fix"}, Env: map[string]any{"event": map[string]any{"id": id}}}, true)
+	state, _, output, _ = p.agentExec(context.Background(), p.Config(), store.QueuedJob{ID: jid}, Payload{Action: config.Action{Agent: "fix"}, Env: map[string]any{"event": map[string]any{"id": id}}}, true)
 	return state, output
 }
 
@@ -130,7 +130,7 @@ func TestSubscriptionAuthFailureNeedsRelogin(t *testing.T) {
 // The agent-result event carries kind and result for every runner kind.
 func TestAgentResultShape(t *testing.T) {
 	p, _ := subPipeline(t, "cat >/dev/null; echo 'final answer'\n")
-	p.Cfg.Rules = append(p.Cfg.Rules, config.Rule{Name: "follow", Source: config.AgentResultSource,
+	p.Config().Rules = append(p.Config().Rules, config.Rule{Name: "follow", Source: config.AgentResultSource,
 		AllowAgentEvents: true, When: `event.kind == "codex" && event.result == "final answer"`,
 		Action: config.Action{Cmd: []string{"echo", "followed"}}})
 	if state, out := runAgentJob(t, p, 30); state != "done" {
@@ -172,7 +172,7 @@ func TestBusyCredentialRequeues(t *testing.T) {
 	jid, _ := store.InsertJob(tx, store.Job{Rule: "start", ActionJSON: "{}"}, time.Now())
 	tx.Commit()
 	p.Store.DB.Exec(`UPDATE jobs SET state='running' WHERE id=?`, jid)
-	state, _, _, _ := p.agentExec(context.Background(), store.QueuedJob{ID: jid}, Payload{Action: config.Action{Agent: "fix"}, Env: map[string]any{"event": map[string]any{"id": 1}}}, false)
+	state, _, _, _ := p.agentExec(context.Background(), p.Config(), store.QueuedJob{ID: jid}, Payload{Action: config.Action{Agent: "fix"}, Env: map[string]any{"event": map[string]any{"id": 1}}}, false)
 	if state != stateRequeued {
 		t.Fatalf("state %q, want requeued", state)
 	}
