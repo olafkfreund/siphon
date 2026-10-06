@@ -1,0 +1,6 @@
+/result
+/agentgw
+*.db
+*.db-wal
+*.db-shm
+/.cache/
