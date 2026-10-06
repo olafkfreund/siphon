@@ -1,4 +1,4 @@
-// Package config loads and validates agentgw.yaml, the only source of truth.
+// Package config loads and validates siphon.yaml, the only source of truth.
 package config
 
 import (
@@ -79,7 +79,7 @@ type Config struct {
 	Sources map[string]*Source `yaml:"sources"`
 	Rules   []Rule             `yaml:"rules"`
 	Agents  map[string]*Agent  `yaml:"agents"`
-	// Credentials are logins agentgw owns: subscription (store files) or, with api_key, an API key.
+	// Credentials are logins siphon owns: subscription (store files) or, with api_key, an API key.
 	Credentials map[string]*Credential `yaml:"credentials"`
 	Routines    map[string]*Routine    `yaml:"routines"`
 	Units       []string               `yaml:"units"`
@@ -94,7 +94,7 @@ type Server struct {
 	Token   Secret `yaml:"token"`
 	Sandbox string `yaml:"sandbox"` // systemd|none
 	// ActionsDir holds per-run directories for sandboxed actions; the NixOS
-	// module sets it to the setgid agentgw-io directory its template unit uses.
+	// module sets it to the setgid siphon-io directory its template unit uses.
 	ActionsDir string       `yaml:"actions_dir"`
 	Egress     EgressServer `yaml:"egress"`
 }
@@ -253,7 +253,7 @@ func Load(path string) (*Config, error) {
 
 func Parse(b []byte) (*Config, error) {
 	c := &Config{
-		Server: Server{Listen: ":8080", DB: "agentgw.db", Workers: 4, Sandbox: "systemd", Egress: EgressServer{Listen: "127.77.0.1:3128"}},
+		Server: Server{Listen: ":8080", DB: "siphon.db", Workers: 4, Sandbox: "systemd", Egress: EgressServer{Listen: "127.77.0.1:3128"}},
 		Limits: Limits{AgentRunsPerDay: 50, HTTPMaxBody: 1 << 20, HTTPTimeout: Duration(30 * time.Second)},
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(b))

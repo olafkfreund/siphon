@@ -1,7 +1,7 @@
-# yaml-language-server: $schema=../schema/agentgw.schema.json
+# yaml-language-server: $schema=../schema/siphon.schema.json
 #
 # A complete example. Secrets are only ever env:NAME or file:/path references.
-# Needed in the environment to validate: AGENTGW_TOKEN (32+ chars), FACTORY_TOKEN,
+# Needed in the environment to validate: SIPHON_TOKEN (32+ chars), FACTORY_TOKEN,
 # METRICS_API_KEY, GH_WEBHOOK_SECRET, PARTNER_WEBHOOK_SECRET.
 # Run it unsandboxed for a quick look with `sandbox: none` (not for real use).
 
@@ -9,7 +9,7 @@ server:
   listen: 127.0.0.1:8080            # portal + API + /hook/<source>; plain HTTP, put TLS in front
   db: state.db                      # relative paths are resolved next to this file
   workers: 4
-  token: env:AGENTGW_TOKEN          # portal login and API bearer token, 32+ characters
+  token: env:SIPHON_TOKEN          # portal login and API bearer token, 32+ characters
   sandbox: systemd                  # systemd (default) | none
 
 limits:
@@ -108,7 +108,7 @@ rules:
     when: 'event.ok == true'
     action: { cmd: [echo, "triage finished"] }
 
-# Logins agentgw owns. Import with `agentgw credentials import` (see README).
+# Logins siphon owns. Import with `siphon credentials import` (see README).
 credentials:
   claude-max: { provider: claude }  # subscription; omit api_key
   chatgpt:    { provider: codex }

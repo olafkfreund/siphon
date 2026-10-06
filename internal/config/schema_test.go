@@ -15,18 +15,20 @@ func TestSchemaUpToDate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const path = "../../schema/agentgw.schema.json"
-	if os.Getenv("UPDATE_SCHEMA") == "1" {
-		if err := os.WriteFile(path, got, 0644); err != nil {
+	// agentgw.schema.json is the legacy copy (until v0.2.0); it must stay identical. // legacy-name
+	for _, path := range []string{"../../schema/siphon.schema.json", "../../schema/agentgw.schema.json"} { // legacy-name
+		if os.Getenv("UPDATE_SCHEMA") == "1" {
+			if err := os.WriteFile(path, got, 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		want, err := os.ReadFile(path)
+		if err != nil {
 			t.Fatal(err)
 		}
-	}
-	want, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, want) {
-		t.Fatal("schema is stale; run: go run ./cmd/agentgw schema > schema/agentgw.schema.json")
+		if !bytes.Equal(got, want) {
+			t.Fatal(path + " is stale; run: UPDATE_SCHEMA=1 go test ./internal/config")
+		}
 	}
 }
 

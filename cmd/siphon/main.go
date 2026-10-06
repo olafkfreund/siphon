@@ -1,4 +1,4 @@
-// Command agentgw is a self-hosted MCP/API gateway: sources -> rules -> actions.
+// Command siphon is a self-hosted MCP/API gateway: sources -> rules -> actions.
 package main
 
 import (
@@ -21,19 +21,19 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/action"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/config"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/cred"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/job"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/rule"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/source"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/web"
+	"github.com/olafkfreund/siphon/internal/action"
+	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/cred"
+	"github.com/olafkfreund/siphon/internal/job"
+	"github.com/olafkfreund/siphon/internal/rule"
+	"github.com/olafkfreund/siphon/internal/source"
+	"github.com/olafkfreund/siphon/internal/store"
+	"github.com/olafkfreund/siphon/internal/web"
 )
 
 var version = "dev"
 
-const usage = `usage: agentgw <command> [flags]
+const usage = `usage: siphon <command> [flags]
 
 commands:
   validate [-config f] [-v]               check a config file (-v: print egress allowlists)
@@ -44,7 +44,7 @@ commands:
   approve|deny [-config f] [-by n] <id>   decide a pending job
   credentials import [-config f] [-token-stdin] <name>   store a login read from stdin
   credentials ls [-config f]              list stored logins (no secrets)
-  schema                                  print the JSON Schema for agentgw.yaml
+  schema                                  print the JSON Schema for siphon.yaml
   version                                 print the version
 `
 
@@ -53,6 +53,9 @@ func main() {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
+	if filepath.Base(os.Args[0]) == "agentgw" { // legacy-name
+		fmt.Fprintln(os.Stderr, "agentgw is now siphon; this alias goes away in v0.2.0") // legacy-name
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	var err error
@@ -60,9 +63,9 @@ func main() {
 	case "version":
 		fmt.Println(version)
 	case "exec-job":
-		// Internal: `agentgw exec-job <run dir>` runs inside agentgw-action@.service.
+		// Internal: `siphon exec-job <run dir>` runs inside siphon-action@.service.
 		if len(os.Args) != 3 || !filepath.IsAbs(os.Args[2]) {
-			fmt.Fprintln(os.Stderr, "usage: agentgw exec-job <absolute run dir>")
+			fmt.Fprintln(os.Stderr, "usage: siphon exec-job <absolute run dir>")
 			os.Exit(125)
 		}
 		os.Exit(action.ExecJob(os.Args[2]))
@@ -75,7 +78,7 @@ func main() {
 		err = validate(args)
 	case "rules":
 		if len(args) == 0 || args[0] != "test" {
-			err = errors.New("usage: agentgw rules test [-config f] <rule> <event.json>")
+			err = errors.New("usage: siphon rules test [-config f] <rule> <event.json>")
 			break
 		}
 		err = rulesTest(ctx, args[1:])
@@ -83,7 +86,7 @@ func main() {
 		err = runOnce(ctx, args)
 	case "jobs":
 		if len(args) == 0 || args[0] != "ls" {
-			err = errors.New("usage: agentgw jobs ls [-config f] [-state s]")
+			err = errors.New("usage: siphon jobs ls [-config f] [-state s]")
 			break
 		}
 		err = jobsLs(args[1:])
@@ -98,19 +101,36 @@ func main() {
 		os.Exit(2)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "agentgw:", err)
+		fmt.Fprintln(os.Stderr, "siphon:", err)
 		os.Exit(1)
 	}
+}
+
+// resolveConfig returns path, except that when -config wasn't given and only the
+// old default file exists it returns that one, with a warning.
+func resolveConfig(fs *flag.FlagSet, path string) string {
+	set := false
+	fs.Visit(func(f *flag.Flag) { set = set || f.Name == "config" })
+	if set {
+		return path
+	}
+	if _, err := os.Stat(path); err != nil {
+		if _, err := os.Stat("agentgw.yaml"); err == nil { // legacy-name
+			fmt.Fprintln(os.Stderr, "warning: agentgw.yaml is deprecated, rename it to siphon.yaml") // legacy-name
+			return "agentgw.yaml"                                                                    // legacy-name
+		}
+	}
+	return path
 }
 
 // load parses -config from args, loads and validates it; rest are positional args.
 func load(name string, args []string) (*config.Config, []string, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	path := fs.String("config", "agentgw.yaml", "config file")
+	path := fs.String("config", "siphon.yaml", "config file")
 	if err := fs.Parse(args); err != nil {
 		return nil, nil, err
 	}
-	cfg, err := config.Load(*path)
+	cfg, err := config.Load(resolveConfig(fs, *path))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -167,7 +187,7 @@ func rulesTest(ctx context.Context, args []string) error {
 		return err
 	}
 	if len(rest) != 2 {
-		return errors.New("usage: agentgw rules test [-config f] <rule> <event.json>")
+		return errors.New("usage: siphon rules test [-config f] <rule> <event.json>")
 	}
 	var r *config.Rule
 	for i := range cfg.Rules {
@@ -293,7 +313,7 @@ func decide(approve bool, args []string) error {
 	}
 	defer st.Close()
 	if len(rest) != 1 {
-		return errors.New("usage: agentgw approve|deny [-config f] [-by name] <job id>")
+		return errors.New("usage: siphon approve|deny [-config f] [-by name] <job id>")
 	}
 	id, err := strconv.ParseInt(rest[0], 10, 64)
 	if err != nil {
@@ -307,11 +327,11 @@ func decide(approve bool, args []string) error {
 
 // openLocal adds -config to fs, parses args and opens the DB named by the config.
 func openLocal(fs *flag.FlagSet, args []string) (*store.Store, []string, error) {
-	path := fs.String("config", "agentgw.yaml", "config file")
+	path := fs.String("config", "siphon.yaml", "config file")
 	if err := fs.Parse(args); err != nil {
 		return nil, nil, err
 	}
-	cfg, err := config.Load(*path)
+	cfg, err := config.Load(resolveConfig(fs, *path))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -361,7 +381,7 @@ func serve(ctx context.Context, args []string) error {
 		}
 		httpErr <- err
 	}()
-	slog.Info("agentgw serving", "listen", ln.Addr().String(), "workers", cfg.Server.Workers, "sources", len(cfg.Sources))
+	slog.Info("siphon serving", "listen", ln.Addr().String(), "workers", cfg.Server.Workers, "sources", len(cfg.Sources))
 	serveErr := p.Serve(ctx)
 	cancel() // if Serve failed early, take HTTP down too
 	sctx, scancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -377,15 +397,15 @@ func serve(ctx context.Context, args []string) error {
 
 func credentials(args []string) error {
 	if len(args) == 0 || (args[0] != "import" && args[0] != "ls") {
-		return errors.New("usage: agentgw credentials import [-config f] [-token-stdin] <name> | credentials ls [-config f]")
+		return errors.New("usage: siphon credentials import [-config f] [-token-stdin] <name> | credentials ls [-config f]")
 	}
 	fs := flag.NewFlagSet("credentials "+args[0], flag.ContinueOnError)
-	path := fs.String("config", "agentgw.yaml", "config file")
+	path := fs.String("config", "siphon.yaml", "config file")
 	token := fs.Bool("token-stdin", false, "stdin is a bare token (claude setup-token)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	cfg, err := config.Load(*path)
+	cfg, err := config.Load(resolveConfig(fs, *path))
 	if err != nil {
 		return err
 	}
@@ -415,7 +435,7 @@ func credentials(args []string) error {
 		return tw.Flush()
 	}
 	if fs.NArg() != 1 {
-		return errors.New("usage: agentgw credentials import [-config f] [-token-stdin] <name> < loginfile")
+		return errors.New("usage: siphon credentials import [-config f] [-token-stdin] <name> < loginfile")
 	}
 	name := fs.Arg(0)
 	c := cfg.Credentials[name]

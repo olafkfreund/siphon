@@ -9,11 +9,11 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/action"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/config"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/rule"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/source"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
+	"github.com/olafkfreund/siphon/internal/action"
+	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/rule"
+	"github.com/olafkfreund/siphon/internal/source"
+	"github.com/olafkfreund/siphon/internal/store"
 )
 
 const (
@@ -165,7 +165,7 @@ func (p *Pipeline) pauseRoutine(j store.QueuedJob, i int, id string, prog progre
 	if err := tx.Commit(); err != nil {
 		return "failed", -1, err.Error()
 	}
-	slog.Info("approval required", "job", j.ID, "step", i, "approve", fmt.Sprintf("agentgw approve %d", j.ID))
+	slog.Info("approval required", "job", j.ID, "step", i, "approve", fmt.Sprintf("siphon approve %d", j.ID))
 	return statePaused, 0, out
 }
 

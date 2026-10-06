@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/config"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/cred"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
+	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/cred"
+	"github.com/olafkfreund/siphon/internal/store"
 )
 
 // codexAuth builds a codex auth.json whose access token expires at exp.

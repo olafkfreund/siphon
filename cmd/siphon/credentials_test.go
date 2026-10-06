@@ -27,7 +27,7 @@ func runCreds(t *testing.T, in string, args ...string) (string, error) {
 
 func TestCredentialsImportLs(t *testing.T) {
 	dir := t.TempDir()
-	cfg := filepath.Join(dir, "agentgw.yaml")
+	cfg := filepath.Join(dir, "siphon.yaml")
 	os.WriteFile(cfg, []byte("credentials: {max: {provider: claude}, cx: {provider: codex}}\n"), 0o600)
 	login := `{"claudeAiOauth":{"accessToken":"ACCESS-SECRET","refreshToken":"REFRESH-SECRET","expiresAt":1900000000000},"mcpOAuth":{"x":{"accessToken":"MCP-SECRET"}}}`
 	out, err := runCreds(t, login, "import", "-config", cfg, "max")
@@ -56,7 +56,7 @@ func TestCredentialsImportLs(t *testing.T) {
 
 func TestRulesTestEnvelope(t *testing.T) {
 	dir := t.TempDir()
-	cfg := filepath.Join(dir, "agentgw.yaml")
+	cfg := filepath.Join(dir, "siphon.yaml")
 	os.WriteFile(cfg, []byte(`sources: {s: {type: http, url: "http://127.0.0.1/x"}}
 rules:
   - name: r
@@ -88,7 +88,7 @@ rules:
 }
 
 func TestValidateVerboseEgress(t *testing.T) {
-	cfg := filepath.Join(t.TempDir(), "agentgw.yaml")
+	cfg := filepath.Join(t.TempDir(), "siphon.yaml")
 	os.WriteFile(cfg, []byte("credentials: {c: {provider: codex}}\nagents: {a: {kind: codex}, b: {kind: codex, egress: {enabled: false}}}\n"), 0o600)
 	or, ow, _ := os.Pipe()
 	old := os.Stdout

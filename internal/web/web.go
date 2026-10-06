@@ -21,8 +21,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/config"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
+	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/store"
 )
 
 //go:embed templates/*.html static/*
@@ -48,7 +48,7 @@ type server struct {
 }
 
 const (
-	cookieName = "agentgw_session"
+	cookieName = "siphon_session"
 	failBurst  = 5 // bad logins / API auth failures per IP per minute
 	maxBuckets = 4096
 )

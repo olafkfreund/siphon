@@ -47,7 +47,7 @@ func (s MCP) Poll(ctx context.Context) (Event, error) {
 	ctx, cancel := context.WithTimeout(ctx, o.Timeout)
 	defer cancel()
 	transport := s.transport(ctx, false)
-	session, err := mcp.NewClient(&mcp.Implementation{Name: "agentgw", Version: "1"}, nil).Connect(ctx, transport, nil)
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "siphon", Version: "1"}, nil).Connect(ctx, transport, nil)
 	if err != nil {
 		return Event{}, err
 	}
@@ -115,7 +115,7 @@ func (s MCP) Listen(ctx context.Context, onChange func()) error {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	client := mcp.NewClient(&mcp.Implementation{Name: "agentgw", Version: "1"}, &mcp.ClientOptions{
+	client := mcp.NewClient(&mcp.Implementation{Name: "siphon", Version: "1"}, &mcp.ClientOptions{
 		ResourceUpdatedHandler: func(_ context.Context, req *mcp.ResourceUpdatedNotificationRequest) {
 			if req.Params != nil && req.Params.URI == s.Options.Resource {
 				onChange()

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/config"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
+	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/store"
 )
 
 var t0 = time.Unix(1_700_000_000, 0)

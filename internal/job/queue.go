@@ -3,12 +3,12 @@ package job
 import (
 	"context"
 	"fmt"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/action"
+	"github.com/olafkfreund/siphon/internal/action"
 	"log/slog"
 	"sync"
 	"time"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
+	"github.com/olafkfreund/siphon/internal/store"
 )
 
 // idlePoll is how long an idle worker waits before checking the queue again.
@@ -20,7 +20,7 @@ var stopOrphans = action.StopOrphans
 
 func (p *Pipeline) Requeue() error {
 	if p.Cfg.Server.Sandbox != "none" {
-		// A crashed agentgw leaves its agentgw-action@ units running (they live
+		// A crashed siphon leaves its siphon-action@ units running (they live
 		// outside our cgroup); stop them before their jobs are requeued, so a
 		// step never runs twice at once.
 		sctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -28,8 +28,8 @@ func (p *Pipeline) Requeue() error {
 		cancel()
 		if err != nil {
 			// Refuse to start: requeueing now could run a step twice at once.
-			// systemd restarts agentgw and retries.
-			return fmt.Errorf("stopping orphaned agentgw-action@ units failed (check systemd/polkit), refusing to start: %w", err)
+			// systemd restarts siphon and retries.
+			return fmt.Errorf("stopping orphaned siphon-action@ units failed (check systemd/polkit), refusing to start: %w", err)
 		}
 	}
 	rq, f, err := store.RequeueRunning(p.Store.DB, p.Now())

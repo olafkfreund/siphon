@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-// fakeSystemd stands in for systemctl: "starting" agentgw-action@<id> runs
+// fakeSystemd stands in for systemctl: "starting" siphon-action@<id> runs
 // ExecJob in-process with the run dir's job.json and output files, the way
 // the NixOS template unit would. It records the last exit for `show`.
 func fakeSystemd(t *testing.T, dir string) (stopped *[]string) {
@@ -25,8 +25,8 @@ func fakeSystemd(t *testing.T, dir string) (stopped *[]string) {
 	var stops []string
 	origStart, origExit, origReset, origStop := startUnit, unitExit, resetFailed, stopUnits
 	startUnit = func(ctx context.Context, unit string) error {
-		id := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(unit, "agentgw-action-open@"), "agentgw-action@"), ".service")
-		last = ExecJob(filepath.Join(dir, id)) // what `agentgw exec-job <dir>/%i` does in the unit
+		id := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(unit, "siphon-action-open@"), "siphon-action@"), ".service")
+		last = ExecJob(filepath.Join(dir, id)) // what `siphon exec-job <dir>/%i` does in the unit
 		if last != 0 {
 			return os.ErrInvalid // systemctl start --wait fails when the unit fails
 		}
@@ -87,7 +87,7 @@ func TestTemplateRunCancelStopsUnit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	startUnit = func(ctx context.Context, unit string) error { cancel(); <-ctx.Done(); return ctx.Err() }
 	exit, _, _ := RunCmd(ctx, []string{"true"}, SandboxOptions{Mode: "systemd", Dir: dir, Timeout: time.Minute}, nil)
-	if exit != -1 || len(*stops) != 1 || !strings.HasPrefix((*stops)[0], "agentgw-action-open@") {
+	if exit != -1 || len(*stops) != 1 || !strings.HasPrefix((*stops)[0], "siphon-action-open@") {
 		t.Fatalf("exit=%d stops=%v, want -1 and the instance stopped", exit, *stops)
 	}
 }
@@ -121,7 +121,7 @@ func TestStopOrphansTargetsTemplateInstances(t *testing.T) {
 	stops := fakeSystemd(t, t.TempDir())
 	var reset []string
 	resetFailed = func(units ...string) { reset = append(reset, units...) }
-	if err := StopOrphans(context.Background()); err != nil || !reflect.DeepEqual(*stops, []string{"agentgw-action@*.service", "agentgw-action-open@*.service"}) {
+	if err := StopOrphans(context.Background()); err != nil || !reflect.DeepEqual(*stops, []string{"siphon-action@*.service", "siphon-action-open@*.service"}) {
 		t.Fatalf("stops=%v err=%v", *stops, err)
 	}
 	if !reflect.DeepEqual(reset, *stops) {
@@ -139,7 +139,7 @@ func TestTemplateEgressSelectionAndEnv(t *testing.T) {
 			var spec JobSpec
 			startUnit = func(ctx context.Context, name string) error {
 				unit = name
-				id := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(name, "agentgw-action-open@"), "agentgw-action@"), ".service")
+				id := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(name, "siphon-action-open@"), "siphon-action@"), ".service")
 				b, err := os.ReadFile(filepath.Join(dir, id, "job.json"))
 				if err != nil {
 					return err
@@ -157,9 +157,9 @@ func TestTemplateEgressSelectionAndEnv(t *testing.T) {
 			if err != nil || exit != 0 {
 				t.Fatalf("exit=%d err=%v", exit, err)
 			}
-			prefix := "agentgw-action-open@"
+			prefix := "siphon-action-open@"
 			if restricted {
-				prefix = "agentgw-action@"
+				prefix = "siphon-action@"
 			}
 			if !strings.HasPrefix(unit, prefix) || !strings.HasSuffix(unit, ".service") {
 				t.Fatalf("unit=%q", unit)
@@ -283,7 +283,7 @@ func TestTemplateRunIgnoresFIFOs(t *testing.T) {
 			dir := t.TempDir()
 			orig := startUnit
 			startUnit = func(_ context.Context, unit string) error {
-				id := strings.TrimSuffix(strings.TrimPrefix(unit, "agentgw-action@"), ".service")
+				id := strings.TrimSuffix(strings.TrimPrefix(unit, "siphon-action@"), ".service")
 				run := filepath.Join(dir, id)
 				if err := syscall.Mkfifo(filepath.Join(run, name), 0o600); err != nil {
 					return err
@@ -324,13 +324,13 @@ func TestTemplateRunSignalExit(t *testing.T) {
 }
 
 func TestEgressSocketSpec(t *testing.T) {
-	for _, sock := range []string{"/run/agentgw/egress.sock", ""} {
+	for _, sock := range []string{"/run/siphon/egress.sock", ""} {
 		dir := t.TempDir()
 		fakeSystemd(t, dir)
 		original := startUnit
 		var spec JobSpec
 		startUnit = func(ctx context.Context, name string) error {
-			id := strings.TrimSuffix(strings.TrimPrefix(name, "agentgw-action@"), ".service")
+			id := strings.TrimSuffix(strings.TrimPrefix(name, "siphon-action@"), ".service")
 			b, err := os.ReadFile(filepath.Join(dir, id, "job.json"))
 			if err != nil {
 				return err

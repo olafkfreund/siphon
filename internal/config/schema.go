@@ -7,15 +7,15 @@ import (
 	"strings"
 )
 
-// Schema returns the JSON Schema for agentgw.yaml.
+// Schema returns the JSON Schema for siphon.yaml.
 func Schema() ([]byte, error) {
 	s, err := schemaFor(reflect.TypeFor[Config]())
 	if err != nil {
 		return nil, err
 	}
 	s["$schema"] = "https://json-schema.org/draft/2020-12/schema"
-	s["$id"] = "https://github.com/olafkfreund/MCP-AgentGateway/schema/agentgw.schema.json"
-	s["title"] = "agentgw config"
+	s["$id"] = "https://github.com/olafkfreund/siphon/schema/siphon.schema.json"
+	s["title"] = "siphon config"
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return nil, err

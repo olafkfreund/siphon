@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
+	"github.com/olafkfreund/siphon/internal/store"
 )
 
 func (s *server) apiRoutes(mux *http.ServeMux) {
@@ -110,7 +110,7 @@ func (s *server) api(h http.HandlerFunc) http.HandlerFunc {
 		tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if !ok || !s.tokenOK(tok) {
 			s.lim.fail(ip)
-			w.Header().Set("WWW-Authenticate", `Bearer realm="agentgw"`)
+			w.Header().Set("WWW-Authenticate", `Bearer realm="siphon"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

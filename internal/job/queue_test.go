@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/config"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
+	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/store"
 )
 
 func newPipeline(t *testing.T, workers int) *Pipeline {

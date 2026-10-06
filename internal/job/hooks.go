@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/rule"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/source"
+	"github.com/olafkfreund/siphon/internal/rule"
+	"github.com/olafkfreund/siphon/internal/source"
 )
 
 // listenDebounce is the minimum gap between hint-triggered ticks of one source.

@@ -198,7 +198,7 @@ func TestLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Lock(p); err == nil || !strings.Contains(err.Error(), "another agentgw") {
+	if _, err := Lock(p); err == nil || !strings.Contains(err.Error(), "another siphon") {
 		t.Fatalf("second lock: %v", err)
 	}
 	un()

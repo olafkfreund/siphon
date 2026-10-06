@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/config"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/rule"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
+	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/rule"
+	"github.com/olafkfreund/siphon/internal/store"
 )
 
 // guardPipeline builds a pipeline whose agent runner is a stub printing {"ok":true}.

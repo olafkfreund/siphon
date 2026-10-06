@@ -224,7 +224,7 @@ func TestLoadMakesDBRelativeToConfig(t *testing.T) {
 	for in, want := range map[string]string{
 		"state.db":      filepath.Join(dir, "state.db"),
 		"/abs/state.db": "/abs/state.db",
-		"":              filepath.Join(dir, "agentgw.db"), // default is relative too
+		"":              filepath.Join(dir, "siphon.db"), // default is relative too
 	} {
 		body := "server: {}\n"
 		if in != "" {
@@ -520,7 +520,7 @@ func TestEgressValidation(t *testing.T) {
 		"server: {egress: {listen: \"example.com:3128\"}}":                                                        "loopback",
 		"server: {egress: {listen: \"[::1]:3128\"}}":                                                              "IPv4 loopback",
 		"server: {egress: {socket: rel/egress.sock}}":                                                             "egress.socket",
-		"server: {egress: {socket: /run/agentgw/egress.sock}}":                                                    "",
+		"server: {egress: {socket: /run/siphon/egress.sock}}":                                                     "",
 		"server: {egress: {allow: [\"bad host\"]}}":                                                               "egress.allow",
 		"server: {egress: {allow: [\"a.com:0\"]}}":                                                                "port must be",
 		"server: {egress: {allow: [\"a.com:70000\"]}}":                                                            "port must be",

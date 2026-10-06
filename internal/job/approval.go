@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
+	"github.com/olafkfreund/siphon/internal/store"
 )
 
 const approvalTTL = 24 * time.Hour
