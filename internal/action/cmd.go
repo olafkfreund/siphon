@@ -87,7 +87,14 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 			cmd.Env = append(cmd.Env, name+"="+value)
 		}
 	}
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.Cancel = func() error {
+		if mode == "systemd" {
+			// Killing the systemd-run client does not stop the transient unit
+			// (it belongs to PID 1); stop it explicitly so no action outlives us.
+			_ = exec.Command(stopUnitArgv(opts.Unit)[0], stopUnitArgv(opts.Unit)[1:]...).Run()
+		}
+		return cmd.Process.Signal(syscall.SIGTERM)
+	}
 	cmd.WaitDelay = 10 * time.Second
 	maxExtra := 0
 	for _, secret := range secrets {

@@ -35,3 +35,9 @@ func SandboxArgv(argv []string, o SandboxOptions) []string {
 	}
 	return append(append(result, "--"), argv...)
 }
+
+// stopUnitArgv stops an action's transient unit on cancellation (polkit allows
+// stop for agentgw-* units). --no-block: never hold up our own exit.
+var stopUnitArgv = func(unit string) []string {
+	return []string{"systemctl", "stop", "--no-block", "--", unit}
+}
