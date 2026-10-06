@@ -6,7 +6,9 @@ import (
 	"embed"
 	"fmt"
 	"net/url"
+	"os"
 	"sort"
+	"syscall"
 	"time"
 
 	_ "modernc.org/sqlite" // driver name "sqlite"
@@ -310,4 +312,21 @@ func CountAgentJobsSince(tx *sql.Tx, since time.Time) (int, error) {
 	err := tx.QueryRow(`SELECT count(*) FROM jobs WHERE created_at >= ?
 		AND COALESCE(json_extract(action_json, '$.action.Agent'), '') != ''`, ms(since)).Scan(&n)
 	return n, err
+}
+
+// Lock takes an exclusive, non-blocking flock on <dbPath>.lock so two
+// daemons/run-once processes never share one DB. The lock dies with the process.
+func Lock(dbPath string) (unlock func(), err error) {
+	if dbPath == ":memory:" {
+		return func() {}, nil
+	}
+	f, err := os.OpenFile(dbPath+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("another agentgw (serve or run-once) holds %s", dbPath)
+	}
+	return func() { f.Close() }, nil // closing releases the flock
 }

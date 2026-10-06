@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -189,4 +190,21 @@ func TestCleanup(t *testing.T) {
 	if count(`SELECT COUNT(*) FROM seen_event`) != 1 || count(`SELECT COUNT(*) FROM approvals`) != 0 {
 		t.Fatal("seen_event/approvals retention")
 	}
+}
+
+func TestLock(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "s.db")
+	un, err := Lock(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Lock(p); err == nil || !strings.Contains(err.Error(), "another agentgw") {
+		t.Fatalf("second lock: %v", err)
+	}
+	un()
+	un2, err := Lock(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	un2()
 }

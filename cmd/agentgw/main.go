@@ -169,6 +169,11 @@ func runOnce(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	unlock, err := store.Lock(cfg.Server.DB)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	st, err := store.Open(cfg.Server.DB)
 	if err != nil {
 		return err
@@ -244,6 +249,11 @@ func serve(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	unlock, err := store.Lock(cfg.Server.DB)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	st, err := store.Open(cfg.Server.DB)
 	if err != nil {
 		return err

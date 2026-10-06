@@ -184,3 +184,57 @@ func TestBearerCleartextWarning(t *testing.T) {
 		}
 	}
 }
+
+func TestDurationsAndAgentMCP(t *testing.T) {
+	t.Setenv("AGW_X", "x")
+	c, _ := Parse([]byte(`
+sources:
+  neg: { type: http, url: "http://x", poll: -1m }
+  web: { type: webhook, secret: env:AGW_X, signature: github }
+  h:   { type: http, url: "http://x" }
+agents:
+  a: { mcp: [h], timeout: -1s }
+  b: { prompt: hi }
+routines: { r: { steps: [{ id: s, cmd: [true], timeout: -1s }] } }
+rules:
+  - { name: r, source: h, when: "true", cooldown: -1m, action: { cmd: [true] } }
+`))
+	if c.Agents["b"].Timeout != Duration(10*time.Minute) {
+		t.Fatalf("agent timeout default: %v", c.Agents["b"].Timeout)
+	}
+	if c.Sources["web"].Poll != 0 || c.Sources["h"].Poll != Duration(time.Minute) {
+		t.Fatal("poll defaults")
+	}
+	msg := c.Validate().Error()
+	for _, w := range []string{
+		"sources.neg: poll must be > 0", "has type http, want mcp", "agents.a: timeout must not be negative",
+		"steps[0]: timeout must not be negative", "repeat and cooldown must not be negative",
+	} {
+		if !strings.Contains(msg, w) {
+			t.Errorf("missing %q in %s", w, msg)
+		}
+	}
+	if strings.Contains(msg, "sources.web") {
+		t.Error("webhook needs no poll")
+	}
+}
+
+func TestLoadMakesDBRelativeToConfig(t *testing.T) {
+	dir := t.TempDir()
+	for in, want := range map[string]string{
+		"state.db":      filepath.Join(dir, "state.db"),
+		"/abs/state.db": "/abs/state.db",
+		"":              filepath.Join(dir, "agentgw.db"), // default is relative too
+	} {
+		body := "server: {}\n"
+		if in != "" {
+			body = "server: {db: " + in + "}\n"
+		}
+		f := filepath.Join(dir, "c.yaml")
+		os.WriteFile(f, []byte(body), 0o600)
+		c, err := Load(f)
+		if err != nil || c.Server.DB != want {
+			t.Errorf("%q: got %q (%v) want %q", in, c.Server.DB, err, want)
+		}
+	}
+}

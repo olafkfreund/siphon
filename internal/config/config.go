@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -188,7 +189,15 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Parse(b)
+	c, err := Parse(b)
+	if err != nil {
+		return nil, err
+	}
+	// A relative db lives next to the config file, wherever the daemon is started.
+	if d := c.Server.DB; d != "" && d != ":memory:" && !filepath.IsAbs(d) {
+		c.Server.DB = filepath.Join(filepath.Dir(path), d)
+	}
+	return c, nil
 }
 
 func Parse(b []byte) (*Config, error) {
@@ -207,9 +216,15 @@ func Parse(b []byte) (*Config, error) {
 		}
 	}
 	for _, a := range c.Agents {
-		if a != nil && a.Approve == nil {
+		if a == nil {
+			continue
+		}
+		if a.Approve == nil {
 			t := true
 			a.Approve = &t
+		}
+		if a.Timeout == 0 {
+			a.Timeout = Duration(10 * time.Minute)
 		}
 	}
 	for _, s := range c.secretPtrs() {
@@ -357,6 +372,10 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if c.Limits.HTTPTimeout < 0 {
+		add("limits.http_timeout: must not be negative")
+	}
+
 	for _, u := range c.Units {
 		if strings.Contains(u, "{{") {
 			add("units: %q must not be templated", u)
@@ -394,6 +413,9 @@ func (c *Config) Validate() error {
 		default:
 			add("%s: on must be edge or each, got %q", p, r.On)
 		}
+		if r.Repeat < 0 || r.Cooldown < 0 {
+			add("%s: repeat and cooldown must not be negative", p)
+		}
 		c.validateAction(p, r.Action, add)
 		if (r.Action.Agent != "" || (r.Action.Routine != "" && c.routineHasAgent(r.Action.Routine))) && r.Cooldown <= 0 {
 			add("%s: cooldown is mandatory for agent actions", p)
@@ -408,9 +430,14 @@ func (c *Config) Validate() error {
 			continue
 		}
 		for _, m := range a.MCP {
-			if _, ok := c.Sources[m]; !ok {
+			if src, ok := c.Sources[m]; !ok {
 				add("%s: mcp references unknown source %q", p, m)
+			} else if src != nil && src.Type != "mcp" {
+				add("%s: mcp source %q has type %s, want mcp", p, m, src.Type)
 			}
+		}
+		if a.Timeout < 0 {
+			add("%s: timeout must not be negative", p)
 		}
 		if len(a.Runner) > 0 && strings.Contains(a.Runner[0], "{{") {
 			add("%s: runner[0] must not be templated", p)
@@ -437,6 +464,9 @@ func (c *Config) Validate() error {
 				add("%s: duplicate step id %q", sp, st.ID)
 			}
 			ids[st.ID] = true
+			if st.Timeout < 0 {
+				add("%s: timeout must not be negative", sp)
+			}
 			checkExpr(sp+" if", st.If, add)
 			c.validateAction(sp, Action{Cmd: st.Cmd, Unit: st.Unit, Agent: st.Agent}, add)
 		}
@@ -449,6 +479,9 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 	if s == nil {
 		add("%s: empty", p)
 		return
+	}
+	if s.Poll < 0 || (s.Type != "webhook" && s.Poll == 0) {
+		add("%s: poll must be > 0", p)
 	}
 	switch s.Type {
 	case "mcp":

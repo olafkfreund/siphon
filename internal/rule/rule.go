@@ -26,6 +26,8 @@ type Event struct {
 	Headers map[string]string
 	Data    any
 	Depth   int
+	// ParentID is the job that produced this event (agent-result), 0 if none.
+	ParentID int64
 }
 
 // Fire is one rule firing. Env is the templating/expr env (event, item, headers, source).
