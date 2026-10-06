@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/olafkfreund/siphon/internal/config"
@@ -35,7 +36,9 @@ type Options struct {
 	// Config returns the live config (Pipeline.Config); Apply makes a new one live (Pipeline.Apply).
 	Config func() *config.Config
 	Apply  func(*config.Config) error
-	Banner string // shown in red on every page (startup fallback notice)
+	// ConfigPath is the config file the portal edits are layered on; empty disables editing.
+	ConfigPath string
+	Banner     string // shown in red on every page (startup fallback notice)
 	// Decide approves or denies a pending job (Pipeline.Decide). Nil uses the store directly.
 	Decide func(jobID int64, approve bool, by string) error
 	// Hooks are mounted at POST /hook/{source}, unauthenticated: HMAC is their auth.
@@ -49,6 +52,8 @@ type server struct {
 	tokHash [32]byte
 	lim     *limiter
 	tpl     *template.Template
+	editMu  sync.Mutex             // serialises config saves
+	notice  atomic.Pointer[string] // set when a save could not be applied live
 }
 
 const (
@@ -117,6 +122,7 @@ func New(o Options) http.Handler {
 	})
 	s.apiRoutes(mux)
 	s.portalRoutes(mux)
+	s.configRoutes(mux)
 	return secure(mux)
 }
 

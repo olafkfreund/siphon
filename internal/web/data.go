@@ -134,9 +134,11 @@ func (s *server) job(id int64) (store.JobDetail, bool, error) {
 // Page titles and which nav entry each page lights up.
 var (
 	titles = map[string]string{"dashboard": "Dashboard", "jobs": "Jobs", "job": "Job", "approvals": "Approvals",
-		"rules": "Rules", "sources": "Sources", "audit": "Audit", "logins": "Logins", "egress": "Egress"}
+		"rules": "Rules", "sources": "Sources", "audit": "Audit", "logins": "Logins", "egress": "Egress",
+		"cfglist": "Config", "cfgedit": "Edit", "history": "History", "historyitem": "Revision"}
 	active = map[string]string{"dashboard": "dash", "jobs": "jobs", "job": "jobs", "approvals": "approvals",
-		"rules": "rules", "sources": "sources", "audit": "audit", "logins": "logins", "egress": "egress"}
+		"rules": "rules", "sources": "sources", "audit": "audit", "logins": "logins", "egress": "egress",
+		"cfglist": "rules", "cfgedit": "rules", "history": "audit", "historyitem": "audit"}
 	// Pages that refresh themselves every 5 s (job detail decides by state).
 	polls = map[string]bool{"dashboard": true, "jobs": true, "approvals": true, "sources": true, "audit": true}
 )

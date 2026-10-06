@@ -133,28 +133,28 @@ func resolveConfig(fs *flag.FlagSet, path string) string {
 // load parses -config from args, loads and validates it (file plus portal
 // edits unless -file-only); rest are positional args.
 func load(name string, args []string) (*config.Config, []string, error) {
-	cfg, rest, _, err := loadCfg(name, args, false)
+	cfg, rest, _, _, err := loadCfg(name, args, false)
 	return cfg, rest, err
 }
 
-// loadCfg is load; with fallback, an overlay that makes the config invalid is
+// loadCfg is load, also returning the resolved config path; with fallback, an overlay that makes the config invalid is
 // replaced by the last valid revision (or the file alone) and banner says so.
-func loadCfg(name string, args []string, fallback bool) (*config.Config, []string, string, error) {
+func loadCfg(name string, args []string, fallback bool) (*config.Config, []string, string, string, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	path := fs.String("config", "siphon.yaml", "config file")
 	fileOnly := fs.Bool("file-only", false, "ignore portal edits")
 	if err := fs.Parse(args); err != nil {
-		return nil, nil, "", err
+		return nil, nil, "", "", err
 	}
 	p := resolveConfig(fs, *path)
 	var items, last []config.Item
 	if !*fileOnly {
 		base, err := config.Load(p)
 		if err != nil {
-			return nil, nil, "", err
+			return nil, nil, "", "", err
 		}
 		if items, last, err = dbOverlay(base.Server.DB); err != nil {
-			return nil, nil, "", err
+			return nil, nil, "", "", err
 		}
 	}
 	var cfg *config.Config
@@ -166,12 +166,12 @@ func loadCfg(name string, args []string, fallback bool) (*config.Config, []strin
 		cfg, err = tryLoad(p, items)
 	}
 	if cfg == nil {
-		return nil, nil, "", err
+		return nil, nil, "", "", err
 	}
 	for _, w := range cfg.Warnings() {
 		fmt.Fprintln(os.Stderr, "warning:", w)
 	}
-	return cfg, fs.Args(), banner, err
+	return cfg, fs.Args(), banner, p, err
 }
 
 // tryLoad loads the file plus items and validates; the config is returned
@@ -471,7 +471,7 @@ func openLocal(fs *flag.FlagSet, args []string) (*store.Store, []string, error) 
 }
 
 func serve(ctx context.Context, args []string) error {
-	cfg, _, banner, err := loadCfg("serve", args, true)
+	cfg, _, banner, cfgPath, err := loadCfg("serve", args, true)
 	if err != nil {
 		return err
 	}
@@ -499,7 +499,7 @@ func serve(ctx context.Context, args []string) error {
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		Handler: web.New(web.Options{
-			Token: cfg.Server.Token.Value, Store: st, Config: p.Config, Apply: p.Apply, Banner: banner, Decide: p.Decide,
+			Token: cfg.Server.Token.Value, Store: st, Config: p.Config, Apply: p.Apply, Banner: banner, ConfigPath: cfgPath, Decide: p.Decide,
 			Hooks: p.Webhooks(), Now: time.Now,
 		}),
 	}
@@ -577,10 +577,7 @@ func credentials(args []string) error {
 	if err != nil {
 		return err
 	}
-	file, b, err := cred.ValidateFor(c.Provider, true, raw)
-	if *token {
-		file, b, err = cred.Validate(c.Provider, cred.ImportToken, raw)
-	}
+	file, b, err := cred.ValidateImport(c.Provider, *token, raw)
 	if err != nil {
 		return err
 	}
