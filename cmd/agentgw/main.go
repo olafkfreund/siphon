@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,7 +36,7 @@ var version = "dev"
 const usage = `usage: agentgw <command> [flags]
 
 commands:
-  validate [-config f]                    check a config file
+  validate [-config f] [-v]               check a config file (-v: print egress allowlists)
   rules test [-config f] <rule> <event>   dry-run a rule against a saved event (JSON file)
   run-once [-config f]                    poll every source once and run matching actions
   serve [-config f]                       run the daemon
@@ -120,11 +121,44 @@ func load(name string, args []string) (*config.Config, []string, error) {
 }
 
 func validate(args []string) error {
-	if _, _, err := load("validate", args); err != nil {
+	verbose := slices.Contains(args, "-v")
+	args = slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == "-v" })
+	cfg, _, err := load("validate", args)
+	if err != nil {
 		return err
+	}
+	if verbose {
+		printEgress(cfg)
 	}
 	fmt.Println("ok")
 	return nil
+}
+
+func printEgress(cfg *config.Config) {
+	list := func(a []config.HostPort) string {
+		s := make([]string, len(a))
+		for i, h := range a {
+			s[i] = h.String()
+		}
+		return strings.Join(s, ", ")
+	}
+	names := make([]string, 0, len(cfg.Agents))
+	for n := range cfg.Agents {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		if a, on := cfg.AgentEgress(n); on {
+			fmt.Printf("agent %s egress: %s\n", n, list(a))
+		} else {
+			fmt.Printf("agent %s egress: off\n", n)
+		}
+	}
+	for _, r := range cfg.Rules {
+		if a, on := cfg.RuleEgress(r); on {
+			fmt.Printf("rule %s egress: %s\n", r.Name, list(a))
+		}
+	}
 }
 
 func rulesTest(ctx context.Context, args []string) error {

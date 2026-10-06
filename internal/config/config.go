@@ -95,7 +95,27 @@ type Server struct {
 	Sandbox string `yaml:"sandbox"` // systemd|none
 	// ActionsDir holds per-run directories for sandboxed actions; the NixOS
 	// module sets it to the setgid agentgw-io directory its template unit uses.
-	ActionsDir string `yaml:"actions_dir"`
+	ActionsDir string       `yaml:"actions_dir"`
+	Egress     EgressServer `yaml:"egress"`
+}
+
+// EgressServer configures the egress proxy that restricts sandboxed runs.
+type EgressServer struct {
+	Listen     string   `yaml:"listen"` // loopback ip:port
+	Allow      []string `yaml:"allow"`  // global extra hosts: host, host:port or *.suffix[:port]
+	CmdDefault bool     `yaml:"cmd_default"`
+}
+
+// EgressAgent is an agent's egress setting; Enabled defaults to true.
+type EgressAgent struct {
+	Enabled *bool    `yaml:"enabled"`
+	Allow   []string `yaml:"allow"`
+}
+
+// EgressRule opts a rule's cmd actions in to egress restriction.
+type EgressRule struct {
+	Enabled bool     `yaml:"enabled"`
+	Allow   []string `yaml:"allow"`
 }
 
 type Limits struct {
@@ -133,17 +153,18 @@ type Auth struct {
 }
 
 type Rule struct {
-	Name             string   `yaml:"name"`
-	Source           string   `yaml:"source"`
-	ForEach          string   `yaml:"for_each"`
-	ID               string   `yaml:"id"`
-	When             string   `yaml:"when"`
-	On               string   `yaml:"on"` // edge (default)|each
-	Repeat           Duration `yaml:"repeat"`
-	Cooldown         Duration `yaml:"cooldown"`
-	AllowAgentEvents bool     `yaml:"allow_agent_events"`
-	Action           Action   `yaml:"action"`
-	Approve          bool     `yaml:"approve"`
+	Name             string     `yaml:"name"`
+	Source           string     `yaml:"source"`
+	ForEach          string     `yaml:"for_each"`
+	ID               string     `yaml:"id"`
+	When             string     `yaml:"when"`
+	On               string     `yaml:"on"` // edge (default)|each
+	Repeat           Duration   `yaml:"repeat"`
+	Cooldown         Duration   `yaml:"cooldown"`
+	AllowAgentEvents bool       `yaml:"allow_agent_events"`
+	Action           Action     `yaml:"action"`
+	Approve          bool       `yaml:"approve"`
+	Egress           EgressRule `yaml:"egress"`
 }
 
 type Action struct {
@@ -167,9 +188,10 @@ var credName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 var kinds = []string{"claude", "codex", "agy"}
 
 type Agent struct {
-	Kind       string `yaml:"kind"` // claude (default)|codex|agy
-	Credential string `yaml:"credential"`
-	Command    string `yaml:"command"` // binary path override
+	Egress     EgressAgent `yaml:"egress"`
+	Kind       string      `yaml:"kind"` // claude (default)|codex|agy
+	Credential string      `yaml:"credential"`
+	Command    string      `yaml:"command"` // binary path override
 	// Deprecated: use kind and command.
 	Runner       []string `yaml:"runner"`
 	Prompt       string   `yaml:"prompt"`
@@ -230,7 +252,7 @@ func Load(path string) (*Config, error) {
 
 func Parse(b []byte) (*Config, error) {
 	c := &Config{
-		Server: Server{Listen: ":8080", DB: "agentgw.db", Workers: 4, Sandbox: "systemd"},
+		Server: Server{Listen: ":8080", DB: "agentgw.db", Workers: 4, Sandbox: "systemd", Egress: EgressServer{Listen: "127.77.0.1:3128"}},
 		Limits: Limits{AgentRunsPerDay: 50, HTTPMaxBody: 1 << 20, HTTPTimeout: Duration(30 * time.Second)},
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(b))
@@ -252,6 +274,10 @@ func Parse(b []byte) (*Config, error) {
 		}
 		if a.Kind == "" {
 			a.Kind = "claude"
+		}
+		if a.Egress.Enabled == nil {
+			t := true
+			a.Egress.Enabled = &t
 		}
 		if len(a.Runner) > 0 && a.Command == "" {
 			a.Command = a.Runner[0]
@@ -405,6 +431,9 @@ func (c *Config) Warnings() []string {
 				w = append(w, fmt.Sprintf("agent %s: runner arguments after the binary are ignored", name))
 			}
 		}
+		if c.Server.Sandbox == "none" && *a.Egress.Enabled {
+			w = append(w, fmt.Sprintf("agent %s: egress allowlists are not enforced with sandbox: none", name))
+		}
 		add := func(f string, a ...any) { w = append(w, fmt.Sprintf("agent %s: ", name)+fmt.Sprintf(f, a...)) }
 		if a.Kind == "codex" || a.Kind == "agy" {
 			add("built-in shell tools can't be disabled (%s runs %s)", a.Kind, map[string]string{"codex": "read-only", "agy": "in a sandbox in plan mode"}[a.Kind])
@@ -512,6 +541,17 @@ func (c *Config) Validate() error {
 	if t := c.Server.Token; t.isSet() && t.Value != "" && len(t.Value) < 32 {
 		add("server.token: must be at least 32 characters")
 	}
+	if h, _, err := net.SplitHostPort(c.Server.Egress.Listen); err != nil || net.ParseIP(h) == nil || !net.ParseIP(h).IsLoopback() {
+		add("server.egress.listen: must be a loopback ip:port like 127.77.0.1:3128, got %q", c.Server.Egress.Listen)
+	}
+	checkAllow := func(p string, list []string) {
+		for _, e := range list {
+			if _, err := parseHostPort(e); err != nil {
+				add("%s.egress.allow: %v", p, err)
+			}
+		}
+	}
+	checkAllow("server", c.Server.Egress.Allow)
 	if c.Limits.HTTPTimeout < 0 {
 		add("limits.http_timeout: must not be negative")
 	}
@@ -558,6 +598,7 @@ func (c *Config) Validate() error {
 		if r.Repeat < 0 || r.Cooldown < 0 {
 			add("%s: repeat and cooldown must not be negative", p)
 		}
+		checkAllow(fmt.Sprintf("rules[%d]", i), r.Egress.Allow)
 		c.validateAction(p, r.Action, add)
 		if (r.Action.Agent != "" || (r.Action.Routine != "" && c.RoutineHasAgent(r.Action.Routine))) && r.Cooldown <= 0 {
 			add("%s: cooldown is mandatory for agent actions", p)
@@ -627,6 +668,7 @@ func (c *Config) Validate() error {
 		if a.APIKeyFile != "" && !safePath.MatchString(a.APIKeyFile) {
 			add("%s: api_key_file must be an absolute path of [A-Za-z0-9/._-]", p)
 		}
+		checkAllow(p, a.Egress.Allow)
 		checkTemplate(p+" prompt", a.Prompt, add)
 	}
 
@@ -801,4 +843,113 @@ func sortedKeys[V any](m map[string]V) []string {
 func implicitFor(c *Config, name string) bool {
 	a := c.Agents[strings.TrimPrefix(name, implicitPrefix)]
 	return a != nil && a.Credential == name && a.APIKeyFile != ""
+}
+
+// HostPort is one egress allowlist entry. Host is an exact name or *.suffix
+// (subdomains only). The integrator maps it to the proxy's entry type.
+type HostPort struct {
+	Host         string
+	Port         int
+	AllowPrivate bool // from an allow_private MCP source
+}
+
+func (h HostPort) String() string {
+	s := fmt.Sprintf("%s:%d", h.Host, h.Port)
+	if h.AllowPrivate {
+		s += " (allow_private)"
+	}
+	return s
+}
+
+var hostName = regexp.MustCompile(`^(\*\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$`)
+
+// parseHostPort reads host, host:port, *.suffix or *.suffix:port; the port defaults to 443.
+func parseHostPort(e string) (HostPort, error) {
+	host, port := e, 443
+	if i := strings.LastIndex(e, ":"); i >= 0 {
+		n, err := strconv.Atoi(e[i+1:])
+		if err != nil || n < 1 || n > 65535 {
+			return HostPort{}, fmt.Errorf("%q: port must be 1-65535", e)
+		}
+		host, port = e[:i], n
+	}
+	if !hostName.MatchString(host) {
+		return HostPort{}, fmt.Errorf("%q: want host, host:port or *.suffix", e)
+	}
+	return HostPort{Host: strings.ToLower(host), Port: port}, nil
+}
+
+// providerHosts are the verified hosts each CLI needs (2026-10-06).
+var providerHosts = map[string][2][]string{ // kind -> {subscription, api key}
+	"claude": {{"api.anthropic.com", "platform.claude.com"}, {"api.anthropic.com"}},
+	"codex":  {{"chatgpt.com", "auth.openai.com"}, {"api.openai.com"}},
+	"agy": {{"oauth2.googleapis.com", "daily-cloudcode-pa.googleapis.com", "cloudcode-pa.googleapis.com", "www.googleapis.com", "lh3.googleusercontent.com"},
+		{"generativelanguage.googleapis.com"}},
+}
+
+func (c *Config) userAllow(lists ...[]string) (out []HostPort) {
+	for _, l := range lists {
+		for _, e := range l {
+			if hp, err := parseHostPort(e); err == nil {
+				out = append(out, hp)
+			}
+		}
+	}
+	return out
+}
+
+func dedupe(l []HostPort) []HostPort {
+	seen := map[HostPort]bool{}
+	out := l[:0]
+	for _, h := range l {
+		if !seen[h] {
+			seen[h] = true
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// AgentEgress returns the agent's effective egress allowlist and whether
+// restriction is enabled for it.
+func (c *Config) AgentEgress(agent string) (allow []HostPort, enabled bool) {
+	a := c.Agents[agent]
+	if a == nil || a.Egress.Enabled == nil || !*a.Egress.Enabled {
+		return nil, false
+	}
+	mode := 0 // subscription (also for legacy agents with no credential)
+	if _, cr := c.AgentCredential(agent); cr != nil && cr.APIKey.isSet() {
+		mode = 1
+	}
+	for _, h := range providerHosts[a.Kind][mode] {
+		allow = append(allow, HostPort{Host: h, Port: 443})
+	}
+	for _, m := range a.MCP {
+		src := c.Sources[m]
+		if src == nil || src.URL == "" {
+			continue
+		}
+		u, err := url.Parse(src.URL)
+		if err != nil || u.Hostname() == "" {
+			continue
+		}
+		port := 443
+		if u.Scheme == "http" {
+			port = 80
+		}
+		if p, err := strconv.Atoi(u.Port()); err == nil {
+			port = p
+		}
+		allow = append(allow, HostPort{Host: strings.ToLower(u.Hostname()), Port: port, AllowPrivate: src.AllowPrivate})
+	}
+	allow = append(allow, c.userAllow(a.Egress.Allow, c.Server.Egress.Allow)...)
+	return dedupe(allow), true
+}
+
+// RuleEgress returns the allowlist for a rule's cmd actions and whether they are restricted.
+func (c *Config) RuleEgress(r Rule) (allow []HostPort, enabled bool) {
+	if !r.Egress.Enabled && !c.Server.Egress.CmdDefault {
+		return nil, false
+	}
+	return dedupe(c.userAllow(r.Egress.Allow, c.Server.Egress.Allow)), true
 }

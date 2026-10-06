@@ -86,3 +86,18 @@ rules:
 		t.Fatalf("bare event has no headers: %s", out)
 	}
 }
+
+func TestValidateVerboseEgress(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "agentgw.yaml")
+	os.WriteFile(cfg, []byte("credentials: {c: {provider: codex}}\nagents: {a: {kind: codex}, b: {kind: codex, egress: {enabled: false}}}\n"), 0o600)
+	or, ow, _ := os.Pipe()
+	old := os.Stdout
+	os.Stdout = ow
+	err := validate([]string{"-config", cfg, "-v"})
+	os.Stdout = old
+	ow.Close()
+	b, _ := io.ReadAll(or)
+	if err != nil || !strings.Contains(string(b), "agent a egress: chatgpt.com:443, auth.openai.com:443") || !strings.Contains(string(b), "agent b egress: off") {
+		t.Fatalf("%q %v", b, err)
+	}
+}

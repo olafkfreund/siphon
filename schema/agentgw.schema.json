@@ -25,6 +25,21 @@
           "credential": {
             "type": "string"
           },
+          "egress": {
+            "additionalProperties": false,
+            "properties": {
+              "allow": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          },
           "kind": {
             "type": "string"
           },
@@ -199,6 +214,21 @@
             "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
             "type": "string"
           },
+          "egress": {
+            "additionalProperties": false,
+            "properties": {
+              "allow": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          },
           "for_each": {
             "type": "string"
           },
@@ -234,6 +264,24 @@
         },
         "db": {
           "type": "string"
+        },
+        "egress": {
+          "additionalProperties": false,
+          "properties": {
+            "allow": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "cmd_default": {
+              "type": "boolean"
+            },
+            "listen": {
+              "type": "string"
+            }
+          },
+          "type": "object"
         },
         "listen": {
           "type": "string"
