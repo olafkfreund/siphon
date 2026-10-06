@@ -10,6 +10,7 @@ import (
 
 	"github.com/olafkfreund/siphon/internal/rule"
 	"github.com/olafkfreund/siphon/internal/source"
+	"github.com/olafkfreund/siphon/internal/store"
 )
 
 // listenDebounce is the minimum gap between hint-triggered ticks of one source.
@@ -34,6 +35,9 @@ func (p *Pipeline) Webhooks() map[string]http.Handler {
 // deliver records the replay key and enqueues in one transaction, so a
 // crash can neither lose an accepted webhook nor accept it twice.
 func (p *Pipeline) deliver(ctx context.Context, ev source.Event, key string) (bool, error) {
+	if serr := store.SetSourceEvent(p.Store.DB, ev.Source, ev.Data); serr != nil {
+		slog.Warn("store last event", "source", ev.Source, "err", serr)
+	}
 	_, ids, dup, ruleErr, err := p.handleEvent(ctx, rule.Event{Source: ev.Source, Headers: ev.Headers, Data: ev.Data},
 		false, "hook:"+ev.Source, key)
 	if ruleErr != nil {

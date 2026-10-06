@@ -156,6 +156,9 @@ func (p *Pipeline) Tick(ctx context.Context, name string) ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
+	if serr := store.SetSourceEvent(p.Store.DB, name, ev.Data); serr != nil {
+		slog.Warn("store last event", "source", name, "err", serr)
+	}
 	_, ids, err := p.HandleEvent(ctx, ev, false)
 	return ids, err
 }
