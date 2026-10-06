@@ -10,9 +10,10 @@ type SandboxOptions struct {
 	Mode        string
 	Timeout     time.Duration
 	Credentials map[string]string
+	Unit        string
 }
 
-func SandboxArgv(argv []string, timeout time.Duration, creds map[string]string) []string {
+func SandboxArgv(argv []string, timeout time.Duration, creds map[string]string, unit ...string) []string {
 	seconds := int64((timeout + time.Second - 1) / time.Second)
 	if seconds < 1 {
 		seconds = 1
@@ -21,6 +22,9 @@ func SandboxArgv(argv []string, timeout time.Duration, creds map[string]string) 
 		"--property=DynamicUser=yes", "--property=ProtectSystem=strict", "--property=ProtectHome=yes",
 		"--property=PrivateTmp=yes", "--property=NoNewPrivileges=yes",
 		"--property=IPAddressDeny=169.254.0.0/16", fmt.Sprintf("--property=RuntimeMaxSec=%ds", seconds)}
+	if len(unit) > 0 && unit[0] != "" {
+		result = append(result, "--unit="+unit[0])
+	}
 	keys := make([]string, 0, len(creds))
 	for name := range creds {
 		keys = append(keys, name)
