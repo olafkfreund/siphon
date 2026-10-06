@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 12
 author: olafkfreund
 ---
@@ -96,3 +96,10 @@ Must not:
 4. **Granularity.** One allowlist per agent (precise; needs a way to tell
    runs apart inside the proxy), or one shared list for all sandboxed runs
    (simpler, looser)? Recommendation: **per agent**.
+
+## Resolutions (approved 2026-10-06, recommendations)
+
+1. On by default for agents, with built-in provider endpoints.
+2. `cmd` actions: opt-in, per rule or globally.
+3. Built-in provider host defaults, plus per-agent `egress.allow`, plus a global override.
+4. Per-agent allowlists.
