@@ -95,9 +95,11 @@ func TestWebhookRawAndFailure(t *testing.T) {
 	mac := hmac.New(sha256.New, []byte("key"))
 	mac.Write([]byte("plain"))
 	r.Header.Set("X-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
-	for _, header := range []string{"Authorization", "Cookie", "Proxy-Authorization", "Connection", "Keep-Alive", "Te", "Trailer", "Transfer-Encoding", "Upgrade"} {
+	for _, header := range []string{"Authorization", "Cookie", "Proxy-Authorization", "Proxy-Authenticate", "Keep-Alive", "Te", "Trailer", "Transfer-Encoding", "Upgrade"} {
 		r.Header.Set(header, "secret")
 	}
+	r.Header.Set("Connection", "Keep-Alive, X-Secret")
+	r.Header.Set("X-Secret", "v")
 	r.Header.Set("X-Useful", "kept")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -108,7 +110,7 @@ func TestWebhookRawAndFailure(t *testing.T) {
 	if got.Headers["x-useful"] != "kept" {
 		t.Fatalf("useful header missing: %+v", got.Headers)
 	}
-	for _, header := range []string{"x-signature", "authorization", "cookie", "proxy-authorization", "connection", "keep-alive", "te", "trailer", "transfer-encoding", "upgrade"} {
+	for _, header := range []string{"x-signature", "authorization", "cookie", "proxy-authorization", "proxy-authenticate", "connection", "keep-alive", "x-secret", "te", "trailer", "transfer-encoding", "upgrade"} {
 		if _, ok := got.Headers[header]; ok {
 			t.Errorf("leaked %s", header)
 		}

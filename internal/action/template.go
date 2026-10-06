@@ -89,7 +89,7 @@ var (
 
 // templateRun runs spec in a fresh agentgw-action@ instance and returns its
 // exit code and (stdout, stderr). exit -1 means it never ran or was cancelled.
-func templateRun(ctx context.Context, dir string, spec JobSpec) (int, []byte, []byte, map[int][]byte, error) {
+func templateRun(ctx context.Context, dir string, spec JobSpec, captureLimit int) (int, []byte, []byte, map[int][]byte, error) {
 	if dir == "" {
 		return -1, nil, nil, nil, errors.New("sandbox: no action directory configured")
 	}
@@ -137,8 +137,8 @@ func templateRun(ctx context.Context, dir string, spec JobSpec) (int, []byte, []
 		cancel()
 		resetFailed(unit)
 	}
-	stdout := readCapped(filepath.Join(runDir, "stdout"))
-	stderr := readCapped(filepath.Join(runDir, "stderr"))
+	stdout := readCapped(filepath.Join(runDir, "stdout"), captureLimit)
+	stderr := readCapped(filepath.Join(runDir, "stderr"), captureLimit)
 	writeback := readWritebacks(runDir, spec.Writeback)
 	switch {
 	case ctx.Err() != nil:
@@ -175,7 +175,7 @@ func dirGid(dir string) (int, error) {
 	return int(st.Gid), nil
 }
 
-func readCapped(path string) []byte {
+func readCapped(path string, limit int) []byte {
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil
@@ -185,14 +185,14 @@ func readCapped(path string) []byte {
 	if err != nil || !info.Mode().IsRegular() {
 		return nil
 	}
-	b, _ := io.ReadAll(io.LimitReader(f, outputCap))
+	b, _ := io.ReadAll(io.LimitReader(f, int64(limit)))
 	return b
 }
 
 func readWritebacks(runDir string, names []string) map[int][]byte {
 	var writeback map[int][]byte
 	for i := range names {
-		if b := readCapped(filepath.Join(runDir, fmt.Sprintf("wb-%d", i))); b != nil {
+		if b := readCapped(filepath.Join(runDir, fmt.Sprintf("wb-%d", i)), outputCap); b != nil {
 			if writeback == nil {
 				writeback = make(map[int][]byte)
 			}

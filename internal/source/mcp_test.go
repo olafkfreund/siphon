@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
@@ -137,5 +138,25 @@ func TestMCPDeclaredTool(t *testing.T) {
 	}
 	if calls != 1 || ev.Data.(map[string]any)["ok"] != true {
 		t.Fatalf("calls=%d event=%+v", calls, ev)
+	}
+}
+
+func TestMCPStructuredContentPreservesInteger(t *testing.T) {
+	serverSide, clientSide := mcp.NewInMemoryTransports()
+	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+	server.AddTool(&mcp.Tool{Name: "id", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// As the MCP spec asks (and go-sdk's typed tools do): structured
+		// output plus its serialized JSON as TextContent.
+		return &mcp.CallToolResult{
+			StructuredContent: map[string]any{"id": json.Number("9007199254740993")},
+			Content:           []mcp.Content{&mcp.TextContent{Text: `{"id":9007199254740993}`}},
+		}, nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go server.Run(ctx, serverSide)
+	ev, err := (MCP{Options: MCPOptions{Tool: "id"}, Transport: clientSide}).Poll(ctx)
+	if err != nil || ev.Data.(map[string]any)["id"] != int64(9007199254740993) {
+		t.Fatalf("event=%+v err=%v", ev, err)
 	}
 }
