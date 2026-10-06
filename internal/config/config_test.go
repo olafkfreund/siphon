@@ -81,6 +81,7 @@ units: [u.service]
 		{"no action", `[{name: r, source: s, when: "true", action: {}}]`, "exactly one"},
 		{"two actions", `[{name: r, source: s, when: "true", action: {cmd: [a], unit: u.service}}]`, "exactly one"},
 		{"bad template", `[{name: r, source: s, when: "true", action: {cmd: ["{{"]}}]`, "bad template"},
+		{"templated cmd[0]", `[{name: r, source: s, when: "true", action: {cmd: ["{{.a}}", x]}}]`, "cmd[0] must not be templated"},
 		{"bad on", `[{name: r, source: s, when: "true", on: sometimes, action: {cmd: [a]}}]`, "on must be"},
 	}
 	for _, tc := range cases {
@@ -123,5 +124,63 @@ func TestFileSecretAndUnknownKey(t *testing.T) {
 	}
 	if _, err := Parse([]byte("limits: {http_timeout: soon}\n")); err == nil {
 		t.Fatal("bad duration should fail")
+	}
+}
+
+func TestRoutineAndRunnerTemplatedArgv0(t *testing.T) {
+	c, _ := Parse([]byte(`
+agents: { a: { runner: ["{{.x}}", -p] } }
+routines: { r: { steps: [{ id: s, cmd: ["{{.y}}"] }] } }
+`))
+	msg := c.Validate().Error()
+	for _, w := range []string{"runner[0] must not be templated", "cmd[0] must not be templated"} {
+		if !strings.Contains(msg, w) {
+			t.Errorf("missing %q in %s", w, msg)
+		}
+	}
+}
+
+func TestHeaders(t *testing.T) {
+	t.Setenv("AGW_H", "hdr-secret")
+	c, _ := Parse([]byte(`
+sources:
+  s:
+    type: http
+    url: http://x
+    headers: { Accept: application/json, X-Api-Key: "env:AGW_H" }
+`))
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Secrets(); len(got) != 1 || got[0] != "hdr-secret" {
+		t.Fatalf("secrets: %v", got)
+	}
+	for _, h := range []string{"Authorization", "Cookie", "X-Auth-Token", "X-Api-Key", "My-Secret"} {
+		c, _ = Parse([]byte("sources: {s: {type: http, url: http://x, headers: {" + h + ": literal}}}"))
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "inline secret") {
+			t.Errorf("%s: want inline secret error, got %v", h, err)
+		}
+	}
+}
+
+func TestEmptySecretIsError(t *testing.T) {
+	t.Setenv("AGW_EMPTY", "")
+	f := filepath.Join(t.TempDir(), "empty")
+	os.WriteFile(f, []byte("\n"), 0o600)
+	for _, ref := range []string{"env:AGW_EMPTY", "file:" + f} {
+		c, _ := Parse([]byte("server: {token: \"" + ref + "\"}\n"))
+		if err := c.Validate(); err == nil {
+			t.Errorf("%s: want error", ref)
+		}
+	}
+}
+
+func TestBearerCleartextWarning(t *testing.T) {
+	t.Setenv("AGW_B", "b")
+	for url, want := range map[string]int{"http://p510:8090/mcp": 1, "http://localhost:1/m": 0, "http://127.0.0.1/m": 0, "https://x/m": 0} {
+		c, _ := Parse([]byte("sources: {s: {type: mcp, url: \"" + url + "\", read: {resource: r://x}, auth: {bearer: env:AGW_B}}}"))
+		if got := len(c.Warnings()); got != want {
+			t.Errorf("%s: warnings=%d want %d", url, got, want)
+		}
 	}
 }

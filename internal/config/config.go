@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"slices"
 	"sort"
@@ -98,8 +100,8 @@ type Source struct {
 	Poll         Duration          `yaml:"poll"`
 	Auth         *Auth             `yaml:"auth"`
 	AllowPrivate bool              `yaml:"allow_private"`
-	Method       string            `yaml:"method"` // http: GET (default) or POST
-	Headers      map[string]string `yaml:"headers"`
+	Method       string            `yaml:"method"`  // http: GET (default) or POST
+	Headers      map[string]Secret `yaml:"headers"` // values may be env:/file: refs or plain literals
 	Body         string            `yaml:"body"`
 	Secret       Secret            `yaml:"secret"`           // webhook HMAC key
 	Signature    string            `yaml:"signature"`        // github|sha256
@@ -206,9 +208,22 @@ func Parse(b []byte) (*Config, error) {
 			c.resolveErrs = append(c.resolveErrs, err)
 		}
 	}
+	for _, name := range sortedKeys(c.Sources) {
+		if src := c.Sources[name]; src != nil {
+			for _, h := range sortedKeys(src.Headers) {
+				v := src.Headers[h]
+				if err := v.resolve(); err != nil {
+					c.resolveErrs = append(c.resolveErrs, err)
+				}
+				src.Headers[h] = v
+			}
+		}
+	}
 	return c, nil
 }
 
+// secretPtrs are values that must always be env:/file: refs. Source headers
+// are handled separately: they may be plain literals unless the name looks secret.
 func (c *Config) secretPtrs() []*Secret {
 	out := []*Secret{&c.Server.Token}
 	for _, name := range sortedKeys(c.Sources) {
@@ -237,6 +252,9 @@ func (s *Secret) resolve() error {
 			return fmt.Errorf("secret %s: %w", s.Ref, err)
 		}
 		s.Value = strings.TrimSpace(string(b))
+		if s.Value == "" {
+			return fmt.Errorf("secret %s: file is empty", s.Ref)
+		}
 	}
 	return nil
 }
@@ -247,6 +265,15 @@ func (c *Config) Secrets() []string {
 	for _, s := range c.secretPtrs() {
 		if s.Value != "" {
 			out = append(out, s.Value)
+		}
+	}
+	for _, name := range sortedKeys(c.Sources) { // inline literal headers have no Value
+		if src := c.Sources[name]; src != nil {
+			for _, h := range sortedKeys(src.Headers) {
+				if v := src.Headers[h].Value; v != "" {
+					out = append(out, v)
+				}
+			}
 		}
 	}
 	return out
@@ -262,8 +289,34 @@ func (c *Config) Warnings() []string {
 		if s := c.Sources[name]; s != nil && s.AllowPrivate {
 			w = append(w, fmt.Sprintf("source %s: allow_private disables the private-address guard", name))
 		}
+		if s := c.Sources[name]; s != nil && s.Auth != nil && s.Auth.Bearer.isSet() && cleartextRemote(s.URL) {
+			w = append(w, fmt.Sprintf("source %s: bearer token sent over plain http to a non-loopback host", name))
+		}
 	}
 	return w
+}
+
+func cleartextRemote(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "http" {
+		return false
+	}
+	h := u.Hostname()
+	if ip := net.ParseIP(h); ip != nil {
+		return !ip.IsLoopback()
+	}
+	return h != "localhost"
+}
+
+// secretHeader reports whether a header name implies a secret value.
+func secretHeader(name string) bool {
+	n := strings.ToLower(name)
+	for _, k := range []string{"authorization", "cookie", "token", "key", "secret", "password"} {
+		if strings.Contains(n, k) {
+			return true
+		}
+	}
+	return false
 }
 
 // Validate returns every problem at once, joined.
@@ -281,6 +334,17 @@ func (c *Config) Validate() error {
 	for _, s := range c.secretPtrs() {
 		if s.isSet() && !strings.HasPrefix(s.Ref, "env:") && !strings.HasPrefix(s.Ref, "file:") {
 			add("inline secret: values must be env:NAME or file:/path")
+		}
+	}
+
+	for _, name := range sortedKeys(c.Sources) {
+		if src := c.Sources[name]; src != nil {
+			for _, h := range sortedKeys(src.Headers) {
+				ref := src.Headers[h].Ref
+				if secretHeader(h) && !strings.HasPrefix(ref, "env:") && !strings.HasPrefix(ref, "file:") {
+					add("sources.%s.headers.%s: inline secret: values must be env:NAME or file:/path", name, h)
+				}
+			}
 		}
 	}
 
@@ -338,6 +402,9 @@ func (c *Config) Validate() error {
 			if _, ok := c.Sources[m]; !ok {
 				add("%s: mcp references unknown source %q", p, m)
 			}
+		}
+		if len(a.Runner) > 0 && strings.Contains(a.Runner[0], "{{") {
+			add("%s: runner[0] must not be templated", p)
 		}
 		checkTemplate(p+" prompt", a.Prompt, add)
 	}
@@ -411,6 +478,9 @@ func (c *Config) validateAction(p string, a Action, add func(string, ...any)) {
 	n := 0
 	if len(a.Cmd) > 0 {
 		n++
+		if strings.Contains(a.Cmd[0], "{{") {
+			add("%s: cmd[0] must not be templated", p)
+		}
 		for _, e := range a.Cmd {
 			checkTemplate(p+" cmd", e, add)
 		}

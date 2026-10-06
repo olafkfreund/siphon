@@ -165,18 +165,21 @@ func evalItem(ctx context.Context, tx *sql.Tx, r config.Rule, env map[string]any
 	}
 	f := Fire{Rule: r.Name, Key: key, Env: env}
 
-	if r.On == "each" {
-		if !cur {
-			return f, false, nil
-		}
-		ok, err := admit(tx, r, key, now, true)
-		return f, ok, err
-	}
-
 	st, err := store.GetRuleState(tx, r.Name, key)
 	if err != nil {
 		return f, false, err
 	}
+
+	if r.On == "each" {
+		// Already fired: the row has a fire time. Deferred ids have no row yet.
+		if !cur || !st.LastFired.IsZero() {
+			return f, false, nil
+		}
+		ok, err := admit(tx, r, key, now)
+		return f, ok, err
+	}
+
+	// An edge key that disappears from for_each keeps its last value.
 	if !cur {
 		if st.Found && !st.LastValue {
 			return f, false, nil
@@ -187,12 +190,13 @@ func evalItem(ctx context.Context, tx *sql.Tx, r config.Rule, env map[string]any
 	if st.LastValue && !refire {
 		return f, false, nil
 	}
-	ok, err = admit(tx, r, key, now, false)
+	ok, err = admit(tx, r, key, now)
 	return f, ok, err
 }
 
-// admit applies the per-rule cooldown, the each-dedupe, and records the fire.
-func admit(tx *sql.Tx, r config.Rule, key string, now time.Time, each bool) (bool, error) {
+// admit applies the cooldown and records the fire.
+func admit(tx *sql.Tx, r config.Rule, key string, now time.Time) (bool, error) {
+	// Cooldown scope: per rule, across all keys (and items of one event).
 	if r.Cooldown > 0 {
 		last, err := store.RuleLastFired(tx, r.Name)
 		if err != nil {
@@ -200,12 +204,6 @@ func admit(tx *sql.Tx, r config.Rule, key string, now time.Time, each bool) (boo
 		}
 		if !last.IsZero() && now.Sub(last) < time.Duration(r.Cooldown) {
 			return false, nil
-		}
-	}
-	if each {
-		isNew, err := store.MarkSeen(tx, "rule:"+r.Name, key, now)
-		if err != nil || !isNew {
-			return false, err
 		}
 	}
 	return true, store.PutRuleState(tx, r.Name, key, true, now)

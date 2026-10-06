@@ -198,11 +198,17 @@ func ClaimJob(db *sql.DB, now time.Time) (j QueuedJob, ok bool, err error) {
 	return j, err == nil, err
 }
 
-// FinishJob records the outcome of a running job.
+// FinishJob records the outcome of a running job; it errors if the job is not running.
 func FinishJob(db *sql.DB, id int64, state string, exit int, output string, now time.Time) error {
-	_, err := db.Exec(`UPDATE jobs SET state=?, exit_code=?, output=?, finished_at=? WHERE id=?`,
+	r, err := db.Exec(`UPDATE jobs SET state=?, exit_code=?, output=?, finished_at=? WHERE id=? AND state='running'`,
 		state, exit, output, ms(now), id)
-	return err
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return fmt.Errorf("finish job %d: not running", id)
+	}
+	return nil
 }
 
 // PutSourceState records the last poll time and error ("" on success).

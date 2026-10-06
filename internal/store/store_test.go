@@ -74,3 +74,27 @@ func TestHelpers(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestFinishJobOnlyRunning(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.UnixMilli(1_700_000_000_000)
+	tx, _ := s.DB.Begin()
+	id, _ := InsertJob(tx, Job{Rule: "r", ActionJSON: "{}"}, now)
+	tx.Commit()
+	if err := FinishJob(s.DB, id, "done", 0, "", now); err == nil {
+		t.Fatal("queued job must not be finishable")
+	}
+	if _, ok, err := ClaimJob(s.DB, now); !ok || err != nil {
+		t.Fatal(ok, err)
+	}
+	if err := FinishJob(s.DB, id, "done", 0, "ok", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := FinishJob(s.DB, id, "failed", 1, "late", now); err == nil {
+		t.Fatal("second finish must fail")
+	}
+}
