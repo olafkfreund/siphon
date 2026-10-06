@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"text/template"
 	"time"
@@ -40,12 +42,13 @@ func Render(argv []string, data any) ([]string, error) {
 }
 
 func RunCmd(ctx context.Context, argv []string, opts SandboxOptions, secrets []string) (int, []byte, error) {
-	return runCommand(ctx, argv, opts, secrets)
+	exit, output, _, err := runCommand(ctx, argv, opts, secrets, nil, false)
+	return exit, output, err
 }
 
-func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets []string) (int, []byte, error) {
+func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets []string, stdin []byte, separateStdout bool) (int, []byte, []byte, error) {
 	if len(argv) == 0 {
-		return -1, nil, errors.New("empty command")
+		return -1, nil, nil, errors.New("empty command")
 	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = 30 * time.Second
@@ -59,12 +62,15 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 	}
 	switch mode {
 	case "systemd":
-		argv = SandboxArgv(argv, opts.Timeout, opts.Credentials, opts.Unit)
+		argv = SandboxArgv(argv, opts)
 	case "none":
 	default:
-		return -1, nil, fmt.Errorf("invalid sandbox mode %q", mode)
+		return -1, nil, nil, fmt.Errorf("invalid sandbox mode %q", mode)
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	cmd.Env = []string{}
 	for _, name := range []string{"PATH", "HOME", "LANG"} {
 		if value, ok := os.LookupEnv(name); ok {
@@ -81,20 +87,31 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 	}
 	buf := &cappedBuffer{limit: 64<<10 + maxExtra}
 	cmd.Stdout, cmd.Stderr = buf, buf
+	var stdout *cappedBuffer
+	if separateStdout {
+		stdout = &cappedBuffer{limit: 1<<20 + maxExtra}
+		cmd.Stdout = io.MultiWriter(buf, stdout)
+	}
 	err := cmd.Run()
-	output := buf.Bytes()
-	output = Mask(output, secrets)
+	output := Mask(buf.Bytes(), secrets)
 	if len(output) > 64<<10 {
 		output = output[:64<<10]
 	}
+	var stdoutBytes []byte
+	if stdout != nil {
+		stdoutBytes = Mask(stdout.Bytes(), secrets)
+		if len(stdoutBytes) > 1<<20 {
+			stdoutBytes = stdoutBytes[:1<<20]
+		}
+	}
 	if err == nil {
-		return 0, output, nil
+		return 0, output, stdoutBytes, nil
 	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
-		return exit.ExitCode(), output, nil
+		return exit.ExitCode(), output, stdoutBytes, nil
 	}
-	return -1, output, err
+	return -1, output, stdoutBytes, err
 }
 
 // Mask replaces known secrets in output, longest first.
@@ -110,14 +127,19 @@ func Mask(b []byte, secrets []string) []byte {
 }
 
 type cappedBuffer struct {
-	bytes.Buffer
+	buf   bytes.Buffer
 	limit int
+	mu    sync.Mutex
 }
 
+func (b *cappedBuffer) Bytes() []byte { return b.buf.Bytes() }
+
 func (b *cappedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	n := len(p)
-	if b.Len() < b.limit {
-		_, _ = b.Buffer.Write(p[:min(len(p), b.limit-b.Len())])
+	if b.buf.Len() < b.limit {
+		_, _ = b.buf.Write(p[:min(len(p), b.limit-b.buf.Len())])
 	}
 	return n, nil
 }
