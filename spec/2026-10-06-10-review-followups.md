@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 10
 intent: intent/2026-10-06-10-review-followups.md
 ---
