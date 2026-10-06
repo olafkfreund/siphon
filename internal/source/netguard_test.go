@@ -1,6 +1,7 @@
 package source
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,27 @@ import (
 	"testing"
 	"time"
 )
+
+func TestResolveAllowed(t *testing.T) {
+	ctx := context.Background()
+	for _, tt := range []struct {
+		host         string
+		allowPrivate bool
+		wantError    bool
+	}{
+		{"127.0.0.1", false, true},
+		{"127.0.0.1", true, false},
+		{"1.1.1.1", false, false},
+	} {
+		addrs, err := ResolveAllowed(ctx, tt.host, tt.allowPrivate)
+		if (err != nil) != tt.wantError {
+			t.Fatalf("ResolveAllowed(%q, %v): %v", tt.host, tt.allowPrivate, err)
+		}
+		if err == nil && (len(addrs) != 1 || addrs[0].String() != tt.host) {
+			t.Fatalf("ResolveAllowed(%q, %v) = %v", tt.host, tt.allowPrivate, addrs)
+		}
+	}
+}
 
 func TestBlockedIP(t *testing.T) {
 	for _, tt := range []struct {
