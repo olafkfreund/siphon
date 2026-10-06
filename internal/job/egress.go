@@ -65,6 +65,7 @@ func (p *Pipeline) startEgress(ctx context.Context) error {
 		}
 	}
 	if sock := p.Cfg.Server.Egress.Socket; sock != "" {
+		os.Remove(sock) // a stale socket must not pass for a live one below
 		go func() { errc <- px.ServeUnix(ctx, sock) }()
 		for {
 			if _, err := os.Stat(sock); err == nil {

@@ -322,6 +322,12 @@ proxy** (an HTTP CONNECT proxy on `server.egress.listen`, default
 sandbox, and the proxy applies the same private-address guard as sources. It
 tunnels bytes without inspecting TLS.
 
+On NixOS each restricted run has its own network namespace and an empty
+`/run`: `exec-job` forwards `127.0.0.1:3128` inside it to the proxy's unix
+socket (`server.egress.socket`, set by the module), so no host port or host
+daemon socket (nscd, D-Bus, nix-daemon, ...) is reachable. Don't run
+`agentgw run-once` alongside `serve` with the same socket path.
+
 An agent's allowlist is the built-in provider hosts for its kind and login type,
 plus the host:port of each `mcp:` source with a `url`, plus
 `agents.<name>.egress.allow`, plus `server.egress.allow`.

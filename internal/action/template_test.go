@@ -413,3 +413,14 @@ func TestExecJobForwarderListenFails(t *testing.T) {
 		t.Fatalf("code=%d stderr=%q", code, errb.String())
 	}
 }
+
+// job.json carries the run's token and logins; it is gone before the child runs.
+func TestExecJobUnlinksSpec(t *testing.T) {
+	jobFilesDir = t.TempDir()
+	job := filepath.Join(t.TempDir(), "job.json")
+	os.WriteFile(job, []byte(`{"argv":["sh","-c","test -e `+job+` && echo still-there; true"]}`), 0o600)
+	var out, errb strings.Builder
+	if code := execJob(filepath.Dir(job), job, &out, &errb); code != 0 || strings.Contains(out.String(), "still-there") {
+		t.Fatalf("code=%d out=%q err=%q", code, out.String(), errb.String())
+	}
+}

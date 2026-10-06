@@ -229,6 +229,10 @@ pkgs.testers.runNixOSTest {
         (pkgs.writeShellScriptBin "egress-probe" ''
           ip=$(awk '$2 == "external" || $3 == "external" {print $1; exit}' /etc/hosts)
           [ -e /run/nscd/socket ] && echo NSCD-VISIBLE
+          [ -e /nix/var/nix/daemon-socket/socket ] && echo NIX-DAEMON-VISIBLE
+          ls /run/systemd/units >/dev/null 2>&1 && echo UNIT-IDS-VISIBLE
+          find /sys/fs/cgroup -name 'agentgw-action*' 2>/dev/null | grep -q . && echo CGROUP-IDS-VISIBLE
+          echo "slash-run=$(ls /run | tr '\n' ' ')"
           echo "via-proxy=$(curl -s -m 10 --proxytunnel http://external:8080/)"
           echo "blocked=$(curl -s -m 10 -o /dev/null -w '%{http_connect}' --proxytunnel http://blocked.example:8080/)"
           curl -s -m 5 --noproxy '*' "http://$ip:8080/" >/dev/null && echo RAW-IP-REACHED
@@ -415,6 +419,10 @@ pkgs.testers.runNixOSTest {
         assert "DBUS-VISIBLE" not in out, f"system bus reachable from the sandbox: {out}"
         assert "API-REACHED-77" not in out, f"wildcard-bound API reachable via the proxy address: {out}"
         assert "NSCD-VISIBLE" not in out, f"nscd (host name resolution) reachable from the sandbox: {out}"
+        for leak in ("NIX-DAEMON-VISIBLE", "UNIT-IDS-VISIBLE", "CGROUP-IDS-VISIBLE"):
+            assert leak not in out, f"{leak}: {out}"
+        entries = set(out.split("slash-run=")[1].split("\n")[0].split())
+        assert entries <= {"agentgw", "current-system"}, f"unexpected /run entries in the sandbox: {entries}"
         assert "proxy-env=set" in out and "run-" not in out, f"proxy env missing or token leaked: {out}"
         n = machine.succeed("sqlite3 /var/lib/agentgw/state.db \"select count(*) from audit where event='egress_blocked' and detail='blocked.example:8080'\"").strip()
         assert n == "1", f"egress_blocked audited {n} times"

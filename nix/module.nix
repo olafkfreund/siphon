@@ -45,7 +45,12 @@ let
     # NixOS-managed dirs get an empty read-only tmpfs (the CLI sees no
     # config, rather than an unreadable one); others are made inaccessible.
     TemporaryFileSystem = map (d: "/etc/${d}:ro") (lib.filter etcManaged agentEtcDirs);
-    InaccessiblePaths = map (d: "-/etc/${d}") (lib.filter (d: !etcManaged d) agentEtcDirs);
+    InaccessiblePaths = map (d: "-/etc/${d}") (lib.filter (d: !etcManaged d) agentEtcDirs) ++ [
+      # Unit names there reveal other runs' ids (and so their run dirs).
+      "-/run/systemd/units"
+      # The daemon fetches URLs for any client: network outside the sandbox.
+      "-/nix/var/nix/daemon-socket"
+    ];
     PrivateTmp = true;
     ProtectSystem = "strict";
     ProtectHome = true;
@@ -56,7 +61,8 @@ let
     ProtectKernelTunables = true;
     ProtectKernelModules = true;
     ProtectKernelLogs = true;
-    ProtectControlGroups = true;
+    # Own cgroup namespace: other runs' ids (unit names) stay invisible.
+    ProtectControlGroups = "private";
     ProtectClock = true;
     ProtectHostname = true;
     RestrictNamespaces = true;
@@ -78,7 +84,11 @@ let
     description = "agentgw sandboxed action %i";
     # Agent CLIs first, then the system profile for tools actions may call.
     path = cfg.agentPackages ++ [ "/run/current-system/sw" ];
-    serviceConfig = actionServiceConfig // network;
+    # mkMerge, not //: list options (InaccessiblePaths, ...) must concatenate.
+    serviceConfig = lib.mkMerge [
+      actionServiceConfig
+      network
+    ];
   };
   agentEtcDirs = [
     "claude-code"
@@ -240,13 +250,13 @@ in
           PrivateNetwork = true;
           IPAddressDeny = [ "any" ];
           IPAddressAllow = [ "127.0.0.1/32" ];
-          BindPaths = [ egressDir ];
-          # Name lookups over local sockets would leave the namespace (DNS
-          # exfiltration); the proxy resolves names itself.
-          InaccessiblePaths = [
-            "-/run/dbus"
-            "-/run/systemd/resolve"
-            "-/run/nscd"
+          # An empty /run: no host daemon socket (nscd, D-Bus, resolved,
+          # avahi, tailscale, databases...) is reachable, only the proxy's.
+          # connect() works on a read-only bind.
+          TemporaryFileSystem = [ "/run:ro" ];
+          BindReadOnlyPaths = [
+            egressDir
+            "/run/current-system" # PATH: /run/current-system/sw
           ];
         }
       else

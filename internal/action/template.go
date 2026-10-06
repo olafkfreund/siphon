@@ -442,6 +442,9 @@ func execJob(runDir, jobFile string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "exec-job:", err)
 		return 125
 	}
+	// It holds the run's proxy token and logins: don't leave it readable by
+	// other runs (all share group agentgw-io) for the run's lifetime.
+	os.Remove(jobFile)
 	var spec JobSpec
 	if err := json.Unmarshal(raw, &spec); err != nil || len(spec.Argv) == 0 {
 		fmt.Fprintln(stderr, "exec-job: bad job spec")

@@ -100,15 +100,30 @@ func (p *Proxy) serve(ctx context.Context, listener net.Listener) error {
 	defer listener.Close()
 	stop := context.AfterFunc(ctx, func() { listener.Close() })
 	defer stop()
+	// All connections (pre-auth and tunnels): bounded so a run cannot
+	// exhaust agentgw's fds; tunnels have their own, lower cap.
+	pending := make(chan struct{}, 512)
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
-			return err
+			// e.g. EMFILE: back off and keep serving rather than leave every
+			// later run without network until a restart.
+			time.Sleep(100 * time.Millisecond)
+			continue
 		}
-		go p.handle(ctx, conn)
+		select {
+		case pending <- struct{}{}:
+		default:
+			conn.Close()
+			continue
+		}
+		go func() {
+			defer func() { <-pending }()
+			p.handle(ctx, conn)
+		}()
 	}
 }
 

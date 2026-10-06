@@ -177,3 +177,14 @@ This implements spec Amendment 1 (approved). These decisions carry over and are 
   - **Step 9:** `/run/agentgw` is created by tmpfiles as `2710 agentgw:agentgw-io` (setgid, so the socket inherits the group), not as a `RuntimeDirectory`. The restricted template bind-mounts the **directory**, not the socket file, so a socket recreated by an agentgw restart is still the one units see. The settings default uses `recursiveUpdate`, because a shallow `//` had dropped `server.db`.
   - **Step 10:** the probe checks that `/run/nscd/socket` is absent instead of expecting `getent hosts external` to fail. The VM resolves that name from `/etc/hosts`, a local file that is no exfiltration path.
   - **Result:** the real claude-code 2.1.289 and codex 0.160.0 start with exit 0 in the restricted template, and they reach the network only through the forwarder (`api.anthropic.com` and `api.openai.com` show up as blocked).
+- **Amendment 1 security review fixes (fresh Opus reviewer):**
+  - **Critical:** the restricted template still reached host unix sockets. The worst was the nix-daemon socket, since the daemon fetches URLs for any client. The restricted template now gets an empty read-only `/run` (`TemporaryFileSystem=/run:ro`) with only `egressDir` and `/run/current-system` (for PATH) bound in, read-only. Both templates hide `/nix/var/nix/daemon-socket`. The VM probe asserts that `/run` holds only those two entries and that the daemon socket is absent.
+  - **High (pre-existing, from #7):** a run could learn another run's id (from `/run/systemd/units` or cgroupfs) and read its `job.json`, which holds the token and logins, through the shared `agentgw-io` group. Fixed three ways:
+    - `exec-job` unlinks `job.json` before starting the child;
+    - both templates hide `/run/systemd/units`;
+    - both templates use `ProtectControlGroups=private` (systemd 261).
+    - Unit and VM tests cover this.
+  - **Also found:** `actionServiceConfig // network` was a shallow merge, so the restricted template's `InaccessiblePaths` replaced the base list hiding unmanaged `/etc/<cli>` dirs. Now `mkMerge`.
+  - **Medium:** the proxy's accept loop backs off on errors (for example EMFILE) instead of exiting, and connections per listener are capped at 512.
+  - **Low:** `startEgress` removes a stale socket before waiting for the new one.
+  - **Not fixed, a known limit:** a `run-once` run while `serve` is up, with the same socket path, replaces serve's socket. Don't run them together on one host with egress on.
