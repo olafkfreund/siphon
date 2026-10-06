@@ -15,8 +15,9 @@ import (
 const approvalTTL = 24 * time.Hour
 
 // newApproval inserts the approvals row for a pending job and returns the
-// one-shot link path. The token exists only in that return value (and the log
-// line the caller writes); the DB keeps its SHA-256, and the audit row the masked path.
+// one-shot link path. The token exists only in that return value: callers
+// must never log it (it is a credential). The DB keeps its SHA-256 and the
+// audit row the masked path.
 func (p *Pipeline) newApproval(tx *sql.Tx, jobID int64, now time.Time) (link string, err error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {

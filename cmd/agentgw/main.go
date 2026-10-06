@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -151,6 +152,23 @@ func rulesTest(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("event: %w", err)
 	}
+	// {"headers": {...}, "event": {...}} is an envelope; anything else is the event itself.
+	var headers map[string]string
+	if m, ok := data.(map[string]any); ok && len(m) == 2 && m["event"] != nil && m["headers"] != nil {
+		hm, ok := m["headers"].(map[string]any)
+		if !ok {
+			return errors.New("event: headers must be an object of strings")
+		}
+		headers = make(map[string]string, len(hm))
+		for k, v := range hm {
+			sv, ok := v.(string)
+			if !ok {
+				return fmt.Errorf("event: header %q must be a string", k)
+			}
+			headers[strings.ToLower(k)] = sv
+		}
+		data = m["event"]
+	}
 	st, err := store.Open(":memory:")
 	if err != nil {
 		return err
@@ -158,7 +176,7 @@ func rulesTest(ctx context.Context, args []string) error {
 	defer st.Close()
 	cfg.Rules = []config.Rule{*r}
 	p := &job.Pipeline{Cfg: cfg, Store: st, Now: time.Now}
-	fires, _, evalErr := p.HandleEvent(ctx, rule.Event{Source: r.Source, Data: data}, true)
+	fires, _, evalErr := p.HandleEvent(ctx, rule.Event{Source: r.Source, Headers: headers, Data: data}, true)
 
 	type out struct {
 		Key  string   `json:"key"`

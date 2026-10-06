@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -50,5 +51,38 @@ func TestCredentialsImportLs(t *testing.T) {
 	}
 	if _, err := runCreds(t, "tok", "import", "-config", cfg, "-token-stdin", "max"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRulesTestEnvelope(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "agentgw.yaml")
+	os.WriteFile(cfg, []byte(`sources: {s: {type: http, url: "http://127.0.0.1/x"}}
+rules:
+  - name: r
+    source: s
+    when: 'headers["x-k"] == "v" && event.n == 1'
+    action: { cmd: [echo, hi] }
+`), 0o600)
+	run := func(ev string) string {
+		f := filepath.Join(dir, "ev.json")
+		os.WriteFile(f, []byte(ev), 0o600)
+		or, ow, _ := os.Pipe()
+		old := os.Stdout
+		os.Stdout = ow
+		err := rulesTest(context.Background(), []string{"-config", cfg, "r", f})
+		os.Stdout = old
+		ow.Close()
+		b, _ := io.ReadAll(or)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	if out := run(`{"headers": {"X-K": "v"}, "event": {"n": 1}}`); !strings.Contains(out, `"argv"`) {
+		t.Fatalf("envelope should fire: %s", out)
+	}
+	if out := run(`{"n": 1}`); strings.Contains(out, `"argv"`) {
+		t.Fatalf("bare event has no headers: %s", out)
 	}
 }

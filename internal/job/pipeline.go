@@ -77,6 +77,37 @@ type Payload struct {
 	// Steps is a snapshot of the routine's steps at enqueue time; running a
 	// routine never reads the live config.
 	Steps []config.Step `json:"steps,omitempty"`
+	// Agents snapshots the agent definitions this job uses, so a paused or
+	// queued job never picks up an edited agent. MCP sources stay live: they
+	// hold resolved secrets that must not be persisted.
+	Agents map[string]config.Agent `json:"agents,omitempty"`
+}
+
+// agentDef returns the snapshotted agent definition, falling back to the
+// live config for payloads written before snapshots existed.
+func (p *Pipeline) agentDef(name string, snap map[string]config.Agent) *config.Agent {
+	if a, ok := snap[name]; ok {
+		return &a
+	}
+	return p.Cfg.Agents[name]
+}
+
+// agentSnapshot collects the definitions of every agent an action can run.
+func (p *Pipeline) agentSnapshot(a config.Action) map[string]config.Agent {
+	names := []string{a.Agent}
+	for _, st := range p.routineSteps(a) {
+		names = append(names, st.Agent)
+	}
+	out := map[string]config.Agent{}
+	for _, n := range names {
+		if def := p.Cfg.Agents[n]; n != "" && def != nil {
+			out[n] = *def
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // Poll fetches one event from a polled source.
@@ -211,7 +242,7 @@ func (p *Pipeline) enqueue(tx *sql.Tx, r config.Rule, f rule.Fire, ev rule.Event
 			return 0, "", store.Audit(tx, now, "rule:"+r.Name, "skip_agent_cap", 0, fmt.Sprintf("%d agent runs in 24h", n))
 		}
 	}
-	b, err := json.Marshal(Payload{Action: r.Action, Env: f.Env, Agent: hasAgent, Steps: p.routineSteps(r.Action)})
+	b, err := json.Marshal(Payload{Action: r.Action, Env: f.Env, Agent: hasAgent, Steps: p.routineSteps(r.Action), Agents: p.agentSnapshot(r.Action)})
 	if err != nil {
 		return 0, "", err
 	}
@@ -331,7 +362,7 @@ func (p *Pipeline) runAgent(ctx context.Context, j store.QueuedJob, pl Payload) 
 // wait=false (plain agent jobs) puts the job back in the queue when its login
 // is busy instead of tying up a worker; routine steps (wait=true) block.
 func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload, wait bool) (string, int, string, []byte) {
-	a := p.Cfg.Agents[pl.Action.Agent]
+	a := p.agentDef(pl.Action.Agent, pl.Agents)
 	if a == nil {
 		return "failed", -1, "unknown agent " + pl.Action.Agent, nil
 	}
@@ -353,7 +384,7 @@ func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload,
 	}
 	// Credential: an API key, or a subscription login from the store. No
 	// credential at all is the legacy path (the runner's own environment).
-	credName, c := p.Cfg.AgentCredential(pl.Action.Agent)
+	credName, c := a.Credential, p.Cfg.Credentials[a.Credential]
 	st := cred.StoreFor(p.Cfg)
 	var start map[string][]byte
 	switch {
@@ -416,8 +447,13 @@ func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload,
 	}
 	data["kind"], data["result"], data["raw"] = a.Kind, res.Result, res.Raw
 	ev := rule.Event{Source: config.AgentResultSource, Depth: j.Depth + 1, ParentID: j.ID, Data: data}
-	if _, _, herr := p.HandleEvent(ctx, ev, false); herr != nil {
-		slog.Warn("agent-result rules", "job", j.ID, "err", herr)
+	_, _, _, ruleErr, err := p.handleEvent(ctx, ev, false, "", "")
+	if err != nil {
+		// Nothing committed: failing beats a "done" job whose result vanished.
+		return "failed", 1, "agent result not recorded: " + err.Error() + "\n" + out, res.Stdout
+	}
+	if ruleErr != nil {
+		slog.Warn("agent-result rules", "job", j.ID, "err", ruleErr)
 	}
 	return "done", 0, out, res.Stdout
 }
@@ -450,6 +486,10 @@ func (p *Pipeline) saveWriteback(j store.QueuedJob, credName, provider string, s
 		}
 		if wrote {
 			p.audit("credential_refreshed", j.ID, credName)
+		} else {
+			// The store changed since this run started (a re-import): it wins.
+			slog.Info("credential write-back stale; kept the stored login", "credential", credName)
+			p.audit("credential_writeback_stale", j.ID, credName)
 		}
 	}
 }
@@ -515,10 +555,11 @@ func headerValues(h map[string]config.Secret) map[string]string {
 // decodePayload keeps integers as int64 so templates render 1700000000, not 1.7e+09.
 func decodePayload(s string) (Payload, error) {
 	var raw struct {
-		Action config.Action   `json:"action"`
-		Env    json.RawMessage `json:"env"`
-		Agent  bool            `json:"agent"`
-		Steps  []config.Step   `json:"steps"`
+		Action config.Action           `json:"action"`
+		Env    json.RawMessage         `json:"env"`
+		Agent  bool                    `json:"agent"`
+		Steps  []config.Step           `json:"steps"`
+		Agents map[string]config.Agent `json:"agents"`
 	}
 	if err := json.Unmarshal([]byte(s), &raw); err != nil {
 		return Payload{}, err
@@ -528,7 +569,7 @@ func decodePayload(s string) (Payload, error) {
 		return Payload{}, err
 	}
 	m, _ := env.(map[string]any)
-	return Payload{Action: raw.Action, Env: m, Agent: raw.Agent, Steps: raw.Steps}, nil
+	return Payload{Action: raw.Action, Env: m, Agent: raw.Agent, Steps: raw.Steps, Agents: raw.Agents}, nil
 }
 
 func (p *Pipeline) mcpOptions(name string) source.MCPOptions {

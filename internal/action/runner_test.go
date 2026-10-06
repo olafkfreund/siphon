@@ -159,6 +159,18 @@ func TestParseAndClassify(t *testing.T) {
 	}
 }
 
+func TestClaudeRawPreservesInteger(t *testing.T) {
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "claude")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nprintf '%s' '{\"result\":\"done\",\"id\":9007199254740993}'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	got, err := RunAgent(context.Background(), AgentOptions{Command: stub, Prompt: "p", WorkDir: filepath.Join(dir, "work"), Sandbox: SandboxOptions{Mode: "none"}})
+	if err != nil || got.Exit != 0 || got.Raw.(map[string]any)["id"] != int64(9007199254740993) {
+		t.Fatalf("result=%+v err=%v", got, err)
+	}
+}
+
 func TestPlacedFilesAndResults(t *testing.T) {
 	dir := t.TempDir()
 	claude := filepath.Join(dir, "claude")

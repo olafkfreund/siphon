@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"fmt"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/action"
 	"log/slog"
 	"sync"
@@ -14,16 +15,22 @@ import (
 const idlePoll = time.Second
 
 // Requeue is the startup recovery for jobs a previous process left `running`.
+// stopOrphans is a seam for tests.
+var stopOrphans = action.StopOrphans
+
 func (p *Pipeline) Requeue() error {
 	if p.Cfg.Server.Sandbox != "none" {
 		// A crashed agentgw leaves its agentgw-action@ units running (they live
 		// outside our cgroup); stop them before their jobs are requeued, so a
 		// step never runs twice at once.
 		sctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		if err := action.StopOrphans(sctx); err != nil {
-			slog.Warn("stopping orphaned action units", "err", err)
-		}
+		err := stopOrphans(sctx)
 		cancel()
+		if err != nil {
+			// Refuse to start: requeueing now could run a step twice at once.
+			// systemd restarts agentgw and retries.
+			return fmt.Errorf("stopping orphaned agentgw-action@ units failed (check systemd/polkit), refusing to start: %w", err)
+		}
 	}
 	rq, f, err := store.RequeueRunning(p.Store.DB, p.Now())
 	if rq+f > 0 {

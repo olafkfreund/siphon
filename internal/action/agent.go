@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -91,11 +92,6 @@ func RunAgent(ctx context.Context, o AgentOptions) (AgentResult, error) {
 		tokenStrings(b, &secrets)
 	}
 	exit, output, stdout, wb, err := runCommand(ctx, argv, sb, secrets, stdin, true)
-	for _, b := range wb {
-		secrets = append(secrets, string(b))
-		tokenStrings(b, &secrets)
-	}
-	output, stdout, stderr = Mask(output, secrets), Mask(stdout, secrets), Mask(stderr, secrets)
 	result, raw := parseResult(o.Kind, stdout)
 	if o.Kind == "agy" {
 		if m, ok := raw.(map[string]any); ok && m["status"] == "ERROR" && exit == 0 {
@@ -174,7 +170,12 @@ func parseResult(kind string, stdout []byte) (string, any) {
 		return strings.TrimSpace(string(stdout)), nil
 	}
 	var raw map[string]any
-	if json.Unmarshal(stdout, &raw) != nil {
+	value, err := decodeJSON(stdout)
+	if err != nil {
+		return "", nil
+	}
+	raw, _ = value.(map[string]any)
+	if raw == nil {
 		return "", nil
 	}
 	field := "result"
@@ -183,6 +184,50 @@ func parseResult(kind string, stdout []byte) (string, any) {
 	}
 	result, _ := raw[field].(string)
 	return result, raw
+}
+
+func decodeJSON(b []byte) (any, error) {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	var value any
+	if err := dec.Decode(&value); err != nil {
+		return nil, err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, errors.New("multiple JSON values")
+		}
+		return nil, err
+	}
+	return convertNumbers(value)
+}
+
+func convertNumbers(value any) (any, error) {
+	switch v := value.(type) {
+	case json.Number:
+		if n, err := v.Int64(); err == nil {
+			return n, nil
+		}
+		return v.Float64()
+	case map[string]any:
+		for key, item := range v {
+			converted, err := convertNumbers(item)
+			if err != nil {
+				return nil, err
+			}
+			v[key] = converted
+		}
+	case []any:
+		for i, item := range v {
+			converted, err := convertNumbers(item)
+			if err != nil {
+				return nil, err
+			}
+			v[i] = converted
+		}
+	}
+	return value, nil
 }
 
 func classify(kind string, raw any, stderr []byte) string {

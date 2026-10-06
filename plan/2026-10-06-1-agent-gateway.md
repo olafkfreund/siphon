@@ -269,7 +269,7 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
 - Step 9/11 (agent auth): `claude --bare` authenticates only via `ANTHROPIC_API_KEY` or an `apiKeyHelper` passed with `--settings` (per `claude --help`). In the systemd sandbox, the API key file goes in via `LoadCredential`, and a generated settings JSON sets `apiKeyHelper` to read `/run/credentials/<unit>/<name>`. This is wired in step 11.
 - Step 10:
   - The approval id is the job id (one approval per job): `approve|deny <job id>` and `/a/<job id>/<token>`.
-  - The one-shot link (with its token) is logged at slog info after commit, so the operator can see it. The audit row stores `/a/<id>/***`.
+  - The one-shot link (with its token) was first logged at slog info after commit. **Superseded by the Phase 1 review (M5): tokens are never logged**; the log says `agentgw approve <id>`. The audit row stores `/a/<id>/***`.
   - Smoke-tested by hand: `run-once`, then `jobs ls`, then `approve` (a second approve is rejected), then `run-once` again, ending in a `done` job.
 - Step 9 (Codex): `RunAgent` returns the result. Emitting the `agent-result` event happens in the pipeline (step 11). `SandboxOptions.Unit` was added for explicit unit names, so the MCP config reaches the DynamicUser sandbox as `LoadCredential` at `/run/credentials/<unit>/mcp.json`.
 - Step 11:

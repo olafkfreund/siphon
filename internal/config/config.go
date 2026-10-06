@@ -238,6 +238,9 @@ func Parse(b []byte) (*Config, error) {
 	if err := dec.Decode(c); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+	if err := dec.Decode(new(yaml.Node)); !errors.Is(err, io.EOF) {
+		return nil, errors.New("parse config: multiple YAML documents are not supported")
+	}
 	for _, s := range c.Sources {
 		if s != nil && s.Poll == 0 && s.Type != "webhook" {
 			s.Poll = Duration(time.Minute)
@@ -406,7 +409,7 @@ func (c *Config) Warnings() []string {
 		if a.Kind == "codex" || a.Kind == "agy" {
 			add("built-in shell tools can't be disabled (%s runs %s)", a.Kind, map[string]string{"codex": "read-only", "agy": "in a sandbox in plan mode"}[a.Kind])
 		}
-		if a.Kind == "agy" && len(a.AllowedTools) > 0 {
+		if a.Kind == "agy" && len(a.MCP) > 0 {
 			add("tool allowlist not enforced (only MCP server scoping)")
 		}
 		if a.Kind != "claude" && a.MaxTurns > 0 {
@@ -673,6 +676,11 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 	if s.Poll < 0 || (s.Type != "webhook" && s.Poll == 0) {
 		add("%s: poll must be > 0", p)
 	}
+	if s.Type == "mcp" || s.Type == "http" {
+		if u, err := url.Parse(s.URL); err == nil && u.User != nil {
+			add("%s: url must not contain credentials (user:pass@); use auth.bearer or headers", p)
+		}
+	}
 	switch s.Type {
 	case "mcp":
 		if (s.URL == "") == (len(s.Command) == 0) {
@@ -703,6 +711,8 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 		case "sha256":
 			if s.SigHeader == "" {
 				add("%s: signature sha256 needs signature_header", p)
+			} else if strings.EqualFold(s.SigHeader, s.TimestampHdr) {
+				add("%s: signature_header and timestamp_header must differ", p)
 			}
 		default:
 			add("%s: signature must be github or sha256, got %q", p, s.Signature)

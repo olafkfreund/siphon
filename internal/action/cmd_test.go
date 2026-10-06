@@ -7,7 +7,19 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestTimeoutSeconds(t *testing.T) {
+	for _, tt := range []struct {
+		duration time.Duration
+		want     int
+	}{{500 * time.Millisecond, 1}, {1200 * time.Millisecond, 2}, {2 * time.Second, 2}} {
+		if got := timeoutSeconds(tt.duration); got != tt.want {
+			t.Fatalf("%s: got %d, want %d", tt.duration, got, tt.want)
+		}
+	}
+}
 
 func TestRender(t *testing.T) {
 	argv, err := Render([]string{"printf", "%s", "{{.Value}}"}, map[string]string{"Value": "hello world"})

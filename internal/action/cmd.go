@@ -75,13 +75,17 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 	for _, secret := range secrets {
 		maxExtra = max(maxExtra, len(secret))
 	}
+	if len(opts.Writeback) > 0 {
+		maxExtra = max(maxExtra, outputCap)
+	}
 	switch mode {
 	case "systemd":
 		exit, so, se, writeback, err := templateRun(ctx, opts.Dir, JobSpec{
 			Argv: argv, Stdin: stdin, Env: opts.Env, Files: opts.Files,
 			Writeback:  opts.Writeback,
-			TimeoutSec: int(opts.Timeout / time.Second),
-		})
+			TimeoutSec: timeoutSeconds(opts.Timeout),
+		}, outputCap+maxExtra)
+		appendWritebackSecrets(writeback, &secrets)
 		output := capBytes(Mask(append(so, se...), secrets), 64<<10)
 		var stdoutBytes []byte
 		if separateStdout {
@@ -161,6 +165,7 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 	}
 	saveWritebacks(home, runDir, JobSpec{Files: opts.Files, Writeback: opts.Writeback}, writebackErr)
 	writeback := readWritebacks(runDir, opts.Writeback)
+	appendWritebackSecrets(writeback, &secrets)
 	output := Mask(buf.Bytes(), secrets)
 	if len(output) > 64<<10 {
 		output = output[:64<<10]
@@ -183,6 +188,21 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 		return exit.ExitCode(), output, stdoutBytes, writeback, nil
 	}
 	return -1, output, stdoutBytes, writeback, err
+}
+
+func timeoutSeconds(timeout time.Duration) int {
+	seconds := int(timeout / time.Second)
+	if timeout%time.Second != 0 {
+		seconds++
+	}
+	return max(1, seconds)
+}
+
+func appendWritebackSecrets(writeback map[int][]byte, secrets *[]string) {
+	for _, b := range writeback {
+		*secrets = append(*secrets, string(b))
+		tokenStrings(b, secrets)
+	}
 }
 
 // Mask replaces known secrets in output, longest first.
