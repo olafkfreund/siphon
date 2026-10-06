@@ -464,6 +464,31 @@ pkgs.testers.runNixOSTest {
         assert "egress: blocked api.anthropic.com:443" in out, f"claude never reached the proxy: {out}"
         assert "egress: blocked api.openai.com:443" in out, f"codex never reached the proxy: {out}"
 
+    with subtest("a rule created over the config API fires without a restart"):
+        import json
+        auth = f"-H 'Authorization: Bearer {TOKEN}'"
+        api = "http://127.0.0.1:8080/api/config/rules"
+        rev = json.loads(machine.succeed(f"curl -sf {auth} {api}/sandboxed-cmd"))["rev"]
+        def put(name, yaml_text, rev):
+            body = json.dumps({"yaml": yaml_text, "rev": rev})
+            machine.succeed(f"printf '%s' '{body}' > /tmp/put.json")
+            return machine.succeed(f"curl -s -o /tmp/put.out -w '%{{http_code}}' -X PUT {auth} -H 'Content-Type: application/json' --data-binary @/tmp/put.json {api}/{name}").strip()
+        # Invalid (unknown source): refused, nothing stored.
+        assert put("bad-rule", "source: nope\nwhen: 'true'\naction: {cmd: [echo, x]}\n", rev) in ("400", "422"), machine.succeed("cat /tmp/put.out")
+        code = put("portal-rule", "source: gh\nwhen: event.kind == \"portal\"\non: each\nid: event.n\naction: {cmd: [echo, from-portal]}\n", rev)
+        assert code == "200", machine.succeed("cat /tmp/put.out")
+        assert hook('{"kind":"portal","n":500}') == "202"
+        try:
+            machine.wait_until_succeeds(
+                "sqlite3 /var/lib/siphon/state.db \"select output from jobs where rule='portal-rule' and state='done'\" | grep -q from-portal",
+                timeout=60,
+            )
+        except Exception:
+            dump()
+            raise
+        assert machine.succeed("sqlite3 /var/lib/siphon/state.db \"select count(*) from config_revision\"").strip() == "1"
+        assert machine.succeed("sqlite3 /var/lib/siphon/state.db \"select count(*) from audit where event='config_changed'\"").strip() == "1"
+
     with subtest("stopping siphon leaves no orphaned action units (cmd and agent)"):
         assert hook('{"kind":"sleep","n":3}') == "202"
         assert hook('{"kind":"agent","n":4}') == "202"
