@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -37,6 +38,33 @@ type JobSpec struct {
 	Files      map[string][]byte `json:"files,omitempty"` // written 0600 under jobFilesDir
 	Writeback  []string          `json:"writeback,omitempty"`
 	TimeoutSec int               `json:"timeout_sec"`
+	// EgressSocket: exec-job forwards forwardAddr to this unix socket.
+	EgressSocket string `json:"egress_socket,omitempty"`
+}
+
+// forwardAddr is where exec-job listens inside the unit's private network
+// namespace; the run's proxy URL points here. Tests override it.
+var forwardAddr = "127.0.0.1:3128"
+
+// forward copies each connection accepted on ln to the unix socket sock until ln is closed.
+func forward(ln net.Listener, sock string) {
+	for {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go func() {
+			u, err := net.Dial("unix", sock)
+			if err != nil {
+				c.Close()
+				return
+			}
+			go func() { io.Copy(u, c); u.Close(); c.Close() }()
+			io.Copy(c, u)
+			u.Close()
+			c.Close()
+		}()
+	}
 }
 
 // jobFilesDir is where exec-job writes JobSpec.Files inside the unit (its
@@ -450,6 +478,15 @@ func execJob(runDir, jobFile string, stdout, stderr io.Writer) int {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(spec.TimeoutSec)*time.Second)
 		defer cancel()
+	}
+	if spec.EgressSocket != "" {
+		ln, err := net.Listen("tcp", forwardAddr)
+		if err != nil {
+			fmt.Fprintln(stderr, "egress forwarder:", err)
+			return 1
+		}
+		defer ln.Close()
+		go forward(ln, spec.EgressSocket)
 	}
 	cmd := exec.CommandContext(ctx, spec.Argv[0], spec.Argv[1:]...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }

@@ -16,4 +16,6 @@ type SandboxOptions struct {
 	stderr    *[]byte
 }
 
-type EgressEnv struct{ ProxyURL string }
+// Socket, when set, is the proxy's unix socket: in systemd mode the unit gets
+// no route to the proxy's TCP address, so exec-job forwards 127.0.0.1:3128 to it.
+type EgressEnv struct{ ProxyURL, Socket string }

@@ -106,7 +106,7 @@ func (p *Pipeline) egressFor(jobID int64, allow []config.HostPort, on bool) (env
 		entries[i] = egress.Entry{Host: hp.Host, Port: hp.Port, AllowPrivate: hp.AllowPrivate}
 	}
 	url, blocked, release := px.Register(entries)
-	return &action.EgressEnv{ProxyURL: url}, func() string {
+	return &action.EgressEnv{ProxyURL: url, Socket: p.Cfg.Server.Egress.Socket}, func() string {
 		b := blocked()
 		release()
 		if len(b) == 0 {

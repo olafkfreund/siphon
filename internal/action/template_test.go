@@ -1,8 +1,11 @@
 package action
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -317,5 +320,96 @@ func TestTemplateRunSignalExit(t *testing.T) {
 	exit, _, _ := RunCmd(context.Background(), []string{"true"}, SandboxOptions{Mode: "systemd", Dir: dir, Timeout: time.Second}, nil)
 	if exit != 137 {
 		t.Fatalf("exit=%d, want 128+9", exit)
+	}
+}
+
+func TestEgressSocketSpec(t *testing.T) {
+	for _, sock := range []string{"/run/agentgw/egress.sock", ""} {
+		dir := t.TempDir()
+		fakeSystemd(t, dir)
+		original := startUnit
+		var spec JobSpec
+		startUnit = func(ctx context.Context, name string) error {
+			id := strings.TrimSuffix(strings.TrimPrefix(name, "agentgw-action@"), ".service")
+			b, err := os.ReadFile(filepath.Join(dir, id, "job.json"))
+			if err != nil {
+				return err
+			}
+			if err := json.Unmarshal(b, &spec); err != nil {
+				return err
+			}
+			return original(ctx, name)
+		}
+		const orig = "http://run-id:token-secret@127.77.0.1:3128"
+		opts := SandboxOptions{Mode: "systemd", Dir: dir, Egress: &EgressEnv{ProxyURL: orig, Socket: sock}}
+		if exit, _, err := RunCmd(context.Background(), []string{"true"}, opts, nil); err != nil || exit != 0 {
+			t.Fatalf("exit=%d err=%v", exit, err)
+		}
+		want := orig
+		if sock != "" {
+			want = "http://run-id:token-secret@127.0.0.1:3128"
+		}
+		if spec.EgressSocket != sock || spec.Env["HTTPS_PROXY"] != want || strings.Contains(strings.Join(spec.Argv, " "), "token-secret") {
+			t.Fatalf("sock=%q spec=%+v", sock, spec)
+		}
+	}
+}
+
+func TestForward(t *testing.T) {
+	d, err := os.MkdirTemp("", "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(d)
+	sock := filepath.Join(d, "e.sock")
+	echo, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Skip(err)
+	}
+	defer echo.Close()
+	go func() {
+		for {
+			c, err := echo.Accept()
+			if err != nil {
+				return
+			}
+			go func() { io.Copy(c, c); c.Close() }()
+		}
+	}()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer ln.Close()
+	go forward(ln, sock)
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(3 * time.Second))
+	c.Write([]byte("ping"))
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(c, buf); err != nil || string(buf) != "ping" {
+		t.Fatalf("%q %v", buf, err)
+	}
+}
+
+func TestExecJobForwarderListenFails(t *testing.T) {
+	jobFilesDir = t.TempDir()
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer taken.Close()
+	old := forwardAddr
+	forwardAddr = taken.Addr().String()
+	defer func() { forwardAddr = old }()
+	run := t.TempDir()
+	path := filepath.Join(run, "job.json")
+	os.WriteFile(path, []byte(`{"argv":["true"],"egress_socket":"/nonexistent.sock"}`), 0o600)
+	var out, errb bytes.Buffer
+	if code := execJob(run, path, &out, &errb); code != 1 || !strings.Contains(errb.String(), "egress forwarder:") {
+		t.Fatalf("code=%d stderr=%q", code, errb.String())
 	}
 }
