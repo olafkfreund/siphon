@@ -115,7 +115,7 @@ Revert the merge. Operators can disable it without a revert: `services.agentgw.e
   - The README notes that with `egress.enable = false` the proxy variables are not enforced.
   - **Open, needs an owner decision:** the IP filter is IP-only, so services bound to all addresses are reachable on 127.77.0.1:<port>. nscd also still resolves names for the sandbox.
 
-## Amendment 1 (status: draft): private netns, unix-socket proxy, no nscd
+## Amendment 1 (status: approved): private netns, unix-socket proxy, no nscd
 
 This implements spec Amendment 1 (approved). These decisions carry over and are binding:
 - The restricted template gets `PrivateNetwork=yes`, keeps `IPAddressDeny=any`, and changes `IPAddressAllow` to `127.0.0.1/32`.
