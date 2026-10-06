@@ -113,11 +113,21 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 		sum := sha256.Sum256(signed)
 		id = hex.EncodeToString(sum[:])
 		headers := make(map[string]string, len(r.Header))
+		connectionHeaders := make(map[string]bool)
+		for _, value := range r.Header.Values("Connection") {
+			for _, name := range strings.Split(value, ",") {
+				connectionHeaders[strings.ToLower(strings.TrimSpace(name))] = true
+			}
+		}
 		for k := range r.Header {
-			switch strings.ToLower(k) {
-			case strings.ToLower(header), "x-hub-signature-256", "authorization", "cookie", "proxy-authorization", "connection", "keep-alive", "te", "trailer", "transfer-encoding", "upgrade":
+			name := strings.ToLower(k)
+			if connectionHeaders[name] {
+				continue
+			}
+			switch name {
+			case strings.ToLower(header), "x-hub-signature-256", "authorization", "cookie", "proxy-authorization", "proxy-authenticate", "connection", "keep-alive", "te", "trailer", "transfer-encoding", "upgrade":
 			default:
-				headers[strings.ToLower(k)] = r.Header.Get(k)
+				headers[name] = r.Header.Get(k)
 			}
 		}
 		data, err := DecodeJSON(body)

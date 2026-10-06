@@ -190,7 +190,7 @@ func TestTemplateWriteback(t *testing.T) {
 			exit, _, _, wb, err := templateRun(context.Background(), dir, JobSpec{
 				Argv: []string{"sh", "-c", cmd}, Files: map[string][]byte{".codex/auth.json": []byte("old")},
 				Writeback: []string{".codex/auth.json"},
-			})
+			}, outputCap)
 			if err != nil || (changed && exit != 3) || (!changed && exit != 0) {
 				t.Fatalf("exit=%d err=%v", exit, err)
 			}
@@ -206,7 +206,7 @@ func TestTemplateWritebackCap(t *testing.T) {
 	fakeSystemd(t, dir)
 	_, _, _, wb, err := templateRun(context.Background(), dir, JobSpec{
 		Argv: []string{"sh", "-c", `head -c 1100000 /dev/zero > "$HOME/big"`}, Writeback: []string{"big"},
-	})
+	}, outputCap)
 	if err != nil || len(wb[0]) != outputCap {
 		t.Fatalf("writeback length=%d err=%v", len(wb[0]), err)
 	}
@@ -227,7 +227,7 @@ func TestTemplateRunIgnoresFIFOs(t *testing.T) {
 			}
 			t.Cleanup(func() { startUnit = orig })
 			started := time.Now()
-			_, stdout, _, wb, err := templateRun(context.Background(), dir, JobSpec{Writeback: []string{"token"}})
+			_, stdout, _, wb, err := templateRun(context.Background(), dir, JobSpec{Writeback: []string{"token"}}, outputCap)
 			if err != nil || len(stdout) != 0 || len(wb) != 0 || time.Since(started) >= 2*time.Second {
 				t.Fatalf("stdout=%q wb=%v err=%v elapsed=%v", stdout, wb, err, time.Since(started))
 			}
@@ -241,7 +241,7 @@ func TestWritebackErrorKeepsExitAndOutput(t *testing.T) {
 	exit, stdout, stderr, wb, err := templateRun(context.Background(), dir, JobSpec{
 		Argv:      []string{"sh", "-c", `ln -s /tmp "$HOME/linked"; printf good > "$HOME/changed"; printf answer`},
 		Writeback: []string{"linked/token", "changed"},
-	})
+	}, outputCap)
 	if err != nil || exit != 0 || string(stdout) != "answer" || !strings.Contains(string(stderr), "writeback") || string(wb[1]) != "good" {
 		t.Fatalf("exit=%d stdout=%q stderr=%q wb=%v err=%v", exit, stdout, stderr, wb, err)
 	}

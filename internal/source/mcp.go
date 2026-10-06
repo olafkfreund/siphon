@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -73,8 +74,20 @@ func (s MCP) Poll(ctx context.Context) (Event, error) {
 		if result.IsError {
 			return Event{}, fmt.Errorf("MCP tool %q returned an error", o.Tool)
 		}
-		if result.StructuredContent != nil {
-			data = result.StructuredContent
+		// Prefer the TextContent copy of structured output (the MCP spec says a
+		// tool SHOULD send both, and go-sdk does): it decodes exactly, whereas
+		// the SDK has already turned StructuredContent numbers into float64.
+		if text, ok := jsonText(result.Content); ok {
+			data = text
+		} else if result.StructuredContent != nil {
+			// ponytail: lossy above 2^53; only hit when a tool omits the text copy.
+			encoded, err := json.Marshal(result.StructuredContent)
+			if err != nil {
+				return Event{}, err
+			}
+			if data, err = DecodeJSON(encoded); err != nil {
+				return Event{}, err
+			}
 		} else {
 			values := make([]any, 0, len(result.Content))
 			for _, c := range result.Content {
@@ -91,7 +104,6 @@ func (s MCP) Poll(ctx context.Context) (Event, error) {
 	return Event{Source: o.Name, ReceivedAt: time.Now(), Headers: map[string]string{}, Data: data}, nil
 }
 
-// Listen reports changes to the declared resource until the context ends or the session fails.
 func (s MCP) Listen(ctx context.Context, onChange func()) error {
 	if s.Options.Tool != "" || s.Options.Resource == "" {
 		return ErrListenUnsupported
@@ -209,4 +221,18 @@ func (t bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	copy := req.Clone(req.Context())
 	copy.Header.Set("Authorization", "Bearer "+t.token)
 	return t.base.RoundTrip(copy)
+}
+
+// jsonText returns the single TextContent of a tool result decoded as JSON
+// (integers kept exact), if there is exactly one and it parses.
+func jsonText(content []mcp.Content) (any, bool) {
+	if len(content) != 1 {
+		return nil, false
+	}
+	t, ok := content[0].(*mcp.TextContent)
+	if !ok {
+		return nil, false
+	}
+	v, err := DecodeJSON([]byte(t.Text))
+	return v, err == nil
 }
