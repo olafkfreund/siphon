@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 16
 spec: spec/2026-10-06-16-rename-siphon.md
 ---
