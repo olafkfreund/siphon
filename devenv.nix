@@ -21,16 +21,16 @@
     run-tests.exec = "go vet ./... && go test -race ./...";
     schema.exec = ''UPDATE_SCHEMA=1 go test ./internal/config/ -run TestSchemaUpToDate && echo "schema regenerated"'';
     vm-test.exec = "nix build .#checks.x86_64-linux.vm -L";
-    agentgw.exec = ''go run ./cmd/agentgw "$@"'';
+    siphon.exec = ''go run ./cmd/siphon "$@"'';
   };
 
   enterShell = ''
-    echo "agentgw dev shell: $(go version | cut -d' ' -f3)"
-    echo "  run-tests | schema | vm-test | agentgw <cmd>"
+    echo "siphon dev shell: $(go version | cut -d' ' -f3)"
+    echo "  run-tests | schema | vm-test | siphon <cmd>"
   '';
 
   # https://devenv.sh/tests/ — `devenv test` runs this before devenv:enterTest.
-  tasks."agentgw:test" = {
+  tasks."siphon:test" = {
     exec = "go vet ./... && go test -race ./...";
     before = [ "devenv:enterTest" ];
   };
