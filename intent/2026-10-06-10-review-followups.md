@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 10
 author: olafkfreund
 ---
@@ -118,3 +118,9 @@ the review text and still need confirming in the spec ("to confirm").
 3. **Item 3:** when stopping orphans fails, should startup refuse to start, or
    start but leave those jobs `running` until a later stop succeeds? Default:
    refuse to start (fail fast; systemd restarts and retries).
+
+## Resolutions (approved 2026-10-06, defaults)
+
+1. Item 2: document the limitation plus a stricter fallback (no live identity calls).
+2. Item 5: snapshot the agent definition in routines.
+3. Item 3: refuse to start when stopping orphans fails.
