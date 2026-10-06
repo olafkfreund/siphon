@@ -25,6 +25,6 @@ func RunUnit(ctx context.Context, unit string, allowed []string, timeout time.Du
 	}
 	// systemctl itself is the client; the unit runs under its own config, so
 	// no extra sandbox wraps this call.
-	exit, out, _, err := runCommand(ctx, systemctlArgv(unit), SandboxOptions{Mode: "none", Timeout: timeout}, secrets, nil, false)
+	exit, out, _, _, err := runCommand(ctx, systemctlArgv(unit), SandboxOptions{Mode: "none", Timeout: timeout}, secrets, nil, false)
 	return exit, out, err
 }

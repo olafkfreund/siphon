@@ -151,6 +151,18 @@ func TestAgentArgv(t *testing.T) {
 	}
 }
 
+func TestRunAgentWriteback(t *testing.T) {
+	o := AgentOptions{
+		Runner: []string{"sh", "-c", `printf new > "$HOME/.codex/auth.json"; printf '{"result":"ok"}'`},
+		Prompt: "p", WorkDir: filepath.Join(t.TempDir(), "work"),
+		Sandbox: SandboxOptions{Mode: "none", Files: map[string][]byte{".codex/auth.json": []byte("old")}, Writeback: []string{".codex/auth.json"}},
+	}
+	got, err := RunAgent(context.Background(), o)
+	if err != nil || got.Exit != 0 || string(got.Writeback[0]) != "new" {
+		t.Fatalf("result=%+v err=%v", got, err)
+	}
+}
+
 func contains(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

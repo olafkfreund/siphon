@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -42,18 +43,19 @@ func Render(argv []string, data any) ([]string, error) {
 }
 
 func RunCmd(ctx context.Context, argv []string, opts SandboxOptions, secrets []string) (int, []byte, error) {
-	exit, output, _, err := runCommand(ctx, argv, opts, secrets, nil, false)
+	exit, output, _, _, err := runCommand(ctx, argv, opts, secrets, nil, false)
 	return exit, output, err
 }
 
 // RunCmdSplit also returns stdout alone for callers that parse JSON output.
 func RunCmdSplit(ctx context.Context, argv []string, opts SandboxOptions, secrets []string) (exit int, output, stdout []byte, err error) {
-	return runCommand(ctx, argv, opts, secrets, nil, true)
+	exit, output, stdout, _, err = runCommand(ctx, argv, opts, secrets, nil, true)
+	return
 }
 
-func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets []string, stdin []byte, separateStdout bool) (int, []byte, []byte, error) {
+func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets []string, stdin []byte, separateStdout bool) (int, []byte, []byte, map[int][]byte, error) {
 	if len(argv) == 0 {
-		return -1, nil, nil, errors.New("empty command")
+		return -1, nil, nil, nil, errors.New("empty command")
 	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = 30 * time.Second
@@ -75,8 +77,9 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 	}
 	switch mode {
 	case "systemd":
-		exit, so, se, err := templateRun(ctx, opts.Dir, JobSpec{
+		exit, so, se, writeback, err := templateRun(ctx, opts.Dir, JobSpec{
 			Argv: argv, Stdin: stdin, Env: opts.Env, Files: opts.Files,
+			Writeback:  opts.Writeback,
 			TimeoutSec: int(opts.Timeout / time.Second),
 		})
 		output := capBytes(Mask(append(so, se...), secrets), 64<<10)
@@ -84,21 +87,47 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 		if separateStdout {
 			stdoutBytes = capBytes(Mask(so, secrets), 1<<20)
 		}
-		return exit, output, stdoutBytes, err
+		return exit, output, stdoutBytes, writeback, err
 	case "none":
 	default:
-		return -1, nil, nil, fmt.Errorf("invalid sandbox mode %q", mode)
+		return -1, nil, nil, nil, fmt.Errorf("invalid sandbox mode %q", mode)
+	}
+	runDir, err := os.MkdirTemp("", "agentgw-action-")
+	if err != nil {
+		return -1, nil, nil, nil, err
+	}
+	defer os.RemoveAll(runDir)
+	home := filepath.Join(runDir, "home")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		return -1, nil, nil, nil, err
+	}
+	if err := writeJobFiles(home, opts.Files); err != nil {
+		return -1, nil, nil, nil, err
+	}
+	for _, name := range opts.Writeback {
+		if _, err := relativeFile(name); err != nil {
+			return -1, nil, nil, nil, err
+		}
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
 	cmd.Env = []string{}
-	for _, name := range []string{"PATH", "HOME", "LANG"} {
+	for _, name := range []string{"PATH", "LANG"} {
 		if value, ok := os.LookupEnv(name); ok {
 			cmd.Env = append(cmd.Env, name+"="+value)
 		}
 	}
+	for name, value := range opts.Env {
+		if name == "" || strings.ContainsAny(name, "=\x00") || strings.Contains(value, "\x00") {
+			return -1, nil, nil, nil, fmt.Errorf("bad env %q", name)
+		}
+		if name != "HOME" {
+			cmd.Env = append(cmd.Env, name+"="+value)
+		}
+	}
+	cmd.Env = append(cmd.Env, "HOME="+home)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = 10 * time.Second
 	buf := &cappedBuffer{limit: 64<<10 + maxExtra}
@@ -108,7 +137,11 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 		stdout = &cappedBuffer{limit: 1<<20 + maxExtra}
 		cmd.Stdout = io.MultiWriter(buf, stdout)
 	}
-	err := cmd.Run()
+	err = cmd.Run()
+	if writeErr := saveWritebacks(home, runDir, JobSpec{Files: opts.Files, Writeback: opts.Writeback}); writeErr != nil {
+		return -1, nil, nil, nil, writeErr
+	}
+	writeback := readWritebacks(runDir, opts.Writeback)
 	output := Mask(buf.Bytes(), secrets)
 	if len(output) > 64<<10 {
 		output = output[:64<<10]
@@ -121,13 +154,13 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 		}
 	}
 	if err == nil {
-		return 0, output, stdoutBytes, nil
+		return 0, output, stdoutBytes, writeback, nil
 	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
-		return exit.ExitCode(), output, stdoutBytes, nil
+		return exit.ExitCode(), output, stdoutBytes, writeback, nil
 	}
-	return -1, output, stdoutBytes, err
+	return -1, output, stdoutBytes, writeback, err
 }
 
 // Mask replaces known secrets in output, longest first.
