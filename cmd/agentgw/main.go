@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -261,27 +262,43 @@ func serve(ctx context.Context, args []string) error {
 		return err
 	}
 	defer st.Close()
-	p := &job.Pipeline{Cfg: cfg, Store: st, Now: time.Now}
+	p := job.New(cfg, st, time.Now)
+	// Bind first so a bad or busy address fails at startup, not silently later.
+	ln, err := net.Listen("tcp", cfg.Server.Listen)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	srv := &http.Server{
-		Addr:              cfg.Server.Listen,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 		Handler: web.New(web.Options{
 			Token: cfg.Server.Token.Value, Store: st, Cfg: cfg, Decide: p.Decide,
 			Hooks: p.Webhooks(), Now: time.Now,
 		}),
 	}
 	httpErr := make(chan error, 1)
-	go func() { httpErr <- srv.ListenAndServe() }()
 	go func() {
-		<-ctx.Done()
-		sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		srv.Shutdown(sctx)
+		err := srv.Serve(ln)
+		if !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("http server failed; stopping", "err", err)
+			cancel() // never run workers without the HTTP side
+		}
+		httpErr <- err
 	}()
-	slog.Info("agentgw serving", "listen", cfg.Server.Listen, "workers", cfg.Server.Workers, "sources", len(cfg.Sources))
-	err = p.Serve(ctx)
-	if herr := <-httpErr; herr != nil && !errors.Is(herr, http.ErrServerClosed) {
-		return herr
+	slog.Info("agentgw serving", "listen", ln.Addr().String(), "workers", cfg.Server.Workers, "sources", len(cfg.Sources))
+	serveErr := p.Serve(ctx)
+	cancel() // if Serve failed early, take HTTP down too
+	sctx, scancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer scancel()
+	// Shutdown waits for in-flight handlers (webhooks mid-transaction), so the
+	// deferred store Close only runs once nothing uses the DB.
+	shutErr := srv.Shutdown(sctx)
+	if herr := <-httpErr; !errors.Is(herr, http.ErrServerClosed) {
+		return errors.Join(serveErr, herr)
 	}
-	return err
+	return errors.Join(serveErr, shutErr)
 }

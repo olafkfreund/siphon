@@ -37,6 +37,12 @@ type Pipeline struct {
 	runFn func(context.Context, store.QueuedJob) (string, int, string) // tests only
 }
 
+// New returns a Pipeline ready for Serve. The worker nudge channel is made
+// here, before any HTTP handler can call deliver (no race with Serve).
+func New(cfg *config.Config, st *store.Store, now func() time.Time) *Pipeline {
+	return &Pipeline{Cfg: cfg, Store: st, Now: now, nudge: make(chan struct{}, 64)}
+}
+
 // Payload is what a job row carries: the action and the env it renders with.
 type Payload struct {
 	Action config.Action  `json:"action"`
@@ -93,31 +99,33 @@ func (p *Pipeline) Tick(ctx context.Context, name string) ([]int64, error) {
 // HandleEvent evaluates every rule against ev in one transaction and, unless
 // dryRun, enqueues a job per fire. Rule state and job inserts commit together.
 func (p *Pipeline) HandleEvent(ctx context.Context, ev rule.Event, dryRun bool) ([]rule.Fire, []int64, error) {
-	fires, ids, _, err := p.handleEvent(ctx, ev, dryRun, "", "")
-	return fires, ids, err
+	fires, ids, _, ruleErr, err := p.handleEvent(ctx, ev, dryRun, "", "")
+	return fires, ids, errors.Join(err, ruleErr)
 }
 
 // handleEvent is HandleEvent plus an optional replay check: when seenScope is
 // set, (seenScope, seenID) is recorded in the same transaction as the jobs, and
 // dup=true is returned without evaluating anything if it was already seen.
-func (p *Pipeline) handleEvent(ctx context.Context, ev rule.Event, dryRun bool, seenScope, seenID string) (fires []rule.Fire, ids []int64, dup bool, err error) {
+// ruleErr holds per-rule evaluation errors from a transaction that still
+// committed; err means nothing was committed.
+func (p *Pipeline) handleEvent(ctx context.Context, ev rule.Event, dryRun bool, seenScope, seenID string) (fires []rule.Fire, ids []int64, dup bool, ruleErr, err error) {
 	tx, err := p.Store.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, nil, false, err
+		return nil, nil, false, nil, err
 	}
 	defer tx.Rollback()
 	now := p.Now()
 	if seenScope != "" {
 		isNew, err := store.MarkSeen(tx, seenScope, seenID, now)
 		if err != nil || !isNew {
-			return nil, nil, !isNew, err
+			return nil, nil, !isNew, nil, err
 		}
 	}
 	var approvalIDs []int64
 	var errs []error
 	for _, r := range p.Cfg.Rules {
 		if on, _, err := store.RuleEnabled(tx, r.Name); err != nil {
-			return nil, nil, false, err
+			return nil, nil, false, nil, err
 		} else if !on {
 			continue // disabled at runtime from the portal/API
 		}
@@ -132,7 +140,7 @@ func (p *Pipeline) handleEvent(ctx context.Context, ev rule.Event, dryRun bool, 
 		for _, f := range fs {
 			id, link, err := p.enqueue(tx, r, f, ev, now)
 			if err != nil {
-				return nil, nil, false, err
+				return nil, nil, false, nil, err
 			}
 			if id == 0 {
 				continue // skipped by the loop guard or the agent cap (audited)
@@ -145,7 +153,7 @@ func (p *Pipeline) handleEvent(ctx context.Context, ev rule.Event, dryRun bool, 
 	}
 	if !dryRun {
 		if err := tx.Commit(); err != nil {
-			return nil, nil, false, err
+			return nil, nil, false, nil, err
 		}
 		for _, id := range approvalIDs { // after commit, so a rolled-back job is never announced
 			// ponytail: the one-shot token is a credential and is never logged;
@@ -153,7 +161,7 @@ func (p *Pipeline) handleEvent(ctx context.Context, ev rule.Event, dryRun bool, 
 			slog.Info("approval required", "job", id, "approve", fmt.Sprintf("agentgw approve %d", id))
 		}
 	}
-	return fires, ids, false, errors.Join(errs...)
+	return fires, ids, false, errors.Join(errs...), nil
 }
 
 // enqueue inserts the job; for pending_approval it also creates the approval

@@ -306,3 +306,13 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
   - Listen hints trigger an immediate tick; a hint within 5 s of the last tick is dropped (the next poll catches it). Listen gives up quietly on `ErrListenUnsupported` and reconnects after the poll interval on other errors.
   - `serve` runs the HTTP server (`ReadHeaderTimeout` 10 s) and shuts it down gracefully. HandleEvent skips rules disabled via the portal/API.
   - Smoke-tested live: healthz 200, API 401 without token, signed webhook 202 → job `done`, CSP header present, a second `serve` refused by the lock, SIGTERM exits 0.
+- Phase 2 review (fresh Opus reviewer; 0 critical, 3 high, 8 medium, 7 low). Opus lane fixes:
+  - **H1:** `serve` binds first, and a failing HTTP server cancels the workers. Workers stop first, then `srv.Shutdown` waits for in-flight handlers before the store closes.
+  - **H3:** Read/Write/Idle timeouts are set on the HTTP server.
+  - **M3:** per-rule errors after commit are logged and the webhook still gets 202.
+  - **M5:** listen hints use a trailing-edge debounce, so a hint is deferred rather than dropped, and the clock is injected.
+  - **L2:** `job.New` creates the nudge channel before HTTP starts.
+- Plan items not built (L7):
+  - The step-10 CLI `--server` (talking to `/api`) is dropped. The local-DB CLI plus portal/API cover it; YAGNI.
+  - The plan's `web/server.go` is `web/web.go`.
+  - "byte-identical" htmx means identical below the added header comment (official SRI hash verified by the reviewer).

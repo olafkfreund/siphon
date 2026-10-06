@@ -20,7 +20,7 @@ import (
 func TestWebhookEndToEnd(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("AGW_HOOK", "s3cret")
-	t.Setenv("AGW_TOKEN", "tok")
+	t.Setenv("AGW_TOKEN", "tok-0123456789abcdef0123456789abcdef")
 	cfg, err := config.Parse([]byte(`
 server: { sandbox: none, db: ` + dir + `/state.db, token: env:AGW_TOKEN }
 sources:
@@ -77,5 +77,62 @@ rules:
 	}
 	if strings.TrimSpace(out) != "pr 1700000001" {
 		t.Fatalf("job output %q", out)
+	}
+}
+
+// Phase 2 review M3: a per-rule evaluation error after commit must not turn an
+// accepted webhook into a 500. M4: a rule disabled at runtime never fires.
+func TestWebhookRuleErrorAndDisabledRule(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AGW_HOOK", "s3cret")
+	cfg, err := config.Parse([]byte(`
+server: { sandbox: none, db: ` + dir + `/state.db }
+sources:
+  gh: { type: webhook, secret: env:AGW_HOOK, signature: github }
+rules:
+  - { name: ok, source: gh, when: 'true', on: each, id: 'event.n', action: { cmd: [echo, ok] } }
+  - { name: broken, source: gh, when: 'int(event.title) > 0', action: { cmd: [echo, never] } }
+  - { name: off, source: gh, when: 'true', on: each, id: 'event.n', action: { cmd: [echo, off] } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(cfg.Server.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := store.SetRuleOverride(st.DB, "off", false, "test", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	p := New(cfg, st, time.Now)
+	h := p.Webhooks()["gh"]
+
+	body := `{"n":1,"title":"not-a-number"}`
+	mac := hmac.New(sha256.New, []byte("s3cret"))
+	mac.Write([]byte(body))
+	r := httptest.NewRequest(http.MethodPost, "/hook/gh", strings.NewReader(body))
+	r.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status %d, want 202 despite the broken rule", w.Code)
+	}
+	var rules []string
+	rows, err := st.DB.Query(`SELECT rule FROM jobs ORDER BY rule`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var r string
+		rows.Scan(&r)
+		rules = append(rules, r)
+	}
+	if strings.Join(rules, ",") != "ok" {
+		t.Fatalf("jobs for rules %v, want only [ok] (broken errors, off is disabled)", rules)
 	}
 }

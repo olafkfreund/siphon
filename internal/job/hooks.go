@@ -34,8 +34,12 @@ func (p *Pipeline) Webhooks() map[string]http.Handler {
 // deliver records the replay key and enqueues in one transaction, so a
 // crash can neither lose an accepted webhook nor accept it twice.
 func (p *Pipeline) deliver(ctx context.Context, ev source.Event, key string) (bool, error) {
-	_, ids, dup, err := p.handleEvent(ctx, rule.Event{Source: ev.Source, Headers: ev.Headers, Data: ev.Data},
+	_, ids, dup, ruleErr, err := p.handleEvent(ctx, rule.Event{Source: ev.Source, Headers: ev.Headers, Data: ev.Data},
 		false, "hook:"+ev.Source, key)
+	if ruleErr != nil {
+		// Committed anyway: accept (202) so the sender doesn't retry into a 409.
+		slog.Warn("webhook rules", "source", ev.Source, "err", ruleErr)
+	}
 	if err != nil {
 		slog.Warn("webhook", "source", ev.Source, "err", err)
 	}

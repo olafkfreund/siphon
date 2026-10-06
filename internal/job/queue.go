@@ -29,7 +29,9 @@ func (p *Pipeline) Serve(ctx context.Context) error {
 	if err := p.Requeue(); err != nil {
 		return err
 	}
-	p.nudge = make(chan struct{}, 64) // wakes idle workers when jobs are enqueued
+	if p.nudge == nil { // literal Pipelines in tests; serve uses New
+		p.nudge = make(chan struct{}, 64)
+	}
 	nudge := p.nudge
 	var wg sync.WaitGroup
 	spawn := func(f func()) { wg.Add(1); go func() { defer wg.Done(); f() }() }
@@ -55,24 +57,30 @@ func (p *Pipeline) pollLoop(ctx context.Context, name string, every time.Duratio
 	t := time.NewTicker(every)
 	defer t.Stop()
 	last := p.tickAndNudge(ctx, name)
+	var trailing <-chan time.Time // armed when a hint lands inside the debounce window
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		case <-trailing:
 		case <-hint:
-			// ponytail: hints within listenDebounce of the last tick are dropped;
-			// the next ticker poll still catches the change.
-			if time.Since(last) < listenDebounce {
+			// Trailing-edge debounce: a hint inside the window is deferred to the
+			// window's end, never dropped, so a change seen mid-tick is re-read.
+			if wait := listenDebounce - p.Now().Sub(last); wait > 0 {
+				if trailing == nil {
+					trailing = time.After(wait)
+				}
 				continue
 			}
 		}
+		trailing = nil
 		last = p.tickAndNudge(ctx, name)
 	}
 }
 
 func (p *Pipeline) tickAndNudge(ctx context.Context, name string) time.Time {
-	start := time.Now()
+	start := p.Now()
 	ids, err := p.Tick(ctx, name)
 	if err != nil && ctx.Err() == nil {
 		slog.Warn("poll failed", "source", name, "err", err)
