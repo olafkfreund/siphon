@@ -46,14 +46,14 @@ type progress struct {
 
 // stepNeedsApproval: a step gates on its own approve flag, and an agent step
 // also on the agent's approve (default true), like an agent rule action does.
-func (p *Pipeline) stepNeedsApproval(st config.Step) bool {
+func (p *Pipeline) stepNeedsApproval(st config.Step, agents map[string]config.Agent) bool {
 	if st.Approve {
 		return true
 	}
 	if st.Agent == "" {
 		return false
 	}
-	a := p.Cfg.Agents[st.Agent]
+	a := p.agentDef(st.Agent, agents)
 	return a == nil || a.Approve == nil || *a.Approve
 }
 
@@ -110,10 +110,10 @@ func (p *Pipeline) runRoutine(ctx context.Context, j store.QueuedJob, pl Payload
 				continue
 			}
 		}
-		if p.stepNeedsApproval(st) && i != approved {
+		if p.stepNeedsApproval(st, pl.Agents) && i != approved {
 			return p.pauseRoutine(j, i, st.ID, prog)
 		}
-		res := p.execOnce(ctx, j, st, env)
+		res := p.execOnce(ctx, j, st, env, pl.Agents)
 		if ctx.Err() != nil && res.Exit == -1 {
 			// Interrupted: don't record it; the job stays running for the startup requeue.
 			return "failed", -1, marshalProgress(prog)
@@ -231,7 +231,7 @@ func (p *Pipeline) backoff(base time.Duration, factor float64, n int) time.Durat
 	return time.Duration(d * (0.8 + 0.4*r()))
 }
 
-func (p *Pipeline) execOnce(ctx context.Context, j store.QueuedJob, st config.Step, env map[string]any) stepResult {
+func (p *Pipeline) execOnce(ctx context.Context, j store.QueuedJob, st config.Step, env map[string]any, agents map[string]config.Agent) stepResult {
 	timeout := time.Duration(st.Timeout)
 	if timeout <= 0 {
 		timeout = defaultStepTimeout
@@ -259,7 +259,7 @@ func (p *Pipeline) execOnce(ctx context.Context, j store.QueuedJob, st config.St
 		actx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 		var state string
-		state, exit, out, stdout = p.agentExec(actx, j, Payload{Action: config.Action{Agent: st.Agent}, Env: env}, true)
+		state, exit, out, stdout = p.agentExec(actx, j, Payload{Action: config.Action{Agent: st.Agent}, Env: env, Agents: agents}, true)
 		if state != "done" && exit == 0 {
 			exit = -1
 		}

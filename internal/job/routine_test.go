@@ -388,8 +388,8 @@ routines:
 		t.Fatalf("agent step must pause for approval: %s log=%q out=%s", j.State, r.logged(), j.Output)
 	}
 	// An agent with approve: false and no step-level approve does not gate.
-	if r.p.stepNeedsApproval(config.Step{Agent: "quiet"}) || !r.p.stepNeedsApproval(config.Step{Agent: "fix"}) ||
-		!r.p.stepNeedsApproval(config.Step{Agent: "quiet", Approve: true}) || r.p.stepNeedsApproval(config.Step{Cmd: []string{"x"}}) {
+	if r.p.stepNeedsApproval(config.Step{Agent: "quiet"}, nil) || !r.p.stepNeedsApproval(config.Step{Agent: "fix"}, nil) ||
+		!r.p.stepNeedsApproval(config.Step{Agent: "quiet", Approve: true}, nil) || r.p.stepNeedsApproval(config.Step{Cmd: []string{"x"}}, nil) {
 		t.Fatal("stepNeedsApproval")
 	}
 }
