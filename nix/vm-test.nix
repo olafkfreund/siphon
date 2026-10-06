@@ -1,5 +1,22 @@
 { self, pkgs }:
 
+let
+  # The real agent CLIs (claude-code is unfree), run in the restricted
+  # template to prove they start without nscd and reach the network only
+  # through the forwarder.
+  unfree = import pkgs.path {
+    inherit (pkgs.stdenv.hostPlatform) system;
+    config.allowUnfreePredicate = p: (p.pname or "") == "claude-code";
+  };
+  realClis = pkgs.writeShellScriptBin "real-cli-check" ''
+    t=$(mktemp -d)
+    ${unfree.claude-code}/bin/claude --version >/dev/null 2>&1; echo "claude-version-rc=$?"
+    ${pkgs.codex}/bin/codex --version >/dev/null 2>&1; echo "codex-version-rc=$?"
+    HOME=$t ANTHROPIC_API_KEY=sk-ant-dummy timeout 90 ${unfree.claude-code}/bin/claude --bare -p hi 2>&1 | tail -5
+    HOME=$t CODEX_HOME=$t OPENAI_API_KEY=sk-dummy timeout 90 ${pkgs.codex}/bin/codex exec --skip-git-repo-check hi </dev/null 2>&1 | tail -5
+    true
+  '';
+in
 pkgs.testers.runNixOSTest {
   name = "agentgw";
 
@@ -30,7 +47,8 @@ pkgs.testers.runNixOSTest {
         };
         settings = {
           server = {
-            listen = "127.0.0.1:8080";
+            # All addresses: the restricted sandbox must still not reach it.
+            listen = "0.0.0.0:8080";
             token = "file:/run/credentials/agentgw.service/token";
           };
           sources.gh = {
@@ -165,6 +183,15 @@ pkgs.testers.runNixOSTest {
               action.agent = "probe";
             }
             {
+              name = "real-clis";
+              source = "gh";
+              when = ''event.kind == "real"'';
+              on = "each";
+              id = "event.n";
+              action.cmd = [ "real-cli-check" ];
+              egress.enabled = true;
+            }
+            {
               # cmd actions default to egress off: open template, no proxy.
               name = "open-cmd";
               source = "gh";
@@ -200,14 +227,17 @@ pkgs.testers.runNixOSTest {
       services.agentgw.agentPackages = [
         # Runs in the restricted template: only the proxy is reachable.
         (pkgs.writeShellScriptBin "egress-probe" ''
-          ip=$(getent hosts external | awk '{print $1}')
+          ip=$(awk '$2 == "external" || $3 == "external" {print $1; exit}' /etc/hosts)
+          [ -e /run/nscd/socket ] && echo NSCD-VISIBLE
           echo "via-proxy=$(curl -s -m 10 --proxytunnel http://external:8080/)"
           echo "blocked=$(curl -s -m 10 -o /dev/null -w '%{http_connect}' --proxytunnel http://blocked.example:8080/)"
           curl -s -m 5 --noproxy '*' "http://$ip:8080/" >/dev/null && echo RAW-IP-REACHED
           curl -s -m 5 --noproxy '*' http://127.0.0.1:8080/healthz >/dev/null && echo API-REACHED
+          curl -s -m 5 --noproxy '*' http://127.77.0.1:8080/healthz >/dev/null && echo API-REACHED-77
           [ -e /run/dbus/system_bus_socket ] && echo DBUS-VISIBLE
           echo "proxy-env=''${HTTPS_PROXY:+set}"
         '')
+        realClis
         (pkgs.writeShellScriptBin "slow-agent" "trap 'sleep 15; exit 0' TERM; sleep 600 & wait; wait")
         (pkgs.writeShellScriptBin "claude" ''
           f="$HOME/.claude/.credentials.json"
@@ -383,11 +413,31 @@ pkgs.testers.runNixOSTest {
         assert "RAW-IP-REACHED" not in out, f"IP filter bypassed: {out}"
         assert "API-REACHED" not in out, f"agentgw API reachable from the sandbox: {out}"
         assert "DBUS-VISIBLE" not in out, f"system bus reachable from the sandbox: {out}"
+        assert "API-REACHED-77" not in out, f"wildcard-bound API reachable via the proxy address: {out}"
+        assert "NSCD-VISIBLE" not in out, f"nscd (host name resolution) reachable from the sandbox: {out}"
         assert "proxy-env=set" in out and "run-" not in out, f"proxy env missing or token leaked: {out}"
         n = machine.succeed("sqlite3 /var/lib/agentgw/state.db \"select count(*) from audit where event='egress_blocked' and detail='blocked.example:8080'\"").strip()
         assert n == "1", f"egress_blocked audited {n} times"
         out = machine.succeed("sqlite3 /var/lib/agentgw/state.db \"select output from jobs where rule='open-cmd'\"")
         assert "external-ok" in out, f"cmd without egress could not reach the network: {out}"
+
+    with subtest("real claude and codex start in the restricted sandbox and reach only the proxy"):
+        assert hook('{"kind":"real","n":300}') == "202"
+        try:
+            machine.wait_until_succeeds(
+                "sqlite3 /var/lib/agentgw/state.db \"select state from jobs where rule='real-clis'\" | grep -qx done",
+                timeout=300,
+            )
+        except Exception:
+            dump()
+            raise
+        out = machine.succeed("sqlite3 /var/lib/agentgw/state.db \"select output from jobs where rule='real-clis'\"")
+        print(out)
+        assert "claude-version-rc=0" in out and "codex-version-rc=0" in out, f"a CLI failed to start: {out}"
+        for crash in ("uv_os_get_passwd", "getpwuid", "No user exists"):
+            assert crash not in out, f"user lookup failed without nscd: {out}"
+        assert "egress: blocked api.anthropic.com:443" in out, f"claude never reached the proxy: {out}"
+        assert "egress: blocked api.openai.com:443" in out, f"codex never reached the proxy: {out}"
 
     with subtest("stopping agentgw leaves no orphaned action units (cmd and agent)"):
         assert hook('{"kind":"sleep","n":3}') == "202"
