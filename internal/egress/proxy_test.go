@@ -160,3 +160,24 @@ func TestHeadLimit(t *testing.T) {
 		t.Fatalf("oversized head status = %d", code)
 	}
 }
+
+// A name whose first address is unreachable (e.g. IPv6 listed first for an
+// IPv4-only server) still tunnels via the next checked address.
+func TestDialFallback(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer upstream.Close()
+	u, _ := url.Parse(upstream.URL)
+	_, portText, _ := net.SplitHostPort(u.Host)
+	var port int
+	fmt.Sscan(portText, &port)
+	p := startProxy(t, func(context.Context, string, bool) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("127.0.0.2"), netip.MustParseAddr("127.0.0.1")}, nil
+	})
+	proxyURL, _, release := p.Register([]Entry{{Host: "dual.test", Port: port, AllowPrivate: true}})
+	defer release()
+	parsed, _ := url.Parse(proxyURL)
+	token, _ := parsed.User.Password()
+	if code, _ := raw(t, p, "CONNECT", "dual.test:"+portText, parsed.User.Username()+":"+token, ""); code != 200 {
+		t.Fatalf("CONNECT = %d, want 200 via the second address", code)
+	}
+}

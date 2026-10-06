@@ -201,7 +201,14 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	upstream, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", net.JoinHostPort(addrs[0].String(), portText))
+	// Try each checked address in order (a dual-stack name may list an
+	// unreachable family first); never re-resolve.
+	var upstream net.Conn
+	for _, addr := range addrs {
+		if upstream, err = (&net.Dialer{}).DialContext(dialCtx, "tcp", net.JoinHostPort(addr.String(), portText)); err == nil {
+			break
+		}
+	}
 	if err != nil {
 		writeError(conn, http.StatusBadGateway)
 		return

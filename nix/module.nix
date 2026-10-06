@@ -215,10 +215,6 @@ in
       };
     };
 
-    # Every sandboxed cmd/agent run is an instance of this template; its
-    # hardening is fixed here, so agentgw can't loosen it. %i is a 16-hex run
-    # id. PID 1 opens nothing in agentgw-writable directories: exec-job, as
-    # the DynamicUser, reads job.json and creates stdout/stderr itself.
     # Every sandboxed cmd/agent run is an instance of one of these templates;
     # their hardening is fixed here, so agentgw can't loosen it. %i is a
     # 16-hex run id. PID 1 opens nothing in agentgw-writable directories:
