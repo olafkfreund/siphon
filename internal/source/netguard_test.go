@@ -47,7 +47,7 @@ func TestBlockedIP(t *testing.T) {
 }
 
 func TestGuardedClientDoesNotRedirect(t *testing.T) {
-	client := guardedClient(true, time.Second, 100)
+	client := guardedClient(true, time.Second, 100, false)
 	if client.CheckRedirect(nil, nil) != http.ErrUseLastResponse {
 		t.Fatal("client follows redirects")
 	}

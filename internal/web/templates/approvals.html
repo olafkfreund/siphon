@@ -1,0 +1,6 @@
+{{define "approvals"}}<h1>Pending approvals</h1>
+<table><tr><th>Job</th><th>Rule</th><th>Created</th><th>Expires</th><th></th></tr>
+{{range .Approvals}}<tr><td><a href="/jobs/{{.JobID}}">{{.JobID}}</a></td><td>{{.Rule}}</td><td>{{tm .CreatedAt}}</td><td>{{tm .ExpiresAt}}</td><td>
+<form method="post" action="/approvals/{{.JobID}}/approve" hx-post="/approvals/{{.JobID}}/approve" hx-target="#main"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>Approve</button></form>
+<form method="post" action="/approvals/{{.JobID}}/deny" hx-post="/approvals/{{.JobID}}/deny" hx-target="#main"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>Deny</button></form></td></tr>
+{{else}}<tr><td colspan="5">none</td></tr>{{end}}</table>{{end}}

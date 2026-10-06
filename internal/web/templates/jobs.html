@@ -1,0 +1,5 @@
+{{define "jobs"}}<h1>Jobs{{if .State}} ({{.State}}){{end}}</h1>
+<p><a href="/jobs">all</a> · <a href="/jobs?state=pending_approval">pending</a> · <a href="/jobs?state=queued">queued</a> · <a href="/jobs?state=running">running</a> · <a href="/jobs?state=done">done</a> · <a href="/jobs?state=failed">failed</a></p>
+<table><tr><th>ID</th><th>Rule</th><th>State</th><th>Attempt</th><th>Created</th><th>Exit</th></tr>
+{{range .Jobs}}<tr><td><a href="/jobs/{{.ID}}">{{.ID}}</a></td><td>{{.Rule}}</td><td>{{.State}}</td><td>{{.Attempt}}</td><td>{{tm .CreatedAt}}</td><td>{{exit .ExitCode}}</td></tr>
+{{else}}<tr><td colspan="6">none</td></tr>{{end}}</table>{{end}}

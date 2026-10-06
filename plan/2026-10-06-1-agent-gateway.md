@@ -292,3 +292,29 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
   - **L4:** step 13 must rate-limit `/a/` bad-token attempts.
   - **Step 17:** the polkit rule must also restrict transient-unit properties (no `User=`, credential paths only under allowed dirs), not just the unit name.
   - **Step 18:** the VM test must assert that SIGTERM to agentgw stops its transient units (no orphaned agents).
+- Phase 2 decisions (before the code):
+  - **The one-shot `/a/<id>/<token>` link is not built.** Tokens are never logged (Phase 1 M5), so nothing could deliver one. Approvals go through the authenticated portal/API and the CLI. The store's token path stays for a future notification action. Review carry-over L4 becomes rate-limiting of login/API auth failures.
+  - **Webhook replay** is checked by the integrator's `Deliver` callback: `seen_event` MarkSeen in the same tx as `HandleEvent`, so the replay record and the enqueue commit together. `internal/source` only verifies.
+  - **Portal session:** the cookie holds an HMAC of the token with a per-process random key, so a restart logs users out. CSRF uses an HMAC of the session.
+- Step 13:
+  - A rule override only disables. Enabling deletes the override row and restores the config default, so "overridden" means "disabled at runtime".
+  - htmx 2.0.4 is vendored, byte-identical to unpkg (sha256 verified), with `allowEval:false` and no indicator styles so the CSP stays `default-src 'self'`.
+  - Failed login and API auth share a per-IP bucket of 5/min. It keys on RemoteAddr only, so behind a reverse proxy all clients share one bucket (`ponytail:` note).
+  - Plain POSTs redirect, so the portal works without JS.
+- Step 12/14 integration (Opus):
+  - **The webhook replay key is the SHA-256 of the signed body, not the delivery-id header.** Delivery-id and timestamp headers aren't covered by the HMAC, so a captured request could be replayed with a fresh id. The delivery id stays in `headers` for rules and tracing. Replay record and enqueue commit in one tx (`handleEvent` with a seen scope).
+  - Listen hints trigger an immediate tick; a hint within 5 s of the last tick is dropped (the next poll catches it). Listen gives up quietly on `ErrListenUnsupported` and reconnects after the poll interval on other errors.
+  - `serve` runs the HTTP server (`ReadHeaderTimeout` 10 s) and shuts it down gracefully. HandleEvent skips rules disabled via the portal/API.
+  - Smoke-tested live: healthz 200, API 401 without token, signed webhook 202 → job `done`, CSP header present, a second `serve` refused by the lock, SIGTERM exits 0.
+- Phase 2 review (fresh Opus reviewer; 0 critical, 3 high, 8 medium, 7 low). Opus lane fixes:
+  - **H1:** `serve` binds first, and a failing HTTP server cancels the workers. Workers stop first, then `srv.Shutdown` waits for in-flight handlers before the store closes.
+  - **H3:** Read/Write/Idle timeouts are set on the HTTP server.
+  - **M3:** per-rule errors after commit are logged and the webhook still gets 202.
+  - **M5:** listen hints use a trailing-edge debounce, so a hint is deferred rather than dropped, and the clock is injected.
+  - **L2:** `job.New` creates the nudge channel before HTTP starts.
+- Plan items not built (L7):
+  - The step-10 CLI `--server` (talking to `/api`) is dropped. The local-DB CLI plus portal/API cover it; YAGNI.
+  - The plan's `web/server.go` is `web/web.go`.
+  - "byte-identical" htmx means identical below the added header comment (official SRI hash verified by the reviewer).
+  - Bug found by the step-14 pipeline test (review L7): `MCP.Listen` blocked in `session.Wait()` ignoring ctx, so `serve` would hang on SIGTERM with an active subscription. The session is now closed on ctx cancel. go-sdk v1.8.0 uses `subscriptions/listen` (2026-07-28) under `Subscribe`, per the stack trace.
+  - `listenDebounce` is a package var so tests can shorten it.

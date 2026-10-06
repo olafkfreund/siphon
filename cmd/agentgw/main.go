@@ -8,6 +8,8 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -21,6 +23,7 @@ import (
 	"github.com/olafkfreund/MCP-AgentGateway/internal/rule"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/source"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
+	"github.com/olafkfreund/MCP-AgentGateway/internal/web"
 )
 
 var version = "dev"
@@ -259,6 +262,43 @@ func serve(ctx context.Context, args []string) error {
 		return err
 	}
 	defer st.Close()
-	slog.Info("agentgw serving", "workers", cfg.Server.Workers, "sources", len(cfg.Sources))
-	return (&job.Pipeline{Cfg: cfg, Store: st, Now: time.Now}).Serve(ctx)
+	p := job.New(cfg, st, time.Now)
+	// Bind first so a bad or busy address fails at startup, not silently later.
+	ln, err := net.Listen("tcp", cfg.Server.Listen)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	srv := &http.Server{
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		Handler: web.New(web.Options{
+			Token: cfg.Server.Token.Value, Store: st, Cfg: cfg, Decide: p.Decide,
+			Hooks: p.Webhooks(), Now: time.Now,
+		}),
+	}
+	httpErr := make(chan error, 1)
+	go func() {
+		err := srv.Serve(ln)
+		if !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("http server failed; stopping", "err", err)
+			cancel() // never run workers without the HTTP side
+		}
+		httpErr <- err
+	}()
+	slog.Info("agentgw serving", "listen", ln.Addr().String(), "workers", cfg.Server.Workers, "sources", len(cfg.Sources))
+	serveErr := p.Serve(ctx)
+	cancel() // if Serve failed early, take HTTP down too
+	sctx, scancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer scancel()
+	// Shutdown waits for in-flight handlers (webhooks mid-transaction), so the
+	// deferred store Close only runs once nothing uses the DB.
+	shutErr := srv.Shutdown(sctx)
+	if herr := <-httpErr; !errors.Is(herr, http.ErrServerClosed) {
+		return errors.Join(serveErr, herr)
+	}
+	return errors.Join(serveErr, shutErr)
 }

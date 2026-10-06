@@ -23,7 +23,7 @@ var blockedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("::/96"),
 }
 
-func guardedClient(allowPrivate bool, timeout time.Duration, maxBody int64) *http.Client {
+func guardedClient(allowPrivate bool, timeout time.Duration, maxBody int64, stream bool) *http.Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
@@ -53,6 +53,9 @@ func guardedClient(allowPrivate bool, timeout time.Duration, maxBody int64) *htt
 			}
 			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
 		},
+	}
+	if stream {
+		return &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
 	if maxBody <= 0 {
 		maxBody = 1 << 20

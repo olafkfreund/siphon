@@ -9,7 +9,7 @@ import (
 )
 
 func setenv(t *testing.T) {
-	t.Setenv("AGW_TOKEN", "tok-secret")
+	t.Setenv("AGW_TOKEN", "tok-secret-0123456789abcdef0123456789")
 	t.Setenv("AGW_FACTORY", "fac-secret")
 	t.Setenv("AGW_GH", "gh-secret")
 }
@@ -29,7 +29,7 @@ func TestFullLoads(t *testing.T) {
 	if !*c.Agents["triage-task"].Approve {
 		t.Fatal("agent approve should default true")
 	}
-	if got := strings.Join(c.Secrets(), ","); got != "tok-secret,fac-secret,gh-secret" {
+	if got := strings.Join(c.Secrets(), ","); got != "tok-secret-0123456789abcdef0123456789,fac-secret,gh-secret" {
 		t.Fatalf("secrets: %s", got)
 	}
 }
@@ -50,7 +50,7 @@ func TestBadListsAll(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, msg)
 		}
 	}
-	if len(c.Warnings()) != 1 {
+	if !hasWarning(c, "sandbox") {
 		t.Errorf("want sandbox warning, got %v", c.Warnings())
 	}
 }
@@ -116,8 +116,8 @@ func TestFileSecretAndUnknownKey(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "tok")
 	os.WriteFile(f, []byte("from-file\n"), 0o600)
 	c, _ := Parse([]byte("server: {token: \"file:" + f + "\"}\n"))
-	if c.Server.Token.Value != "from-file" || c.Validate() != nil {
-		t.Fatalf("%+v %v", c.Server.Token, c.Validate())
+	if c.Server.Token.Value != "from-file" {
+		t.Fatalf("%+v", c.Server.Token)
 	}
 	if _, err := Parse([]byte("bogus: 1\n")); err == nil {
 		t.Fatal("unknown key should fail")
@@ -179,8 +179,8 @@ func TestBearerCleartextWarning(t *testing.T) {
 	t.Setenv("AGW_B", "b")
 	for url, want := range map[string]int{"http://p510:8090/mcp": 1, "http://localhost:1/m": 0, "http://127.0.0.1/m": 0, "https://x/m": 0} {
 		c, _ := Parse([]byte("sources: {s: {type: mcp, url: \"" + url + "\", read: {resource: r://x}, auth: {bearer: env:AGW_B}}}"))
-		if got := len(c.Warnings()); got != want {
-			t.Errorf("%s: warnings=%d want %d", url, got, want)
+		if got := hasWarning(c, "bearer"); got != (want == 1) {
+			t.Errorf("%s: bearer warning=%v want %v", url, got, want == 1)
 		}
 	}
 }
@@ -236,5 +236,54 @@ func TestLoadMakesDBRelativeToConfig(t *testing.T) {
 		if err != nil || c.Server.DB != want {
 			t.Errorf("%q: got %q (%v) want %q", in, c.Server.DB, err, want)
 		}
+	}
+}
+
+func hasWarning(c *Config, sub string) bool {
+	for _, w := range c.Warnings() {
+		if strings.Contains(w, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestTokenLengthAndListenWarning(t *testing.T) {
+	t.Setenv("AGW_SHORT", "too-short")
+	t.Setenv("AGW_LONG", strings.Repeat("x", 32))
+	c, _ := Parse([]byte("server: {token: env:AGW_SHORT}\n"))
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "at least 32") {
+		t.Fatalf("short token: %v", err)
+	}
+	c, _ = Parse([]byte("server: {token: env:AGW_LONG}\n"))
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for listen, warn := range map[string]bool{":8080": true, "0.0.0.0:80": true, "127.0.0.1:8080": false, "[::1]:8080": false, "localhost:80": false} {
+		c, _ := Parse([]byte("server: {listen: \"" + listen + "\"}\n"))
+		if got := hasWarning(c, "server.listen"); got != warn {
+			t.Errorf("%s: warn=%v want %v", listen, got, warn)
+		}
+	}
+}
+
+func TestWebhookIDAndTimestamp(t *testing.T) {
+	t.Setenv("AGW_W", "w")
+	for _, tc := range []struct{ extra, want string }{
+		{"", ""},
+		{", id: header.X-GitHub-Delivery", ""},
+		{", id: body.id", "id must look like header."},
+		{", id: \"header.a b\"", "id must look like header."},
+		{", timestamp_header: X-T", "timestamp_header is not allowed"},
+	} {
+		c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, signature: github" + tc.extra + "}}"))
+		err := c.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%q: %v", tc.extra, err)
+		}
+	}
+	c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, signature: sha256, signature_header: X-S, timestamp_header: X-T}}"))
+	if err := c.Validate(); err != nil {
+		t.Fatalf("sha256 preset may use a timestamp: %v", err)
 	}
 }

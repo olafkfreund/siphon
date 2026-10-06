@@ -1,0 +1,8 @@
+{{define "layout"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>agentgw · {{.Title}}</title>
+<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false}'>
+<link rel="stylesheet" href="/static/style.css"><script src="/static/htmx.min.js" defer></script></head>
+<body><header><strong>agentgw</strong>
+<nav><a href="/jobs">Jobs</a> <a href="/approvals">Approvals</a> <a href="/rules">Rules</a> <a href="/sources">Sources</a> <a href="/audit">Audit</a></nav>
+<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Log out</button></form></header>
+<main id="main" hx-get="{{.Path}}" hx-trigger="every 5s" hx-swap="innerHTML">{{.Body}}</main></body></html>{{end}}

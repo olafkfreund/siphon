@@ -1,0 +1,4 @@
+{{define "login"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>agentgw · login</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><main><h1>agentgw</h1>{{if .}}<p class="err">{{.}}</p>{{end}}
+<form method="post" action="/login"><label>Token <input type="password" name="token" autofocus></label> <button>Log in</button></form></main></body></html>{{end}}

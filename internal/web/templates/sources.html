@@ -1,0 +1,4 @@
+{{define "sources"}}<h1>Sources</h1>
+<table><tr><th>Name</th><th>Type</th><th>Poll</th><th>Last poll</th><th>Last error</th></tr>
+{{range .Sources}}<tr><td>{{.Name}}</td><td>{{.Type}}</td><td>{{.Poll}}</td><td>{{tp .LastPollAt}}</td><td>{{.LastError}}</td></tr>
+{{else}}<tr><td colspan="5">none</td></tr>{{end}}</table>{{end}}

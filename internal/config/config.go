@@ -309,6 +309,9 @@ func (c *Config) Warnings() []string {
 	if c.Server.Sandbox == "none" {
 		w = append(w, "server.sandbox is none: actions run unsandboxed")
 	}
+	if !loopbackListen(c.Server.Listen) {
+		w = append(w, fmt.Sprintf("server.listen %q is not loopback: the portal is plain HTTP, put it behind TLS or a reverse proxy", c.Server.Listen))
+	}
 	for _, name := range sortedKeys(c.Sources) {
 		if s := c.Sources[name]; s != nil && s.AllowPrivate {
 			w = append(w, fmt.Sprintf("source %s: allow_private disables the private-address guard", name))
@@ -319,6 +322,19 @@ func (c *Config) Warnings() []string {
 	}
 	return w
 }
+
+func loopbackListen(addr string) bool {
+	h, _, err := net.SplitHostPort(addr)
+	if err != nil || h == "" {
+		return false
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return h == "localhost"
+}
+
+var webhookID = regexp.MustCompile(`^header\.[A-Za-z0-9-]+$`)
 
 func cleartextRemote(raw string) bool {
 	u, err := url.Parse(raw)
@@ -372,6 +388,9 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if t := c.Server.Token; t.isSet() && t.Value != "" && len(t.Value) < 32 {
+		add("server.token: must be at least 32 characters")
+	}
 	if c.Limits.HTTPTimeout < 0 {
 		add("limits.http_timeout: must not be negative")
 	}
@@ -501,6 +520,12 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 	case "webhook":
 		if !s.Secret.isSet() {
 			add("%s: secret is required", p)
+		}
+		if s.ID != "" && !webhookID.MatchString(s.ID) {
+			add("%s: id must look like header.<Name>, got %q", p, s.ID)
+		}
+		if s.Signature == "github" && s.TimestampHdr != "" {
+			add("%s: timestamp_header is not allowed with signature github (GitHub does not sign timestamps)", p)
 		}
 		switch s.Signature {
 		case "github":

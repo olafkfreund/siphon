@@ -52,7 +52,7 @@ func (s HTTP) Poll(ctx context.Context) (Event, error) {
 	for k, v := range o.Headers {
 		req.Header.Set(k, v)
 	}
-	client := guardedClient(o.AllowPrivate, o.Timeout, limit)
+	client := guardedClient(o.AllowPrivate, o.Timeout, limit, false)
 	if s.transport != nil {
 		client.Transport = s.transport
 	}

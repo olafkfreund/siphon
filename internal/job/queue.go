@@ -29,13 +29,18 @@ func (p *Pipeline) Serve(ctx context.Context) error {
 	if err := p.Requeue(); err != nil {
 		return err
 	}
-	nudge := make(chan struct{}, 64) // wakes idle workers when Tick enqueued jobs
+	if p.nudge == nil { // literal Pipelines in tests; serve uses New
+		p.nudge = make(chan struct{}, 64)
+	}
+	nudge := p.nudge
 	var wg sync.WaitGroup
 	spawn := func(f func()) { wg.Add(1); go func() { defer wg.Done(); f() }() }
 
 	for _, name := range sortedSources(p.Cfg) {
 		if s := p.Cfg.Sources[name]; s.Type != "webhook" {
-			spawn(func() { p.pollLoop(ctx, name, time.Duration(s.Poll), nudge) })
+			hint := make(chan struct{}, 1)
+			spawn(func() { p.listen(ctx, name, hint) })
+			spawn(func() { p.pollLoop(ctx, name, time.Duration(s.Poll), hint) })
 		}
 	}
 	for i := 0; i < p.Cfg.Server.Workers; i++ {
@@ -48,26 +53,42 @@ func (p *Pipeline) Serve(ctx context.Context) error {
 	return nil
 }
 
-func (p *Pipeline) pollLoop(ctx context.Context, name string, every time.Duration, nudge chan<- struct{}) {
+func (p *Pipeline) pollLoop(ctx context.Context, name string, every time.Duration, hint <-chan struct{}) {
 	t := time.NewTicker(every)
 	defer t.Stop()
+	last := p.tickAndNudge(ctx, name)
+	var trailing <-chan time.Time // armed when a hint lands inside the debounce window
 	for {
-		ids, err := p.Tick(ctx, name)
-		if err != nil && ctx.Err() == nil {
-			slog.Warn("poll failed", "source", name, "err", err)
-		}
-		for range ids {
-			select {
-			case nudge <- struct{}{}:
-			default:
-			}
-		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		case <-trailing:
+		case <-hint:
+			// Trailing-edge debounce: a hint inside the window is deferred to the
+			// window's end, never dropped, so a change seen mid-tick is re-read.
+			if wait := listenDebounce - p.Now().Sub(last); wait > 0 {
+				if trailing == nil {
+					trailing = time.After(wait)
+				}
+				continue
+			}
 		}
+		trailing = nil
+		last = p.tickAndNudge(ctx, name)
 	}
+}
+
+func (p *Pipeline) tickAndNudge(ctx context.Context, name string) time.Time {
+	start := p.Now()
+	ids, err := p.Tick(ctx, name)
+	if err != nil && ctx.Err() == nil {
+		slog.Warn("poll failed", "source", name, "err", err)
+	}
+	for range ids {
+		p.nudgeWorkers()
+	}
+	return start
 }
 
 func (p *Pipeline) worker(ctx context.Context, nudge <-chan struct{}) {

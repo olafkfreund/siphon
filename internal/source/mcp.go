@@ -30,6 +30,8 @@ type MCP struct {
 	Transport mcp.Transport // optional in-process transport for tests
 }
 
+var ErrListenUnsupported = errors.New("MCP resource subscriptions unsupported")
+
 func (s MCP) Poll(ctx context.Context) (Event, error) {
 	o := s.Options
 	if (o.Resource == "") == (o.Tool == "") {
@@ -43,24 +45,7 @@ func (s MCP) Poll(ctx context.Context) (Event, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, o.Timeout)
 	defer cancel()
-	transport := s.Transport
-	if transport == nil && len(o.Command) > 0 {
-		cmd := exec.CommandContext(ctx, o.Command[0], o.Command[1:]...)
-		cmd.Env = []string{}
-		for _, name := range []string{"PATH", "HOME", "LANG"} {
-			if value, ok := os.LookupEnv(name); ok {
-				cmd.Env = append(cmd.Env, name+"="+value)
-			}
-		}
-		transport = &mcp.CommandTransport{Command: cmd}
-	}
-	if transport == nil {
-		client := guardedClient(o.AllowPrivate, o.Timeout, o.MaxBody)
-		if o.Bearer != "" {
-			client.Transport = bearerTransport{base: client.Transport, token: o.Bearer}
-		}
-		transport = &mcp.StreamableClientTransport{Endpoint: o.URL, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: true}
-	}
+	transport := s.transport(ctx, false)
 	session, err := mcp.NewClient(&mcp.Implementation{Name: "agentgw", Version: "1"}, nil).Connect(ctx, transport, nil)
 	if err != nil {
 		return Event{}, err
@@ -104,6 +89,97 @@ func (s MCP) Poll(ctx context.Context) (Event, error) {
 		}
 	}
 	return Event{Source: o.Name, ReceivedAt: time.Now(), Headers: map[string]string{}, Data: data}, nil
+}
+
+// Listen reports changes to the declared resource until the context ends or the session fails.
+func (s MCP) Listen(ctx context.Context, onChange func()) error {
+	if s.Options.Tool != "" || s.Options.Resource == "" {
+		return ErrListenUnsupported
+	}
+	if s.Transport == nil && (len(s.Options.Command) == 0) == (s.Options.URL == "") {
+		return errors.New("declare exactly one command or URL")
+	}
+	timeout := s.Options.Timeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "agentgw", Version: "1"}, &mcp.ClientOptions{
+		ResourceUpdatedHandler: func(_ context.Context, req *mcp.ResourceUpdatedNotificationRequest) {
+			if req.Params != nil && req.Params.URI == s.Options.Resource {
+				onChange()
+			}
+		},
+	})
+	connectCtx, cancel := context.WithTimeout(ctx, timeout)
+	transport := &deadlineTransport{Transport: s.transport(ctx, true)}
+	session, err := client.Connect(connectCtx, transport, nil)
+	if transport.stop != nil {
+		transport.stop()
+	}
+	cancel()
+	if err != nil {
+		return err
+	}
+	defer session.Close()
+	caps := session.InitializeResult().Capabilities
+	if caps == nil || caps.Resources == nil || !caps.Resources.Subscribe {
+		return ErrListenUnsupported
+	}
+	subscribeCtx, cancel := context.WithTimeout(ctx, timeout)
+	stop := context.AfterFunc(subscribeCtx, func() { transport.conn.Close() })
+	err = session.Subscribe(subscribeCtx, &mcp.SubscribeParams{URI: s.Options.Resource})
+	stop()
+	cancel()
+	if err != nil {
+		return err
+	}
+	onChange()
+	// Wait ignores ctx: close the session on cancellation, or serve hangs on SIGTERM.
+	defer context.AfterFunc(ctx, func() { session.Close() })()
+	err = session.Wait()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
+}
+
+type deadlineTransport struct {
+	mcp.Transport
+	conn mcp.Connection
+	stop func() bool
+}
+
+func (t *deadlineTransport) Connect(ctx context.Context) (mcp.Connection, error) {
+	conn, err := t.Transport.Connect(ctx)
+	if err == nil {
+		t.conn = conn
+		t.stop = context.AfterFunc(ctx, func() { conn.Close() })
+	}
+	return conn, err
+}
+
+func (s MCP) transport(ctx context.Context, stream bool) mcp.Transport {
+	o := s.Options
+	transport := s.Transport
+	if transport == nil && len(o.Command) > 0 {
+		cmd := exec.CommandContext(ctx, o.Command[0], o.Command[1:]...)
+		cmd.Env = []string{}
+		for _, name := range []string{"PATH", "HOME", "LANG"} {
+			if value, ok := os.LookupEnv(name); ok {
+				cmd.Env = append(cmd.Env, name+"="+value)
+			}
+		}
+		transport = &mcp.CommandTransport{Command: cmd}
+	}
+	if transport == nil {
+		var client *http.Client
+		client = guardedClient(o.AllowPrivate, o.Timeout, o.MaxBody, stream)
+		if o.Bearer != "" {
+			client.Transport = bearerTransport{base: client.Transport, token: o.Bearer}
+		}
+		transport = &mcp.StreamableClientTransport{Endpoint: o.URL, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: !stream}
+	}
+	return transport
 }
 
 func decodeContent(text string, blob []byte) any {
