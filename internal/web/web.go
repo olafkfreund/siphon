@@ -14,7 +14,9 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +50,7 @@ type server struct {
 const (
 	cookieName = "agentgw_session"
 	failBurst  = 5 // bad logins / API auth failures per IP per minute
+	maxBuckets = 4096
 )
 
 func New(o Options) http.Handler {
@@ -122,15 +125,46 @@ func (s *server) mac(msg string) string {
 }
 
 // The cookie is an HMAC over the token under a random key: the raw token never reaches the browser.
-func (s *server) sessionValue() string          { return s.mac("session:" + s.Token) }
+// Cookie value: "<issue unix seconds>|<HMAC(key, "session:"+ts)>", valid for 24 h.
+// There is no server-side session store, so logout only clears the browser's
+// cookie; the value itself stays valid until it expires or the process restarts.
+const sessionTTL = 24 * time.Hour
+
+func (s *server) sessionValue() string {
+	ts := strconv.FormatInt(s.Now().Unix(), 10)
+	return ts + "|" + s.mac("session:"+ts)
+}
+
+func (s *server) sessionValid(v string) bool {
+	ts, sig, ok := strings.Cut(v, "|")
+	if !ok || s.Token == "" || !eq(sig, s.mac("session:"+ts)) {
+		return false
+	}
+	n, err := strconv.ParseInt(ts, 10, 64)
+	age := s.Now().Sub(time.Unix(n, 0))
+	return err == nil && age >= -time.Minute && age < sessionTTL
+}
+
 func (s *server) csrfFor(session string) string { return s.mac("csrf:" + session) }
 
+// clientIP is the limiter key: the IPv4 address, or the /64 prefix of an IPv6
+// one (a single host controls a whole /64).
+// ponytail: X-Forwarded-For is not trusted; behind a proxy all clients share one bucket.
 func clientIP(r *http.Request) string {
 	h, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		h = r.RemoteAddr
 	}
-	return h // ponytail: X-Forwarded-For is not trusted; behind a proxy all clients share one bucket
+	a, err := netip.ParseAddr(h)
+	if err != nil {
+		return h
+	}
+	a = a.Unmap()
+	if a.Is6() {
+		p, _ := a.Prefix(64)
+		return p.String()
+	}
+	return a.String()
 }
 
 func eq(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
@@ -167,12 +201,8 @@ func (l *limiter) blocked(ip string) bool {
 func (l *limiter) fail(ip string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if len(l.m) > 4096 { // drop fully refilled entries
-		for k, b := range l.m {
-			if l.refill(b); b.tokens >= failBurst {
-				delete(l.m, k)
-			}
-		}
+	if len(l.m) > maxBuckets { // ponytail: forgets all penalties; beats sweeping under the lock
+		l.m = map[string]*bucket{}
 	}
 	b := l.m[ip]
 	if b == nil {

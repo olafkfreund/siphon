@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 )
 
@@ -48,6 +49,11 @@ func RuleEnabled(tx *sql.Tx, name string) (enabled, overridden bool, err error) 
 
 // SetRuleOverride disables a rule (row present) or re-enables it (row removed,
 // back to the config default), and audits the change.
+//
+// Disabling also cancels the rule's queued and pending_approval jobs in the
+// same transaction (audited as rule_disabled_cancel with the count).
+// Re-enabling resumes from the frozen rule state: events seen while the rule
+// was disabled were never recorded, so their ids may fire on re-enable.
 func SetRuleOverride(db *sql.DB, name string, enabled bool, by string, now time.Time) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -61,6 +67,15 @@ func SetRuleOverride(db *sql.DB, name string, enabled bool, by string, now time.
 		event = "rule_disable"
 		_, err = tx.Exec(`INSERT INTO rule_override(rule, enabled, updated_at) VALUES (?,0,?)
 			ON CONFLICT(rule) DO UPDATE SET enabled=0, updated_at=excluded.updated_at`, name, ms(now))
+		if err == nil {
+			var r sql.Result
+			r, err = tx.Exec(`UPDATE jobs SET state='cancelled', finished_at=?
+				WHERE rule=? AND state IN ('queued','pending_approval')`, ms(now), name)
+			if err == nil {
+				n, _ := r.RowsAffected()
+				err = Audit(tx, now, by, "rule_disabled_cancel", 0, fmt.Sprintf("%s: %d jobs", name, n))
+			}
+		}
 	}
 	if err != nil {
 		return err

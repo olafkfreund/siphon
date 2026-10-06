@@ -1,7 +1,9 @@
 package web
 
 import (
+	"bytes"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -36,6 +38,7 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 			found, err := fill(r, &v)
 			switch {
 			case err != nil:
+				slog.Error("portal page", "path", r.URL.Path, "err", err)
 				http.Error(w, "internal error", http.StatusInternalServerError)
 			case !found:
 				http.NotFound(w, r)
@@ -80,6 +83,7 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 			return
 		}
 		if err := store.SetRuleOverride(s.Store.DB, name, verb == "enable", "portal", s.Now()); err != nil {
+			slog.Error("rule override", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -95,7 +99,8 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 			return
 		}
 		if err := s.Decide(id, verb == "approve", "portal"); err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
+			code, msg := decisionError(err)
+			http.Error(w, msg, code)
 			return
 		}
 		v := view{CSRF: csrf}
@@ -119,18 +124,13 @@ func (s *server) page(w http.ResponseWriter, r *http.Request, name string, v vie
 		s.render(w, name, v)
 		return
 	}
-	var body bufWriter
+	var body bytes.Buffer
 	if err := s.tpl.ExecuteTemplate(&body, name, v); err != nil {
 		http.Error(w, "template error", http.StatusInternalServerError)
 		return
 	}
 	s.render(w, "layout", layout{Title: name, Path: r.URL.RequestURI(), CSRF: v.CSRF, Body: template.HTML(body.String())})
 }
-
-type bufWriter struct{ b []byte }
-
-func (w *bufWriter) Write(p []byte) (int, error) { w.b = append(w.b, p...); return len(p), nil }
-func (w *bufWriter) String() string              { return string(w.b) }
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
@@ -154,7 +154,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 func (s *server) portal(h func(w http.ResponseWriter, r *http.Request, csrf string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		c, err := r.Cookie(cookieName)
-		if err != nil || s.Token == "" || !eq(c.Value, s.sessionValue()) {
+		if err != nil || !s.sessionValid(c.Value) {
 			if r.Method == http.MethodGet {
 				http.Redirect(w, r, "/login", http.StatusSeeOther)
 				return

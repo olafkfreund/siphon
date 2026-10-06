@@ -16,7 +16,11 @@ func CreateApproval(tx *sql.Tx, jobID int64, tokenHash []byte, expires time.Time
 	return err
 }
 
-var ErrBadToken = errors.New("invalid approval token")
+var (
+	ErrBadToken   = errors.New("invalid approval token")
+	ErrNotFound   = errors.New("no such job or approval")
+	ErrNotPending = errors.New("approval is not pending") // already decided, expired, or job not pending
+)
 
 // DecideApproval approves (job → queued) or denies (job → cancelled) a pending
 // job, identified by job id. An empty token skips the token check (operator on
@@ -37,7 +41,7 @@ func DecideApproval(db *sql.DB, jobID int64, approve bool, by, token string, now
 	err = tx.QueryRow(`SELECT a.token_hash, a.expires_at, a.decision, j.state
 		FROM approvals a JOIN jobs j ON j.id=a.job_id WHERE a.job_id=?`, jobID).Scan(&hash, &expires, &decision, &state)
 	if err == sql.ErrNoRows {
-		return fmt.Errorf("job %d has no approval", jobID)
+		return fmt.Errorf("job %d has no approval: %w", jobID, ErrNotFound)
 	}
 	if err != nil {
 		return err
@@ -56,11 +60,11 @@ func DecideApproval(db *sql.DB, jobID int64, approve bool, by, token string, now
 	}
 	switch {
 	case decision.Valid:
-		return fmt.Errorf("job %d already %s", jobID, decision.String)
+		return fmt.Errorf("job %d already %s: %w", jobID, decision.String, ErrNotPending)
 	case state != "pending_approval":
-		return fmt.Errorf("job %d is %s, not pending approval", jobID, state)
+		return fmt.Errorf("job %d is %s, not pending approval: %w", jobID, state, ErrNotPending)
 	case ms(now) >= expires:
-		return fmt.Errorf("approval for job %d has expired", jobID)
+		return fmt.Errorf("approval for job %d has expired: %w", jobID, ErrNotPending)
 	}
 
 	dec, event, newState := "denied", "deny", "cancelled"
@@ -74,7 +78,7 @@ func DecideApproval(db *sql.DB, jobID int64, approve bool, by, token string, now
 		return err
 	}
 	if n, _ := r.RowsAffected(); n == 0 {
-		return fmt.Errorf("job %d already decided", jobID)
+		return fmt.Errorf("job %d already decided: %w", jobID, ErrNotPending)
 	}
 	if approve {
 		_, err = tx.Exec(`UPDATE jobs SET state='queued', run_after=? WHERE id=?`, ms(now), jobID)

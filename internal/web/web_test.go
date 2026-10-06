@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -350,5 +351,106 @@ func TestHooksUnauthenticated(t *testing.T) {
 	}
 	if w := e.do("POST", "/hook/zz", nil, nil); w.Code != 404 {
 		t.Fatal(w.Code)
+	}
+}
+
+func TestLimiterKeysIPv6By64(t *testing.T) {
+	r := func(a string) *http.Request { x := httptest.NewRequest("GET", "/", nil); x.RemoteAddr = a; return x }
+	a, b := clientIP(r("[2001:db8:1:2:aaaa::1]:1")), clientIP(r("[2001:db8:1:2:bbbb::9]:2"))
+	if a != b || a != "2001:db8:1:2::/64" {
+		t.Fatalf("%s %s", a, b)
+	}
+	if clientIP(r("[2001:db8:1:3::1]:1")) == a {
+		t.Fatal("different /64 must differ")
+	}
+	if clientIP(r("[::ffff:192.0.2.7]:1")) != "192.0.2.7" || clientIP(r("192.0.2.7:1")) != "192.0.2.7" {
+		t.Fatal("ipv4 key")
+	}
+	e := newEnv(t, nil)
+	for i := 0; i < 5; i++ {
+		e.do("POST", "/login", url.Values{"token": {"bad"}}, func(r *http.Request) { r.RemoteAddr = "[2001:db8:1:2::" + itoa(i+1) + "]:1" })
+	}
+	if w := e.do("POST", "/login", url.Values{"token": {"bad"}}, func(r *http.Request) { r.RemoteAddr = "[2001:db8:1:2:ffff::1]:1" }); w.Code != 429 {
+		t.Fatalf("same /64 shares a bucket: %d", w.Code)
+	}
+}
+
+func TestLimiterOverflowReplacesMap(t *testing.T) {
+	l := &limiter{now: time.Now, m: map[string]*bucket{}}
+	for i := 0; i < maxBuckets+10; i++ {
+		l.fail("ip" + itoa(i))
+	}
+	if len(l.m) > maxBuckets {
+		t.Fatalf("map grew to %d", len(l.m))
+	}
+}
+
+func TestSessionExpiryAndTamper(t *testing.T) {
+	e := newEnv(t, nil)
+	c, _ := e.login()
+	add := func(r *http.Request) { r.AddCookie(c) }
+	if w := e.do("GET", "/jobs", nil, add); w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+	e.now = e.now.Add(23 * time.Hour)
+	if w := e.do("GET", "/jobs", nil, add); w.Code != 200 {
+		t.Fatalf("still valid at 23h: %d", w.Code)
+	}
+	e.now = e.now.Add(2 * time.Hour)
+	if w := e.do("GET", "/jobs", nil, add); w.Code != 303 {
+		t.Fatalf("expired at 25h: %d", w.Code)
+	}
+	// tampered timestamp (pushed forward to dodge expiry) must fail the HMAC
+	e.now = e.now.Add(-25 * time.Hour)
+	c2, _ := e.login()
+	_, sig, _ := strings.Cut(c2.Value, "|")
+	forged := &http.Cookie{Name: c2.Name, Value: itoa(int(e.now.Unix())+3600) + "|" + sig}
+	if w := e.do("GET", "/jobs", nil, func(r *http.Request) { r.AddCookie(forged) }); w.Code != 303 {
+		t.Fatalf("tampered ts: %d", w.Code)
+	}
+	if w := e.do("GET", "/jobs", nil, func(r *http.Request) { r.AddCookie(&http.Cookie{Name: c2.Name, Value: "garbage"}) }); w.Code != 303 {
+		t.Fatal(w.Code)
+	}
+}
+
+func TestDecisionErrorsAreFixedMessages(t *testing.T) {
+	e := newEnv(t, nil)
+	if w := e.do("POST", "/api/jobs/999/approve", nil, bearer); w.Code != 404 || strings.Contains(w.Body.String(), "999") {
+		t.Fatalf("unknown job: %d %s", w.Code, w.Body.String())
+	}
+	id := e.pendingJob()
+	e.do("POST", "/api/jobs/"+itoa(int(id))+"/deny", nil, bearer)
+	w := e.do("POST", "/api/jobs/"+itoa(int(id))+"/approve", nil, bearer)
+	if w.Code != 409 || strings.Contains(w.Body.String(), "denied") || !strings.Contains(w.Body.String(), "already decided") {
+		t.Fatalf("conflict: %d %s", w.Code, w.Body.String())
+	}
+	e2 := newEnv(t, func(o *Options) {
+		o.Decide = func(int64, bool, string) error { return errors.New("sqlite: secret internals") }
+	})
+	w = e2.do("POST", "/api/jobs/1/approve", nil, bearer)
+	if w.Code != 500 || strings.Contains(w.Body.String(), "sqlite") || !strings.Contains(w.Body.String(), "internal error") {
+		t.Fatalf("internal: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestDisablingRuleCancelsBacklog(t *testing.T) {
+	e := newEnv(t, nil)
+	tx, _ := e.st.DB.Begin()
+	q, _ := store.InsertJob(tx, store.Job{Rule: "disk-full", ActionJSON: "{}"}, e.now)
+	p, _ := store.InsertJob(tx, store.Job{Rule: "disk-full", ActionJSON: "{}", State: "pending_approval"}, e.now)
+	run, _ := store.InsertJob(tx, store.Job{Rule: "disk-full", ActionJSON: "{}", State: "running"}, e.now)
+	other, _ := store.InsertJob(tx, store.Job{Rule: "other", ActionJSON: "{}"}, e.now)
+	tx.Commit()
+	if w := e.do("POST", "/api/rules/disk-full/disable", nil, bearer); w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+	state := func(id int64) string { j, _ := store.GetJob(e.st.DB, id); return j.State }
+	if state(q) != "cancelled" || state(p) != "cancelled" || state(run) != "running" || state(other) != "queued" {
+		t.Fatalf("%s %s %s %s", state(q), state(p), state(run), state(other))
+	}
+	var n int
+	e.st.DB.QueryRow(`SELECT COUNT(*) FROM audit WHERE event='rule_disabled_cancel' AND detail LIKE '%2 jobs'`).Scan(&n)
+	if n != 1 {
+		t.Fatal("audit row missing")
 	}
 }

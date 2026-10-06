@@ -2,6 +2,8 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -57,7 +59,8 @@ func (s *server) apiRoutes(mux *http.ServeMux) {
 			return nil, 404, errMsg("not found")
 		}
 		if err := s.Decide(id, verb == "approve", "api"); err != nil {
-			return nil, 409, err
+			code, msg := decisionError(err)
+			return nil, code, errMsg(msg)
 		}
 		return map[string]bool{"ok": true}, 200, nil
 	})
@@ -69,6 +72,19 @@ func (s *server) apiRoutes(mux *http.ServeMux) {
 		err := store.SetRuleOverride(s.Store.DB, name, verb == "enable", "api", s.Now())
 		return map[string]bool{"ok": true}, 200, err
 	})
+}
+
+// decisionError maps a Decide error to a status and a fixed client message;
+// anything unexpected is logged and reported as a plain 500.
+func decisionError(err error) (int, string) {
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return 404, "not found"
+	case errors.Is(err, store.ErrNotPending):
+		return 409, "already decided, expired or not pending"
+	}
+	slog.Error("decide", "err", err)
+	return 500, "internal error"
 }
 
 type errMsg string
@@ -106,11 +122,13 @@ func (s *server) reply(w http.ResponseWriter, r *http.Request, f func(*http.Requ
 	v, code, err := f(r)
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
-		if code == 200 {
-			code = 500
+		msg, ok := err.(errMsg) // only our fixed messages reach clients
+		if !ok {
+			slog.Error("api", "path", r.URL.Path, "err", err)
+			code, msg = 500, "internal error"
 		}
 		w.WriteHeader(code)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		json.NewEncoder(w).Encode(map[string]string{"error": string(msg)})
 		return
 	}
 	w.WriteHeader(code)
