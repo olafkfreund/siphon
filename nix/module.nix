@@ -19,6 +19,13 @@ let
   } cfg.settings;
   configFile = yaml.generate "agentgw.yaml" settings;
   units = settings.units or [ ];
+  agentEtcDirs = [
+    "claude-code"
+    "codex"
+    "gemini"
+    "antigravity"
+  ];
+  etcManaged = d: lib.any (k: k == d || lib.hasPrefix "${d}/" k) (lib.attrNames config.environment.etc);
 in
 {
   options.services.agentgw = {
@@ -62,6 +69,13 @@ in
       type = lib.types.str;
       default = "2h";
       description = "Hard ceiling (RuntimeMaxSec) for any sandboxed action; per-action timeouts apply below it.";
+    };
+
+    agentPackages = lib.mkOption {
+      type = lib.types.listOf lib.types.package;
+      default = [ ];
+      example = lib.literalExpression "[ pkgs.claude-code pkgs.codex ]";
+      description = "Agent CLIs (claude, codex, agy) made available to sandboxed agent runs.";
     };
   };
 
@@ -140,7 +154,8 @@ in
     # the DynamicUser, reads job.json and creates stdout/stderr itself.
     systemd.services."agentgw-action@" = {
       description = "agentgw sandboxed action %i";
-      path = [ "/run/current-system/sw" ]; # tools actions may call (claude, etc.)
+      # Agent CLIs first, then the system profile for tools actions may call.
+      path = cfg.agentPackages ++ [ "/run/current-system/sw" ];
       serviceConfig = {
         Type = "exec";
         ExecStart = "${cfg.package}/bin/agentgw exec-job ${actionsDir}/%i";
@@ -152,6 +167,12 @@ in
         TimeoutStopSec = "20s"; # bounds agentgw's blocking stop of orphans
         LimitFSIZE = "16M"; # caps stdout/stderr files (and anything else it writes)
         TasksMax = 256;
+        # System-wide agent CLI config must not reach agents: managed hooks,
+        # instructions or extra MCP servers there would bypass the allowlist.
+        # NixOS-managed dirs get an empty read-only tmpfs (the CLI sees no
+        # config, rather than an unreadable one); others are made inaccessible.
+        TemporaryFileSystem = map (d: "/etc/${d}:ro") (lib.filter etcManaged agentEtcDirs);
+        InaccessiblePaths = map (d: "-/etc/${d}") (lib.filter (d: !etcManaged d) agentEtcDirs);
         PrivateTmp = true;
         ProtectSystem = "strict";
         ProtectHome = true;

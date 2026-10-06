@@ -31,12 +31,36 @@ pkgs.testers.runNixOSTest {
           # A stand-in agent runner: same template unit as a real `claude` run.
           agents.slow = {
             # Takes 15 s to honour SIGTERM, so overlapping copies would be visible.
-            runner = [
-              "sh"
-              "-c"
-              "trap 'sleep 15; exit 0' TERM; sleep 600 & wait; wait"
-              "agent"
-            ];
+            command = "slow-agent";
+            prompt = "p";
+            approve = false;
+            # Own throwaway credential, so it never holds a subscription's slot.
+            credential = "slow-key";
+          };
+          credentials = {
+            slow-key = {
+              provider = "claude";
+              api_key = "file:/etc/agentgw/token";
+            };
+            claude-max.provider = "claude";
+            chatgpt.provider = "codex";
+            google.provider = "agy";
+          };
+          agents.ac = {
+            kind = "claude";
+            credential = "claude-max";
+            prompt = "p";
+            approve = false;
+          };
+          agents.ax = {
+            kind = "codex";
+            credential = "chatgpt";
+            prompt = "p";
+            approve = false;
+          };
+          agents.ag = {
+            kind = "agy";
+            credential = "google";
             prompt = "p";
             approve = false;
           };
@@ -81,6 +105,33 @@ pkgs.testers.runNixOSTest {
               cooldown = "1s";
               action.agent = "slow";
             }
+            {
+              name = "sub-claude";
+              source = "gh";
+              when = ''event.kind == "sub-claude"'';
+              on = "each";
+              id = "event.n";
+              cooldown = "1s";
+              action.agent = "ac";
+            }
+            {
+              name = "sub-codex";
+              source = "gh";
+              when = ''event.kind == "sub-codex"'';
+              on = "each";
+              id = "event.n";
+              cooldown = "1s";
+              action.agent = "ax";
+            }
+            {
+              name = "sub-agy";
+              source = "gh";
+              when = ''event.kind == "sub-agy"'';
+              on = "each";
+              id = "event.n";
+              cooldown = "1s";
+              action.agent = "ag";
+            }
           ];
           units = [ "marker.service" ];
         };
@@ -95,6 +146,39 @@ pkgs.testers.runNixOSTest {
         Type = "oneshot";
         ExecStart = "${pkgs.coreutils}/bin/true";
       };
+
+      # Stand-in agent CLIs: each checks its login is where the runner puts
+      # it, tries to read agentgw's credential store (must fail), rewrites its
+      # login with a marker (write-back), and answers.
+      services.agentgw.agentPackages = [
+        (pkgs.writeShellScriptBin "slow-agent" "trap 'sleep 15; exit 0' TERM; sleep 600 & wait; wait")
+        (pkgs.writeShellScriptBin "claude" ''
+          f="$HOME/.claude/.credentials.json"
+          [ -f "$f" ] || { echo "no login at $f" >&2; exit 2; }
+          for p in /var/lib/agentgw/credentials/claude-max/credentials.json /var/lib/agentgw/credentials/chatgpt/auth.json /var/lib/agentgw/credentials/google/antigravity-oauth-token; do cat "$p" >/dev/null 2>&1 && echo LEAK; done; [ -n "$(ls -A /etc/codex 2>/dev/null)" ] && echo ETC-VISIBLE
+          cat >/dev/null
+          printf '%s' '{"claudeAiOauth":{"accessToken":"a2","refreshToken":"refreshed-claude","expiresAt":4102444800000}}' > "$f"
+          echo '{"type":"result","result":"claude ok"}'
+        '')
+        (pkgs.writeShellScriptBin "codex" ''
+          f="$CODEX_HOME/auth.json"
+          [ -f "$f" ] || { echo "no login at $f" >&2; exit 2; }
+          for p in /var/lib/agentgw/credentials/claude-max/credentials.json /var/lib/agentgw/credentials/chatgpt/auth.json /var/lib/agentgw/credentials/google/antigravity-oauth-token; do cat "$p" >/dev/null 2>&1 && echo LEAK; done; [ -n "$(ls -A /etc/codex 2>/dev/null)" ] && echo ETC-VISIBLE
+          cat >/dev/null
+          printf '%s' '{"tokens":{"id_token":"x","access_token":"h.eyJleHAiOjQxMDI0NDQ4MDB9.s","refresh_token":"refreshed-codex","account_id":"a"}}' > "$f"
+          echo "codex ok"
+        '')
+        (pkgs.writeShellScriptBin "agy" ''
+          f="$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
+          [ -f "$f" ] || { echo "no login at $f" >&2; exit 2; }
+          for p in /var/lib/agentgw/credentials/claude-max/credentials.json /var/lib/agentgw/credentials/chatgpt/auth.json /var/lib/agentgw/credentials/google/antigravity-oauth-token; do cat "$p" >/dev/null 2>&1 && echo LEAK; done; [ -n "$(ls -A /etc/codex 2>/dev/null)" ] && echo ETC-VISIBLE
+          printf '%s' '{"token":{"access_token":"a2","token_type":"Bearer","refresh_token":"refreshed-agy","expiry":"2100-01-01T00:00:00Z"},"auth_method":"oauth"}' > "$f"
+          echo '{"status":"OK","response":"agy ok"}'
+        '')
+      ];
+
+      # A system-wide codex config the sandbox must not see.
+      environment.etc."codex/config.toml".text = "";
 
       environment.systemPackages = [
         pkgs.sqlite
@@ -186,6 +270,40 @@ pkgs.testers.runNixOSTest {
         machine.fail("runuser -u agentgw -- systemctl start --wait agentgw-action@fedcba9876543210.service")
         assert machine.succeed("cat /root/victim").strip() == "original", "symlink target was written"
         machine.fail("test -e /root/victim2")
+
+    with subtest("subscription logins: claude, codex and agy run in the sandbox with write-back"):
+        cfg = machine.succeed("systemctl cat agentgw.service | grep -o '/nix/store/[a-z0-9]*-agentgw.yaml' | head -1").strip()
+        agw = machine.succeed("systemctl cat agentgw.service | grep -o '/nix/store/[^ ]*/bin/agentgw' | head -1").strip()
+        logins = {
+            "claude-max": '{"claudeAiOauth":{"accessToken":"a1","refreshToken":"r1","expiresAt":4000000000000}}',
+            "chatgpt": '{"tokens":{"id_token":"x","access_token":"h.eyJleHAiOjQwMDAwMDAwMDB9.s","refresh_token":"r1","account_id":"a"}}',
+            "google": '{"token":{"access_token":"a1","token_type":"Bearer","refresh_token":"r1","expiry":"2096-01-01T00:00:00Z"},"auth_method":"oauth"}',
+        }
+        for name, body in logins.items():
+            machine.succeed(f"printf '%s' '{body}' > /tmp/{name}.json")
+            machine.succeed(f"runuser -u agentgw -- {agw} credentials import -config {cfg} {name} < /tmp/{name}.json")
+        for i, kind in enumerate(["sub-claude", "sub-codex", "sub-agy"]):
+            assert hook(f'{{"kind":"{kind}","n":{100 + i}}}') == "202"
+        try:
+            for rule in ["sub-claude", "sub-codex", "sub-agy"]:
+                machine.wait_until_succeeds(
+                    f"sqlite3 /var/lib/agentgw/state.db \"select state from jobs where rule='{rule}'\" | grep -qx done",
+                    timeout=60,
+                )
+        except Exception:
+            dump()
+            raise
+        outputs = machine.succeed("sqlite3 /var/lib/agentgw/state.db \"select output from jobs where rule like 'sub-%'\"")
+        assert "LEAK" not in outputs, f"action read the credential store: {outputs}"
+        assert "ETC-VISIBLE" not in outputs, f"system CLI config visible in the sandbox: {outputs}"
+        for name, f, marker in [
+            ("claude-max", "credentials.json", "refreshed-claude"),
+            ("chatgpt", "auth.json", "refreshed-codex"),
+            ("google", "antigravity-oauth-token", "refreshed-agy"),
+        ]:
+            machine.succeed(f"grep -q {marker} /var/lib/agentgw/credentials/{name}/{f}")
+        listing = machine.succeed(f"runuser -u agentgw -- {agw} credentials ls -config {cfg}")
+        assert "refreshed" not in listing and "r1" not in listing.split(), f"ls leaked a token: {listing}"
 
     with subtest("stopping agentgw leaves no orphaned action units (cmd and agent)"):
         assert hook('{"kind":"sleep","n":3}') == "202"

@@ -320,3 +320,95 @@ func TestUnitNamesAndAgentRetry(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+func TestAgentCredentials(t *testing.T) {
+	key := filepath.Join(t.TempDir(), "k")
+	os.WriteFile(key, []byte("sk-x\n"), 0o600)
+	cases := []struct {
+		name, yaml, wantErr, wantCred string
+		warns                         []string
+	}{
+		{"default single subscription", "credentials: {cx: {provider: codex}}\nagents: {a: {kind: codex}}", "", "cx", nil},
+		{"explicit wins", "credentials: {c1: {provider: claude}, c2: {provider: claude}}\nagents: {a: {credential: c2}}", "", "c2", nil},
+		{"ambiguous", "credentials: {c1: {provider: claude}, c2: {provider: claude}}\nagents: {a: {}}", "credential is required", "", nil},
+		{"none for codex", "agents: {a: {kind: codex}}", "credential is required", "", nil},
+		{"api key credential is no default", "credentials: {k: {provider: claude, api_key: \"file:" + key + "\"}}\nagents: {a: {}}", "credential is required", "", nil},
+		{"kind mismatch", "credentials: {cx: {provider: codex}}\nagents: {a: {credential: cx}}", "is for codex, agent kind is claude", "cx", nil},
+		{"unknown credential", "credentials: {cx: {provider: codex}}\nagents: {a: {credential: nope}}", "unknown credential", "nope", nil},
+		{"bad provider", "credentials: {x: {provider: gpt}}", "provider must be", "", nil},
+		{"bad concurrency", "credentials: {x: {provider: codex, concurrency: -1}}", "concurrency must be >= 1", "", nil},
+		{"bad kind", "agents: {a: {kind: foo}}", "kind must be", "", nil},
+		{"runner alias", "agents: {a: {runner: [/bin/c, --bare, -p]}}", "", "", []string{"runner is deprecated", "arguments after the binary are ignored"}},
+		{"runner alias, one arg", "agents: {a: {runner: [/bin/c]}}", "", "", []string{"runner is deprecated"}},
+		{"runner with codex", "credentials: {cx: {provider: codex}}\nagents: {a: {kind: codex, runner: [x]}}", "runner implies kind claude", "cx", nil},
+		{"api_key_file implicit", "agents: {a: {kind: codex, api_key_file: " + key + "}}", "", "_apikey_a", nil},
+		{"codex warnings", "credentials: {cx: {provider: codex}}\nagents: {a: {kind: codex, max_turns: 3, max_budget_usd: 1}}", "", "cx",
+			[]string{"shell tools", "max_turns not enforced", "max_budget_usd not enforced"}},
+		{"agy warnings", "credentials: {g: {provider: agy}}\nagents: {a: {kind: agy, allowed_tools: [x]}}", "", "g",
+			[]string{"shell tools", "tool allowlist not enforced"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := Parse([]byte(tc.yaml))
+			if err != nil {
+				t.Fatal(err)
+			}
+			verr := c.Validate()
+			if tc.wantErr == "" && verr != nil {
+				t.Fatalf("unexpected: %v", verr)
+			}
+			if tc.wantErr != "" && (verr == nil || !strings.Contains(verr.Error(), tc.wantErr)) {
+				t.Fatalf("want %q, got %v", tc.wantErr, verr)
+			}
+			if got, _ := c.AgentCredential("a"); tc.wantCred != "" && got != tc.wantCred {
+				t.Fatalf("credential %q, want %q", got, tc.wantCred)
+			}
+			for _, w := range tc.warns {
+				if !hasWarning(c, w) {
+					t.Errorf("missing warning %q in %v", w, c.Warnings())
+				}
+			}
+		})
+	}
+}
+
+func TestAliasMappingAndWarningsAbsent(t *testing.T) {
+	key := filepath.Join(t.TempDir(), "k")
+	os.WriteFile(key, []byte("sk-x\n"), 0o600)
+	c, _ := Parse([]byte("agents: {a: {runner: [/bin/c, -p], api_key_file: " + key + "}}"))
+	a := c.Agents["a"]
+	if a.Kind != "claude" || a.Command != "/bin/c" {
+		t.Fatalf("alias: %+v", a)
+	}
+	name, cr := c.AgentCredential("a")
+	if name != "_apikey_a" || cr.Provider != "claude" || cr.APIKey.Value != "sk-x" || cr.Concurrency != 1 {
+		t.Fatalf("implicit: %s %+v", name, cr)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	// claude with unset limits and a codex agent without them: no kind warnings
+	c, _ = Parse([]byte("credentials: {cx: {provider: codex}}\nagents: {a: {kind: codex}}"))
+	if hasWarning(c, "max_turns") || hasWarning(c, "max_budget") {
+		t.Fatalf("spurious: %v", c.Warnings())
+	}
+}
+
+func TestLegacyExemptionAndNames(t *testing.T) {
+	key := filepath.Join(t.TempDir(), "k")
+	os.WriteFile(key, []byte("sk\n"), 0o600)
+	c, _ := Parse([]byte("agents: {a: {api_key_file: " + key + "}, b: {}}"))
+	if err := c.Validate(); err != nil {
+		t.Fatalf("legacy mix must validate: %v", err)
+	}
+	for yaml, want := range map[string]string{
+		"credentials: {Bad_Name: {provider: claude}}":                                            "name must match",
+		"credentials: {_apikey_x: {provider: claude}}":                                           "reserved",
+		"credentials: {_apikey_a: {provider: claude}}\nagents: {a: {api_key_file: " + key + "}}": "collides",
+	} {
+		c, _ := Parse([]byte(yaml))
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: want %q, got %v", yaml, want, err)
+		}
+	}
+}

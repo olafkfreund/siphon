@@ -2,9 +2,11 @@ package action
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -36,7 +38,7 @@ func fakeSystemd(t *testing.T, dir string) (stopped *[]string) {
 func TestTemplateRunSuccessWithFilesStdinEnv(t *testing.T) {
 	dir := t.TempDir()
 	fakeSystemd(t, dir)
-	exit, output, stdout, err := runCommand(context.Background(),
+	exit, output, stdout, _, err := runCommand(context.Background(),
 		[]string{"sh", "-c", `cat "$1"; printf ' %s ' "$TOKEN"; cat; echo oops >&2`, "x", FilePath("cfg")},
 		SandboxOptions{Mode: "systemd", Dir: dir, Timeout: 5 * time.Second,
 			Env: map[string]string{"TOKEN": "s3cret"}, Files: map[string][]byte{"cfg": []byte("from-file")}},
@@ -68,7 +70,7 @@ func TestTemplateRunFailureExitCode(t *testing.T) {
 func TestTemplateRunTimeoutInsideUnit(t *testing.T) {
 	dir := t.TempDir()
 	fakeSystemd(t, dir)
-	exit, output, _, _ := runCommand(context.Background(), []string{"sleep", "30"},
+	exit, output, _, _, _ := runCommand(context.Background(), []string{"sleep", "30"},
 		SandboxOptions{Mode: "systemd", Dir: dir, Timeout: time.Second}, nil, nil, false)
 	if exit != 124 || !strings.Contains(string(output), "timed out") {
 		t.Fatalf("exit=%d output=%q, want 124 from exec-job's timeout", exit, output)
@@ -88,11 +90,26 @@ func TestTemplateRunCancelStopsUnit(t *testing.T) {
 
 func TestExecJobRejectsPathInFileName(t *testing.T) {
 	jobFilesDir = t.TempDir()
-	job := filepath.Join(t.TempDir(), "job.json")
-	os.WriteFile(job, []byte(`{"argv":["true"],"files":{"../evil":"eA=="}}`), 0o600)
-	var out, errb strings.Builder
-	if code := execJob(job, &out, &errb); code != 125 {
-		t.Fatalf("code=%d stderr=%q", code, errb.String())
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(jobFilesDir, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"../x", "/abs", "a/../../b", "linked/x"} {
+		t.Run(name, func(t *testing.T) {
+			run := t.TempDir()
+			job, _ := json.Marshal(JobSpec{Argv: []string{"true"}, Files: map[string][]byte{name: []byte("bad")}})
+			path := filepath.Join(run, "job.json")
+			if err := os.WriteFile(path, job, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var out, errb strings.Builder
+			if code := execJob(run, path, &out, &errb); code != 125 {
+				t.Fatalf("code=%d stderr=%q", code, errb.String())
+			}
+		})
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Fatalf("wrote outside HOME: %v", entries)
 	}
 }
 
@@ -127,8 +144,106 @@ func TestExecJobRejectsBadEnv(t *testing.T) {
 	job := filepath.Join(t.TempDir(), "job.json")
 	os.WriteFile(job, []byte(`{"argv":["true"],"env":{"A=B":"x"}}`), 0o600)
 	var out, errb strings.Builder
-	if code := execJob(job, &out, &errb); code != 125 {
+	if code := execJob(filepath.Dir(job), job, &out, &errb); code != 125 {
 		t.Fatalf("code=%d", code)
+	}
+}
+
+func TestExecJobNestedFiles(t *testing.T) {
+	jobFilesDir = t.TempDir()
+	run := t.TempDir()
+	job, _ := json.Marshal(JobSpec{Argv: []string{"true"}, Files: map[string][]byte{".codex/auth.json": []byte("token")}})
+	path := filepath.Join(run, "job.json")
+	if err := os.WriteFile(path, job, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb strings.Builder
+	if code := execJob(run, path, &out, &errb); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errb.String())
+	}
+	parent := filepath.Join(jobFilesDir, ".codex")
+	info, err := os.Stat(parent)
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("parent mode: %v %v", info, err)
+	}
+	data, err := os.ReadFile(filepath.Join(parent, "auth.json"))
+	if err != nil || string(data) != "token" {
+		t.Fatalf("file: %q %v", data, err)
+	}
+	info, err = os.Stat(filepath.Join(parent, "auth.json"))
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("file mode: %v %v", info, err)
+	}
+}
+
+func TestTemplateWriteback(t *testing.T) {
+	dir := t.TempDir()
+	fakeSystemd(t, dir)
+	for _, changed := range []bool{false, true} {
+		name := "unchanged"
+		cmd := "true"
+		if changed {
+			name = "changed"
+			cmd = `printf new > "$HOME/.codex/auth.json"; exit 3`
+		}
+		t.Run(name, func(t *testing.T) {
+			exit, _, _, wb, err := templateRun(context.Background(), dir, JobSpec{
+				Argv: []string{"sh", "-c", cmd}, Files: map[string][]byte{".codex/auth.json": []byte("old")},
+				Writeback: []string{".codex/auth.json"},
+			})
+			if err != nil || (changed && exit != 3) || (!changed && exit != 0) {
+				t.Fatalf("exit=%d err=%v", exit, err)
+			}
+			if changed && string(wb[0]) != "new" || !changed && len(wb) != 0 {
+				t.Fatalf("writeback=%v", wb)
+			}
+		})
+	}
+}
+
+func TestTemplateWritebackCap(t *testing.T) {
+	dir := t.TempDir()
+	fakeSystemd(t, dir)
+	_, _, _, wb, err := templateRun(context.Background(), dir, JobSpec{
+		Argv: []string{"sh", "-c", `head -c 1100000 /dev/zero > "$HOME/big"`}, Writeback: []string{"big"},
+	})
+	if err != nil || len(wb[0]) != outputCap {
+		t.Fatalf("writeback length=%d err=%v", len(wb[0]), err)
+	}
+}
+
+func TestTemplateRunIgnoresFIFOs(t *testing.T) {
+	for _, name := range []string{"stdout", "wb-0"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			orig := startUnit
+			startUnit = func(_ context.Context, unit string) error {
+				id := strings.TrimSuffix(strings.TrimPrefix(unit, "agentgw-action@"), ".service")
+				run := filepath.Join(dir, id)
+				if err := syscall.Mkfifo(filepath.Join(run, name), 0o600); err != nil {
+					return err
+				}
+				return nil
+			}
+			t.Cleanup(func() { startUnit = orig })
+			started := time.Now()
+			_, stdout, _, wb, err := templateRun(context.Background(), dir, JobSpec{Writeback: []string{"token"}})
+			if err != nil || len(stdout) != 0 || len(wb) != 0 || time.Since(started) >= 2*time.Second {
+				t.Fatalf("stdout=%q wb=%v err=%v elapsed=%v", stdout, wb, err, time.Since(started))
+			}
+		})
+	}
+}
+
+func TestWritebackErrorKeepsExitAndOutput(t *testing.T) {
+	dir := t.TempDir()
+	fakeSystemd(t, dir)
+	exit, stdout, stderr, wb, err := templateRun(context.Background(), dir, JobSpec{
+		Argv:      []string{"sh", "-c", `ln -s /tmp "$HOME/linked"; printf good > "$HOME/changed"; printf answer`},
+		Writeback: []string{"linked/token", "changed"},
+	})
+	if err != nil || exit != 0 || string(stdout) != "answer" || !strings.Contains(string(stderr), "writeback") || string(wb[1]) != "good" {
+		t.Fatalf("exit=%d stdout=%q stderr=%q wb=%v err=%v", exit, stdout, stderr, wb, err)
 	}
 }
 

@@ -19,6 +19,15 @@
           "approve": {
             "type": "boolean"
           },
+          "command": {
+            "type": "string"
+          },
+          "credential": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
           "max_budget_usd": {
             "type": "number"
           },
@@ -42,6 +51,25 @@
           },
           "timeout": {
             "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "credentials": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key": {
+            "description": "env:NAME, file:/path, or (where allowed) a literal",
+            "type": "string"
+          },
+          "concurrency": {
+            "type": "integer"
+          },
+          "provider": {
             "type": "string"
           }
         },

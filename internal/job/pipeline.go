@@ -19,6 +19,7 @@ import (
 
 	"github.com/olafkfreund/MCP-AgentGateway/internal/action"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/config"
+	"github.com/olafkfreund/MCP-AgentGateway/internal/cred"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/rule"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/source"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
@@ -322,12 +323,14 @@ func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, ex
 // runAgent runs the agent and feeds its JSON result back as an agent-result
 // event one level deeper; rules see it only with allow_agent_events (loop guard).
 func (p *Pipeline) runAgent(ctx context.Context, j store.QueuedJob, pl Payload) (string, int, string) {
-	state, exit, out, _ := p.agentExec(ctx, j, pl)
+	state, exit, out, _ := p.agentExec(ctx, j, pl, false)
 	return state, exit, out
 }
 
 // agentExec is runAgent that also returns the agent's stdout (routine steps parse it).
-func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload) (string, int, string, []byte) {
+// wait=false (plain agent jobs) puts the job back in the queue when its login
+// is busy instead of tying up a worker; routine steps (wait=true) block.
+func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload, wait bool) (string, int, string, []byte) {
 	a := p.Cfg.Agents[pl.Action.Agent]
 	if a == nil {
 		return "failed", -1, "unknown agent " + pl.Action.Agent, nil
@@ -341,29 +344,127 @@ func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload)
 		}
 		servers[name] = action.MCPServer{URL: s.URL, Command: s.Command, Headers: h}
 	}
-	res, err := action.RunAgent(ctx, action.AgentOptions{
-		Runner: a.Runner, Prompt: a.Prompt, Env: pl.Env, MCP: servers,
+	opts := action.AgentOptions{
+		Kind: a.Kind, Command: a.Command, Runner: a.Runner,
+		Prompt: a.Prompt, Env: pl.Env, MCP: servers,
 		AllowedTools: a.AllowedTools, MaxTurns: a.MaxTurns, MaxBudgetUSD: a.MaxBudgetUSD,
 		Timeout: time.Duration(a.Timeout), Sandbox: p.sandbox(0),
 		Secrets: p.Cfg.Secrets(), WorkDir: filepath.Join(filepath.Dir(p.Cfg.Server.DB), "jobs", strconv.FormatInt(j.ID, 10)),
-		APIKeyFile: a.APIKeyFile,
-	})
+	}
+	// Credential: an API key, or a subscription login from the store. No
+	// credential at all is the legacy path (the runner's own environment).
+	credName, c := p.Cfg.AgentCredential(pl.Action.Agent)
+	st := cred.StoreFor(p.Cfg)
+	var start map[string][]byte
+	switch {
+	case c == nil:
+	case c.APIKey.Value != "":
+		opts.APIKey = c.APIKey.Value
+	default:
+		// One run per login at a time (default): rotating refresh tokens
+		// would otherwise invalidate each other.
+		actx := ctx
+		if !wait {
+			var cancel context.CancelFunc
+			actx, cancel = context.WithTimeout(ctx, 50*time.Millisecond)
+			defer cancel()
+		}
+		release, err := cred.Acquire(actx, credName, c.Concurrency)
+		if err != nil && !wait && ctx.Err() == nil {
+			if rerr := store.RequeueJob(p.Store.DB, j.ID, j.ResumeStep, j.Output, p.Now().Add(credBusyRetry)); rerr != nil {
+				return "failed", -1, rerr.Error(), nil
+			}
+			return stateRequeued, 0, "", nil
+		}
+		if err != nil {
+			return "failed", -1, "waiting for credential " + credName + ": " + err.Error(), nil
+		}
+		defer release()
+		files, err := st.Load(credName)
+		if err != nil || len(files) == 0 {
+			return "failed", 1, fmt.Sprintf("credential %s is not imported: run `agentgw credentials import %s < <login file>`", credName, credName), nil
+		}
+		opts.CredFiles, start = files, files
+	}
+	res, err := action.RunAgent(ctx, opts)
+	if c != nil {
+		p.saveWriteback(j, credName, c.Provider, start, res.Writeback)
+	}
 	out := string(res.Output)
 	if err != nil {
 		return "failed", res.Exit, out + err.Error(), nil
 	}
 	if res.Exit != 0 {
+		// Classify only failures: a successful answer may well mention "401".
+		switch res.Class {
+		case "auth":
+			msg := fmt.Sprintf("credential %s needs re-login: log in with %s on the host, then run `agentgw credentials import %s`", credName, a.Kind, credName)
+			p.audit("credential_reauth", j.ID, credName)
+			return "failed", res.Exit, msg + "\n" + out, res.Stdout
+		case "quota":
+			return "failed", res.Exit, "quota/rate limit reached for " + credName + "\n" + out, res.Stdout
+		}
 		return "failed", res.Exit, out, res.Stdout
 	}
-	if data, derr := source.DecodeJSON(res.Stdout); derr == nil {
-		ev := rule.Event{Source: config.AgentResultSource, Data: data, Depth: j.Depth + 1, ParentID: j.ID}
-		if _, _, herr := p.HandleEvent(ctx, ev, false); herr != nil {
-			slog.Warn("agent-result rules", "job", j.ID, "err", herr)
+	// One agent-result shape for every kind: {kind, result, raw}. A JSON-object
+	// answer keeps its own fields at the top too, so existing rules still match.
+	data := map[string]any{}
+	if m, ok := res.Raw.(map[string]any); ok {
+		for k, v := range m {
+			data[k] = v
 		}
-	} else {
-		slog.Warn("agent stdout is not JSON; no agent-result event", "job", j.ID, "err", derr)
+	}
+	data["kind"], data["result"], data["raw"] = a.Kind, res.Result, res.Raw
+	ev := rule.Event{Source: config.AgentResultSource, Depth: j.Depth + 1, ParentID: j.ID, Data: data}
+	if _, _, herr := p.HandleEvent(ctx, ev, false); herr != nil {
+		slog.Warn("agent-result rules", "job", j.ID, "err", herr)
 	}
 	return "done", 0, out, res.Stdout
+}
+
+// credBusyRetry is how long a plain agent job waits in the queue when its
+// login is busy. ponytail: fixed; tune if logins queue deeply.
+const credBusyRetry = 5 * time.Second
+
+// saveWriteback stores refreshed login files: shape-checked, then
+// compare-and-swap against what this run started with.
+func (p *Pipeline) saveWriteback(j store.QueuedJob, credName, provider string, start, wb map[string][]byte) {
+	st := cred.StoreFor(p.Cfg)
+	for file, b := range wb {
+		_, norm, err := cred.ValidateFor(provider, true, b)
+		if err != nil {
+			slog.Warn("credential write-back rejected", "credential", credName, "file", file, "err", err)
+			continue
+		}
+		// A run must not swap the owner's login for another account (a
+		// prompt-injected agent controls what it writes back).
+		if !cred.SameAccount(provider, start[file], norm) {
+			slog.Warn("credential write-back rejected: account changed", "credential", credName, "file", file)
+			p.audit("credential_writeback_rejected", j.ID, credName)
+			continue
+		}
+		wrote, err := st.Save(credName, file, start[file], norm)
+		if err != nil {
+			slog.Warn("credential write-back failed", "credential", credName, "err", err)
+			continue
+		}
+		if wrote {
+			p.audit("credential_refreshed", j.ID, credName)
+		}
+	}
+}
+
+// audit writes one audit row outside any transaction.
+func (p *Pipeline) audit(event string, jobID int64, detail string) {
+	tx, err := p.Store.DB.Begin()
+	if err != nil {
+		return
+	}
+	if store.Audit(tx, p.Now(), "agent", event, jobID, detail) == nil {
+		tx.Commit()
+	} else {
+		tx.Rollback()
+	}
 }
 
 // RunOnce polls every polled source once, then runs whatever got queued.

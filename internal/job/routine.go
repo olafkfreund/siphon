@@ -259,7 +259,7 @@ func (p *Pipeline) execOnce(ctx context.Context, j store.QueuedJob, st config.St
 		actx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 		var state string
-		state, exit, out, stdout = p.agentExec(actx, j, Payload{Action: config.Action{Agent: st.Agent}, Env: env})
+		state, exit, out, stdout = p.agentExec(actx, j, Payload{Action: config.Action{Agent: st.Agent}, Env: env}, true)
 		if state != "done" && exit == 0 {
 			exit = -1
 		}

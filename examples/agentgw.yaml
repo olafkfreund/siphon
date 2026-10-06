@@ -108,9 +108,16 @@ rules:
     when: 'event.ok == true'
     action: { cmd: [echo, "triage finished"] }
 
+# Logins agentgw owns. Import with `agentgw credentials import` (see README).
+credentials:
+  claude-max: { provider: claude }  # subscription; omit api_key
+  chatgpt:    { provider: codex }
+  google:     { provider: agy, concurrency: 1 }
+
 agents:
   triage-task:
-    runner: [claude, --bare, -p]    # default; any argv runner works
+    kind: claude                    # default; claude | codex | agy
+    credential: claude-max          # optional: the only claude subscription is the default
     prompt: "Task {{.item.id}} failed: {{.item.error}}. Diagnose with the factory tools and report as JSON."
     mcp: [factory]                  # only these sources are exposed to the agent
     allowed_tools: [mcp__factory__task_get_logs, mcp__factory__task_status]
@@ -118,6 +125,20 @@ agents:
     max_budget_usd: 1
     timeout: 10m
     approve: true                   # default true for agents
+
+  triage-codex:
+    kind: codex                     # validate warns: no shell-tool, turn or budget limits
+    credential: chatgpt
+    prompt: "Summarise task {{.item.id}} using the factory tools."
+    mcp: [factory]
+    allowed_tools: [mcp__factory__task_status]
+    max_turns: 10
+
+  triage-agy:
+    kind: agy                       # validate warns: no tool allowlist, turn or budget limits
+    credential: google
+    prompt: "Summarise task {{.item.id}} using the factory tools."
+    mcp: [factory]
 
 routines:
   review-pr:

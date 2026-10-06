@@ -10,7 +10,7 @@ source of truth, and one SQLite file holds the state.
 sources            rules                        actions
 mcp      ─┐        when: <expr>                 cmd      argv, sandboxed
 http     ─┼──────▶ on: edge | each      ──────▶ unit     starts an allowlisted systemd unit and waits for it
-webhook  ─┘        cooldown, repeat             agent    claude (or any argv runner), tool allowlist
+webhook  ─┘        cooldown, repeat             agent    claude, codex or agy on a subscription login
                                                 routine  ordered steps: if, retry, approve, continue_on_error
 ```
 
@@ -21,6 +21,22 @@ webhook  ─┘        cooldown, repeat             agent    claude (or any argv
   `headers` and `source`. `on: edge` fires on false→true, `on: each` fires once
   per id; `repeat` and `cooldown` limit how often.
 - **Actions** run as jobs in a worker pool, with approval, audit and retention.
+
+## Development
+
+The project ships a [devenv](https://devenv.sh) shell (Go, gopls, sqlite, jq,
+curl, openssl) with `GOTOOLCHAIN=local`, so Go never downloads a toolchain:
+
+```sh
+devenv shell        # or `devenv allow` once, to activate on cd
+run-tests           # go vet + go test -race
+schema              # regenerate schema/agentgw.schema.json
+vm-test             # the NixOS VM test (nix build .#checks.x86_64-linux.vm)
+agentgw validate -config examples/agentgw.yaml
+devenv test         # what CI runs: vet + tests; fails on any failing test
+```
+
+`nix develop` still works for anyone without devenv.
 
 ## Quick start
 
@@ -119,6 +135,8 @@ All commands that read the config take `-config <file>` (default `agentgw.yaml`)
 | `agentgw run-once [-config f]` | Poll every source once, evaluate rules, run the jobs. Holds the DB lock. |
 | `agentgw serve [-config f]` | The daemon: pollers, webhook endpoints, workers, portal and API. Holds the DB lock. |
 | `agentgw jobs ls [-config f] [-state s]` | List jobs (newest first). |
+| `agentgw credentials import [-config f] [-token-stdin] <name>` | Read a login file (or, with `-token-stdin`, a Claude setup-token) from stdin, check its shape and store it. |
+| `agentgw credentials ls [-config f]` | List stored logins: name, provider, token expiry, last write-back. Never prints secrets. |
 | `agentgw approve [-config f] [-by name] <job id>` | Approve a pending job (`-by` defaults to `$USER`). |
 | `agentgw deny [-config f] [-by name] <job id>` | Deny a pending job. |
 | `agentgw schema` | Print the JSON Schema for `agentgw.yaml`. |
@@ -156,6 +174,136 @@ See [`examples/agentgw.yaml`](examples/agentgw.yaml) for every source type, rule
 mode and action type, plus a routine with retry and approval. To add a new kind
 of source, see [`docs/adding-a-source.md`](docs/adding-a-source.md).
 
+## Agents and subscriptions
+
+An agent runs a coding-agent CLI inside the same systemd sandbox as `cmd`
+actions. **Subscription logins are the default**; API keys stay supported.
+Three kinds exist: `claude` (default), `codex` and `agy` (Antigravity).
+
+```yaml
+credentials:
+  claude-max: { provider: claude }
+  chatgpt:    { provider: codex }
+  google:     { provider: agy }
+  openai-key: { provider: codex, api_key: "file:/run/credentials/agentgw.service/openai" }
+
+agents:
+  triage:
+    kind: codex                  # claude (default) | codex | agy
+    credential: chatgpt          # optional if exactly one subscription credential of that kind exists
+    command: /run/current-system/sw/bin/codex   # optional binary override
+    prompt: "..."
+```
+
+### Import a login
+
+Log in on a host where the CLI works, then import the login file as the
+service user. The file is read from stdin, so this works across users. The
+store is `<dir of server.db>/credentials/<name>/` (mode 0700), which the
+sandbox never sees; agentgw hands each run only the files it needs.
+
+| Provider | Log in | Import |
+|---|---|---|
+| claude | `claude` (then `/login`) | `sudo -u agentgw agentgw credentials import -config <path> claude-max < ~/.claude/.credentials.json` |
+| claude, non-rotating (not yet verified live) | `claude setup-token` | `... credentials import -config <path> -token-stdin claude-max` (paste the token on stdin; used as `CLAUDE_CODE_OAUTH_TOKEN`) |
+| codex | `codex login` | `sudo -u agentgw agentgw credentials import -config <path> chatgpt < ~/.codex/auth.json` |
+| agy | `agy` (sign in) | `sudo -u agentgw agentgw credentials import -config <path> google < ~/.gemini/antigravity-cli/antigravity-oauth-token` |
+
+Import checks the file's shape. For Claude only the `claudeAiOauth` object is
+kept (MCP OAuth entries are dropped). `agentgw credentials ls -config <path>`
+shows name, provider, token expiry and last write-back, never a secret.
+
+### Trust: the login lives in the agent's sandbox
+
+A subscription agent has its login, **including the refresh token**, in its own
+sandbox HOME while it runs. A prompt-injected agent could send it out: network
+egress is open apart from the cloud metadata addresses. Use a dedicated or
+low-value account for each credential, and restrict egress where that matters
+(an HTTP proxy, or systemd `IPAddressAllow`/`IPAddressDeny` through a module
+override). On write-back agentgw re-validates the file's shape, drops unknown
+fields, and for codex refuses a login that belongs to a different account.
+Claude and agy logins carry no account id to compare. Each replace keeps the
+previous file as `<file>.prev` (0600) in the credential's store directory, so
+a bad write-back can be undone by copying it back.
+
+### What each kind can enforce
+
+| Control | claude | codex | agy |
+|---|---|---|---|
+| Built-in tools off | yes (`--tools ""`) | no: runs read-only (`-s read-only`) | no: plan mode plus `--sandbox` |
+| Exact MCP tool allowlist | yes | yes (`enabled_tools`, per-tool approval) | no: only the listed MCP servers are configured |
+| `max_turns`, `max_budget_usd` | yes | no (timeout only) | no (`--print-timeout` and timeout) |
+| Prompt delivery | stdin | stdin | one `--print=<prompt>` argv element |
+
+agy's prompt is therefore on its argv: other users on the host can see it only
+under `sandbox: none` (the systemd sandbox hides `/proc`), and prompts over
+about 128 KiB fail. MCP bearer headers stay off argv: Codex gets its MCP
+configuration from a config file in its private HOME, not from `-c` flags.
+
+`agentgw validate` prints one warning per agent for each control its kind
+cannot enforce. Nothing is refused: the systemd sandbox remains the outer
+boundary. Every kind's result reaches `agent-result` rules as
+`{"kind", "result": <final text>, "raw": <the CLI's JSON, or null>}`.
+
+### Refresh, write-back and concurrency
+
+CLIs refresh their tokens while running. After each run agentgw copies a
+changed login file back into the store, but only if the store still holds the
+bytes the run started with (compare-and-swap under a per-credential lock);
+otherwise the copy with the later token expiry wins. Write-back bytes never
+enter job output, and credential contents are masked in it.
+`credentials.<name>.concurrency` (default **1**) limits concurrent runs per
+login so two runs never race a rotating refresh token; extra jobs wait.
+
+If a login stops working, the job fails with
+`credential <name> needs re-login: log in with <kind> on the host, then run
+agentgw credentials import <name>`, and the audit log records
+`credential_reauth`. Quota errors are reported as
+`quota/rate limit reached for <name>` and are not treated as auth failures.
+Each refreshed token that is saved back is audited as `credential_refreshed`.
+
+Verified live (2026-10-06) on real subscriptions: a Claude Max login and a
+ChatGPT-plan Codex login, each imported with `credentials import`, ran an
+agent that called an allowlisted MCP tool. Antigravity authenticated but was
+blocked by the account's own quota at the time; its full run is pending.
+
+### API keys
+
+Set `api_key: env:NAME` or `file:/path` on the credential. The key is read
+when the config loads, so changing it needs a restart. Claude runs with
+`--bare` and receives the key as `ANTHROPIC_API_KEY`; codex gets `{"OPENAI_API_KEY": ...}` in its
+`auth.json` with `forced_login_method=api`; agy gets `GEMINI_API_KEY` (not yet
+verified against a live agy).
+
+### Where the CLIs come from
+
+Install them into the sandbox with `services.agentgw.agentPackages`
+(`pkgs.claude-code`, `pkgs.codex`; agy is not in nixpkgs, so use your own
+package). System-wide CLI configuration under `/etc` (for example
+`/etc/codex/`) is visible inside the sandbox and applies to agent runs; the
+user's own `~/.claude`, `~/.codex` and `~/.gemini` are not.
+
+### Subscriptions and terms
+
+Automated or headless use of a consumer subscription may be restricted by the
+provider's terms. Read Anthropic's consumer terms of service and usage policy,
+OpenAI's terms of use, and Google's terms of service and the Antigravity
+terms before pointing a subscription at an unattended agent. Compliance is the
+operator's responsibility.
+
+### Migrating from `runner:` and `api_key_file:`
+
+- `runner: [claude, ...]` still works as a deprecated alias for
+  `kind: claude` with `command: <runner[0]>`; arguments after the binary are
+  ignored, and `validate` warns about both. Replace it with `kind`/`command`.
+- `api_key_file: /path` still works: it becomes an implicit API-key credential
+  for the agent's kind (named `_apikey_<agent>`, a reserved prefix). Prefer a `credentials:` entry with `api_key: file:/path`.
+- Credential names are lower-case `[a-z0-9][a-z0-9_-]*`.
+- With `sandbox: none`, agent runs get a private temporary HOME; plain `cmd`
+  actions keep yours.
+- On NixOS add the CLIs to `services.agentgw.agentPackages` so the action
+  unit can find them.
+
 ## Security notes
 
 Read these before running it anywhere that matters.
@@ -179,10 +327,15 @@ Read these before running it anywhere that matters.
   capability set, a syscall filter, hidden `/proc`, the metadata addresses
   blocked, `LimitFSIZE=16M`, `TasksMax` and a `maxActionRuntime` ceiling. An
   action cannot read agentgw's state DB or credentials (the VM test checks).
-- **Secrets stay off argv and out of readable paths.** agentgw hands each run
-  its argv, stdin and private files (MCP config, API key) in a job file that
-  only agentgw and that run's sandbox user (via group `agentgw-io`) can read;
-  inside the unit they land in its private `/tmp`.
+- **Secrets stay off argv and out of readable paths, with one exception.**
+  agentgw hands each run its argv, stdin and private files (MCP config, API key,
+  subscription login) in a job file that only agentgw and that run's sandbox
+  user (via group `agentgw-io`) can read; inside the unit they land in its
+  private `/tmp`. The exception is deliberate: **a subscription agent holds its
+  login's refresh token in its own sandbox HOME**, and a prompt-injected agent
+  could exfiltrate it over the open network. Use a dedicated or low-value
+  account per credential and restrict egress where that matters (see
+  "Agents and subscriptions"). agy also takes its prompt as an argv element.
 - **agentgw cannot raise its own privileges.** The module's polkit rule lets the
   `agentgw` user only start/stop/reset `agentgw-action@<16 hex>` instances and
   start the units in your `units:` allowlist; every other polkit action
