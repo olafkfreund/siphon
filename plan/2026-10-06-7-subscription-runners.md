@@ -166,3 +166,8 @@ Revert the merge commit. The old `runner`/`api_key_file` configs keep working th
   - `go.mod` relaxed from `go 1.26.8` to `go 1.26.0`, because devenv's nixpkgs has Go 1.26.7.
   - Verified: `devenv test` passes, and fails with exit 1 on a deliberately failing canary test; `nix build` is unchanged.
   - Not run: `devenv allow` (the user's consent).
+- Step 5:
+  - **The legacy no-credential exemption is kept**, not removed as planned. The Rollback promise ("old `runner:` configs keep working") requires it: a Claude agent with no credential uses the runner's own environment, as before.
+  - The agent-result event keeps a JSON-object answer's own fields at the top level, alongside `kind`/`result`/`raw`, so existing rules (`event.ok`) still match.
+  - Classification applies to failed runs only.
+  - Write-back is shape-validated with `cred.Validate`, then compare-and-swap saved, then audited as `credential_refreshed`.
