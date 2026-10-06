@@ -158,3 +158,39 @@ rules:
 - **Live:** one claude (API-key or subscription, whichever is safe at the
   time) and one codex subscription run through the real proxy, with the
   built-in lists only. agy once its quota resets.
+
+## Amendment 1 (status: draft, 2026-10-06): private network namespace for the restricted template
+
+**Why.** The pre-PR security review found that `IPAddressAllow=127.77.0.1/32` filters by address, not by port.
+
+- Any host service bound to all addresses is reachable from the restricted sandbox at `127.77.0.1:<port>`. That covers agentgw's own default `:8080`, sshd and databases.
+- This contradicts the Design claim that "loopback services other than the proxy are unreachable".
+
+A second finding: nscd still resolves names for the sandbox, which is a slow DNS exfiltration channel. Owner decisions: a private network namespace, and hiding nscd with a live check.
+
+**Design change (replaces "Template unit, when egress is enforced").**
+
+- **The restricted `agentgw-action@` gets `PrivateNetwork=yes`.**
+  - Its namespace has only its own `lo`, so no host address or port is reachable by construction.
+  - `IPAddressDeny=any` plus `IPAddressAllow=127.0.0.1/32` stay on as a second layer.
+- **The proxy also listens on a unix socket**, `/run/agentgw/egress.sock`, owned by `agentgw:agentgw-io` with mode `0660`. The restricted template bind-mounts it in.
+  - The TCP listener on `server.egress.listen` is kept for `sandbox: none` and for the open template's tests. It is unchanged.
+- **`exec-job` (already the first process in the unit) starts a forwarder when the job has egress.**
+  - The forwarder listens on `127.0.0.1:3128` inside the namespace, and each connection is piped to the unix socket.
+  - The run's `HTTPS_PROXY` then points at `http://run-<id>:<token>@127.0.0.1:3128`. Proxy authentication, allowlists and SSRF checks are unchanged, because the proxy still sees every CONNECT.
+  - The forwarder stops when the agent process exits.
+- **The restricted template also hides `/run/nscd`** (as well as `/run/dbus` and `/run/systemd/resolve`, already done). The sandbox then has no name resolution at all, and the proxy resolves names.
+  - **Risk:** user and group lookups for the DynamicUser go through nscd on NixOS. A CLI that calls `getpwuid` (Node's `os.userInfo()`) could fail.
+  - **Verification:** the VM test runs the real `claude` and `codex` packages inside the restricted template (`--version`, plus one prompt that must fail only at the network, through the proxy). This is in addition to the stubs.
+- **The open template is unchanged.**
+
+**Alternatives rejected.**
+
+- An nftables cgroup rule limiting the action slice to `127.77.0.1` tcp/3128. It needs a slice that always exists and the nftables backend, and it is more fragile.
+- Documenting the gap and following up later: rejected by the owner.
+
+**Verification added.**
+
+- In the VM test, agentgw listens on `0.0.0.0:8080`. The probe must fail to reach both `127.77.0.1:8080` and `127.0.0.1:8080`.
+- The probe also checks that `getent hosts external` fails.
+- An allowed host still works through the proxy.
