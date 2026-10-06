@@ -37,6 +37,7 @@ commands:
   serve [-config f]                       run the daemon
   jobs ls [-config f] [-state s]          list jobs
   approve|deny [-config f] [-by n] <id>   decide a pending job
+  schema                                  print the JSON Schema for agentgw.yaml
   version                                 print the version
 `
 
@@ -51,6 +52,11 @@ func main() {
 	switch cmd, args := os.Args[1], os.Args[2:]; cmd {
 	case "version":
 		fmt.Println(version)
+	case "schema":
+		var b []byte
+		if b, err = config.Schema(); err == nil {
+			_, err = os.Stdout.Write(b)
+		}
 	case "validate":
 		err = validate(args)
 	case "rules":
