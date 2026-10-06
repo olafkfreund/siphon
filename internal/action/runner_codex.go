@@ -3,6 +3,7 @@ package action
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -19,7 +20,7 @@ func tomlArray(v []string) string {
 	return "[" + strings.Join(q, ",") + "]"
 }
 
-func buildCodex(o AgentOptions, cmd, prompt string) ([]string, []byte, map[string]string, map[string][]byte, []string, []string, error) {
+func buildCodex(o AgentOptions, cmd, prompt, home string) ([]string, []byte, map[string]string, map[string][]byte, []string, []string, error) {
 	method := "chatgpt"
 	files := map[string][]byte{}
 	var wb, store []string
@@ -32,6 +33,7 @@ func buildCodex(o AgentOptions, cmd, prompt string) ([]string, []byte, map[strin
 		store = []string{"auth.json"}
 	}
 	argv := []string{cmd, "exec", "--skip-git-repo-check", "--ephemeral", "--strict-config", "-s", "read-only", "-c", "forced_login_method=" + tomlString(method)}
+	var config strings.Builder
 	names := make([]string, 0, len(o.MCP))
 	for n := range o.MCP {
 		names = append(names, n)
@@ -45,7 +47,7 @@ func buildCodex(o AgentOptions, cmd, prompt string) ([]string, []byte, map[strin
 		prefix := "mcp_servers." + n + "."
 		switch {
 		case s.URL != "" && len(s.Command) == 0:
-			argv = append(argv, "-c", prefix+"url="+tomlString(s.URL))
+			fmt.Fprintln(&config, prefix+"url="+tomlString(s.URL))
 			if len(s.Headers) > 0 {
 				keys := make([]string, 0, len(s.Headers))
 				for k := range s.Headers {
@@ -56,10 +58,11 @@ func buildCodex(o AgentOptions, cmd, prompt string) ([]string, []byte, map[strin
 				for _, k := range keys {
 					pairs = append(pairs, tomlString(k)+"="+tomlString(s.Headers[k]))
 				}
-				argv = append(argv, "-c", prefix+"http_headers={"+strings.Join(pairs, ",")+"}")
+				fmt.Fprintln(&config, prefix+"http_headers={"+strings.Join(pairs, ",")+"}")
 			}
 		case s.URL == "" && len(s.Command) > 0:
-			argv = append(argv, "-c", prefix+"command="+tomlString(s.Command[0]), "-c", prefix+"args="+tomlArray(s.Command[1:]))
+			fmt.Fprintln(&config, prefix+"command="+tomlString(s.Command[0]))
+			fmt.Fprintln(&config, prefix+"args="+tomlArray(s.Command[1:]))
 		default:
 			return nil, nil, nil, nil, nil, nil, fmt.Errorf("mcp server %q needs one URL or command", n)
 		}
@@ -73,11 +76,14 @@ func buildCodex(o AgentOptions, cmd, prompt string) ([]string, []byte, map[strin
 			}
 		}
 		sort.Strings(tools)
-		argv = append(argv, "-c", prefix+"enabled_tools="+tomlArray(tools))
+		fmt.Fprintln(&config, prefix+"enabled_tools="+tomlArray(tools))
 		for _, tool := range tools {
-			argv = append(argv, "-c", prefix+"tools."+tool+".approval_mode="+tomlString("approve"))
+			fmt.Fprintln(&config, prefix+"tools."+tool+".approval_mode="+tomlString("approve"))
 		}
 	}
+	if config.Len() > 0 {
+		files[".codex/config.toml"] = []byte(config.String())
+	}
 	argv = append(argv, "-")
-	return argv, []byte(prompt), map[string]string{"CODEX_HOME": FilePath(".codex")}, files, wb, store, nil
+	return argv, []byte(prompt), map[string]string{"CODEX_HOME": filepath.Join(home, ".codex")}, files, wb, store, nil
 }

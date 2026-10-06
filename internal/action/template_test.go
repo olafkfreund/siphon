@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -208,6 +209,41 @@ func TestTemplateWritebackCap(t *testing.T) {
 	})
 	if err != nil || len(wb[0]) != outputCap {
 		t.Fatalf("writeback length=%d err=%v", len(wb[0]), err)
+	}
+}
+
+func TestTemplateRunIgnoresFIFOs(t *testing.T) {
+	for _, name := range []string{"stdout", "wb-0"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			orig := startUnit
+			startUnit = func(_ context.Context, unit string) error {
+				id := strings.TrimSuffix(strings.TrimPrefix(unit, "agentgw-action@"), ".service")
+				run := filepath.Join(dir, id)
+				if err := syscall.Mkfifo(filepath.Join(run, name), 0o600); err != nil {
+					return err
+				}
+				return nil
+			}
+			t.Cleanup(func() { startUnit = orig })
+			started := time.Now()
+			_, stdout, _, wb, err := templateRun(context.Background(), dir, JobSpec{Writeback: []string{"token"}})
+			if err != nil || len(stdout) != 0 || len(wb) != 0 || time.Since(started) >= 2*time.Second {
+				t.Fatalf("stdout=%q wb=%v err=%v elapsed=%v", stdout, wb, err, time.Since(started))
+			}
+		})
+	}
+}
+
+func TestWritebackErrorKeepsExitAndOutput(t *testing.T) {
+	dir := t.TempDir()
+	fakeSystemd(t, dir)
+	exit, stdout, stderr, wb, err := templateRun(context.Background(), dir, JobSpec{
+		Argv:      []string{"sh", "-c", `ln -s /tmp "$HOME/linked"; printf good > "$HOME/changed"; printf answer`},
+		Writeback: []string{"linked/token", "changed"},
+	})
+	if err != nil || exit != 0 || string(stdout) != "answer" || !strings.Contains(string(stderr), "writeback") || string(wb[1]) != "good" {
+		t.Fatalf("exit=%d stdout=%q stderr=%q wb=%v err=%v", exit, stdout, stderr, wb, err)
 	}
 }
 

@@ -36,8 +36,8 @@ func TestRunCommandNoneWriteback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(string(output)); !os.IsNotExist(err) {
-		t.Fatalf("temp HOME still exists: %q: %v", output, err)
+	if string(output) != os.Getenv("HOME") {
+		t.Fatalf("HOME changed: %q", output)
 	}
 	for _, name := range []string{"../escape", "/absolute"} {
 		if _, _, _, _, err := runCommand(context.Background(), []string{"true"}, SandboxOptions{Mode: "none", Files: map[string][]byte{name: []byte("x")}}, nil, nil, false); err == nil {
@@ -74,5 +74,14 @@ func TestRunCmd(t *testing.T) {
 	_, output, err = RunCmd(context.Background(), []string{"printf", "%s", "abcdef"}, SandboxOptions{Mode: "none"}, []string{"abc", "abcdef"})
 	if err != nil || string(output) != "***" {
 		t.Fatalf("overlapping secrets: %q, %v", output, err)
+	}
+}
+
+func TestRunCmdNoneKeepsParentHOME(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	exit, output, err := RunCmd(context.Background(), []string{"sh", "-c", `printf '%s' "$HOME"`}, SandboxOptions{Mode: "none"}, nil)
+	if err != nil || exit != 0 || string(output) != home {
+		t.Fatalf("exit=%d HOME=%q err=%v", exit, output, err)
 	}
 }

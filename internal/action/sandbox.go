@@ -11,4 +11,6 @@ type SandboxOptions struct {
 	Env       map[string]string // systemd: extra child env (secrets stay off argv)
 	Files     map[string][]byte // systemd: private files, at FilePath(name) inside the unit
 	Writeback []string
+	home      string
+	stderr    *[]byte
 }
