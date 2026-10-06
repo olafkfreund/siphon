@@ -156,6 +156,32 @@ See [`examples/agentgw.yaml`](examples/agentgw.yaml) for every source type, rule
 mode and action type, plus a routine with retry and approval. To add a new kind
 of source, see [`docs/adding-a-source.md`](docs/adding-a-source.md).
 
+## Agents and Claude authentication
+
+The default runner is `claude --bare -p`. `--bare` is the most isolated mode,
+but it reads only `ANTHROPIC_API_KEY` or an `apiKeyHelper`: it never uses a
+Claude subscription login. Set `api_key_file` on the agent to use it.
+
+**To use your Claude subscription instead of API billing**, run the agent
+without `--bare`:
+
+```yaml
+agents:
+  triage:
+    runner: [claude, -p]      # no --bare: uses your Claude Code login
+    prompt: "..."
+    mcp: [demo]
+    allowed_tools: [mcp__demo__get_status]
+    max_turns: 4
+```
+
+With `sandbox: none` on a workstation, the agent uses the login already in
+your `~/.claude` (verified end to end; see the plan's Tests section). Without
+`--bare`, Claude Code also loads that user's hooks and settings, so keep
+this to a trusted workstation. Running subscription agents inside the
+systemd sandbox (a `claude setup-token` token passed to the unit) is not
+built yet.
+
 ## Security notes
 
 Read these before running it anywhere that matters.

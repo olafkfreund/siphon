@@ -197,6 +197,10 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
 - `internal/e2e_test.go` covers the in-memory MCP server through `run-once` to edge fires to a `done` job.
 - `nix flake check` runs the package build, go tests and the NixOS VM test.
 - Manual, before the PR: one real `claude` agent run against a local MCP server with an allowlist of one read-only tool. Check that the output is masked and that the `agent-result` event does not re-trigger.
+  - **Done 2026-10-06 (after merge), on the owner's Claude subscription rather than an API key.** Runner `[claude, -p]` (no `--bare`, which ignores OAuth), `sandbox: none`, against a one-tool stdio MCP demo server. Results:
+    - The `degraded` rule fired, and the agent made 2 turns with one `get_status` call and no permission denials, in about 8 s.
+    - Its JSON result became an `agent-result` event that fired an `allow_agent_events` rule exactly once (depth 1, parent_id set), with no re-trigger.
+    - Claude reported an estimated cost of $0.06; on the subscription it counts toward plan usage, not API billing.
 
 ## Handoff and review
 
