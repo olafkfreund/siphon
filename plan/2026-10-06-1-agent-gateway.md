@@ -200,8 +200,21 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
 
 ## Handoff and review
 
-- There are 19 file-editing steps, so the `coder` agent (Sonnet) implements them. Start it with this plan path and step 1, and send each later step to the same agent with `SendMessage`.
-- After each phase, a fresh Opus reviewer gets only this plan path and `git diff` for that phase.
+- **Owner decision (2026-10-06): coding is split between Claude and OpenAI Codex.**
+  - The Claude side is the `coder` agent (Sonnet), plus the session model (Opus) for integration steps.
+  - Codex runs via `codex exec -s workspace-write`. The sandbox is never bypassed and the network stays off, so step 1 pre-fetches every Go dependency.
+  - Codex works in its own git worktree, `../MCP-AgentGateway-codex`, on branch `feat/1-codex-lane`, and does not commit. Opus reviews its diff, runs the tests, and commits it with Codex attribution, then merges the lane into `feat/1-agent-gateway`.
+- Split rule: Codex takes self-contained packages with a clear interface; Claude takes the core path and the integration. Lanes touch disjoint directories, so they run in parallel.
+
+| Phase | Opus (session) | `coder` (Claude Sonnet) | Codex |
+|---|---|---|---|
+| 0 | 1 (scaffold, deps), 7 (integration) | 2 → 3 → 4 (`config`, `store`, `rule`) | 5 → 6 (`source`, `action/cmd+sandbox`) |
+| 1 | 11 | 8, 10 | 9 (`action/agent`) |
+| 2 | — | 13 (`web`) | 12 (`source/webhook`), 14 (listen hints) |
+| 3 | 17, 18 (Nix module, VM test) | 15, 19 | 16 (`schema`) |
+
+- Start one `coder` per task with this plan path and its first step. Send each later step to the same agent with `SendMessage`.
+- After each phase, a fresh Opus reviewer gets only this plan path and `git diff` for that phase. This covers both Claude's and Codex's code, so each model's work is checked by another.
 - One PR per phase into `main`, each linking intent, spec and plan, and stating which steps the coder did.
 - Any deviation updates this file in the same commit as the code.
 
