@@ -182,7 +182,7 @@ func Load(path string) (*Config, error) {
 
 func Parse(b []byte) (*Config, error) {
 	c := &Config{
-		Server: Server{Listen: ":8080", Workers: 4, Sandbox: "systemd"},
+		Server: Server{Listen: ":8080", DB: "agentgw.db", Workers: 4, Sandbox: "systemd"},
 		Limits: Limits{AgentRunsPerDay: 50, HTTPMaxBody: 1 << 20, HTTPTimeout: Duration(30 * time.Second)},
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(b))

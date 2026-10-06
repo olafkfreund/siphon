@@ -13,7 +13,7 @@
           pname = "agentgw";
           version = self.shortRev or "dev";
           src = self;
-          vendorHash = "sha256-WFuT25UpII2m2xRRHdYmDSJj+dzTDElT2XnPuk1kxUw=";
+          vendorHash = "sha256-Rz0KK7Pz4m1NcpoFn7tQfdi9qaEdnWoAZmBTQz5+Pyw=";
           env.CGO_ENABLED = 0;
           subPackages = [ "cmd/agentgw" ];
           ldflags = [ "-s" "-w" "-X main.version=${self.shortRev or "dev"}" ];

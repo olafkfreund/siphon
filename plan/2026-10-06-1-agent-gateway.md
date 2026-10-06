@@ -235,3 +235,13 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
   - An item whose expression errors is skipped and its error returned, without blocking the other items.
   - On a `when` timeout, the expr goroutine is abandoned, bounded by expr's memory budget.
   - Added the `store.RuleLastFired` helper.
+- Step 5/6 (Codex):
+  - `action.RunCmd` takes `SandboxOptions` and secret values explicitly and returns an exec error.
+  - The guarded client sets an overall `http.Client.Timeout` and a body cap. Step 14 needs a separate client without these for long-lived listen streams.
+- Step 7:
+  - The end-to-end test lives at `internal/job/e2e_test.go`, not `internal/e2e_test.go` (`internal/` has no package).
+  - Added `store.ClaimJob`, `store.FinishJob` and `store.PutSourceState`, plus `server.db` default `agentgw.db`.
+  - The `cmd` action timeout is fixed at 10 min (`job.cmdTimeout`) until a rule needs its own.
+  - Approval-required jobs are inserted as `pending_approval`; their approvals rows and decisions arrive in step 10.
+  - `unit`/`agent`/`routine` jobs fail with "not implemented yet" until their phases.
+  - Running `sandbox: systemd` as a non-root user needs the polkit rule from step 17, so local `run-once` uses `sandbox: none` until then.

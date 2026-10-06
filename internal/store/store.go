@@ -175,3 +175,40 @@ func RuleLastFired(tx *sql.Tx, rule string) (time.Time, error) {
 	}
 	return time.UnixMilli(t.Int64), nil
 }
+
+// QueuedJob is a claimed job ready to run.
+type QueuedJob struct {
+	ID         int64
+	Rule       string
+	ActionJSON string
+	Attempt    int
+	Depth      int
+}
+
+// ClaimJob marks the oldest runnable queued job as running and returns it.
+// ok is false when nothing is runnable. Single process, so no SKIP LOCKED.
+func ClaimJob(db *sql.DB, now time.Time) (j QueuedJob, ok bool, err error) {
+	err = db.QueryRow(`UPDATE jobs SET state='running', started_at=?
+		WHERE id=(SELECT id FROM jobs WHERE state='queued' AND run_after<=? ORDER BY id LIMIT 1)
+		RETURNING id, rule, action_json, attempt, depth`, ms(now), ms(now)).
+		Scan(&j.ID, &j.Rule, &j.ActionJSON, &j.Attempt, &j.Depth)
+	if err == sql.ErrNoRows {
+		return j, false, nil
+	}
+	return j, err == nil, err
+}
+
+// FinishJob records the outcome of a running job.
+func FinishJob(db *sql.DB, id int64, state string, exit int, output string, now time.Time) error {
+	_, err := db.Exec(`UPDATE jobs SET state=?, exit_code=?, output=?, finished_at=? WHERE id=?`,
+		state, exit, output, ms(now), id)
+	return err
+}
+
+// PutSourceState records the last poll time and error ("" on success).
+func PutSourceState(db *sql.DB, source string, now time.Time, pollErr string) error {
+	_, err := db.Exec(`INSERT INTO source_state(source,last_poll_at,last_error) VALUES (?,?,?)
+		ON CONFLICT(source) DO UPDATE SET last_poll_at=excluded.last_poll_at, last_error=excluded.last_error`,
+		source, ms(now), pollErr)
+	return err
+}
