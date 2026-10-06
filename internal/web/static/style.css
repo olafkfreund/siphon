@@ -1,6 +1,161 @@
-body{font:15px/1.4 system-ui,sans-serif;margin:0 auto;max-width:70rem;padding:1rem}
-header{display:flex;gap:1rem;align-items:center;border-bottom:1px solid #ccc;margin-bottom:1rem}
-nav{flex:1}nav a{margin-right:.8rem}
-table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:.25rem .6rem;border-bottom:1px solid #eee}
-form{display:inline}pre{background:#f6f6f6;padding:.6rem;overflow:auto}
-.badge{background:#fd0;padding:0 .4rem;border-radius:.3rem}.err{color:#b00}
+/* Siphon "Deep Current" theme. Tokens first: the palette is one edit.
+   Brand guide: docs/brand/README.md. No inline styles anywhere (CSP). */
+:root {
+  --abyss: #06111F; --deep: #0E2A47; --ink: #7C5CFF; --current: #3B82F6; --biolume: #2EE6D6;
+  --kelp: #34D399; --amber: #FFB547; --coral: #FF5D73; --shallows: #F3F8FB;
+  --grad: linear-gradient(135deg, var(--ink), var(--current) 55%, var(--biolume));
+  --bg: var(--shallows); --surface: #fff; --surface-2: #EAF2F7; --line: #D8E4EC;
+  --text: #0B1B2E; --muted: #5B6F84;
+  --ok-text: #0b7a55; --wait-text: #8a5200; --bad-text: #c22a43;
+  --shadow: 0 1px 2px rgba(6,17,31,.06), 0 8px 24px rgba(6,17,31,.06);
+  --r: 14px;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme=light]) {
+    --bg: var(--abyss); --surface: #0B1D33; --surface-2: #0E2A47; --line: #163A5C;
+    --text: #E6F1FA; --muted: #8AA4BD; --ok-text: var(--kelp); --wait-text: var(--amber); --bad-text: var(--coral);
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35); color-scheme: dark;
+  }
+}
+:root[data-theme=dark] {
+  --bg: var(--abyss); --surface: #0B1D33; --surface-2: #0E2A47; --line: #163A5C;
+  --text: #E6F1FA; --muted: #8AA4BD; --ok-text: var(--kelp); --wait-text: var(--amber); --bad-text: var(--coral);
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35); color-scheme: dark;
+}
+
+/* base */
+* { box-sizing: border-box }
+body { margin: 0; font: 15px/1.5 var(--font); background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased }
+a { color: var(--current); text-decoration: none } a:hover { text-decoration: underline }
+h1 { font-size: 1.6rem; margin: 0 0 .2rem; letter-spacing: -.02em; line-height: 1.2 }
+h2 { font-size: 1.05rem; margin: 0 0 .8rem }
+p { margin: 0 0 .8rem }
+code, pre, kbd, .mono, textarea { font-family: var(--mono); font-variant-ligatures: none }
+code, .mono { font-size: .85em }
+pre { margin: 0; background: #06111F; color: #cfe3f5; border-radius: 12px; padding: 1rem; font-size: 13px; line-height: 1.55; overflow: auto; max-height: 26rem; white-space: pre-wrap; overflow-wrap: anywhere }
+.muted { color: var(--muted) } .small { font-size: .82rem } .tiny { font-size: .75rem }
+.err { color: var(--bad-text); font-weight: 500 }
+:focus-visible { outline: 3px solid color-mix(in srgb, var(--ink) 55%, transparent); outline-offset: 2px }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap }
+
+/* shell */
+.app { display: grid; grid-template-columns: 236px 1fr; min-height: 100vh }
+.side { background: var(--surface); border-right: 1px solid var(--line); padding: 1rem .8rem; display: flex; flex-direction: column; gap: .15rem; position: sticky; top: 0; height: 100vh; overflow-y: auto }
+.brand { display: flex; align-items: center; gap: .55rem; padding: .2rem .5rem 1rem; font-weight: 650; font-size: 1.3rem; letter-spacing: -.02em; color: var(--text) }
+.brand:hover { text-decoration: none }
+.brand img { width: 30px; height: 30px }
+.nav a { display: flex; align-items: center; gap: .6rem; padding: .5rem .7rem; border-radius: 10px; color: var(--text); font-weight: 500 }
+.nav a:hover { background: var(--surface-2); text-decoration: none }
+.nav a[aria-current=page] { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--current) }
+.nav .count { margin-left: auto; background: var(--amber); color: #3a2500; border-radius: 999px; font-size: .72rem; padding: 0 .45rem; font-weight: 700 }
+.nav .sep { margin: .8rem .7rem .3rem; font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted) }
+.nav .soon { margin-left: auto; font-size: .65rem; color: var(--muted); font-weight: 600 }
+.ico { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round }
+.side .foot { margin-top: auto; display: flex; gap: .4rem; padding: .5rem 0 0 }
+.side .foot form { display: contents }
+.topbar { display: none }
+.main { padding: 1.6rem 2rem 3rem; max-width: 1200px; width: 100% }
+.top { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.4rem }
+.top .sp, .sp { flex: 1 }
+.banner { background: color-mix(in srgb, var(--coral) 14%, var(--surface)); border: 1px solid color-mix(in srgb, var(--coral) 40%, transparent); color: var(--text); border-radius: var(--r); padding: .7rem 1rem; margin-bottom: 1rem }
+
+/* components */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); padding: 1.1rem 1.2rem }
+.stack { display: flex; flex-direction: column; gap: 1rem }
+.grid { display: grid; gap: 1rem } .g4 { grid-template-columns: repeat(4, 1fr) } .g2 { grid-template-columns: 1.4fr 1fr } .g2e { grid-template-columns: 1fr 1fr }
+.mt { margin-top: 1rem } .mb { margin-bottom: 1rem }
+.btn, button { display: inline-flex; align-items: center; gap: .45rem; white-space: nowrap; border: 1px solid var(--line); background: var(--surface); color: var(--text); border-radius: 999px; padding: .5rem 1rem; font: 600 .9rem var(--font); cursor: pointer; text-decoration: none }
+.btn:hover, button:hover { border-color: var(--current); text-decoration: none }
+.btn.primary { background: var(--grad); border: 0; color: #fff; box-shadow: var(--shadow) }
+.btn.ok { background: var(--kelp); border-color: var(--kelp); color: #04281c }
+.btn.no { color: var(--bad-text); border-color: color-mix(in srgb, var(--coral) 45%, transparent) }
+.btn.sm, .sm > button, form.sm button { padding: .3rem .75rem; font-size: .8rem }
+.btn.block { width: 100%; justify-content: center }
+form.inline { display: inline }
+
+/* status pills: icon + label + colour, never colour alone */
+.pill { display: inline-flex; align-items: center; gap: .35rem; border-radius: 999px; padding: .15rem .6rem; font-size: .78rem; font-weight: 650; white-space: nowrap }
+.pill.queued { background: color-mix(in srgb, var(--muted) 16%, transparent); color: var(--muted) }
+.pill.running { background: color-mix(in srgb, var(--current) 16%, transparent); color: var(--current) }
+.pill.pending_approval { background: color-mix(in srgb, var(--amber) 24%, transparent); color: var(--wait-text) }
+.pill.done { background: color-mix(in srgb, var(--kelp) 20%, transparent); color: var(--ok-text) }
+.pill.failed { background: color-mix(in srgb, var(--coral) 16%, transparent); color: var(--bad-text) }
+.pill.cancelled, .pill.tag { background: var(--surface-2); color: var(--muted) }
+.pill.tag { color: var(--text); font-weight: 600 }
+.pill.running .i { display: inline-block; animation: spin 1.2s linear infinite }
+@keyframes spin { to { transform: rotate(360deg) } }
+
+/* stats */
+.stat { display: flex; flex-direction: column; gap: .2rem }
+.stat b { font-size: 2rem; letter-spacing: -.03em; line-height: 1.1 }
+.stat b.g { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent }
+.stat b small { font-size: 1rem; color: var(--muted); font-weight: 600 }
+.bar { height: 6px; background: var(--surface-2); border-radius: 999px; overflow: hidden; margin-top: .4rem }
+.bar i { display: block; height: 100%; background: var(--grad); border-radius: 999px }
+.w0{width:0}.w5{width:5%}.w10{width:10%}.w15{width:15%}.w20{width:20%}.w25{width:25%}.w30{width:30%}.w35{width:35%}.w40{width:40%}.w45{width:45%}.w50{width:50%}.w55{width:55%}.w60{width:60%}.w65{width:65%}.w70{width:70%}.w75{width:75%}.w80{width:80%}.w85{width:85%}.w90{width:90%}.w95{width:95%}.w100{width:100%}
+
+/* lists */
+.need { display: flex; align-items: center; gap: .8rem; padding: .75rem 0; border-top: 1px solid var(--line) }
+.need:first-of-type { border-top: 0 }
+.need .what { min-width: 0 }
+.need .acts { display: flex; gap: .4rem }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: .4rem; flex: none }
+.dot.ok { background: var(--kelp); box-shadow: 0 0 0 4px color-mix(in srgb, var(--kelp) 20%, transparent) }
+.dot.stale { background: var(--amber) } .dot.error { background: var(--coral) } .dot.idle { background: var(--line) }
+.health { display: flex; flex-direction: column; gap: .75rem }
+.health .meta { margin-left: 1.3rem }
+
+/* tables (all portal tables get this; cards on phones) */
+table { width: 100%; border-collapse: collapse }
+th { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); text-align: left; font-weight: 600; padding: .4rem .6rem }
+td { padding: .65rem .6rem; border-top: 1px solid var(--line); vertical-align: middle }
+tr.fresh td { animation: fresh 2s ease-out }
+@keyframes fresh { from { background: color-mix(in srgb, var(--biolume) 18%, transparent) } }
+.main > table, .main > h1 + p + table, .main > h1 + table { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); overflow: hidden }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1.2rem; margin: 0 0 1rem; font-size: .92rem }
+dt { color: var(--muted) } dd { margin: 0 }
+.chips { display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: 1rem }
+.chip { border: 1px solid var(--line); border-radius: 999px; padding: .25rem .75rem; font-size: .82rem; background: var(--surface); color: var(--text) }
+.chip[aria-current=page] { background: var(--text); color: var(--surface); border-color: var(--text) }
+
+/* forms */
+label { display: inline-flex; flex-direction: column; gap: .3rem; font-size: .82rem; font-weight: 600 }
+input, select, textarea { font: inherit; font-weight: 400; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: .55rem .7rem }
+.hint { font-weight: 400; color: var(--muted); font-size: .78rem }
+
+/* login */
+.login { min-height: 100vh; display: grid; place-items: center; padding: 1rem; background:
+  radial-gradient(900px 500px at 15% 110%, color-mix(in srgb, var(--ink) 22%, transparent), transparent 60%),
+  radial-gradient(800px 500px at 90% -10%, color-mix(in srgb, var(--biolume) 22%, transparent), transparent 60%), var(--bg) }
+.login .card { width: min(400px, 100%); padding: 2rem; text-align: center }
+.login .logo { width: 64px; height: 64px }
+.login .word { font-size: 2rem; font-weight: 650; letter-spacing: -.03em; margin: .6rem 0 .1rem }
+.login form { display: flex; flex-direction: column; gap: .8rem; text-align: left; margin-top: 1.4rem }
+.login label { display: flex }
+
+/* bubbles: the jet, used for live/empty states */
+.bubbles span { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--biolume); margin: 0 2px; animation: rise 2.4s ease-in-out infinite }
+.bubbles span:nth-child(2) { animation-delay: .4s; opacity: .7 } .bubbles span:nth-child(3) { animation-delay: .8s; opacity: .5 }
+@keyframes rise { 50% { transform: translateY(-6px) } }
+.empty { text-align: center; padding: 2rem 1rem; color: var(--muted) }
+.empty .bubbles { margin-bottom: .6rem }
+
+/* motion off on request */
+@media (prefers-reduced-motion: reduce) { *, *::after { animation: none !important; transition: none !important } }
+
+/* phone */
+@media (max-width: 820px) {
+  .app { grid-template-columns: 1fr }
+  .side { display: none; position: fixed; inset: 0 auto 0 0; width: 260px; z-index: 20; box-shadow: var(--shadow) }
+  .app.menu-open .side { display: flex }
+  .topbar { display: flex; align-items: center; gap: .6rem; padding: .7rem 1rem; background: var(--surface); border-bottom: 1px solid var(--line); font-weight: 650; position: sticky; top: 0; z-index: 10 }
+  .topbar img { width: 26px; height: 26px }
+  .topbar button { padding: .35rem; border: 0 }
+  .main { padding: 1rem }
+  .g4 { grid-template-columns: 1fr 1fr } .g2, .g2e { grid-template-columns: 1fr }
+  .need { flex-wrap: wrap } .need .acts { width: 100% } .need .acts form, .need .acts .btn { flex: 1 } .need .acts button { width: 100%; justify-content: center }
+  .hide-sm { display: none }
+}

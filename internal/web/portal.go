@@ -20,17 +20,18 @@ type view struct {
 	Job       store.JobDetail
 	Approvals []store.PendingApproval
 	Audit     []store.AuditRow
+	Dash      *dashView
 }
 
 type layout struct {
-	Title, Path, CSRF string
-	Body              template.HTML
+	Title, Path, CSRF, Active, Banner string
+	Pending                           int
+	Body                              template.HTML
 }
 
 func (s *server) portalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) { s.render(w, "login", "") })
 	mux.HandleFunc("POST /login", s.login)
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/jobs", http.StatusSeeOther) })
 
 	page := func(path, name string, fill func(r *http.Request, v *view) (bool, error)) {
 		mux.HandleFunc("GET "+path, s.portal(func(w http.ResponseWriter, r *http.Request, csrf string) {
@@ -47,6 +48,16 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 			}
 		}))
 	}
+	page("/{$}", "dashboard", func(_ *http.Request, v *view) (ok bool, err error) {
+		if v.Sources, err = s.sources(); err != nil {
+			return true, err
+		}
+		if v.Jobs, err = store.QueryJobs(s.Store.DB, "", 8); err != nil {
+			return true, err
+		}
+		v.Dash, err = s.dashboard(v.Sources)
+		return true, err
+	})
 	page("/sources", "sources", func(_ *http.Request, v *view) (ok bool, err error) { v.Sources, err = s.sources(); return true, err })
 	page("/rules", "rules", func(_ *http.Request, v *view) (ok bool, err error) { v.Rules, err = s.rules(); return true, err })
 	page("/jobs", "jobs", func(r *http.Request, v *view) (ok bool, err error) {
@@ -115,6 +126,9 @@ func (s *server) afterPost(w http.ResponseWriter, r *http.Request, path, name st
 		s.render(w, name, v)
 		return
 	}
+	if r.PostFormValue("back") == "/" { // the dashboard's approve/deny
+		path = "/"
+	}
 	http.Redirect(w, r, path, http.StatusSeeOther)
 }
 
@@ -129,7 +143,9 @@ func (s *server) page(w http.ResponseWriter, r *http.Request, name string, v vie
 		http.Error(w, "template error", http.StatusInternalServerError)
 		return
 	}
-	s.render(w, "layout", layout{Title: name, Path: r.URL.RequestURI(), CSRF: v.CSRF, Body: template.HTML(body.String())})
+	pending, _ := store.PendingApprovals(s.Store.DB)
+	s.render(w, "layout", layout{Title: titles[name], Path: r.URL.RequestURI(), CSRF: v.CSRF, Active: active[name],
+		Pending: len(pending), Body: template.HTML(body.String())})
 }
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {

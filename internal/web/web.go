@@ -80,7 +80,14 @@ func New(o Options) http.Handler {
 			}
 			return itoa(*e)
 		},
-		"pe": url.PathEscape,
+		"pe":  url.PathEscape,
+		"ago": func(t time.Time) string { return ago(o.Now(), t) },
+		"agop": func(t *time.Time) string {
+			if t == nil {
+				return "never"
+			}
+			return ago(o.Now(), *t)
+		},
 	}).ParseFS(assets, "templates/*.html"))
 
 	static, _ := fs.Sub(assets, "static")

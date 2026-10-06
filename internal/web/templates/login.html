@@ -1,4 +1,18 @@
 {{define "login"}}<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>siphon · login</title><link rel="stylesheet" href="/static/style.css"></head>
-<body><main><h1>siphon</h1>{{if .}}<p class="err">{{.}}</p>{{end}}
-<form method="post" action="/login"><label>Token <input type="password" name="token" autofocus></label> <button>Log in</button></form></main></body></html>{{end}}
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · Siphon</title>
+<link rel="icon" href="/static/mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css"><script src="/static/app.js"></script></head>
+<body><main class="login"><div class="card">
+  <img class="logo" src="/static/mark.svg" alt="">
+  <div class="word">siphon</div>
+  <div class="muted">Draws events in. Jets agents out.</div>
+  <form method="post" action="/login">
+    {{if .}}<p class="err" role="alert">{{.}}</p>{{end}}
+    <label>Access token
+      <input type="password" name="token" autocomplete="current-password" required autofocus>
+      <span class="hint">The value of <code>server.token</code>.</span>
+    </label>
+    <button class="btn primary block">Sign in</button>
+  </form>
+</div></main></body></html>{{end}}
