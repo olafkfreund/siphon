@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 1
 author: olafkfreund
 ---
@@ -142,3 +142,15 @@ Must not:
    that enough?
 6. **Deployment host** for the first real run (p510 or another host).
 7. **Name.** `agentgw` as the binary/CLI name?
+
+## Resolutions (approved 2026-10-06)
+
+Approved as drafted, with the proposed answers:
+
+1. Licence: Apache 2.0. Learn from Windmill's code, do not copy its AGPL code.
+2. Language: Go.
+3. Agent runner: `claude -p` by default, with other runners pluggable as commands.
+4. Portal v1: history, approve/deny and rule enable/disable. Config stays in git.
+5. Portal auth: bearer token in v1, OIDC through a reverse proxy later.
+6. Deployment host: decided at deployment time, not needed for spec or plan.
+7. Name: `agentgw`.
