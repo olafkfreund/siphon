@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,5 +149,57 @@ func TestCancellationFinishSemantics(t *testing.T) {
 		if state != tc.want {
 			t.Fatalf("exit %d: state %s, want %s", tc.exit, state, tc.want)
 		}
+	}
+}
+
+// Phase 1 review L6 / plan step 9: the agent's MCP config holds only the
+// sources listed in agents.<name>.mcp, with bearer auth attached.
+func TestAgentGetsOnlyListedMCPSources(t *testing.T) {
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "cat-config.sh")
+	// Print the --mcp-config file so the job output shows what the agent got.
+	script := "#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = --mcp-config ] && cat \"$2\"; shift; done\n"
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGW_M1_TOKEN", "tok-m1")
+	cfg, err := config.Parse([]byte(`
+server: { sandbox: none, db: ` + dir + `/state.db }
+sources:
+  m1: { type: mcp, url: https://m1.example/mcp, read: { resource: "x://a" }, auth: { bearer: env:AGW_M1_TOKEN } }
+  m2: { type: mcp, url: https://m2.example/mcp, read: { resource: "x://b" } }
+agents:
+  a: { runner: [` + stub + `], prompt: "p", mcp: [m1], approve: false }
+rules:
+  - { name: r, source: m2, when: 'true', cooldown: 1s, action: { agent: a } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(cfg.Server.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	p := &Pipeline{Cfg: cfg, Store: st, Now: time.Now}
+	ctx := context.Background()
+	if _, _, err := p.HandleEvent(ctx, rule.Event{Source: "m2", Data: map[string]any{}}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.RunQueued(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var out string
+	if err := st.DB.QueryRow(`SELECT output FROM jobs WHERE rule='r'`).Scan(&out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "m1.example") || strings.Contains(out, "m2.example") {
+		t.Fatalf("agent MCP config = %s; want only m1", out)
+	}
+	if strings.Contains(out, "tok-m1") || !strings.Contains(out, "Bearer ***") {
+		t.Fatalf("bearer not attached or not masked in output: %s", out)
 	}
 }

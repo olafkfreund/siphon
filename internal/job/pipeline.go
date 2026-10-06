@@ -289,11 +289,13 @@ func (p *Pipeline) runAgent(ctx context.Context, j store.QueuedJob, pl Payload) 
 	if res.Exit != 0 {
 		return "failed", res.Exit, out
 	}
-	if data, derr := source.DecodeJSON(res.Output); derr == nil {
+	if data, derr := source.DecodeJSON(res.Stdout); derr == nil {
 		ev := rule.Event{Source: config.AgentResultSource, Data: data, Depth: j.Depth + 1, ParentID: j.ID}
 		if _, _, herr := p.HandleEvent(ctx, ev, false); herr != nil {
 			slog.Warn("agent-result rules", "job", j.ID, "err", herr)
 		}
+	} else {
+		slog.Warn("agent stdout is not JSON; no agent-result event", "job", j.ID, "err", derr)
 	}
 	return "done", 0, out
 }

@@ -274,3 +274,21 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
   - The depth cap (`config.MaxDepth`=2) and the daily agent cap (a rolling 24 h window) are enforced at enqueue, audited as `skip_depth` and `skip_agent_cap`.
   - Agent-result rule errors are logged and do not fail the agent job.
   - The manual real-`claude` check is still open: it needs the owner's API key.
+- Phase 1 review (fresh Opus reviewer; 0 critical, 1 high, 6 medium, 6 low). Fixed:
+  - **H1:** the agent prompt goes on **stdin**, never argv. Event data rendered into the prompt could otherwise inject `claude` flags such as `--mcp-config=<inline json>`.
+  - **M1:** a job that completed during cancellation is recorded, not re-run.
+  - **M2:** an flock on `<db>.lock` stops `serve` and `run-once` from sharing a DB.
+  - **M3:** agent timeout defaults to 10 min; negative durations are rejected.
+  - **M4:** agent stdout is captured separately, and a warning is logged when it isn't JSON.
+  - **M5:** approval tokens are never logged; delivering the link is decided in step 13.
+  - **M6:** a relative `server.db` resolves against the config directory, and the agent work dir is removed after every run.
+  - **L1:** `poll > 0`, and agent `mcp` entries must be `type: mcp`.
+  - **L5:** `parent_id` is set on agent-result jobs.
+  - **L6:** a test covers agent MCP scoping.
+  - The sandbox sets `HOME=/tmp` so `claude` can run under DynamicUser.
+- Carried forward from that review:
+  - **L2:** a cap or depth skip consumes the rule's edge/each state (dropped, not deferred). This is documented here; revisit if it matters.
+  - **L3:** the daily cap counts jobs, not attempts, and step 15 must count routines that contain agents.
+  - **L4:** step 13 must rate-limit `/a/` bad-token attempts.
+  - **Step 17:** the polkit rule must also restrict transient-unit properties (no `User=`, credential paths only under allowed dirs), not just the unit name.
+  - **Step 18:** the VM test must assert that SIGTERM to agentgw stops its transient units (no orphaned agents).
