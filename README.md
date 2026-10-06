@@ -131,7 +131,7 @@ All commands that read the config take `-config <file>` (default `agentgw.yaml`)
 | Command | What it does |
 |---|---|
 | `agentgw validate [-config f]` | Check the config; prints every problem at once, then `ok`. Warnings go to stderr. |
-| `agentgw rules test [-config f] <rule> <event.json>` | Dry-run one rule against an event; prints the fires and the rendered argv as JSON. |
+| `agentgw rules test [-config f] <rule> <event.json>` | Dry-run one rule against an event; prints the fires and the rendered argv as JSON. A file shaped `{"headers": {...}, "event": {...}}` supplies request headers (names are lower-cased); any other JSON is the event itself. |
 | `agentgw run-once [-config f]` | Poll every source once, evaluate rules, run the jobs. Holds the DB lock. |
 | `agentgw serve [-config f]` | The daemon: pollers, webhook endpoints, workers, portal and API. Holds the DB lock. |
 | `agentgw jobs ls [-config f] [-state s]` | List jobs (newest first). |
@@ -221,8 +221,11 @@ egress is open apart from the cloud metadata addresses. Use a dedicated or
 low-value account for each credential, and restrict egress where that matters
 (an HTTP proxy, or systemd `IPAddressAllow`/`IPAddressDeny` through a module
 override). On write-back agentgw re-validates the file's shape, drops unknown
-fields, and for codex refuses a login that belongs to a different account.
-Claude and agy logins carry no account id to compare. Each replace keeps the
+fields, and for codex refuses a login that belongs to a different account
+(account id, else the id-token subject; two empty subjects count as different).
+That check reads fields the sandboxed CLI controls, so it stops naive swaps
+only, not a determined attacker. Claude and agy logins carry no account id to
+compare. Each replace keeps the
 previous file as `<file>.prev` (0600) in the credential's store directory, so
 a bad write-back can be undone by copying it back.
 
@@ -231,7 +234,7 @@ a bad write-back can be undone by copying it back.
 | Control | claude | codex | agy |
 |---|---|---|---|
 | Built-in tools off | yes (`--tools ""`) | no: runs read-only (`-s read-only`) | no: plan mode plus `--sandbox` |
-| Exact MCP tool allowlist | yes | yes (`enabled_tools`, per-tool approval) | no: only the listed MCP servers are configured |
+| Exact MCP tool allowlist | yes | yes (`enabled_tools`, per-tool approval) | no: only the listed MCP servers are configured (`validate` warns whenever the agent has `mcp:` servers) |
 | `max_turns`, `max_budget_usd` | yes | no (timeout only) | no (`--print-timeout` and timeout) |
 | Prompt delivery | stdin | stdin | one `--print=<prompt>` argv element |
 
@@ -250,7 +253,8 @@ boundary. Every kind's result reaches `agent-result` rules as
 CLIs refresh their tokens while running. After each run agentgw copies a
 changed login file back into the store, but only if the store still holds the
 bytes the run started with (compare-and-swap under a per-credential lock);
-otherwise the copy with the later token expiry wins. Write-back bytes never
+otherwise the write-back is dropped (a re-import or another run won) and the
+audit log records `credential_writeback_stale`. Write-back bytes never
 enter job output, and credential contents are masked in it.
 `credentials.<name>.concurrency` (default **1**) limits concurrent runs per
 login so two runs never race a rotating refresh token; extra jobs wait.
@@ -298,6 +302,11 @@ operator's responsibility.
   ignored, and `validate` warns about both. Replace it with `kind`/`command`.
 - `api_key_file: /path` still works: it becomes an implicit API-key credential
   for the agent's kind (named `_apikey_<agent>`, a reserved prefix). Prefer a `credentials:` entry with `api_key: file:/path`.
+- `validate` now also rejects three configs that were already wrong:
+  credentials in an `http`/`mcp` source URL (`user:pass@host`; use
+  `auth.bearer` or `headers`), a config file with more than one YAML
+  document, and a `sha256` webhook whose `signature_header` equals its
+  `timestamp_header` (case-insensitive).
 - Credential names are lower-case `[a-z0-9][a-z0-9_-]*`.
 - With `sandbox: none`, agent runs get a private temporary HOME; plain `cmd`
   actions keep yours.

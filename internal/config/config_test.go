@@ -344,7 +344,7 @@ func TestAgentCredentials(t *testing.T) {
 		{"api_key_file implicit", "agents: {a: {kind: codex, api_key_file: " + key + "}}", "", "_apikey_a", nil},
 		{"codex warnings", "credentials: {cx: {provider: codex}}\nagents: {a: {kind: codex, max_turns: 3, max_budget_usd: 1}}", "", "cx",
 			[]string{"shell tools", "max_turns not enforced", "max_budget_usd not enforced"}},
-		{"agy warnings", "credentials: {g: {provider: agy}}\nagents: {a: {kind: agy, allowed_tools: [x]}}", "", "g",
+		{"agy warnings", "credentials: {g: {provider: agy}}\nagents: {a: {kind: agy, mcp: [m]}}\nsources: {m: {type: mcp, url: http://127.0.0.1/mcp, read: {tool: t}}}", "", "g",
 			[]string{"shell tools", "tool allowlist not enforced"}},
 	}
 	for _, tc := range cases {
@@ -410,5 +410,32 @@ func TestLegacyExemptionAndNames(t *testing.T) {
 		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: want %q, got %v", yaml, want, err)
 		}
+	}
+}
+
+func TestFollowupValidation(t *testing.T) {
+	cases := map[string]string{
+		"sources: {s: {type: http, url: \"http://u:p@h/x\"}}":                                                                             "must not contain credentials",
+		"sources: {s: {type: mcp, url: \"http://u@h/x\", read: {tool: t}}}":                                                               "must not contain credentials",
+		"sources: {w: {type: webhook, secret: \"env:AGW_FACTORY\", signature: sha256, signature_header: X-Sig, timestamp_header: x-sig}}": "must differ",
+		"server: {workers: 1}\n---\nserver: {workers: 2}":                                                                                 "multiple YAML documents",
+	}
+	setenv(t)
+	for y, want := range cases {
+		c, err := Parse([]byte(y))
+		if err == nil {
+			err = c.Validate()
+		}
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: want %q, got %v", y, want, err)
+		}
+	}
+	if _, err := Parse([]byte("server: {workers: 1}\n")); err != nil {
+		t.Fatal(err)
+	}
+	// agy warns about the allowlist whenever it has mcp servers, and only then
+	c, _ := Parse([]byte("credentials: {g: {provider: agy}}\nagents: {a: {kind: agy, allowed_tools: [x]}}"))
+	if hasWarning(c, "allowlist") {
+		t.Fatal("no mcp: no allowlist warning")
 	}
 }
