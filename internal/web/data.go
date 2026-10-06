@@ -138,7 +138,12 @@ var (
 		"cfglist": "Config", "cfgedit": "Edit", "history": "History", "historyitem": "Revision"}
 	active = map[string]string{"dashboard": "dash", "jobs": "jobs", "job": "jobs", "approvals": "approvals",
 		"rules": "rules", "sources": "sources", "audit": "audit", "logins": "logins", "egress": "egress",
-		"cfglist": "rules", "cfgedit": "rules", "history": "audit", "historyitem": "audit"}
+		"cfglist": "rules", "cfgedit": "rules", "history": "history", "historyitem": "history"}
+	// Config kinds as people read them, and the nav entry each lights up.
+	kindTitle = map[string]string{"rules": "Rules", "sources": "Sources", "agents": "Agents", "routines": "Routines", "credentials": "Logins"}
+	kindOne   = map[string]string{"rules": "rule", "sources": "source", "agents": "agent", "routines": "routine", "credentials": "login"}
+	kindNav   = map[string]string{"rules": "rules", "sources": "sources", "agents": "agents", "routines": "routines", "credentials": "logins"}
+	provLabel = map[string]string{"file": "from siphon.yaml", "portal": "added in the portal", "override": "overrides siphon.yaml", "deleted": "deleted in the portal"}
 	// Pages that refresh themselves every 5 s (job detail decides by state).
 	polls = map[string]bool{"dashboard": true, "jobs": true, "approvals": true, "sources": true, "audit": true}
 )

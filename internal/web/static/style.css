@@ -151,6 +151,15 @@ button.switch.on::after { transform: translateX(18px) }
 .blocked { display: flex; align-items: center; gap: .6rem; padding: .5rem .7rem; border-radius: 10px; background: color-mix(in srgb, var(--coral) 9%, transparent); margin-bottom: .4rem }
 .wrap { overflow-wrap: anywhere }
 
+/* editors */
+div.f { display: flex; flex-direction: column; gap: .35rem; font-size: .82rem; font-weight: 600; margin-bottom: .9rem }
+details.yaml-edit summary { cursor: pointer; font-weight: 650; list-style: none; display: flex; align-items: center; gap: .5rem }
+details.yaml-edit summary::before { content: "▸"; color: var(--muted); transition: transform .2s ease-out }
+details.yaml-edit[open] summary::before { transform: rotate(90deg) }
+details.yaml-edit[open] summary { margin-bottom: .8rem }
+details.yaml-edit textarea { width: 100%; min-height: 16rem }
+.badge.portal { color: var(--ink); background: color-mix(in srgb, var(--ink) 12%, transparent) }
+
 /* forms */
 label { display: inline-flex; flex-direction: column; gap: .3rem; font-size: .82rem; font-weight: 600 }
 input, select, textarea { font: inherit; font-weight: 400; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: .55rem .7rem }

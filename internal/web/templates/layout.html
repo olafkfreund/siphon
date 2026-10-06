@@ -14,10 +14,13 @@
     <div class="sep">Configure</div>
     <a href="/rules"{{if eq .Active "rules"}} aria-current="page"{{end}}>{{template "icon" "flow"}}Rules</a>
     <a href="/sources"{{if eq .Active "sources"}} aria-current="page"{{end}}>{{template "icon" "src"}}Sources</a>
+    <a href="/config/agents"{{if eq .Active "agents"}} aria-current="page"{{end}}>{{template "icon" "agent"}}Agents</a>
+    <a href="/config/routines"{{if eq .Active "routines"}} aria-current="page"{{end}}>{{template "icon" "routine"}}Routines</a>
     <a href="/logins"{{if eq .Active "logins"}} aria-current="page"{{end}}>{{template "icon" "key"}}Logins</a>
     <a href="/egress"{{if eq .Active "egress"}} aria-current="page"{{end}}>{{template "icon" "shield"}}Egress</a>
     <div class="sep">Records</div>
     <a href="/audit"{{if eq .Active "audit"}} aria-current="page"{{end}}>{{template "icon" "audit"}}Audit</a>
+    <a href="/history"{{if eq .Active "history"}} aria-current="page"{{end}}>{{template "icon" "hist"}}History</a>
   </nav>
   <div class="foot">
     <button type="button" class="btn sm" data-action="theme">{{template "icon" "moon"}}Theme</button>

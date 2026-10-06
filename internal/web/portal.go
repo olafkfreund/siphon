@@ -175,7 +175,11 @@ func (s *server) page(w http.ResponseWriter, r *http.Request, name string, v vie
 	if v.JobV != nil {
 		poll = v.JobV.State == "running" || v.JobV.State == "queued" || v.JobV.State == "pending_approval"
 	}
-	s.render(w, "layout", layout{Title: titles[name], Path: r.URL.RequestURI(), CSRF: v.CSRF, Active: active[name],
+	title, act := titles[name], active[name]
+	if v.Cfg != nil && v.Cfg.Kind != "" { // config pages light up their own kind
+		title, act = kindTitle[v.Cfg.Kind], kindNav[v.Cfg.Kind]
+	}
+	s.render(w, "layout", layout{Title: title, Path: r.URL.RequestURI(), CSRF: v.CSRF, Active: act,
 		Pending: len(pending), Poll: poll, Banner: s.banner(), Body: template.HTML(body.String())})
 }
 
