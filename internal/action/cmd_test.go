@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestRender(t *testing.T) {
@@ -22,14 +21,6 @@ func TestRender(t *testing.T) {
 	argv, err = Render([]string{"printf", "{{.id}}"}, map[string]any{"id": int64(1700000000)})
 	if err != nil || argv[1] != "1700000000" {
 		t.Fatalf("rendered integer: %q, %v", argv, err)
-	}
-}
-
-func TestSandboxArgv(t *testing.T) {
-	got := SandboxArgv([]string{"true"}, SandboxOptions{Timeout: 1500 * time.Millisecond, Credentials: map[string]string{"key": "/tmp/key"}})
-	want := []string{"systemd-run", "--wait", "--pipe", "--collect", "--quiet", "--setenv=HOME=/tmp", "--property=DynamicUser=yes", "--property=ProtectSystem=strict", "--property=ProtectHome=yes", "--property=PrivateTmp=yes", "--property=NoNewPrivileges=yes", "--property=IPAddressDeny=169.254.0.0/16", "--property=RuntimeMaxSec=2s", "--property=LoadCredential=key:/tmp/key", "--", "true"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %q", got)
 	}
 }
 

@@ -287,3 +287,36 @@ func TestWebhookIDAndTimestamp(t *testing.T) {
 		t.Fatalf("sha256 preset may use a timestamp: %v", err)
 	}
 }
+
+func TestRetryValidation(t *testing.T) {
+	for retry, want := range map[string]string{
+		"{attempts: 3, base: 5s, factor: 2}": "",
+		"{attempts: 11}":                     "retry.attempts must be 0..10",
+		"{attempts: -1}":                     "retry.attempts must be 0..10",
+		"{attempts: 2, factor: 0.5}":         "retry.factor >= 1",
+		"{attempts: 2, base: -1s}":           "retry.factor >= 1",
+	} {
+		c, err := Parse([]byte("routines: {r: {steps: [{id: s, cmd: [true], retry: " + retry + "}]}}"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = c.Validate()
+		if (want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), want)) {
+			t.Errorf("%s: %v", retry, err)
+		}
+	}
+}
+
+func TestUnitNamesAndAgentRetry(t *testing.T) {
+	for u, ok := range map[string]bool{"nix-gc.service": true, "backup@home.timer": true, "x.target": true,
+		"nix-gc": false, "a b.service": false, "-x.service": true, "evil;rm.service": false, "x.socket": false} {
+		c, _ := Parse([]byte("units: [\"" + u + "\"]"))
+		if err := c.Validate(); (err == nil) != ok {
+			t.Errorf("%q: %v", u, err)
+		}
+	}
+	c, _ := Parse([]byte("agents: {a: {prompt: hi}}\nroutines: {r: {steps: [{id: s, agent: a, retry: {attempts: 2}}]}}"))
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "retry is not allowed on agent steps") {
+		t.Fatalf("%v", err)
+	}
+}

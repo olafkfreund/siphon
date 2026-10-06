@@ -185,6 +185,8 @@ type QueuedJob struct {
 	ActionJSON string
 	Attempt    int
 	Depth      int
+	Output     string // routine progress JSON when resuming
+	ResumeStep int
 }
 
 // ClaimJob marks the oldest runnable queued job as running and returns it.
@@ -192,8 +194,8 @@ type QueuedJob struct {
 func ClaimJob(db *sql.DB, now time.Time) (j QueuedJob, ok bool, err error) {
 	err = db.QueryRow(`UPDATE jobs SET state='running', started_at=?
 		WHERE id=(SELECT id FROM jobs WHERE state='queued' AND run_after<=? ORDER BY id LIMIT 1)
-		RETURNING id, rule, action_json, attempt, depth`, ms(now), ms(now)).
-		Scan(&j.ID, &j.Rule, &j.ActionJSON, &j.Attempt, &j.Depth)
+		RETURNING id, rule, action_json, attempt, depth, output, resume_step`, ms(now), ms(now)).
+		Scan(&j.ID, &j.Rule, &j.ActionJSON, &j.Attempt, &j.Depth, &j.Output, &j.ResumeStep)
 	if err == sql.ErrNoRows {
 		return j, false, nil
 	}
@@ -306,12 +308,55 @@ func Cleanup(db *sql.DB, now time.Time) error {
 	return tx.Commit()
 }
 
-// CountAgentJobsSince counts agent jobs created at or after since (daily cap).
+// CountAgentJobsSince counts agent jobs created at or after since (daily cap):
+// agent actions, and routines whose payload carries "agent": true.
+// A routine counts once, however many agent steps it has.
 func CountAgentJobsSince(tx *sql.Tx, since time.Time) (int, error) {
 	var n int
 	err := tx.QueryRow(`SELECT count(*) FROM jobs WHERE created_at >= ?
-		AND COALESCE(json_extract(action_json, '$.action.Agent'), '') != ''`, ms(since)).Scan(&n)
+		AND (COALESCE(json_extract(action_json, '$.action.Agent'), '') != ''
+		  OR COALESCE(json_extract(action_json, '$.agent'), 0) = 1)`, ms(since)).Scan(&n)
 	return n, err
+}
+
+// SaveProgress records routine progress (output JSON, next step) for a running job,
+// so a crash or restart resumes without re-running finished steps.
+func SaveProgress(db *sql.DB, id int64, nextStep int, output string) error {
+	r, err := db.Exec(`UPDATE jobs SET resume_step=?, output=? WHERE id=? AND state='running'`, nextStep, output, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return fmt.Errorf("save progress for job %d: not running", id)
+	}
+	return nil
+}
+
+// RequeueJob sends a running routine job back to queued to retry its current
+// step at runAfter, keeping progress; the worker loop honours run_after.
+func RequeueJob(db *sql.DB, id int64, step int, output string, runAfter time.Time) error {
+	r, err := db.Exec(`UPDATE jobs SET state='queued', started_at=NULL, resume_step=?, output=?, run_after=?
+		WHERE id=? AND state='running'`, step, output, ms(runAfter), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return fmt.Errorf("requeue job %d: not running", id)
+	}
+	return nil
+}
+
+// PauseJob moves a running routine job to pending_approval at step, keeping its
+// progress. The caller creates the approvals row in the same tx.
+func PauseJob(tx *sql.Tx, id int64, step int, output string) error {
+	r, err := tx.Exec(`UPDATE jobs SET state='pending_approval', resume_step=?, output=? WHERE id=? AND state='running'`, step, output, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return fmt.Errorf("pause job %d: not running", id)
+	}
+	return nil
 }
 
 // Lock takes an exclusive, non-blocking flock on <dbPath>.lock so two

@@ -91,6 +91,9 @@ type Server struct {
 	Workers int    `yaml:"workers"`
 	Token   Secret `yaml:"token"`
 	Sandbox string `yaml:"sandbox"` // systemd|none
+	// ActionsDir holds per-run directories for sandboxed actions; the NixOS
+	// module sets it to the setgid agentgw-io directory its template unit uses.
+	ActionsDir string `yaml:"actions_dir"`
 }
 
 type Limits struct {
@@ -178,9 +181,15 @@ type Step struct {
 	Approve         bool     `yaml:"approve"`
 }
 
+// Retry re-runs a failed step. Attempts is the total number of tries, so 0 or 1
+// means no retry. Waits grow as Base*Factor^n with jitter (defaults 10s and 2).
 type Retry struct {
-	Attempts int `yaml:"attempts"`
+	Attempts int      `yaml:"attempts"`
+	Base     Duration `yaml:"base"`
+	Factor   float64  `yaml:"factor"`
 }
+
+const MaxRetryAttempts = 10
 
 // Load reads path, applies defaults and resolves secret refs. Unresolvable
 // refs are reported by Validate, so `validate` lists every problem at once.
@@ -334,6 +343,8 @@ func loopbackListen(addr string) bool {
 	return h == "localhost"
 }
 
+var unitName = regexp.MustCompile(`^[A-Za-z0-9@._:-]+\.(service|target|timer)$`)
+
 var webhookID = regexp.MustCompile(`^header\.[A-Za-z0-9-]+$`)
 
 func cleartextRemote(raw string) bool {
@@ -398,6 +409,8 @@ func (c *Config) Validate() error {
 	for _, u := range c.Units {
 		if strings.Contains(u, "{{") {
 			add("units: %q must not be templated", u)
+		} else if !unitName.MatchString(u) {
+			add("units: %q must be a full unit name like foo.service", u)
 		}
 	}
 
@@ -436,7 +449,7 @@ func (c *Config) Validate() error {
 			add("%s: repeat and cooldown must not be negative", p)
 		}
 		c.validateAction(p, r.Action, add)
-		if (r.Action.Agent != "" || (r.Action.Routine != "" && c.routineHasAgent(r.Action.Routine))) && r.Cooldown <= 0 {
+		if (r.Action.Agent != "" || (r.Action.Routine != "" && c.RoutineHasAgent(r.Action.Routine))) && r.Cooldown <= 0 {
 			add("%s: cooldown is mandatory for agent actions", p)
 		}
 	}
@@ -485,6 +498,17 @@ func (c *Config) Validate() error {
 			ids[st.ID] = true
 			if st.Timeout < 0 {
 				add("%s: timeout must not be negative", sp)
+			}
+			if st.Agent != "" && st.Retry != nil {
+				add("%s: retry is not allowed on agent steps (paid runs would bypass the daily cap)", sp)
+			}
+			if r := st.Retry; r != nil {
+				if r.Attempts < 0 || r.Attempts > MaxRetryAttempts {
+					add("%s: retry.attempts must be 0..%d", sp, MaxRetryAttempts)
+				}
+				if r.Base < 0 || r.Factor < 0 || (r.Factor > 0 && r.Factor < 1) {
+					add("%s: retry.base must be >= 0 and retry.factor >= 1", sp)
+				}
 			}
 			checkExpr(sp+" if", st.If, add)
 			c.validateAction(sp, Action{Cmd: st.Cmd, Unit: st.Unit, Agent: st.Agent}, add)
@@ -580,7 +604,8 @@ func (c *Config) validateAction(p string, a Action, add func(string, ...any)) {
 	}
 }
 
-func (c *Config) routineHasAgent(name string) bool {
+// RoutineHasAgent reports whether the named routine has an agent step.
+func (c *Config) RoutineHasAgent(name string) bool {
 	if rt := c.Routines[name]; rt != nil {
 		for _, s := range rt.Steps {
 			if s.Agent != "" {

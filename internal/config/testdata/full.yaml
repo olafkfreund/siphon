@@ -64,8 +64,8 @@ agents:
 routines:
   review-pr:
     steps:
-      - { id: fetch, cmd: [gh, pr, view, "{{.event.number}}"] }
-      - { id: review, agent: triage-task, if: 'steps.fetch.exit == 0', retry: { attempts: 2 }, timeout: 5m, approve: true }
+      - { id: fetch, cmd: [gh, pr, view, "{{.event.number}}"], retry: { attempts: 2 } }
+      - { id: review, agent: triage-task, if: 'steps.fetch.exit == 0', timeout: 5m, approve: true }
       - { id: notify, cmd: [notify-send, "PR reviewed"], continue_on_error: true }
 
 units: [nix-gc.service]

@@ -46,6 +46,11 @@ func RunCmd(ctx context.Context, argv []string, opts SandboxOptions, secrets []s
 	return exit, output, err
 }
 
+// RunCmdSplit also returns stdout alone for callers that parse JSON output.
+func RunCmdSplit(ctx context.Context, argv []string, opts SandboxOptions, secrets []string) (exit int, output, stdout []byte, err error) {
+	return runCommand(ctx, argv, opts, secrets, nil, true)
+}
+
 func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets []string, stdin []byte, separateStdout bool) (int, []byte, []byte, error) {
 	if len(argv) == 0 {
 		return -1, nil, nil, errors.New("empty command")
@@ -53,16 +58,33 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 	if opts.Timeout <= 0 {
 		opts.Timeout = 30 * time.Second
 	}
-	var cancel context.CancelFunc
-	ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
-	defer cancel()
 	mode := opts.Mode
 	if mode == "" {
 		mode = "systemd"
 	}
+	limit := opts.Timeout
+	if mode == "systemd" {
+		limit += 30 * time.Second // exec-job enforces Timeout inside the unit; this is the backstop
+	}
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithTimeout(ctx, limit)
+	defer cancel()
+	maxExtra := 0
+	for _, secret := range secrets {
+		maxExtra = max(maxExtra, len(secret))
+	}
 	switch mode {
 	case "systemd":
-		argv = SandboxArgv(argv, opts)
+		exit, so, se, err := templateRun(ctx, opts.Dir, JobSpec{
+			Argv: argv, Stdin: stdin, Env: opts.Env, Files: opts.Files,
+			TimeoutSec: int(opts.Timeout / time.Second),
+		})
+		output := capBytes(Mask(append(so, se...), secrets), 64<<10)
+		var stdoutBytes []byte
+		if separateStdout {
+			stdoutBytes = capBytes(Mask(so, secrets), 1<<20)
+		}
+		return exit, output, stdoutBytes, err
 	case "none":
 	default:
 		return -1, nil, nil, fmt.Errorf("invalid sandbox mode %q", mode)
@@ -79,12 +101,6 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 	}
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = 10 * time.Second
-	maxExtra := 0
-	for _, secret := range secrets {
-		if len(secret) > maxExtra {
-			maxExtra = len(secret)
-		}
-	}
 	buf := &cappedBuffer{limit: 64<<10 + maxExtra}
 	cmd.Stdout, cmd.Stderr = buf, buf
 	var stdout *cappedBuffer
@@ -142,4 +158,11 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 		_, _ = b.buf.Write(p[:min(len(p), b.limit-b.buf.Len())])
 	}
 	return n, nil
+}
+
+func capBytes(b []byte, n int) []byte {
+	if len(b) > n {
+		return b[:n]
+	}
+	return b
 }

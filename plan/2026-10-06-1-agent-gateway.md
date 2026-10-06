@@ -318,3 +318,53 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
   - "byte-identical" htmx means identical below the added header comment (official SRI hash verified by the reviewer).
   - Bug found by the step-14 pipeline test (review L7): `MCP.Listen` blocked in `session.Wait()` ignoring ctx, so `serve` would hang on SIGTERM with an active subscription. The session is now closed on ctx cancel. go-sdk v1.8.0 uses `subscriptions/listen` (2026-07-28) under `Subscribe`, per the stack trace.
   - `listenDebounce` is a package var so tests can shorten it.
+- Step 15:
+  - Routine execution lives in `internal/job/routine.go`, not `internal/action`, because it needs the pipeline's agent/cmd runners.
+  - Progress `{steps, awaiting}` lives in the job `output` column, with `resume_step` as the next index and no migration. It is saved after every step, so a crash re-runs only the interrupted step.
+  - `retry.attempts` is total tries, with backoff `base*factor^n` (10 s, ×2, capped at 1 h) and ±20 % jitter.
+  - Each `approve` step creates a new approvals row, and `DecideApproval` uses the latest row.
+  - The payload carries `agent: true` for agent actions and agent-containing routines, so the daily cap counts both (Phase 1 L3).
+  - **The unit action was written by Opus, not the coder:** the coder agent's command guard blocks any command whose text contains `systemctl start`. The owner chose this.
+  - The allowlist is checked three times: in config, at runtime (`action.RunUnit`) and by polkit.
+- Steps 17–18:
+  - `cmd` actions now run in named `agentgw-run-<hex>.service` units, so the polkit rule can allow only `agentgw-(run|agent)-*` transient units (start/stop) and the `units` allowlist (start).
+  - **Residual risk:** polkit cannot see transient-unit properties, so control of the `agentgw` account is root-equivalent (it could request `User=root`). This is documented in the module and the README.
+  - The service runs with `NoNewPrivileges=true` (D-Bus plus polkit needs no setuid) and `CapabilityBoundingSet=""`.
+  - **The VM test caught a real bug, now fixed:** stopping agentgw left `agentgw-run-*` transient units running (killing the systemd-run client doesn't stop a PID 1-owned unit). On cancellation, runCommand now also asks systemd to stop the named unit (`--no-block`). All five VM subtests pass: health/auth, unsigned webhook 401, sandboxed cmd + allowlisted unit end to end, polkit refusing non-allowlisted units and arbitrary transient units, and no orphaned units after stop.
+- Step 19: adding a source takes one new file plus cases in three places (config `validateSource`, `Pipeline.Poll`, schema regeneration), not "one switch case". The docs state the real number. `examples/agentgw.yaml` covers every source type, rule mode and action type, and passes `agentgw validate`.
+- Phase 3 review (fresh Opus reviewer; 1 critical, 2 high, 6 medium, 6 low):
+  - Coder fixed C1 (agent steps honour the agent's approve), H1 (routine snapshot plus awaited-step id), M3 (retry requeues with run_after, no worker sleep), M4 (no retry on agent steps), L1–L4, and the M2/L6 docs.
+  - Codex fixed M2 (http header keys lower-cased), L5 (the stop call has a 10 s bound) and L6 (schema Duration pattern), and folded RunCmdSplit into cmd.go.
+- **H2: sandbox redesigned at the owner's direction ("template unit now").** This changes the spec decision "systemd-run transient units".
+  - Every sandboxed cmd/agent run is an instance of the Nix-defined `agentgw-action@.service`, whose hardening is fixed in Nix.
+  - agentgw writes `<state>/actions/<id>/job.json` (argv, stdin, env, private files, timeout; 0600). The unit gets it as `LoadCredential=job:…`, and the hidden `agentgw exec-job` runs it inside the unit, writing files to its PrivateTmp.
+  - systemd writes stdout/stderr to pre-created 0600 files. The exit code comes from `start --wait`; on failure it is `ExecMainStatus` followed by `reset-failed`.
+  - polkit allows only start/stop/reset-failed on `^agentgw-action@[0-9a-f]{16}\.service$` and start on the allowlist. Transient units are refused, which removes the root-equivalence.
+  - The agent's MCP config and API key travel in the job file, and apiKeyHelper reads the unit-private copy.
+  - New module option `maxActionRuntime` (default 2h) as the RuntimeMaxSec ceiling.
+  - `sandbox: systemd` now needs the NixOS module.
+- My other fixes from that review:
+  - **M1:** startup stops `agentgw-action@*` orphans before RequeueRunning.
+  - **M5:** credentials and environmentFile are `types.str` with an absolute-and-outside-the-store assertion.
+  - **M6:** VM polkit checks assert "Access denied" from the rule, and cover verbs, non-hex names, transient units and a transient unit with the template's name plus `User=root`.
+- The VM test now has 6 subtests and all pass, including the sandboxed cmd running as non-root unable to write agentgw's state dir, and the crash case (SIGKILL → restart → orphans stopped before requeue, no duplicate instances).
+- Template-unit follow-up review (fresh Opus reviewer; 1 critical, 2 high, 4 medium, 8 low). All fixed:
+  - **C1, a real root escalation in the first redesign.** PID 1 opened `StandardOutput=file:` (and `LoadCredential`) paths inside agentgw's writable dir, so a planted symlink could make root write anywhere.
+    - Now PID 1 opens nothing there. The unit runs `agentgw exec-job <dir>/<id>` as its DynamicUser, which reads job.json and creates its outputs with `O_EXCL|O_NOFOLLOW`.
+    - Run dirs live in `/var/lib/agentgw-actions` (tmpfiles `2710 agentgw:agentgw-io`).
+    - Both agentgw.service and the template have `SupplementaryGroups=agentgw-io`. Files get the group by chown, not setgid, because RestrictSUIDSGID forbids setting setgid; a raw `0o2730` is also ignored by Go's `os.Chmod`, and the VM test caught both.
+    - A VM subtest plants the symlink as agentgw and asserts the target is unchanged.
+  - **H1:** `LimitFSIZE=16M` and `TasksMax` on the template; agentgw reads at most 1 MiB back.
+  - **H2:** the orphan stop is blocking, with template `TimeoutStopSec=20s`, followed by reset-failed. The VM test samples peak instances through a SIGKILL and restart with an agent that takes 15 s to stop; peak ≤ 2.
+  - **M1:** reset-failed on cancel and orphan paths.
+  - **M2:** polkit refuses every other action for agentgw.
+  - **M3:** the VM asserts the action can't read the state DB or agentgw's credentials; denials need "Access denied" (or systemd's own fragment refusal for a template-named transient unit); enable/daemon-reload/set-property are checked; `ACTIVE` counts deactivating units.
+  - **M4:** README claims corrected.
+  - **L2:** signal exits map to 128+n, with ExecMainCode read numerically.
+  - **L3:** os.Mkdir for run dirs.
+  - **L4:** `--no-ask-password`.
+  - **L5:** env keys validated.
+  - **L7:** template hardening (ProtectProc, ProcSubset, ProtectKernelLogs, ProtectClock, ProtectHostname, RestrictAddressFamilies, SystemCallFilter).
+  - New config `server.actions_dir`, set by the module.
+- **Test-quality note:** an edit to the VM test's slow-stop runner silently didn't apply (nixfmt had reflowed the list), so two stop subtests passed without exercising a slow stop. It was caught by timing analysis and fixed. Edits to generated or formatted files now assert that the match exists.
+- The VM test has 7 subtests and all pass.

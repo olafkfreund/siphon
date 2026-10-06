@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -119,17 +118,16 @@ func TestAgentArgv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !regexp.MustCompile(`^agentgw-agent-[0-9a-f]{16}\.service$`).MatchString(sandbox.Unit) {
-		t.Fatalf("unit=%q", sandbox.Unit)
-	}
-	credential := "/run/credentials/" + sandbox.Unit + "/mcp.json"
-	want := []string{"claude", "--bare", "-p", "--strict-mcp-config", "--mcp-config", credential, "--tools", "", "--permission-mode", "dontAsk", "--output-format", "json"}
+	want := []string{"claude", "--bare", "-p", "--strict-mcp-config", "--mcp-config", FilePath("mcp.json"), "--tools", "", "--permission-mode", "dontAsk", "--output-format", "json"}
 	if !reflect.DeepEqual(argv, want) || string(prompt) != "-leading ok" {
 		t.Fatalf("argv=%q want=%q", argv, want)
 	}
-	full := SandboxArgv(argv, sandbox)
-	if !contains(full, "--unit="+sandbox.Unit) || !contains(full, "--property=LoadCredential=mcp.json:"+filepath.Join(dir, "mcp.json")) {
-		t.Fatalf("sandbox argv=%q", full)
+	// systemd mode: the config travels in the job spec, never as a readable file.
+	if !strings.Contains(string(sandbox.Files["mcp.json"]), "mcpServers") {
+		t.Fatalf("job files=%v", sandbox.Files)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "mcp.json")); !os.IsNotExist(err) {
+		t.Fatalf("mcp.json written to the work dir in systemd mode")
 	}
 	o.Runner = []string{"{{.runner}}"}
 	if _, _, _, err := agentArgv(o); err == nil {
@@ -162,18 +160,22 @@ func contains(values []string, want string) bool {
 	return false
 }
 
-// Step 11: --bare reads only ANTHROPIC_API_KEY or apiKeyHelper, so the key file
-// reaches the sandbox as a credential and apiKeyHelper points at it.
-func TestAgentAPIKeyCredential(t *testing.T) {
-	o := AgentOptions{Prompt: "p", WorkDir: t.TempDir(), APIKeyFile: "/run/agenix/anthropic", Sandbox: SandboxOptions{Mode: "systemd"}}
+// Step 11: --bare reads only ANTHROPIC_API_KEY or apiKeyHelper. In systemd
+// mode the key travels in the job spec and apiKeyHelper reads the unit-private copy.
+func TestAgentAPIKeyInJobFiles(t *testing.T) {
+	keyFile := filepath.Join(t.TempDir(), "anthropic")
+	if err := os.WriteFile(keyFile, []byte("sk-test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := AgentOptions{Prompt: "p", WorkDir: t.TempDir(), APIKeyFile: keyFile, Sandbox: SandboxOptions{Mode: "systemd"}}
 	argv, _, sb, err := agentArgv(o)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sb.Credentials["api-key"] != "/run/agenix/anthropic" {
-		t.Fatalf("credentials=%v", sb.Credentials)
+	if string(sb.Files["api-key"]) != "sk-test" {
+		t.Fatalf("job files=%v", sb.Files)
 	}
-	want := `{"apiKeyHelper":"cat /run/credentials/` + sb.Unit + `/api-key"}`
+	want := `{"apiKeyHelper":"cat ` + FilePath("api-key") + `"}`
 	for i, a := range argv {
 		if a == "--settings" && argv[i+1] == want {
 			return

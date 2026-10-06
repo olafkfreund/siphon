@@ -39,7 +39,7 @@ func DecideApproval(db *sql.DB, jobID int64, approve bool, by, token string, now
 	var decision sql.NullString
 	var state string
 	err = tx.QueryRow(`SELECT a.token_hash, a.expires_at, a.decision, j.state
-		FROM approvals a JOIN jobs j ON j.id=a.job_id WHERE a.job_id=?`, jobID).Scan(&hash, &expires, &decision, &state)
+		FROM approvals a JOIN jobs j ON j.id=a.job_id WHERE a.job_id=? ORDER BY a.id DESC LIMIT 1`, jobID).Scan(&hash, &expires, &decision, &state)
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("job %d has no approval: %w", jobID, ErrNotFound)
 	}
@@ -94,7 +94,8 @@ func DecideApproval(db *sql.DB, jobID int64, approve bool, by, token string, now
 	return tx.Commit()
 }
 
-// ExpireApprovals fails pending jobs whose approval expired undecided.
+// ExpireApprovals fails pending jobs whose approval expired undecided. Routine
+// progress in the output is kept; the expiry is recorded in the audit log.
 func ExpireApprovals(db *sql.DB, now time.Time) (int, error) {
 	tx, err := db.Begin()
 	if err != nil {
@@ -120,7 +121,7 @@ func ExpireApprovals(db *sql.DB, now time.Time) (int, error) {
 		return 0, err
 	}
 	for _, id := range ids {
-		if _, err := tx.Exec(`UPDATE jobs SET state='failed', finished_at=?, output='approval expired' WHERE id=?`, ms(now), id); err != nil {
+		if _, err := tx.Exec(`UPDATE jobs SET state='failed', finished_at=?, output=CASE WHEN json_valid(output) AND json_type(output,'$.steps')='object' THEN output ELSE 'approval expired' END WHERE id=?`, ms(now), id); err != nil {
 			return 0, err
 		}
 		if err := Audit(tx, now, "system", "approval_expired", id, ""); err != nil {

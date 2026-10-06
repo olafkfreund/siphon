@@ -58,6 +58,12 @@ func compile(src string) (*vm.Program, error) {
 	return p, nil
 }
 
+// Eval evaluates an expression with the same compile cache and 100 ms timeout
+// that rules use (routine `if` expressions share it).
+func Eval(ctx context.Context, src string, env map[string]any) (any, error) {
+	return run(ctx, src, env)
+}
+
 // run evaluates src with the 100 ms timeout.
 // ponytail: on timeout the goroutine is abandoned (expr can't be interrupted);
 // expr's default memory budget bounds runaway loops.
