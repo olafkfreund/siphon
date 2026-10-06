@@ -83,13 +83,22 @@ func TestSaveCAS(t *testing.T) {
 	if w, err := s.Save("c", "credentials.json", v1, v2); err != nil || !w || get() != string(v2) {
 		t.Fatalf("cas swap: %v", err)
 	}
+	// stale writer (old=v1): even with a later expiry it must not overwrite v2
+	if w, err := s.Save("c", "credentials.json", v1, v3); err != nil || w || get() != string(v2) {
+		t.Fatalf("stale newer must lose: %v", err)
+	}
 	// stale writer (old=v1) with older expiry than stored v2: keep v2
 	if w, err := s.Save("c", "credentials.json", v1, claudeJSON("a0", 500)); err != nil || w || get() != string(v2) {
 		t.Fatalf("older must lose: %v", err)
 	}
-	// stale writer with later expiry: wins
-	if w, err := s.Save("c", "credentials.json", v1, v3); err != nil || !w || get() != string(v3) {
-		t.Fatalf("newer must win: %v", err)
+	if w, err := s.Save("c", "credentials.json", v2, v3); err != nil || !w || get() != string(v3) {
+		t.Fatalf("matching old must swap: %v", err)
+	}
+	if w, _ := s.Save("c", "auth.json", []byte("x"), []byte("y")); w {
+		t.Fatal("absent file must not match non-nil old")
+	}
+	if w, err := s.Save("c", "antigravity-oauth-token", nil, []byte("y")); err != nil || !w {
+		t.Fatalf("absent file equals nil old: %v", err)
 	}
 	prev, _ := os.ReadFile(filepath.Join(s.Dir, "c", "credentials.json.prev"))
 	if string(prev) != string(v2) {
@@ -200,6 +209,7 @@ func TestSameAccount(t *testing.T) {
 		{mk("A", "u1"), mk("A", "u1"), true},
 		{mk("A", "u1"), mk("B", "u1"), false},
 		{mk("", "u1"), mk("", "u1"), true},
+		{mk("", ""), mk("", ""), false},
 		{mk("", "u1"), mk("", "u2"), false},
 		{mk("A", "u1"), mk("", "u1"), false},
 		{mk("A", "u1"), []byte("junk"), false},
@@ -210,5 +220,19 @@ func TestSameAccount(t *testing.T) {
 	}
 	if !SameAccount("claude", []byte("a"), []byte("b")) {
 		t.Fatal("claude has no identity: must be true")
+	}
+}
+
+func TestPutFailureKeepsOldVariant(t *testing.T) {
+	s := Store{Dir: filepath.Join(t.TempDir(), "credentials")}
+	s.Put("c", "credentials.json", claudeJSON("a", 1))
+	orig := writeAtomic
+	writeAtomic = func(string, string, []byte) error { return fmt.Errorf("disk full") }
+	defer func() { writeAtomic = orig }()
+	if err := s.Put("c", "oauth-token", []byte("tok")); err == nil {
+		t.Fatal("want error")
+	}
+	if f, err := s.Load("c"); err != nil || f["credentials.json"] == nil {
+		t.Fatalf("old variant lost: %v %v", f, err)
 	}
 }

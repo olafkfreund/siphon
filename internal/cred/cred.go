@@ -142,8 +142,10 @@ func ValidateFor(provider string, subscription bool, raw []byte) (name string, n
 
 // SameAccount reports whether new belongs to the same account as old, so a
 // compromised sandbox can't swap in another login. Only codex carries a
-// stable identity (account_id, else the id_token sub claim). Claude and agy
-// logins have none, so this returns true for them: a known limitation.
+// stable identity (account_id, else the id_token sub claim); two empty subjects
+// count as different accounts. Claude and agy logins have none, so this returns
+// true for them: a known limitation. The check reads fields the sandboxed CLI
+// controls, so it only stops naive swaps, not a determined attacker.
 func SameAccount(provider string, old, new []byte) bool {
 	if provider != "codex" {
 		return true
@@ -155,7 +157,8 @@ func SameAccount(provider string, old, new []byte) bool {
 	if o.Tokens.Account != "" || n.Tokens.Account != "" {
 		return o.Tokens.Account == n.Tokens.Account
 	}
-	return jwtSub(o.Tokens.ID) == jwtSub(n.Tokens.ID)
+	sub := jwtSub(o.Tokens.ID)
+	return sub != "" && sub == jwtSub(n.Tokens.ID)
 }
 
 func jwtClaims(tok string) (c struct {
@@ -253,7 +256,9 @@ func (s Store) lock(name string, fn func(dir string) error) error {
 	return fn(d)
 }
 
-func writeAtomic(dir, file string, b []byte) error {
+var writeAtomic = writeAtomicFile // a var so tests can inject a failure
+
+func writeAtomicFile(dir, file string, b []byte) error {
 	tmp, err := os.CreateTemp(dir, ".tmp-*") // 0600
 	if err != nil {
 		return err
@@ -279,22 +284,24 @@ func (s Store) Put(name, file string, b []byte) error {
 		return fmt.Errorf("unknown credential file %q", file)
 	}
 	return s.lock(name, func(d string) error {
+		if err := writeAtomic(d, file, b); err != nil { // new variant first: a failure keeps the old one
+			return err
+		}
 		for f, p := range fileProvider {
 			if p == prov && f != file {
 				os.Remove(filepath.Join(d, f))
 			}
 		}
-		return writeAtomic(d, file, b)
+		return nil
 	})
 }
 
-// Save writes back a refreshed login file and reports whether it wrote. If
-// the store still holds old it replaces it with new; otherwise someone else
-// wrote meanwhile and the copy with the later token expiry wins (ties keep
-// the stored one). Every replace keeps the previous bytes as <file>.prev.
+// Save writes back a refreshed login file and reports whether it wrote. It
+// writes only if the stored bytes still equal old (an absent file equals nil
+// old): a re-import or another run's write-back wins over a stale one. Every
+// replace keeps the previous bytes as <file>.prev.
 func (s Store) Save(name, file string, old, new []byte) (wrote bool, err error) {
-	prov, ok := fileProvider[file]
-	if !ok {
+	if _, ok := fileProvider[file]; !ok {
 		return false, fmt.Errorf("unknown credential file %q", file)
 	}
 	err = s.lock(name, func(d string) error {
@@ -302,7 +309,7 @@ func (s Store) Save(name, file string, old, new []byte) (wrote bool, err error) 
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		if bytes.Equal(cur, new) || (!bytes.Equal(cur, old) && !Expiry(prov, file, new).After(Expiry(prov, file, cur))) {
+		if bytes.Equal(cur, new) || !bytes.Equal(cur, old) {
 			return nil
 		}
 		if cur != nil {
