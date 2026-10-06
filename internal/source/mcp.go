@@ -2,10 +2,10 @@ package source
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"time"
 
@@ -45,7 +45,14 @@ func (s MCP) Poll(ctx context.Context) (Event, error) {
 	defer cancel()
 	transport := s.Transport
 	if transport == nil && len(o.Command) > 0 {
-		transport = &mcp.CommandTransport{Command: exec.CommandContext(ctx, o.Command[0], o.Command[1:]...)}
+		cmd := exec.CommandContext(ctx, o.Command[0], o.Command[1:]...)
+		cmd.Env = []string{}
+		for _, name := range []string{"PATH", "HOME", "LANG"} {
+			if value, ok := os.LookupEnv(name); ok {
+				cmd.Env = append(cmd.Env, name+"="+value)
+			}
+		}
+		transport = &mcp.CommandTransport{Command: cmd}
 	}
 	if transport == nil {
 		client := guardedClient(o.AllowPrivate, o.Timeout, o.MaxBody)
@@ -103,8 +110,8 @@ func decodeContent(text string, blob []byte) any {
 	if blob != nil {
 		text = string(blob)
 	}
-	var value any
-	if json.Unmarshal([]byte(text), &value) == nil {
+	value, err := DecodeJSON([]byte(text))
+	if err == nil {
 		return value
 	}
 	return map[string]any{"text": text}

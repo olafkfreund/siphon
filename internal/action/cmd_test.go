@@ -16,6 +16,13 @@ func TestRender(t *testing.T) {
 	if _, err := Render([]string{"rm", "{{.Value}}"}, map[string]string{"Value": "-rf"}); err == nil {
 		t.Fatal("injected flag accepted")
 	}
+	if _, err := Render([]string{"{{.Value}}"}, map[string]string{"Value": "printf"}); err == nil || !strings.Contains(err.Error(), "command name") {
+		t.Fatalf("templated command name accepted: %v", err)
+	}
+	argv, err = Render([]string{"printf", "{{.id}}"}, map[string]any{"id": int64(1700000000)})
+	if err != nil || argv[1] != "1700000000" {
+		t.Fatalf("rendered integer: %q, %v", argv, err)
+	}
 }
 
 func TestSandboxArgv(t *testing.T) {
@@ -27,7 +34,12 @@ func TestSandboxArgv(t *testing.T) {
 }
 
 func TestRunCmd(t *testing.T) {
-	exit, output, err := RunCmd(context.Background(), []string{"printf", "token=%s", "secret"}, SandboxOptions{Mode: "none"}, []string{"secret"})
+	t.Setenv("AGW_SECRET_TEST", "x")
+	exit, output, err := RunCmd(context.Background(), []string{"env"}, SandboxOptions{Mode: "none"}, nil)
+	if err != nil || exit != 0 || strings.Contains(string(output), "AGW_SECRET_TEST=") {
+		t.Fatalf("child inherited gateway secret: exit=%d output=%q err=%v", exit, output, err)
+	}
+	exit, output, err = RunCmd(context.Background(), []string{"printf", "token=%s", "secret"}, SandboxOptions{Mode: "none"}, []string{"secret"})
 	if err != nil || exit != 0 || string(output) != "token=***" {
 		t.Fatalf("exit=%d output=%q err=%v", exit, output, err)
 	}
