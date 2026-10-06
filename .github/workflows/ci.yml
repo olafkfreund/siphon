@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: go vet, race tests, nix build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - run: nix develop -c go vet ./...
+      - run: nix develop -c go test -race -count=1 ./...
+      - run: nix build -L # also proves vendorHash is current
+
+  vm:
+    name: NixOS VM test (sandbox, polkit, subscriptions)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: system-features = nixos-test benchmark big-parallel kvm
+      - run: nix build -L .#checks.x86_64-linux.vm
+
+  devenv:
+    name: devenv test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - run: nix profile install nixpkgs#devenv
+      - run: devenv test
