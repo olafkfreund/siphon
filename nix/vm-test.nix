@@ -205,6 +205,7 @@ pkgs.testers.runNixOSTest {
           echo "blocked=$(curl -s -m 10 -o /dev/null -w '%{http_connect}' --proxytunnel http://blocked.example:8080/)"
           curl -s -m 5 --noproxy '*' "http://$ip:8080/" >/dev/null && echo RAW-IP-REACHED
           curl -s -m 5 --noproxy '*' http://127.0.0.1:8080/healthz >/dev/null && echo API-REACHED
+          [ -e /run/dbus/system_bus_socket ] && echo DBUS-VISIBLE
           echo "proxy-env=''${HTTPS_PROXY:+set}"
         '')
         (pkgs.writeShellScriptBin "slow-agent" "trap 'sleep 15; exit 0' TERM; sleep 600 & wait; wait")
@@ -381,6 +382,7 @@ pkgs.testers.runNixOSTest {
         assert "egress: blocked blocked.example:8080 (1)" in out, f"blocked host not reported: {out}"
         assert "RAW-IP-REACHED" not in out, f"IP filter bypassed: {out}"
         assert "API-REACHED" not in out, f"agentgw API reachable from the sandbox: {out}"
+        assert "DBUS-VISIBLE" not in out, f"system bus reachable from the sandbox: {out}"
         assert "proxy-env=set" in out and "run-" not in out, f"proxy env missing or token leaked: {out}"
         n = machine.succeed("sqlite3 /var/lib/agentgw/state.db \"select count(*) from audit where event='egress_blocked' and detail='blocked.example:8080'\"").strip()
         assert n == "1", f"egress_blocked audited {n} times"

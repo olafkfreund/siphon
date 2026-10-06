@@ -361,7 +361,9 @@ rules:
 - With `sandbox: none` nothing is enforced (`validate` warns); the proxy
   variables are still set, so cooperative CLIs are filtered anyway.
 - Turn it off with `services.agentgw.egress.enable = false` on NixOS, or per
-  agent with `egress: { enabled: false }`.
+  agent with `egress: { enabled: false }`. With the module option off, runs
+  still get the proxy variables but nothing enforces them (the sandbox keeps
+  only the metadata-address deny).
 
 ## Security notes
 

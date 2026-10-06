@@ -426,7 +426,7 @@ func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload,
 		}
 		opts.CredFiles, start = files, files
 	}
-	allow, on := p.Cfg.AgentEgress(pl.Action.Agent)
+	allow, on := p.Cfg.AgentEgress(a)
 	egEnv, finish, eerr := p.egressFor(j.ID, allow, on)
 	if eerr != nil {
 		return "failed", -1, eerr.Error(), nil

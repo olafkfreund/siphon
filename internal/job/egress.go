@@ -18,7 +18,7 @@ import (
 // the proxy must be up before any job runs.
 func (p *Pipeline) needsEgress() bool {
 	for name := range p.Cfg.Agents {
-		if _, on := p.Cfg.AgentEgress(name); on {
+		if _, on := p.Cfg.AgentEgress(p.Cfg.Agents[name]); on {
 			return true
 		}
 	}
@@ -117,5 +117,7 @@ func (p *Pipeline) ruleEgress(rule string) ([]config.HostPort, bool) {
 			return p.Cfg.RuleEgress(r)
 		}
 	}
-	return nil, false
+	// Rule renamed or removed since the job was queued: no rule opt-in, but
+	// server.egress.cmd_default still applies.
+	return p.Cfg.RuleEgress(config.Rule{})
 }

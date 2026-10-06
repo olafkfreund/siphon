@@ -226,6 +226,12 @@ in
         {
           IPAddressDeny = [ "any" ];
           IPAddressAllow = [ "${egressIP}/32" ];
+          # Name lookups over local sockets would leave the IP filter's
+          # reach (DNS exfiltration); the proxy resolves names itself.
+          InaccessiblePaths = [
+            "-/run/dbus"
+            "-/run/systemd/resolve"
+          ];
         }
       else
         { IPAddressDeny = metadataDeny; }

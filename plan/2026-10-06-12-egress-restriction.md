@@ -104,3 +104,13 @@ Revert the merge. Operators can disable it without a revert: `services.agentgw.e
   - **claude (subscription, token 7.6 h from expiry, so no refresh):** "OK". It was refused one host, `matrix.freundcloud.org.uk`, which comes from the operator machine's own Claude setup (not the CLI) and is harmless.
   - No proxy credential appears anywhere in the state DB.
   - **agy:** deferred until its quota resets; its host set was verified in the spec evidence.
+- **Security review fixes (fresh Opus reviewer):**
+  - `AgentEgress` now takes the agent definition that actually runs (the job snapshot) and fails closed. A nil agent, or a snapshot without an egress field, is restricted. This reverses the step 4 "live config" choice, which could send a renamed agent's queued job to the open template.
+  - A cmd whose rule has gone away still honours `server.egress.cmd_default`.
+  - Blocked hosts are capped at 64 distinct names per run (the rest count as `other`) and are made printable and at most 255 bytes, which bounds the audit rows and output lines.
+  - The proxy's name resolution has a 5 s timeout.
+  - `server.egress.listen` must be IPv4, because the module derives `IPAddressAllow=<ip>/32` from it.
+  - `validate` also warns for egress-enabled rules and `cmd_default` under `sandbox: none`.
+  - The restricted template hides `/run/dbus` and `/run/systemd/resolve`, closing DNS exfiltration over local sockets; the VM probe asserts the bus is gone.
+  - The README notes that with `egress.enable = false` the proxy variables are not enforced.
+  - **Open, needs an owner decision:** the IP filter is IP-only, so services bound to all addresses are reachable on 127.77.0.1:<port>. nscd also still resolves names for the sandbox.

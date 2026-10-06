@@ -175,7 +175,9 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 		writeError(conn, http.StatusForbidden)
 		return
 	}
-	addrs, err := p.resolve(ctx, host, entry.AllowPrivate)
+	rctx, rcancel := context.WithTimeout(ctx, 5*time.Second)
+	addrs, err := p.resolve(rctx, host, entry.AllowPrivate)
+	rcancel()
 	if err == nil && len(addrs) == 0 {
 		err = errors.New("no address found")
 	}
@@ -248,8 +250,25 @@ func tunnel(dst, source net.Conn, reader io.Reader) {
 	}
 }
 
+// maxBlocked caps the distinct hosts recorded per run (and so the audit rows
+// and output lines); the rest are counted under "other".
+const maxBlocked = 64
+
 func (p *Proxy) block(r *run, host string) {
+	// The name comes from the sandbox: keep it short and printable.
+	host = strings.Map(func(c rune) rune {
+		if c < 0x21 || c > 0x7e {
+			return '?'
+		}
+		return c
+	}, host)
+	if len(host) > 255 {
+		host = host[:255]
+	}
 	p.mu.Lock()
+	if _, ok := r.blocked[host]; !ok && len(r.blocked) >= maxBlocked {
+		host = "other"
+	}
 	r.blocked[host]++
 	p.mu.Unlock()
 }

@@ -181,3 +181,15 @@ func TestDialFallback(t *testing.T) {
 		t.Fatalf("CONNECT = %d, want 200 via the second address", code)
 	}
 }
+
+func TestBlockedCap(t *testing.T) {
+	p := New("127.0.0.1:0", nil)
+	r := &run{blocked: map[string]int{}}
+	for i := 0; i < 200; i++ {
+		p.block(r, fmt.Sprintf("h%d.example:443", i))
+	}
+	p.block(r, "bad\x00\nhost:443")
+	if len(r.blocked) != maxBlocked+1 || r.blocked["other"] != 200-maxBlocked+1 {
+		t.Fatalf("%d hosts, other=%d", len(r.blocked), r.blocked["other"])
+	}
+}

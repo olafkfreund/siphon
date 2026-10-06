@@ -148,7 +148,7 @@ func printEgress(cfg *config.Config) {
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		if a, on := cfg.AgentEgress(n); on {
+		if a, on := cfg.AgentEgress(cfg.Agents[n]); on {
 			fmt.Printf("agent %s egress: %s\n", n, list(a))
 		} else {
 			fmt.Printf("agent %s egress: off\n", n)

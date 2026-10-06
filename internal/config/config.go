@@ -408,6 +408,14 @@ func (c *Config) Warnings() []string {
 	var w []string
 	if c.Server.Sandbox == "none" {
 		w = append(w, "server.sandbox is none: actions run unsandboxed")
+		if c.Server.Egress.CmdDefault {
+			w = append(w, "server.egress.cmd_default: egress allowlists are not enforced with sandbox: none")
+		}
+		for _, r := range c.Rules {
+			if r.Egress.Enabled {
+				w = append(w, fmt.Sprintf("rule %s: egress allowlists are not enforced with sandbox: none", r.Name))
+			}
+		}
 	}
 	if !loopbackListen(c.Server.Listen) {
 		w = append(w, fmt.Sprintf("server.listen %q is not loopback: the portal is plain HTTP, put it behind TLS or a reverse proxy", c.Server.Listen))
@@ -541,8 +549,9 @@ func (c *Config) Validate() error {
 	if t := c.Server.Token; t.isSet() && t.Value != "" && len(t.Value) < 32 {
 		add("server.token: must be at least 32 characters")
 	}
-	if h, _, err := net.SplitHostPort(c.Server.Egress.Listen); err != nil || net.ParseIP(h) == nil || !net.ParseIP(h).IsLoopback() {
-		add("server.egress.listen: must be a loopback ip:port like 127.77.0.1:3128, got %q", c.Server.Egress.Listen)
+	// IPv4 only: the NixOS module derives the sandbox's IPAddressAllow=<ip>/32 from it.
+	if h, _, err := net.SplitHostPort(c.Server.Egress.Listen); err != nil || net.ParseIP(h).To4() == nil || !net.ParseIP(h).IsLoopback() {
+		add("server.egress.listen: must be an IPv4 loopback ip:port like 127.77.0.1:3128, got %q", c.Server.Egress.Listen)
 	}
 	checkAllow := func(p string, list []string) {
 		for _, e := range list {
@@ -910,15 +919,19 @@ func dedupe(l []HostPort) []HostPort {
 	return out
 }
 
-// AgentEgress returns the agent's effective egress allowlist and whether
-// restriction is enabled for it.
-func (c *Config) AgentEgress(agent string) (allow []HostPort, enabled bool) {
-	a := c.Agents[agent]
-	if a == nil || a.Egress.Enabled == nil || !*a.Egress.Enabled {
+// AgentEgress returns the effective egress allowlist of the agent definition
+// that actually runs (a job's snapshot, not the live config) and whether
+// restriction is enabled. It fails closed: a nil agent or one without an
+// egress setting (an old snapshot) is restricted.
+func (c *Config) AgentEgress(a *Agent) (allow []HostPort, enabled bool) {
+	if a == nil {
+		return nil, true
+	}
+	if a.Egress.Enabled != nil && !*a.Egress.Enabled {
 		return nil, false
 	}
 	mode := 0 // subscription (also for legacy agents with no credential)
-	if _, cr := c.AgentCredential(agent); cr != nil && cr.APIKey.isSet() {
+	if cr := c.Credentials[a.Credential]; a.Credential != "" && cr != nil && cr.APIKey.isSet() {
 		mode = 1
 	}
 	for _, h := range providerHosts[a.Kind][mode] {
