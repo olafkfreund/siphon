@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -16,6 +17,9 @@ import (
 func Render(argv []string, data any) ([]string, error) {
 	if len(argv) == 0 {
 		return nil, errors.New("empty command")
+	}
+	if strings.Contains(argv[0], "{{") {
+		return nil, errors.New("command name must not contain a template action")
 	}
 	out := make([]string, len(argv))
 	for i, arg := range argv {
@@ -57,6 +61,12 @@ func RunCmd(ctx context.Context, argv []string, opts SandboxOptions, secrets []s
 		return -1, nil, fmt.Errorf("invalid sandbox mode %q", mode)
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Env = []string{}
+	for _, name := range []string{"PATH", "HOME", "LANG"} {
+		if value, ok := os.LookupEnv(name); ok {
+			cmd.Env = append(cmd.Env, name+"="+value)
+		}
+	}
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = 10 * time.Second
 	maxExtra := 0
@@ -69,13 +79,7 @@ func RunCmd(ctx context.Context, argv []string, opts SandboxOptions, secrets []s
 	cmd.Stdout, cmd.Stderr = buf, buf
 	err := cmd.Run()
 	output := buf.Bytes()
-	secrets = append([]string(nil), secrets...)
-	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
-	for _, secret := range secrets {
-		if secret != "" {
-			output = bytes.ReplaceAll(output, []byte(secret), []byte("***"))
-		}
-	}
+	output = Mask(output, secrets)
 	if len(output) > 64<<10 {
 		output = output[:64<<10]
 	}
@@ -87,6 +91,18 @@ func RunCmd(ctx context.Context, argv []string, opts SandboxOptions, secrets []s
 		return exit.ExitCode(), output, nil
 	}
 	return -1, output, err
+}
+
+// Mask replaces known secrets in output, longest first.
+func Mask(b []byte, secrets []string) []byte {
+	secrets = append([]string(nil), secrets...)
+	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
+	for _, secret := range secrets {
+		if secret != "" {
+			b = bytes.ReplaceAll(b, []byte(secret), []byte("***"))
+		}
+	}
+	return b
 }
 
 type cappedBuffer struct {

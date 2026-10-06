@@ -20,7 +20,7 @@ func TestMCPResource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ev.Data.(map[string]any)["value"] != float64(42) {
+	if ev.Data.(map[string]any)["value"] != int64(42) {
 		t.Fatalf("%+v", ev)
 	}
 }

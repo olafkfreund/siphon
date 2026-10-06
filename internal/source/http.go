@@ -3,7 +3,6 @@ package source
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -65,15 +64,15 @@ func (s HTTP) Poll(ctx context.Context) (Event, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return Event{}, fmt.Errorf("HTTP status %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return Event{}, err
 	}
 	if int64(len(body)) > limit {
 		return Event{}, fmt.Errorf("HTTP body exceeds %d bytes", limit)
 	}
-	var data any
-	if json.Unmarshal(body, &data) != nil {
+	data, err := DecodeJSON(body)
+	if err != nil {
 		data = map[string]any{"text": string(body)}
 	}
 	headers := make(map[string]string, len(resp.Header))

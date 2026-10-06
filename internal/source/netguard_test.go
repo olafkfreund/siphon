@@ -1,25 +1,76 @@
 package source
 
 import (
-	"context"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"testing"
 	"time"
 )
 
-func TestGuardedDial(t *testing.T) {
-	for _, host := range []string{"169.254.169.254", "10.1.2.3", "127.0.0.1", "100.100.100.200", "0.0.0.0"} {
-		client := guardedClient(false, time.Second, 100)
-		_, err := client.Transport.(limitedTransport).base.(*http.Transport).DialContext(context.Background(), "tcp", net.JoinHostPort(host, "80"))
-		if err == nil {
-			t.Fatalf("accepted %s", host)
-		}
+func TestBlockedIP(t *testing.T) {
+	for _, tt := range []struct {
+		ip      string
+		blocked bool
+	}{
+		{"169.254.169.254", true},
+		{"10.1.2.3", true},
+		{"127.0.0.1", true},
+		{"100.64.0.1", true},
+		{"0.0.0.0", true},
+		{"::1", true},
+		{"fe80::1", true},
+		{"::ffff:169.254.169.254", true},
+		{"64:ff9b::101:101", true},
+		{"64:ff9b:1::101:101", true},
+		{"2002:0101:0101::", true},
+		{"::101:101", true},
+		{"192.0.0.1", true},
+		{"198.18.0.1", true},
+		{"168.63.129.16", true},
+		{"100.100.100.200", true},
+		{"fd00:ec2::254", true},
+		{"1.1.1.1", false},
+		{"2606:4700:4700::1111", false},
+	} {
+		t.Run(tt.ip, func(t *testing.T) {
+			addr := netip.MustParseAddr(tt.ip)
+			if got := blockedIP(addr, false); got != tt.blocked {
+				t.Fatalf("blockedIP(%s) = %v, want %v", tt.ip, got, tt.blocked)
+			}
+			if blockedIP(addr, true) {
+				t.Fatalf("blockedIP(%s, allowPrivate=true) = true", tt.ip)
+			}
+		})
 	}
-	for _, host := range []string{"169.254.169.254", "10.1.2.3"} {
-		if blockedIP(netip.MustParseAddr(host), true) {
-			t.Fatalf("blocked %s with allowPrivate", host)
+}
+
+func TestGuardedClientDoesNotRedirect(t *testing.T) {
+	client := guardedClient(true, time.Second, 100)
+	if client.CheckRedirect(nil, nil) != http.ErrUseLastResponse {
+		t.Fatal("client follows redirects")
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("local sockets unavailable: %v", err)
+	}
+	listener.Close()
+	redirected := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/next" {
+			redirected = true
+			return
 		}
+		http.Redirect(w, r, "/next", http.StatusFound)
+	}))
+	defer server.Close()
+	resp, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound || redirected {
+		t.Fatalf("status=%d redirected=%v", resp.StatusCode, redirected)
 	}
 }
