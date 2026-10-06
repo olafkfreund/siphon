@@ -159,7 +159,7 @@ rules:
   time) and one codex subscription run through the real proxy, with the
   built-in lists only. agy once its quota resets.
 
-## Amendment 1 (status: draft, 2026-10-06): private network namespace for the restricted template
+## Amendment 1 (status: approved, 2026-10-06): private network namespace for the restricted template
 
 **Why.** The pre-PR security review found that `IPAddressAllow=127.77.0.1/32` filters by address, not by port.
 
