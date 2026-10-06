@@ -97,3 +97,4 @@ Each step is one commit; cite "Plan step N". Run `go test -race ./...` and `deve
 Revert the merge. Operators can disable it without a revert: `services.agentgw.egress.enable = false`, or per agent `egress.enabled: false`.
 
 ## Deviations log
+- **Step 4:** the proxy also starts lazily on a run's first use (`egressFor`), so pipelines used directly (tests, `rules test`) fail closed instead of erroring for lack of a `serve` start. Tests listen on an ephemeral port via a package-level override (`egressListenOverride`, set in `TestMain`). `AgentEgress` reads the live config, not the per-job agent snapshot: the allowlist follows a reload, which is the stricter choice if hosts were removed. The step 4 test uses a Go helper process as the stub agent instead of curl (no curl dependency in `go test`).
