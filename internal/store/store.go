@@ -6,7 +6,9 @@ import (
 	"embed"
 	"fmt"
 	"net/url"
+	"os"
 	"sort"
+	"syscall"
 	"time"
 
 	_ "modernc.org/sqlite" // driver name "sqlite"
@@ -217,4 +219,114 @@ func PutSourceState(db *sql.DB, source string, now time.Time, pollErr string) er
 		ON CONFLICT(source) DO UPDATE SET last_poll_at=excluded.last_poll_at, last_error=excluded.last_error`,
 		source, ms(now), pollErr)
 	return err
+}
+
+// MaxAttempts is how many times an interrupted job is retried before it fails.
+const MaxAttempts = 3
+
+// RequeueRunning is the startup recovery: every `running` job was interrupted,
+// so it goes back to `queued` with attempt+1, or fails once attempt reaches MaxAttempts.
+// Each decision is audited.
+func RequeueRunning(db *sql.DB, now time.Time) (requeued, failed int, err error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback()
+	type row struct{ id, attempt int64 }
+	var jobs []row
+	rows, err := tx.Query(`SELECT id, attempt FROM jobs WHERE state='running' ORDER BY id`)
+	if err != nil {
+		return 0, 0, err
+	}
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.attempt); err != nil {
+			rows.Close()
+			return 0, 0, err
+		}
+		jobs = append(jobs, r)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, 0, err
+	}
+	rows.Close()
+	for _, j := range jobs {
+		n := j.attempt + 1
+		if n >= MaxAttempts {
+			_, err = tx.Exec(`UPDATE jobs SET state='failed', attempt=?, finished_at=?,
+				output=output || 'interrupted too many times' WHERE id=?`, n, ms(now), j.id)
+			failed++
+			if err == nil {
+				err = Audit(tx, now, "system", "requeue_failed", j.id, fmt.Sprintf("attempt %d", n))
+			}
+		} else {
+			_, err = tx.Exec(`UPDATE jobs SET state='queued', attempt=?, started_at=NULL, run_after=? WHERE id=?`, n, ms(now), j.id)
+			requeued++
+			if err == nil {
+				err = Audit(tx, now, "system", "requeue", j.id, fmt.Sprintf("attempt %d", n))
+			}
+		}
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	return requeued, failed, tx.Commit()
+}
+
+const (
+	jobRetention  = 30 * 24 * time.Hour
+	seenRetention = 7 * 24 * time.Hour
+)
+
+// Cleanup deletes finished jobs and audit rows older than 30 days and
+// seen_event rows older than 7 days.
+func Cleanup(db *sql.DB, now time.Time) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	old := `SELECT id FROM jobs WHERE state IN ('done','failed','cancelled') AND finished_at < ?`
+	cut := ms(now.Add(-jobRetention))
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`UPDATE jobs SET parent_id=NULL WHERE parent_id IN (` + old + `)`, []any{cut}},
+		{`DELETE FROM approvals WHERE job_id IN (` + old + `)`, []any{cut}},
+		{`DELETE FROM jobs WHERE id IN (` + old + `)`, []any{cut}},
+		{`DELETE FROM audit WHERE at < ?`, []any{cut}},
+		{`DELETE FROM seen_event WHERE seen_at < ?`, []any{ms(now.Add(-seenRetention))}},
+	} {
+		if _, err := tx.Exec(q.sql, q.args...); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// CountAgentJobsSince counts agent jobs created at or after since (daily cap).
+func CountAgentJobsSince(tx *sql.Tx, since time.Time) (int, error) {
+	var n int
+	err := tx.QueryRow(`SELECT count(*) FROM jobs WHERE created_at >= ?
+		AND COALESCE(json_extract(action_json, '$.action.Agent'), '') != ''`, ms(since)).Scan(&n)
+	return n, err
+}
+
+// Lock takes an exclusive, non-blocking flock on <dbPath>.lock so two
+// daemons/run-once processes never share one DB. The lock dies with the process.
+func Lock(dbPath string) (unlock func(), err error) {
+	if dbPath == ":memory:" {
+		return func() {}, nil
+	}
+	f, err := os.OpenFile(dbPath+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("another agentgw (serve or run-once) holds %s", dbPath)
+	}
+	return func() { f.Close() }, nil // closing releases the flock
 }

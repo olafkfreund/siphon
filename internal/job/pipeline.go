@@ -8,7 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -29,6 +32,8 @@ type Pipeline struct {
 	Now   func() time.Time
 	// MCPTransport, if set, supplies the transport for an mcp source (tests).
 	MCPTransport func(source string) mcp.Transport
+
+	runFn func(context.Context, store.QueuedJob) (string, int, string) // tests only
 }
 
 // Payload is what a job row carries: the action and the env it renders with.
@@ -104,6 +109,7 @@ func (p *Pipeline) HandleEvent(ctx context.Context, ev rule.Event, dryRun bool) 
 	now := p.Now()
 	var fires []rule.Fire
 	var ids []int64
+	var approvalIDs []int64
 	var errs []error
 	for _, r := range p.Cfg.Rules {
 		fs, err := rule.Evaluate(ctx, tx, r, ev, now, dryRun)
@@ -115,35 +121,67 @@ func (p *Pipeline) HandleEvent(ctx context.Context, ev rule.Event, dryRun bool) 
 			continue
 		}
 		for _, f := range fs {
-			id, err := p.enqueue(tx, r, f, ev.Depth, now)
+			id, link, err := p.enqueue(tx, r, f, ev, now)
 			if err != nil {
 				return nil, nil, err
 			}
+			if id == 0 {
+				continue // skipped by the loop guard or the agent cap (audited)
+			}
 			ids = append(ids, id)
+			if link != "" {
+				approvalIDs = append(approvalIDs, id)
+			}
 		}
 	}
 	if !dryRun {
 		if err := tx.Commit(); err != nil {
 			return nil, nil, err
 		}
+		for _, id := range approvalIDs { // after commit, so a rolled-back job is never announced
+			// ponytail: the one-shot token is a credential and is never logged;
+			// operators approve by id via the CLI. Delivering /a/<id>/<token> is step 13's job.
+			slog.Info("approval required", "job", id, "approve", fmt.Sprintf("agentgw approve %d", id))
+		}
 	}
 	return fires, ids, errors.Join(errs...)
 }
 
-func (p *Pipeline) enqueue(tx *sql.Tx, r config.Rule, f rule.Fire, depth int, now time.Time) (int64, error) {
+// enqueue inserts the job; for pending_approval it also creates the approval
+// in the same tx and returns its link path.
+func (p *Pipeline) enqueue(tx *sql.Tx, r config.Rule, f rule.Fire, ev rule.Event, now time.Time) (id int64, link string, err error) {
+	depth := ev.Depth
+	if depth > config.MaxDepth {
+		return 0, "", store.Audit(tx, now, "rule:"+r.Name, "skip_depth", 0, fmt.Sprintf("depth %d > %d", depth, config.MaxDepth))
+	}
+	if r.Action.Agent != "" {
+		n, err := store.CountAgentJobsSince(tx, now.Add(-24*time.Hour))
+		if err != nil {
+			return 0, "", err
+		}
+		if n >= p.Cfg.Limits.AgentRunsPerDay {
+			return 0, "", store.Audit(tx, now, "rule:"+r.Name, "skip_agent_cap", 0, fmt.Sprintf("%d agent runs in 24h", n))
+		}
+	}
 	b, err := json.Marshal(Payload{Action: r.Action, Env: f.Env})
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	state := "queued"
 	if p.needsApproval(r) {
-		state = "pending_approval" // approvals rows and decisions arrive in plan step 10
+		state = "pending_approval"
 	}
-	id, err := store.InsertJob(tx, store.Job{Rule: r.Name, ActionJSON: string(b), State: state, RunAfter: now, Depth: depth}, now)
+	id, err = store.InsertJob(tx, store.Job{Rule: r.Name, ActionJSON: string(b), State: state, RunAfter: now, Depth: depth, ParentID: ev.ParentID}, now)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
-	return id, store.Audit(tx, now, "rule:"+r.Name, "fire", id, f.Key)
+	if err := store.Audit(tx, now, "rule:"+r.Name, "fire", id, f.Key); err != nil {
+		return 0, "", err
+	}
+	if state == "pending_approval" {
+		link, err = p.newApproval(tx, id, now)
+	}
+	return id, link, err
 }
 
 func (p *Pipeline) needsApproval(r config.Rule) bool {
@@ -160,24 +198,38 @@ func (p *Pipeline) needsApproval(r config.Rule) bool {
 func (p *Pipeline) RunQueued(ctx context.Context) (int, error) {
 	n := 0
 	for {
-		if err := ctx.Err(); err != nil {
-			return n, err
-		}
-		j, ok, err := store.ClaimJob(p.Store.DB, p.Now())
-		if err != nil || !ok {
-			return n, err
-		}
-		state, exit, out := p.run(ctx, j)
-		if err := ctx.Err(); err != nil {
-			// Interrupted, not failed: leave the job running so the startup
-			// requeue (plan step 8) picks it up instead of losing the event.
-			return n, err
-		}
-		if err := store.FinishJob(p.Store.DB, j.ID, state, exit, out, p.Now()); err != nil {
+		ran, err := p.runOne(ctx)
+		if err != nil || !ran {
 			return n, err
 		}
 		n++
 	}
+}
+
+// runOne claims and runs a single job; ran is false when the queue is empty.
+func (p *Pipeline) runOne(ctx context.Context) (ran bool, err error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	j, ok, err := store.ClaimJob(p.Store.DB, p.Now())
+	if err != nil || !ok {
+		return false, err
+	}
+	exec := p.run
+	if p.runFn != nil {
+		exec = p.runFn
+	}
+	state, exit, out := exec(ctx, j)
+	if err := ctx.Err(); err != nil && exit == -1 {
+		// Killed by cancellation (exit -1 = signalled or never started): leave
+		// it running so the startup requeue retries it. A job that completed
+		// before cancellation is recorded below, so it never runs twice.
+		return false, err
+	}
+	if err := store.FinishJob(p.Store.DB, j.ID, state, exit, out, p.Now()); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, exit int, output string) {
@@ -200,13 +252,62 @@ func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, ex
 			return "failed", code, string(out)
 		}
 		return "done", 0, string(out)
+	case pl.Action.Agent != "":
+		return p.runAgent(ctx, j, pl)
 	default:
-		return "failed", -1, "action type not implemented yet (unit/agent/routine arrive in later plan phases)"
+		return "failed", -1, "action type not implemented yet (unit/routine arrive in plan phase 3)"
 	}
+}
+
+// runAgent runs the agent and feeds its JSON result back as an agent-result
+// event one level deeper; rules see it only with allow_agent_events (loop guard).
+func (p *Pipeline) runAgent(ctx context.Context, j store.QueuedJob, pl Payload) (string, int, string) {
+	a := p.Cfg.Agents[pl.Action.Agent]
+	if a == nil {
+		return "failed", -1, "unknown agent " + pl.Action.Agent
+	}
+	servers := map[string]action.MCPServer{}
+	for _, name := range a.MCP {
+		s := p.Cfg.Sources[name]
+		h := headerValues(s.Headers)
+		if s.Auth != nil && s.Auth.Bearer.Value != "" {
+			h["Authorization"] = "Bearer " + s.Auth.Bearer.Value
+		}
+		servers[name] = action.MCPServer{URL: s.URL, Command: s.Command, Headers: h}
+	}
+	res, err := action.RunAgent(ctx, action.AgentOptions{
+		Runner: a.Runner, Prompt: a.Prompt, Env: pl.Env, MCP: servers,
+		AllowedTools: a.AllowedTools, MaxTurns: a.MaxTurns, MaxBudgetUSD: a.MaxBudgetUSD,
+		Timeout: time.Duration(a.Timeout), Sandbox: action.SandboxOptions{Mode: p.Cfg.Server.Sandbox},
+		Secrets: p.Cfg.Secrets(), WorkDir: filepath.Join(filepath.Dir(p.Cfg.Server.DB), "jobs", strconv.FormatInt(j.ID, 10)),
+		APIKeyFile: a.APIKeyFile,
+	})
+	out := string(res.Output)
+	if err != nil {
+		return "failed", res.Exit, out + err.Error()
+	}
+	if res.Exit != 0 {
+		return "failed", res.Exit, out
+	}
+	if data, derr := source.DecodeJSON(res.Stdout); derr == nil {
+		ev := rule.Event{Source: config.AgentResultSource, Data: data, Depth: j.Depth + 1, ParentID: j.ID}
+		if _, _, herr := p.HandleEvent(ctx, ev, false); herr != nil {
+			slog.Warn("agent-result rules", "job", j.ID, "err", herr)
+		}
+	} else {
+		slog.Warn("agent stdout is not JSON; no agent-result event", "job", j.ID, "err", derr)
+	}
+	return "done", 0, out
 }
 
 // RunOnce polls every polled source once, then runs whatever got queued.
 func (p *Pipeline) RunOnce(ctx context.Context) error {
+	if err := p.Requeue(); err != nil {
+		return err
+	}
+	if err := p.ExpireApprovals(); err != nil {
+		return err
+	}
 	var errs []error
 	for _, name := range sortedSources(p.Cfg) {
 		if p.Cfg.Sources[name].Type == "webhook" {

@@ -256,3 +256,39 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
   - `FinishJob` only transitions `running` jobs (L5).
   - Errors in `source_state` and on stderr are masked (L1).
 - Not in the original step-2 list: the `Source.ID` field (webhook delivery id). Cooldown is per rule across all keys, so N new ids with cooldown C take (N-1)·C to all fire. This is documented in `rule.go`.
+- Step 8:
+  - **Retry/backoff moves to step 15.** Only routine steps carry `retry`, so Phase 1 has nothing to retry.
+  - The startup requeue (`store.RequeueRunning`, max 3 attempts) runs in both `Serve` and `RunOnce`.
+  - A source poll failure is logged and the loop continues.
+  - Retention also removes approvals of purged jobs and nulls `parent_id` on surviving children.
+  - Workers are woken by a nudge channel plus a 1 s idle poll.
+- Step 9/11 (agent auth): `claude --bare` authenticates only via `ANTHROPIC_API_KEY` or an `apiKeyHelper` passed with `--settings` (per `claude --help`). In the systemd sandbox, the API key file goes in via `LoadCredential`, and a generated settings JSON sets `apiKeyHelper` to read `/run/credentials/<unit>/<name>`. This is wired in step 11.
+- Step 10:
+  - The approval id is the job id (one approval per job): `approve|deny <job id>` and `/a/<job id>/<token>`.
+  - The one-shot link (with its token) is logged at slog info after commit, so the operator can see it. The audit row stores `/a/<id>/***`.
+  - Smoke-tested by hand: `run-once`, then `jobs ls`, then `approve` (a second approve is rejected), then `run-once` again, ending in a `done` job.
+- Step 9 (Codex): `RunAgent` returns the result. Emitting the `agent-result` event happens in the pipeline (step 11). `SandboxOptions.Unit` was added for explicit unit names, so the MCP config reaches the DynamicUser sandbox as `LoadCredential` at `/run/credentials/<unit>/mcp.json`.
+- Step 11:
+  - The agent's `mcp.json`, which may hold bearer headers, is deleted after every run.
+  - New agent field `api_key_file`. It is passed as credential `api-key` with `--settings {"apiKeyHelper":"cat <path>"}`, and the path is restricted to `^/[A-Za-z0-9/._-]+$` because apiKeyHelper runs through a shell.
+  - The depth cap (`config.MaxDepth`=2) and the daily agent cap (a rolling 24 h window) are enforced at enqueue, audited as `skip_depth` and `skip_agent_cap`.
+  - Agent-result rule errors are logged and do not fail the agent job.
+  - The manual real-`claude` check is still open: it needs the owner's API key.
+- Phase 1 review (fresh Opus reviewer; 0 critical, 1 high, 6 medium, 6 low). Fixed:
+  - **H1:** the agent prompt goes on **stdin**, never argv. Event data rendered into the prompt could otherwise inject `claude` flags such as `--mcp-config=<inline json>`.
+  - **M1:** a job that completed during cancellation is recorded, not re-run.
+  - **M2:** an flock on `<db>.lock` stops `serve` and `run-once` from sharing a DB.
+  - **M3:** agent timeout defaults to 10 min; negative durations are rejected.
+  - **M4:** agent stdout is captured separately, and a warning is logged when it isn't JSON.
+  - **M5:** approval tokens are never logged; delivering the link is decided in step 13.
+  - **M6:** a relative `server.db` resolves against the config directory, and the agent work dir is removed after every run.
+  - **L1:** `poll > 0`, and agent `mcp` entries must be `type: mcp`.
+  - **L5:** `parent_id` is set on agent-result jobs.
+  - **L6:** a test covers agent MCP scoping.
+  - The sandbox sets `HOME=/tmp` so `claude` can run under DynamicUser.
+- Carried forward from that review:
+  - **L2:** a cap or depth skip consumes the rule's edge/each state (dropped, not deferred). This is documented here; revisit if it matters.
+  - **L3:** the daily cap counts jobs, not attempts, and step 15 must count routines that contain agents.
+  - **L4:** step 13 must rate-limit `/a/` bad-token attempts.
+  - **Step 17:** the polkit rule must also restrict transient-unit properties (no `User=`, credential paths only under allowed dirs), not just the unit name.
+  - **Step 18:** the VM test must assert that SIGTERM to agentgw stops its transient units (no orphaned agents).
