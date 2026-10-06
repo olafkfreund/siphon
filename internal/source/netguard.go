@@ -23,8 +23,7 @@ var blockedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("::/96"),
 }
 
-func guardedClient(allowPrivate bool, timeout time.Duration, maxBody int64) *http.Client {
-	stream := timeout < 0 && maxBody < 0
+func guardedClient(allowPrivate bool, timeout time.Duration, maxBody int64, stream bool) *http.Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
