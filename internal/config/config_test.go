@@ -306,3 +306,17 @@ func TestRetryValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestUnitNamesAndAgentRetry(t *testing.T) {
+	for u, ok := range map[string]bool{"nix-gc.service": true, "backup@home.timer": true, "x.target": true,
+		"nix-gc": false, "a b.service": false, "-x.service": true, "evil;rm.service": false, "x.socket": false} {
+		c, _ := Parse([]byte("units: [\"" + u + "\"]"))
+		if err := c.Validate(); (err == nil) != ok {
+			t.Errorf("%q: %v", u, err)
+		}
+	}
+	c, _ := Parse([]byte("agents: {a: {prompt: hi}}\nroutines: {r: {steps: [{id: s, agent: a, retry: {attempts: 2}}]}}"))
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "retry is not allowed on agent steps") {
+		t.Fatalf("%v", err)
+	}
+}

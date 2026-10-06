@@ -41,12 +41,18 @@ echo '{"used_pct": 95}' > event.json
 nix run github:olafkfreund/MCP-AgentGateway -- rules test -config examples/agentgw.yaml disk-full event.json
 ```
 
-Poll every source once and run whatever fires, or run the daemon:
+Poll every source once and run whatever fires, or run the daemon. Outside the
+NixOS module there is no polkit rule, so the systemd sandbox is not available
+to an ordinary user; run unsandboxed for a local try-out (not for real use):
 
 ```sh
-nix run github:olafkfreund/MCP-AgentGateway -- run-once -config examples/agentgw.yaml
-nix run github:olafkfreund/MCP-AgentGateway -- serve    -config examples/agentgw.yaml
+sed 's/sandbox: systemd/sandbox: none/' examples/agentgw.yaml > agentgw.local.yaml
+nix run github:olafkfreund/MCP-AgentGateway -- run-once -config agentgw.local.yaml
+nix run github:olafkfreund/MCP-AgentGateway -- serve    -config agentgw.local.yaml
 ```
+
+Header names in `headers[...]` are lower-case for every source type
+(`headers["x-github-event"]`).
 
 `serve` listens on `server.listen` (default `:8080`). The portal is at
 `http://127.0.0.1:8080/`: log in with the `server.token` value, then browse
@@ -85,7 +91,7 @@ From a checkout, `nix develop -c go test ./...` runs the tests and
       rules = [{
         name = "pr-opened";
         source = "github";
-        when = ''headers["X-GitHub-Event"] == "pull_request"'';
+        when = ''headers["x-github-event"] == "pull_request"'';
         on = "each";
         id = "event.number";
         action.cmd = [ "echo" "PR {{.event.number}}" ];
@@ -120,6 +126,17 @@ All commands that read the config take `-config <file>` (default `agentgw.yaml`)
 
 `serve` and `run-once` exclude each other on one DB file; `jobs ls`, `approve`
 and `deny` are safe next to a running `serve`.
+
+**On NixOS** the binary is not on `PATH` unless you add it
+(`environment.systemPackages = [ config.services.agentgw.package ];`), and the
+CLI must run as the service user, never as root: a root-run command would create
+root-owned SQLite WAL files that the daemon then cannot open. Use the config
+file the unit runs with (`systemctl cat agentgw` shows its path in `ExecStart`):
+
+```sh
+sudo -u agentgw agentgw jobs ls -config /nix/store/...-agentgw.yaml
+sudo -u agentgw agentgw approve -config /nix/store/...-agentgw.yaml 42
+```
 
 ### Editor support
 
@@ -167,6 +184,9 @@ Read these before running it anywhere that matters.
   properties, so it cannot stop that user from asking for `User=root`:
   **control of the `agentgw` account is root-equivalent.** Run agentgw only on
   hosts where that is acceptable, and keep its config, token and state private.
+- **A timed-out or cancelled unit action leaves the unit running.** Unlike a
+  `cmd` or agent (its transient unit is stopped), an allowlisted unit is an
+  operator-owned service: agentgw stops waiting for it but does not stop it.
 - **Outbound requests are guarded.** `http` and `mcp` sources reject loopback,
   private, link-local, CGNAT and cloud-metadata addresses after DNS resolution
   unless the source sets `allow_private: true`. No redirects; body size and time

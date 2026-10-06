@@ -88,7 +88,7 @@ rules:
   # A routine on a signed webhook; it contains an agent step, so it needs a cooldown.
   - name: pr-opened
     source: github
-    when: 'headers["X-GitHub-Event"] == "pull_request" && event.action == "opened"'
+    when: 'headers["x-github-event"] == "pull_request" && event.action == "opened"'
     on: each
     id: event.number
     cooldown: 1m

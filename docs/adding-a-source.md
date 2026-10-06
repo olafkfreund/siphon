@@ -10,6 +10,9 @@ A source turns something into an `Event{Source, ReceivedAt, Headers, Data}`
 sources implement `Poll(ctx) (Event, error)`; push sources (like webhooks)
 serve an `http.Handler` instead (`internal/source/webhook.go`).
 
+Header keys in `Event.Headers` must be lower-case for every source type, because
+rules read them as `headers["x-github-event"]`.
+
 ## Steps for a polled source
 
 Example: a `file` source that reads a local JSON file.

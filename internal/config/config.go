@@ -340,6 +340,8 @@ func loopbackListen(addr string) bool {
 	return h == "localhost"
 }
 
+var unitName = regexp.MustCompile(`^[A-Za-z0-9@._:-]+\.(service|target|timer)$`)
+
 var webhookID = regexp.MustCompile(`^header\.[A-Za-z0-9-]+$`)
 
 func cleartextRemote(raw string) bool {
@@ -404,6 +406,8 @@ func (c *Config) Validate() error {
 	for _, u := range c.Units {
 		if strings.Contains(u, "{{") {
 			add("units: %q must not be templated", u)
+		} else if !unitName.MatchString(u) {
+			add("units: %q must be a full unit name like foo.service", u)
 		}
 	}
 
@@ -442,7 +446,7 @@ func (c *Config) Validate() error {
 			add("%s: repeat and cooldown must not be negative", p)
 		}
 		c.validateAction(p, r.Action, add)
-		if (r.Action.Agent != "" || (r.Action.Routine != "" && c.routineHasAgent(r.Action.Routine))) && r.Cooldown <= 0 {
+		if (r.Action.Agent != "" || (r.Action.Routine != "" && c.RoutineHasAgent(r.Action.Routine))) && r.Cooldown <= 0 {
 			add("%s: cooldown is mandatory for agent actions", p)
 		}
 	}
@@ -491,6 +495,9 @@ func (c *Config) Validate() error {
 			ids[st.ID] = true
 			if st.Timeout < 0 {
 				add("%s: timeout must not be negative", sp)
+			}
+			if st.Agent != "" && st.Retry != nil {
+				add("%s: retry is not allowed on agent steps (paid runs would bypass the daily cap)", sp)
 			}
 			if r := st.Retry; r != nil {
 				if r.Attempts < 0 || r.Attempts > MaxRetryAttempts {
@@ -594,7 +601,8 @@ func (c *Config) validateAction(p string, a Action, add func(string, ...any)) {
 	}
 }
 
-func (c *Config) routineHasAgent(name string) bool {
+// RoutineHasAgent reports whether the named routine has an agent step.
+func (c *Config) RoutineHasAgent(name string) bool {
 	if rt := c.Routines[name]; rt != nil {
 		for _, s := range rt.Steps {
 			if s.Agent != "" {

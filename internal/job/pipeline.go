@@ -36,8 +36,7 @@ type Pipeline struct {
 	MCPTransport func(source string) mcp.Transport
 
 	runFn func(context.Context, store.QueuedJob) (string, int, string) // tests only
-	sleep func(context.Context, time.Duration) error                   // retry backoff; tests inject
-	rnd   func() float64                                               // jitter source; tests inject
+	rnd   func() float64                                               // retry jitter source; tests inject
 }
 
 // runUnit starts a unit and waits for it; tests stub it. The step/action
@@ -54,12 +53,11 @@ var runUnit = func(ctx context.Context, p *Pipeline, unit string) (int, string) 
 	return exit, string(out)
 }
 
-// unit re-checks the allowlist at runtime before anything is started.
-func (p *Pipeline) unit(ctx context.Context, name string) (int, string) {
-	if !slices.Contains(p.Cfg.Units, name) {
-		return -1, fmt.Sprintf("unit not allowlisted: %q", name)
+func (p *Pipeline) routineSteps(a config.Action) []config.Step {
+	if rt := p.Cfg.Routines[a.Routine]; a.Routine != "" && rt != nil {
+		return slices.Clone(rt.Steps)
 	}
-	return runUnit(ctx, p, name)
+	return nil
 }
 
 // New returns a Pipeline ready for Serve. The worker nudge channel is made
@@ -75,6 +73,9 @@ type Payload struct {
 	// Agent marks jobs that run an agent (directly or in a routine step); the
 	// daily agent cap counts them.
 	Agent bool `json:"agent,omitempty"`
+	// Steps is a snapshot of the routine's steps at enqueue time; running a
+	// routine never reads the live config.
+	Steps []config.Step `json:"steps,omitempty"`
 }
 
 // Poll fetches one event from a polled source.
@@ -199,7 +200,7 @@ func (p *Pipeline) enqueue(tx *sql.Tx, r config.Rule, f rule.Fire, ev rule.Event
 	if depth > config.MaxDepth {
 		return 0, "", store.Audit(tx, now, "rule:"+r.Name, "skip_depth", 0, fmt.Sprintf("depth %d > %d", depth, config.MaxDepth))
 	}
-	hasAgent := r.Action.Agent != "" || p.routineHasAgent(r.Action.Routine)
+	hasAgent := r.Action.Agent != "" || p.Cfg.RoutineHasAgent(r.Action.Routine)
 	if hasAgent {
 		n, err := store.CountAgentJobsSince(tx, now.Add(-24*time.Hour))
 		if err != nil {
@@ -209,7 +210,7 @@ func (p *Pipeline) enqueue(tx *sql.Tx, r config.Rule, f rule.Fire, ev rule.Event
 			return 0, "", store.Audit(tx, now, "rule:"+r.Name, "skip_agent_cap", 0, fmt.Sprintf("%d agent runs in 24h", n))
 		}
 	}
-	b, err := json.Marshal(Payload{Action: r.Action, Env: f.Env, Agent: hasAgent})
+	b, err := json.Marshal(Payload{Action: r.Action, Env: f.Env, Agent: hasAgent, Steps: p.routineSteps(r.Action)})
 	if err != nil {
 		return 0, "", err
 	}
@@ -266,8 +267,8 @@ func (p *Pipeline) runOne(ctx context.Context) (ran bool, err error) {
 		exec = p.runFn
 	}
 	state, exit, out := exec(ctx, j)
-	if state == statePaused {
-		return true, nil // routine waiting for approval; PauseJob already recorded it
+	if state == statePaused || state == stateRequeued {
+		return true, nil // routine parked (approval) or rescheduled (retry); the store already recorded it
 	}
 	if err := ctx.Err(); err != nil && exit == -1 {
 		// Killed by cancellation (exit -1 = signalled or never started): leave
@@ -306,7 +307,7 @@ func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, ex
 	case pl.Action.Unit != "":
 		uctx, cancel := context.WithTimeout(ctx, cmdTimeout)
 		defer cancel()
-		if code, out := p.unit(uctx, pl.Action.Unit); code != 0 {
+		if code, out := runUnit(uctx, p, pl.Action.Unit); code != 0 {
 			return "failed", code, out
 		} else {
 			return "done", 0, out
@@ -415,6 +416,8 @@ func decodePayload(s string) (Payload, error) {
 	var raw struct {
 		Action config.Action   `json:"action"`
 		Env    json.RawMessage `json:"env"`
+		Agent  bool            `json:"agent"`
+		Steps  []config.Step   `json:"steps"`
 	}
 	if err := json.Unmarshal([]byte(s), &raw); err != nil {
 		return Payload{}, err
@@ -424,7 +427,7 @@ func decodePayload(s string) (Payload, error) {
 		return Payload{}, err
 	}
 	m, _ := env.(map[string]any)
-	return Payload{Action: raw.Action, Env: m}, nil
+	return Payload{Action: raw.Action, Env: m, Agent: raw.Agent, Steps: raw.Steps}, nil
 }
 
 func (p *Pipeline) mcpOptions(name string) source.MCPOptions {

@@ -332,6 +332,20 @@ func SaveProgress(db *sql.DB, id int64, nextStep int, output string) error {
 	return nil
 }
 
+// RequeueJob sends a running routine job back to queued to retry its current
+// step at runAfter, keeping progress; the worker loop honours run_after.
+func RequeueJob(db *sql.DB, id int64, step int, output string, runAfter time.Time) error {
+	r, err := db.Exec(`UPDATE jobs SET state='queued', started_at=NULL, resume_step=?, output=?, run_after=?
+		WHERE id=? AND state='running'`, step, output, ms(runAfter), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return fmt.Errorf("requeue job %d: not running", id)
+	}
+	return nil
+}
+
 // PauseJob moves a running routine job to pending_approval at step, keeping its
 // progress. The caller creates the approvals row in the same tx.
 func PauseJob(tx *sql.Tx, id int64, step int, output string) error {

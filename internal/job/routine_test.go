@@ -15,11 +15,11 @@ import (
 )
 
 type rt struct {
-	t     *testing.T
-	p     *Pipeline
-	dir   string
-	log   string
-	sleep []time.Duration
+	t   *testing.T
+	p   *Pipeline
+	dir string
+	log string
+	now time.Time // injected clock
 }
 
 // newRT builds a pipeline from YAML with two stub scripts: rec.sh <name> [fail]
@@ -27,7 +27,7 @@ type rt struct {
 func newRT(t *testing.T, yaml string) *rt {
 	t.Helper()
 	dir := t.TempDir()
-	r := &rt{t: t, dir: dir, log: filepath.Join(dir, "log")}
+	r := &rt{t: t, dir: dir, log: filepath.Join(dir, "log"), now: time.Unix(1_800_000_000, 0)}
 	write := func(name, body string) string {
 		p := filepath.Join(dir, name)
 		if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
@@ -47,9 +47,8 @@ func newRT(t *testing.T, yaml string) *rt {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	r.p = &Pipeline{Cfg: cfg, Store: st, Now: time.Now,
-		rnd:   func() float64 { return 0.5 }, // jitter factor exactly 1.0
-		sleep: func(_ context.Context, d time.Duration) error { r.sleep = append(r.sleep, d); return nil },
+	r.p = &Pipeline{Cfg: cfg, Store: st, Now: func() time.Time { return r.now },
+		rnd: func() float64 { return 0.5 }, // jitter factor exactly 1.0
 	}
 	return r
 }
@@ -218,31 +217,59 @@ routines:
 	}
 }
 
-func TestRetryBackoffDurations(t *testing.T) {
+func (r *rt) runAfter(id int64) time.Time {
+	var ms int64
+	r.p.Store.DB.QueryRow(`SELECT run_after FROM jobs WHERE id=?`, id).Scan(&ms)
+	return time.UnixMilli(ms)
+}
+
+func TestRetryBackoffRequeuesInsteadOfSleeping(t *testing.T) {
 	r := newRT(t, ruleYAML+`
 routines:
   r: { steps: [ { id: a, cmd: [REC, a, fail], retry: { attempts: 4 } } ] }
 `)
 	id := r.fire(1)
-	r.run()
-	want := []time.Duration{10 * time.Second, 20 * time.Second, 40 * time.Second}
-	if len(r.sleep) != 3 || r.sleep[0] != want[0] || r.sleep[1] != want[1] || r.sleep[2] != want[2] {
-		t.Fatalf("sleeps: %v", r.sleep)
+	for i, wait := range []time.Duration{10 * time.Second, 20 * time.Second, 40 * time.Second} {
+		r.run()
+		j := r.job(id)
+		if j.State != "queued" || r.logged() != strings.Repeat("a ", i+1)[:2*i+1] {
+			t.Fatalf("attempt %d: %s log=%q", i+1, j.State, r.logged())
+		}
+		if got := r.runAfter(id); !got.Equal(r.now.Add(wait)) {
+			t.Fatalf("attempt %d: run_after %v want now+%v", i+1, got, wait)
+		}
+		if !strings.Contains(j.Output, `"tries":`+itoaT(i+1)) {
+			t.Fatalf("tries not persisted: %s", j.Output)
+		}
+		r.run() // before run_after nothing may run
+		if n := strings.Count(r.logged(), "a"); n != i+1 {
+			t.Fatalf("ran again before its backoff: %d", n)
+		}
+		r.now = r.now.Add(wait)
 	}
-	if j := r.job(id); j.State != "failed" || r.logged() != "a a a a" {
+	r.run()
+	j := r.job(id)
+	if j.State != "failed" || *j.ExitCode != 3 || r.logged() != "a a a a" {
 		t.Fatalf("%s log=%q", j.State, r.logged())
 	}
 }
+
+func itoaT(n int) string { return string(rune('0' + n)) }
 
 func TestRetryCustomBaseFactorAndJitterBounds(t *testing.T) {
 	r := newRT(t, ruleYAML+`
 routines:
   r: { steps: [ { id: a, cmd: [REC, a, fail], retry: { attempts: 3, base: 1s, factor: 3 } } ] }
 `)
-	r.fire(1)
+	id := r.fire(1)
 	r.run()
-	if len(r.sleep) != 2 || r.sleep[0] != time.Second || r.sleep[1] != 3*time.Second {
-		t.Fatalf("sleeps: %v", r.sleep)
+	if got := r.runAfter(id); !got.Equal(r.now.Add(time.Second)) {
+		t.Fatalf("first wait: %v", got.Sub(r.now))
+	}
+	r.now = r.now.Add(time.Second)
+	r.run()
+	if got := r.runAfter(id); !got.Equal(r.now.Add(3 * time.Second)) {
+		t.Fatalf("second wait: %v", got.Sub(r.now))
 	}
 	for _, c := range []struct {
 		rnd  float64
@@ -266,12 +293,36 @@ routines:
 `)
 	id := r.fire(1)
 	r.run()
-	if j := r.job(id); j.State != "done" || len(r.sleep) != 1 || r.logged() != "b" {
-		t.Fatalf("%s sleeps=%v log=%q", j.State, r.sleep, r.logged())
+	if r.job(id).State != "queued" {
+		t.Fatal("first failure should requeue")
+	}
+	r.now = r.now.Add(11 * time.Second)
+	r.run()
+	if j := r.job(id); j.State != "done" || r.logged() != "b" || strings.Contains(j.Output, "tries") {
+		t.Fatalf("%s log=%q out=%s", j.State, r.logged(), j.Output)
 	}
 }
 
-func TestUnitAllowlistRechecked(t *testing.T) {
+func TestApprovedStepStaysApprovedAcrossRetry(t *testing.T) {
+	r := newRT(t, ruleYAML+`
+routines:
+  r: { steps: [ { id: a, cmd: [FLAKY], approve: true, retry: { attempts: 3 } } ] }
+`)
+	id := r.fire(1)
+	r.run()
+	r.p.Decide(id, true, "olaf")
+	r.run() // first try fails -> requeued, must not ask for approval again
+	if st := r.job(id).State; st != "queued" {
+		t.Fatalf("state %s", st)
+	}
+	r.now = r.now.Add(11 * time.Second)
+	r.run()
+	if st := r.job(id).State; st != "done" {
+		t.Fatalf("state %s", st)
+	}
+}
+
+func TestUnitStepsAndActionUseRunUnitSeam(t *testing.T) {
 	var started []string
 	old := runUnit
 	runUnit = func(_ context.Context, _ *Pipeline, u string) (int, string) {
@@ -283,14 +334,13 @@ func TestUnitAllowlistRechecked(t *testing.T) {
 	r := newRT(t, `
 rules:
   - { name: ok, source: s, when: "true", on: each, id: "string(event.id)", action: { unit: nix-gc.service } }
-  - { name: evil, source: s, when: "true", on: each, id: "string(event.id)", action: { unit: evil.service } }
   - { name: rtn, source: s, when: "true", on: each, id: "string(event.id)", action: { routine: r } }
 routines:
-  r: { steps: [ { id: u, unit: nix-gc.service }, { id: v, unit: evil.service, continue_on_error: true } ] }
+  r: { steps: [ { id: u, unit: nix-gc.service } ] }
 units: [nix-gc.service]
 `)
 	_, ids, err := r.p.HandleEvent(context.Background(), rule.Event{Source: "s", Data: map[string]any{"id": 1}}, false)
-	if err != nil || len(ids) != 3 {
+	if err != nil || len(ids) != 2 {
 		t.Fatal(ids, err)
 	}
 	r.run()
@@ -300,28 +350,117 @@ units: [nix-gc.service]
 	if j := r.job(ids[0]); j.State != "done" || j.Output != "started nix-gc.service" {
 		t.Fatalf("%+v", j)
 	}
-	j := r.job(ids[1])
-	if j.State != "failed" || !strings.Contains(j.Output, "not allowlisted") || *j.ExitCode != -1 {
+}
+
+func TestUnitDefaultRejectsUnlistedUnit(t *testing.T) {
+	// The real runUnit (action.RunUnit) enforces the allowlist; nothing reaches systemd.
+	r := newRT(t, `
+rules:
+  - { name: bad, source: s, when: "true", action: { unit: evil.service } }
+  - { name: rtn, source: s, when: "true", action: { routine: r } }
+routines:
+  r: { steps: [ { id: v, unit: evil.service, continue_on_error: true } ] }
+units: [nix-gc.service]
+`)
+	_, ids, _ := r.p.HandleEvent(context.Background(), rule.Event{Source: "s", Data: map[string]any{"id": 1}}, false)
+	r.run()
+	j := r.job(ids[0])
+	if j.State != "failed" || *j.ExitCode != -1 || !strings.Contains(j.Output, "allowlist") {
 		t.Fatalf("%+v", j)
 	}
-	j = r.job(ids[2])
-	if j.State != "done" || !strings.Contains(j.Output, "not allowlisted") {
+	if j := r.job(ids[1]); j.State != "done" || !strings.Contains(j.Output, "allowlist") {
 		t.Fatalf("routine: %+v", j)
 	}
 }
 
-func TestUnitDefaultCallsActionRunUnit(t *testing.T) {
-	// The real RunUnit allowlist-checks again; an unlisted unit never reaches systemd.
-	r := newRT(t, `
-rules:
-  - { name: bad, source: s, when: "true", action: { unit: evil.service } }
-units: [nix-gc.service]
+func TestAgentStepHonoursAgentApprove(t *testing.T) {
+	r := newRT(t, ruleYAML+`
+agents:
+  fix: { prompt: hi }
+  quiet: { prompt: hi, approve: false }
+routines:
+  r: { steps: [ { id: a, cmd: [REC, a] }, { id: b, agent: fix } ] }
 `)
-	r.p.Cfg.Units = []string{"nix-gc.service"}
-	// bypass Pipeline.unit's own check by calling the default directly
-	exit, out := runUnit(context.Background(), r.p, "evil.service")
-	if exit != -1 || !strings.Contains(out, "allowlist") {
-		t.Fatalf("%d %q", exit, out)
+	id := r.fire(1)
+	r.run()
+	j := r.job(id)
+	if j.State != "pending_approval" || r.logged() != "a" || !strings.Contains(j.Output, `"awaiting":1`) {
+		t.Fatalf("agent step must pause for approval: %s log=%q out=%s", j.State, r.logged(), j.Output)
+	}
+	// An agent with approve: false and no step-level approve does not gate.
+	if r.p.stepNeedsApproval(config.Step{Agent: "quiet"}) || !r.p.stepNeedsApproval(config.Step{Agent: "fix"}) ||
+		!r.p.stepNeedsApproval(config.Step{Agent: "quiet", Approve: true}) || r.p.stepNeedsApproval(config.Step{Cmd: []string{"x"}}) {
+		t.Fatal("stepNeedsApproval")
+	}
+}
+
+func TestRoutineUsesSnapshotNotLiveConfig(t *testing.T) {
+	r := newRT(t, ruleYAML+`
+routines:
+  r: { steps: [ { id: a, cmd: [REC, a] }, { id: b, cmd: [REC, b], approve: true }, { id: c, cmd: [REC, c] } ] }
+`)
+	id := r.fire(1)
+	r.run()
+	// The config changes while the job waits: a step is inserted and approve dropped.
+	r.p.Cfg.Routines["r"].Steps = []config.Step{
+		{ID: "x", Cmd: []string{"REC-never", "x"}}, {ID: "a", Cmd: []string{"false"}}, {ID: "b", Cmd: []string{"false"}},
+	}
+	r.p.Decide(id, true, "olaf")
+	r.run()
+	if j := r.job(id); j.State != "done" || r.logged() != "a b c" {
+		t.Fatalf("%s log=%q out=%s", j.State, r.logged(), j.Output)
+	}
+}
+
+func TestAwaitedStepIDMismatchFails(t *testing.T) {
+	r := newRT(t, ruleYAML+`
+routines:
+  r: { steps: [ { id: a, cmd: [REC, a] }, { id: b, cmd: [REC, b], approve: true } ] }
+`)
+	id := r.fire(1)
+	r.run()
+	r.p.Store.DB.Exec(`UPDATE jobs SET output=replace(output, '"awaiting_id":"b"', '"awaiting_id":"zzz"') WHERE id=?`, id)
+	r.p.Decide(id, true, "olaf")
+	r.run()
+	if j := r.job(id); j.State != "failed" || !strings.Contains(j.Output, "does not match") || r.logged() != "a" {
+		t.Fatalf("%s log=%q out=%s", j.State, r.logged(), j.Output)
+	}
+}
+
+func TestSkippedExposedInStepEnv(t *testing.T) {
+	r := newRT(t, ruleYAML+`
+routines:
+  r:
+    steps:
+      - { id: s, cmd: [REC, never], if: "false" }
+      - { id: t, cmd: [REC, t], if: "steps.s.skipped == true" }
+`)
+	id := r.fire(1)
+	r.run()
+	if j := r.job(id); j.State != "done" || r.logged() != "t" {
+		t.Fatalf("%s log=%q", j.State, r.logged())
+	}
+}
+
+func TestExpiryKeepsRoutineProgress(t *testing.T) {
+	r := newRT(t, ruleYAML+`
+routines:
+  r: { steps: [ { id: a, cmd: [REC, a] }, { id: b, cmd: [REC, b], approve: true } ] }
+`)
+	id := r.fire(1)
+	r.run()
+	r.now = r.now.Add(approvalTTL + time.Second)
+	if err := r.p.ExpireApprovals(); err != nil {
+		t.Fatal(err)
+	}
+	j := r.job(id)
+	if j.State != "failed" || !strings.Contains(j.Output, `"steps"`) {
+		t.Fatalf("%s out=%s", j.State, j.Output)
+	}
+	var n int
+	r.p.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit WHERE event='approval_expired' AND job_id=?`, id).Scan(&n)
+	if n != 1 {
+		t.Fatal("expiry must be audited")
 	}
 }
 
