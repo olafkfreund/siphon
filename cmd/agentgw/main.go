@@ -16,6 +16,7 @@ import (
 	"github.com/olafkfreund/MCP-AgentGateway/internal/config"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/job"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/rule"
+	"github.com/olafkfreund/MCP-AgentGateway/internal/source"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
 )
 
@@ -107,8 +108,8 @@ func rulesTest(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	var data any
-	if err := json.Unmarshal(b, &data); err != nil {
+	data, err := source.DecodeJSON(b)
+	if err != nil {
 		return fmt.Errorf("event: %w", err)
 	}
 	st, err := store.Open(":memory:")
@@ -157,5 +158,8 @@ func runOnce(ctx context.Context, args []string) error {
 		return err
 	}
 	defer st.Close()
-	return (&job.Pipeline{Cfg: cfg, Store: st, Now: time.Now}).RunOnce(ctx)
+	if err := (&job.Pipeline{Cfg: cfg, Store: st, Now: time.Now}).RunOnce(ctx); err != nil {
+		return errors.New(string(action.Mask([]byte(err.Error()), cfg.Secrets())))
+	}
+	return nil
 }

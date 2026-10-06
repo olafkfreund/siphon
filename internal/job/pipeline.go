@@ -81,7 +81,7 @@ func (p *Pipeline) Tick(ctx context.Context, name string) ([]int64, error) {
 	ev, err := p.Poll(ctx, name)
 	msg := ""
 	if err != nil {
-		msg = err.Error()
+		msg = string(action.Mask([]byte(err.Error()), p.Cfg.Secrets()))
 	}
 	if serr := store.PutSourceState(p.Store.DB, name, p.Now(), msg); serr != nil {
 		return nil, serr
@@ -181,8 +181,8 @@ func (p *Pipeline) RunQueued(ctx context.Context) (int, error) {
 }
 
 func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, exit int, output string) {
-	var pl Payload
-	if err := json.Unmarshal([]byte(j.ActionJSON), &pl); err != nil {
+	pl, err := decodePayload(j.ActionJSON)
+	if err != nil {
 		return "failed", -1, "bad payload: " + err.Error()
 	}
 	switch {
@@ -242,4 +242,21 @@ func headerValues(h map[string]config.Secret) map[string]string {
 		}
 	}
 	return out
+}
+
+// decodePayload keeps integers as int64 so templates render 1700000000, not 1.7e+09.
+func decodePayload(s string) (Payload, error) {
+	var raw struct {
+		Action config.Action   `json:"action"`
+		Env    json.RawMessage `json:"env"`
+	}
+	if err := json.Unmarshal([]byte(s), &raw); err != nil {
+		return Payload{}, err
+	}
+	env, err := source.DecodeJSON(raw.Env)
+	if err != nil {
+		return Payload{}, err
+	}
+	m, _ := env.(map[string]any)
+	return Payload{Action: raw.Action, Env: m}, nil
 }

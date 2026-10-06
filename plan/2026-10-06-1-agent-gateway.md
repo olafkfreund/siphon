@@ -245,3 +245,14 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
   - Approval-required jobs are inserted as `pending_approval`; their approvals rows and decisions arrive in step 10.
   - `unit`/`agent`/`routine` jobs fail with "not implemented yet" until their phases.
   - Running `sandbox: systemd` as a non-root user needs the polkit rule from step 17, so local `run-once` uses `sandbox: none` until then.
+- Phase 0 review (fresh Opus reviewer; 0 critical, 2 high, 5 medium, 5 low). All high and medium findings fixed, plus L1, L2, L3 and L5. Changes beyond the plan:
+  - JSON is decoded with `source.DecodeJSON`, keeping integers as int64 (H1).
+  - Children get only PATH/HOME/LANG (M1).
+  - argv[0] can never be templated (M2).
+  - netguard also blocks NAT64, 6to4, IPv4-compatible addresses, 192.0.0.0/24, 198.18.0.0/15 and the Azure/Alibaba metadata IPs (M3).
+  - Source `headers` are secret-capable, and inline secret-looking headers are rejected (M4).
+  - `on: each` dedupes via `rule_state`, not `seen_event`, so the TTL sweep cannot replay (M5).
+  - Cancelled runs leave jobs for the startup requeue (H2). **Step 8's startup requeue must run in `RunOnce` as well as `serve`.**
+  - `FinishJob` only transitions `running` jobs (L5).
+  - Errors in `source_state` and on stderr are masked (L1).
+- Not in the original step-2 list: the `Source.ID` field (webhook delivery id). Cooldown is per rule across all keys, so N new ids with cooldown C take (N-1)·C to all fire. This is documented in `rule.go`.
