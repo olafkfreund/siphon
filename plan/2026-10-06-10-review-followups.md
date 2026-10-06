@@ -70,3 +70,6 @@ Steps 1–3 run in parallel; step 4 follows step 2 (the `Save` semantics).
 Revert the merge commit. The three new `validate` errors only reject configs that were already wrong.
 
 ## Deviations log
+- Step 1 (item 6): go-sdk turns `StructuredContent` numbers into float64 before agentgw sees them. Codex captured the raw JSON-RPC response with a transport wrapper; Opus replaced that with preferring the tool result's single TextContent JSON, which the MCP spec says a tool SHOULD send alongside structured output (go-sdk typed tools do). Exact and ~50 lines smaller. It falls back to `StructuredContent`, lossy above 2^53, only when a tool omits the text copy (`ponytail:` note in code).
+- Step 4: the job payload snapshot needed `decodePayload` to read `agents` too; the snapshot test caught it.
+- No separate review round, per the plan. CI plus per-item tests are the gate.
