@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 12
 spec: spec/2026-10-06-12-egress-restriction.md
 ---
