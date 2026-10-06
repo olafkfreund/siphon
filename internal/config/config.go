@@ -245,6 +245,13 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	c.resolveDB(path)
+	return c, nil
+}
+
+// resolveDB points a relative db at the config file's directory and applies
+// the legacy-name fallback.
+func (c *Config) resolveDB(path string) {
 	// A relative db lives next to the config file, wherever the daemon is started.
 	if d := c.Server.DB; d != "" && d != ":memory:" && !filepath.IsAbs(d) {
 		c.Server.DB = filepath.Join(filepath.Dir(path), d)
@@ -258,7 +265,6 @@ func Load(path string) (*Config, error) {
 			}
 		}
 	}
-	return c, nil
 }
 
 func Parse(b []byte) (*Config, error) {
