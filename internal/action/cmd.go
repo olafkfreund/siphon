@@ -87,6 +87,9 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 		if separateStdout {
 			stdoutBytes = capBytes(Mask(so, secrets), 1<<20)
 		}
+		if opts.stderr != nil {
+			*opts.stderr = capBytes(Mask(se, secrets), 1<<20)
+		}
 		return exit, output, stdoutBytes, writeback, err
 	case "none":
 	default:
@@ -97,12 +100,19 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 		return -1, nil, nil, nil, err
 	}
 	defer os.RemoveAll(runDir)
-	home := filepath.Join(runDir, "home")
-	if err := os.Mkdir(home, 0o700); err != nil {
-		return -1, nil, nil, nil, err
+	home := opts.home
+	if home == "" && (len(opts.Files) != 0 || len(opts.Writeback) != 0) {
+		home = filepath.Join(runDir, "home")
+		if err := os.Mkdir(home, 0o700); err != nil {
+			return -1, nil, nil, nil, err
+		}
+	} else if home == "" {
+		home = os.Getenv("HOME")
 	}
-	if err := writeJobFiles(home, opts.Files); err != nil {
-		return -1, nil, nil, nil, err
+	if len(opts.Files) != 0 {
+		if err := writeJobFiles(home, opts.Files); err != nil {
+			return -1, nil, nil, nil, err
+		}
 	}
 	for _, name := range opts.Writeback {
 		if _, err := relativeFile(name); err != nil {
@@ -127,20 +137,29 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 			cmd.Env = append(cmd.Env, name+"="+value)
 		}
 	}
-	cmd.Env = append(cmd.Env, "HOME="+home)
+	if home != "" {
+		cmd.Env = append(cmd.Env, "HOME="+home)
+	}
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = 10 * time.Second
 	buf := &cappedBuffer{limit: 64<<10 + maxExtra}
 	cmd.Stdout, cmd.Stderr = buf, buf
+	var stderr *cappedBuffer
+	if opts.stderr != nil {
+		stderr = &cappedBuffer{limit: 1<<20 + maxExtra}
+		cmd.Stderr = io.MultiWriter(buf, stderr)
+	}
 	var stdout *cappedBuffer
 	if separateStdout {
 		stdout = &cappedBuffer{limit: 1<<20 + maxExtra}
 		cmd.Stdout = io.MultiWriter(buf, stdout)
 	}
 	err = cmd.Run()
-	if writeErr := saveWritebacks(home, runDir, JobSpec{Files: opts.Files, Writeback: opts.Writeback}); writeErr != nil {
-		return -1, nil, nil, nil, writeErr
+	writebackErr := io.Writer(buf)
+	if stderr != nil {
+		writebackErr = io.MultiWriter(buf, stderr)
 	}
+	saveWritebacks(home, runDir, JobSpec{Files: opts.Files, Writeback: opts.Writeback}, writebackErr)
 	writeback := readWritebacks(runDir, opts.Writeback)
 	output := Mask(buf.Bytes(), secrets)
 	if len(output) > 64<<10 {
@@ -152,6 +171,9 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 		if len(stdoutBytes) > 1<<20 {
 			stdoutBytes = stdoutBytes[:1<<20]
 		}
+	}
+	if stderr != nil {
+		*opts.stderr = capBytes(Mask(stderr.Bytes(), secrets), 1<<20)
 	}
 	if err == nil {
 		return 0, output, stdoutBytes, writeback, nil

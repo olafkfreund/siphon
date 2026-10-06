@@ -28,15 +28,16 @@ func TestBuildRun(t *testing.T) {
 			o.Kind = "claude"
 			o.CredFiles = map[string][]byte{"credentials.json": []byte("login")}
 			return o
-		}(), []string{"claude", "-p", "--strict-mcp-config", "--mcp-config", FilePath("mcp.json"), "--tools", "", "--allowedTools", "mcp__demo__get_status", "--permission-mode", "dontAsk", "--output-format", "json"}, "hello world", map[string]string{}, ".claude/.credentials.json", []string{".claude/.credentials.json"}, []string{"credentials.json"}},
-		{"claude api", func() AgentOptions { o := base; o.APIKey = "key"; return o }(), []string{"claude", "-p", "--bare", "--strict-mcp-config", "--mcp-config", FilePath("mcp.json"), "--tools", "", "--allowedTools", "mcp__demo__get_status", "--permission-mode", "dontAsk", "--output-format", "json"}, "hello world", map[string]string{"ANTHROPIC_API_KEY": "key"}, "mcp.json", nil, nil},
+		}(), []string{"claude", "-p", "--strict-mcp-config", "--mcp-config", filepath.Join(base.WorkDir, "mcp.json"), "--tools", "", "--allowedTools", "mcp__demo__get_status", "--permission-mode", "dontAsk", "--output-format", "json"}, "hello world", map[string]string{}, ".claude/.credentials.json", []string{".claude/.credentials.json"}, []string{"credentials.json"}},
+		{"claude api", func() AgentOptions { o := base; o.APIKey = "key"; return o }(), []string{"claude", "-p", "--bare", "--strict-mcp-config", "--mcp-config", filepath.Join(base.WorkDir, "mcp.json"), "--tools", "", "--allowedTools", "mcp__demo__get_status", "--permission-mode", "dontAsk", "--output-format", "json"}, "hello world", map[string]string{"ANTHROPIC_API_KEY": "key"}, "mcp.json", nil, nil},
+		{"claude legacy", func() AgentOptions { o := base; o.Runner = []string{"custom"}; return o }(), []string{"custom", "-p", "--bare", "--strict-mcp-config", "--mcp-config", filepath.Join(base.WorkDir, "mcp.json"), "--tools", "", "--allowedTools", "mcp__demo__get_status", "--permission-mode", "dontAsk", "--output-format", "json"}, "hello world", map[string]string{}, "mcp.json", nil, nil},
 		{"codex subscription", func() AgentOptions {
 			o := base
 			o.Kind = "codex"
 			o.CredFiles = map[string][]byte{"auth.json": []byte("login")}
 			return o
-		}(), []string{"codex", "exec", "--skip-git-repo-check", "--ephemeral", "--strict-config", "-s", "read-only", "-c", `forced_login_method="chatgpt"`, "-c", `mcp_servers.demo.command="serve"`, "-c", `mcp_servers.demo.args=["--quiet"]`, "-c", `mcp_servers.demo.enabled_tools=["get_status"]`, "-c", `mcp_servers.demo.tools.get_status.approval_mode="approve"`, "-"}, "hello world", map[string]string{"CODEX_HOME": FilePath(".codex")}, ".codex/auth.json", []string{".codex/auth.json"}, []string{"auth.json"}},
-		{"codex api", func() AgentOptions { o := base; o.Kind = "codex"; o.APIKey = "key"; o.MCP = nil; return o }(), []string{"codex", "exec", "--skip-git-repo-check", "--ephemeral", "--strict-config", "-s", "read-only", "-c", `forced_login_method="api"`, "-"}, "hello world", map[string]string{"CODEX_HOME": FilePath(".codex")}, ".codex/auth.json", nil, nil},
+		}(), []string{"codex", "exec", "--skip-git-repo-check", "--ephemeral", "--strict-config", "-s", "read-only", "-c", `forced_login_method="chatgpt"`, "-"}, "hello world", map[string]string{"CODEX_HOME": filepath.Join(base.WorkDir, ".codex")}, ".codex/auth.json", []string{".codex/auth.json"}, []string{"auth.json"}},
+		{"codex api", func() AgentOptions { o := base; o.Kind = "codex"; o.APIKey = "key"; o.MCP = nil; return o }(), []string{"codex", "exec", "--skip-git-repo-check", "--ephemeral", "--strict-config", "-s", "read-only", "-c", `forced_login_method="api"`, "-"}, "hello world", map[string]string{"CODEX_HOME": filepath.Join(base.WorkDir, ".codex")}, ".codex/auth.json", nil, nil},
 		{"agy subscription", func() AgentOptions {
 			o := base
 			o.Kind = "agy"
@@ -47,7 +48,7 @@ func TestBuildRun(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			argv, stdin, env, files, wb, store, err := buildRun(tt.o)
+			argv, stdin, env, files, wb, store, err := buildRun(tt.o, tt.o.WorkDir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -63,11 +64,14 @@ func TestBuildRun(t *testing.T) {
 
 func TestCodexTOMLAndAllowlist(t *testing.T) {
 	o := AgentOptions{Kind: "codex", Prompt: "p", WorkDir: t.TempDir(), MCP: map[string]MCPServer{"demo": {URL: "https://test", Headers: map[string]string{"Authorization": `Bearer "quoted"`}}, "empty": {Command: []string{"server"}}}, AllowedTools: []string{"mcp__demo__get_status", "mcp__other__ignored"}}
-	argv, _, _, _, _, _, err := buildRun(o)
+	argv, _, _, files, _, _, err := buildRun(o, o.WorkDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	joined := strings.Join(argv, "\n")
+	joined := string(files[".codex/config.toml"])
+	if strings.Contains(strings.Join(argv, " "), "Bearer") {
+		t.Fatalf("header leaked into argv: %q", argv)
+	}
 	for _, s := range []string{`mcp_servers.demo.http_headers={"Authorization"="Bearer \"quoted\""}`, `mcp_servers.demo.enabled_tools=["get_status"]`, `mcp_servers.demo.tools.get_status.approval_mode="approve"`, `mcp_servers.empty.enabled_tools=[]`} {
 		if !strings.Contains(joined, s) {
 			t.Fatalf("missing %q in %q", s, joined)
@@ -75,9 +79,52 @@ func TestCodexTOMLAndAllowlist(t *testing.T) {
 	}
 }
 
+func TestProviderMCPFiles(t *testing.T) {
+	home := t.TempDir()
+	mcp := map[string]MCPServer{"listed": {Command: []string{"serve", "--quiet"}}}
+	for _, kind := range []string{"claude", "agy"} {
+		o := AgentOptions{Kind: kind, Prompt: "p", WorkDir: home, MCP: mcp}
+		_, _, _, files, _, _, err := buildRun(o, home)
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := "mcp.json"
+		if kind == "agy" {
+			name = ".gemini/config/mcp_config.json"
+		}
+		var config struct {
+			MCPServers map[string]json.RawMessage `json:"mcpServers"`
+		}
+		if err := json.Unmarshal(files[name], &config); err != nil || len(config.MCPServers) != 1 || config.MCPServers["listed"] == nil {
+			t.Fatalf("%s config=%s err=%v", kind, files[name], err)
+		}
+		if kind == "agy" {
+			var server struct {
+				Command string   `json:"command"`
+				Args    []string `json:"args"`
+			}
+			if err := json.Unmarshal(config.MCPServers["listed"], &server); err != nil || server.Command != "serve" || !reflect.DeepEqual(server.Args, []string{"--quiet"}) {
+				t.Fatalf("agy server=%+v err=%v", server, err)
+			}
+			url, err := mcpConfig(map[string]MCPServer{"remote": {URL: "https://example.test/mcp", Headers: map[string]string{"Authorization": "Bearer token"}}}, true)
+			if err != nil || !strings.Contains(string(url), `"serverUrl":"https://example.test/mcp"`) || !strings.Contains(string(url), `"headers":{"Authorization":"Bearer token"}`) {
+				t.Fatalf("agy URL config=%s err=%v", url, err)
+			}
+		}
+	}
+	stub := filepath.Join(home, "claude")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nstat -c %a \"$HOME/mcp.json\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	got, err := RunAgent(context.Background(), AgentOptions{Command: stub, Prompt: "p", WorkDir: filepath.Join(home, "work"), Sandbox: SandboxOptions{Mode: "none"}, MCP: mcp})
+	if err != nil || got.Exit != 0 || string(got.Stdout) != "600\n" {
+		t.Fatalf("claude config mode: %+v err=%v", got, err)
+	}
+}
+
 func TestAgyPromptOneArgument(t *testing.T) {
 	o := AgentOptions{Kind: "agy", Prompt: `--mcp-config={}`, WorkDir: t.TempDir(), Timeout: time.Minute}
-	argv, stdin, _, _, _, _, err := buildRun(o)
+	argv, stdin, _, _, _, _, err := buildRun(o, o.WorkDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,38 +143,19 @@ func TestParseAndClassify(t *testing.T) {
 			t.Fatalf("kind=%s result=%q raw=%v", tt.kind, result, raw)
 		}
 	}
-	for _, tt := range []struct{ input, want string }{{"RESOURCE_EXHAUSTED (code 429): Individual quota reached", "quota"}, {"Status unavailable: tool approval required.", ""}, {`API Error: 401 {"type":"error","error":{"type":"authentication_error"}}`, "auth"}, {"invalid_grant: refresh token expired", "auth"}, {"quota authentication", "quota"}} {
-		if got := classify("agy", []byte(tt.input)); got != tt.want {
-			t.Fatalf("%q: %q", tt.input, got)
+	for _, tt := range []struct {
+		kind         string
+		raw          any
+		stderr, want string
+	}{
+		{"agy", map[string]any{"error": "RESOURCE_EXHAUSTED (code 429): Individual quota reached"}, "", "quota"},
+		{"codex", nil, "Status unavailable: tool approval required.", ""},
+		{"claude", map[string]any{"is_error": true, "result": `API Error: 401 {"type":"error","error":{"type":"authentication_error"}}`}, "", "auth"},
+		{"codex", nil, "invalid_grant: refresh token expired", "auth"},
+	} {
+		if got := classify(tt.kind, tt.raw, []byte(tt.stderr)); got != tt.want {
+			t.Fatalf("%s: %q", tt.kind, got)
 		}
-	}
-}
-
-func TestClaudeLegacyRunnerAndKeyFile(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "key")
-	if err := os.WriteFile(file, []byte("secret"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	o := AgentOptions{Runner: []string{"custom", "--ignored"}, Prompt: "p", WorkDir: t.TempDir(), APIKeyFile: file}
-	argv, _, _, files, _, _, err := buildRun(o)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if argv[0] != "custom" || argv[1] != "-p" || argv[2] != "--bare" || string(files["api-key"]) != "secret" {
-		t.Fatalf("argv=%q files=%v", argv, files)
-	}
-	found := false
-	for i, s := range argv {
-		if s == "--settings" {
-			var m map[string]string
-			if json.Unmarshal([]byte(argv[i+1]), &m) != nil || m["apiKeyHelper"] != "cat "+FilePath("api-key") {
-				t.Fatalf("settings=%q", argv[i+1])
-			}
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("missing settings")
 	}
 }
 
@@ -146,7 +174,19 @@ func TestPlacedFilesAndResults(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, err := RunAgent(context.Background(), AgentOptions{Kind: "agy", Command: agy, Prompt: "p", WorkDir: filepath.Join(dir, "aw"), Sandbox: SandboxOptions{Mode: "none"}, CredFiles: map[string][]byte{"antigravity-oauth-token": []byte("login")}})
-	if err != nil || a.Exit != 0 || a.Class != "quota" || a.Raw == nil {
+	if err != nil || a.Exit != 1 || a.Class != "quota" || a.Raw == nil {
 		t.Fatalf("agy result=%+v err=%v", a, err)
+	}
+}
+
+func TestStdoutQuotaTextDoesNotClassify(t *testing.T) {
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "codex")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nprintf '%s' 'HTTP 429 seen in logs'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	got, err := RunAgent(context.Background(), AgentOptions{Kind: "codex", Command: stub, Prompt: "p", WorkDir: filepath.Join(dir, "work"), Sandbox: SandboxOptions{Mode: "none"}})
+	if err != nil || got.Exit != 0 || got.Class != "" {
+		t.Fatalf("result=%+v err=%v", got, err)
 	}
 }

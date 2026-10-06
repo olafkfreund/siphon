@@ -176,7 +176,7 @@ func dirGid(dir string) (int, error) {
 }
 
 func readCapped(path string) []byte {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil
 	}
@@ -280,71 +280,78 @@ func writeJobFiles(home string, files map[string][]byte) error {
 	return nil
 }
 
-func saveWritebacks(home, runDir string, spec JobSpec) error {
+func saveWritebacks(home, runDir string, spec JobSpec, stderr io.Writer) {
 	if len(spec.Writeback) == 0 {
-		return nil
+		return
 	}
 	gid, err := dirGid(runDir)
 	if err != nil {
-		return err
+		fmt.Fprintln(stderr, "exec-job: writeback:", err)
+		return
 	}
 	for i, name := range spec.Writeback {
-		path, err := filePath(home, name, false)
-		if os.IsNotExist(err) {
-			continue
+		if err := saveWriteback(home, runDir, gid, i, name, spec.Files); err != nil {
+			fmt.Fprintln(stderr, "exec-job: writeback:", err)
 		}
-		if err != nil {
-			return err
-		}
-		f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
-		if os.IsNotExist(err) || errors.Is(err, syscall.ELOOP) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		info, err := f.Stat()
-		if err != nil || !info.Mode().IsRegular() {
-			f.Close()
-			if err != nil {
-				return err
-			}
-			continue
-		}
-		data, err := io.ReadAll(f)
+	}
+}
+
+func saveWriteback(home, runDir string, gid, i int, name string, files map[string][]byte) error {
+	path, err := filePath(home, name, false)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if os.IsNotExist(err) || errors.Is(err, syscall.ELOOP) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
 		f.Close()
 		if err != nil {
 			return err
 		}
-		var old []byte
-		var wrote bool
-		for writtenName, writtenData := range spec.Files {
-			clean, _ := relativeFile(writtenName)
-			if clean == filepath.Clean(name) {
-				old, wrote = writtenData, true
-				break
-			}
+		return nil
+	}
+	data, err := io.ReadAll(io.LimitReader(f, outputCap+1))
+	f.Close()
+	if err != nil {
+		return err
+	}
+	var old []byte
+	var wrote bool
+	for writtenName, writtenData := range files {
+		clean, _ := relativeFile(writtenName)
+		if clean == filepath.Clean(name) {
+			old, wrote = writtenData, true
+			break
 		}
-		if wrote && bytes.Equal(data, old) {
-			continue
-		}
-		out, err := os.OpenFile(filepath.Join(runDir, fmt.Sprintf("wb-%d", i)), os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o640)
-		if err != nil {
-			return err
-		}
-		if err = out.Chown(-1, gid); err == nil {
-			err = out.Chmod(0o640)
-		}
-		if err == nil {
-			_, err = out.Write(data[:min(len(data), outputCap)])
-		}
-		closeErr := out.Close()
-		if err != nil {
-			return err
-		}
-		if closeErr != nil {
-			return closeErr
-		}
+	}
+	if wrote && bytes.Equal(data, old) {
+		return nil
+	}
+	out, err := os.OpenFile(filepath.Join(runDir, fmt.Sprintf("wb-%d", i)), os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o640)
+	if err != nil {
+		return err
+	}
+	if err = out.Chown(-1, gid); err == nil {
+		err = out.Chmod(0o640)
+	}
+	if err == nil {
+		_, err = out.Write(data[:min(len(data), outputCap)])
+	}
+	closeErr := out.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 	return nil
 }
@@ -446,10 +453,7 @@ func execJob(runDir, jobFile string, stdout, stderr io.Writer) int {
 	cmd.Stdin = bytes.NewReader(spec.Stdin)
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	err = cmd.Run()
-	if err := saveWritebacks(jobFilesDir, runDir, spec); err != nil {
-		fmt.Fprintln(stderr, "exec-job:", err)
-		return 125
-	}
+	saveWritebacks(jobFilesDir, runDir, spec, stderr)
 	var ee *exec.ExitError
 	switch {
 	case err == nil:

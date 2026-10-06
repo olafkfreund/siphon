@@ -7,14 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"text/template"
 	"time"
 )
 
-var safePath = regexp.MustCompile(`^/[A-Za-z0-9/._-]+$`)
+var authError = regexp.MustCompile(`(?i)\b(?:401|invalid_grant|not logged in|authentication_error|unauthori[sz]ed)\b`)
+var quotaError = regexp.MustCompile(`(?i)\b(?:429|RESOURCE_EXHAUSTED|quota|rate.?limit)\b`)
 
 type MCPServer struct {
 	URL     string
@@ -28,7 +28,6 @@ type AgentOptions struct {
 	Runner       []string // deprecated: only Runner[0] is used for Claude
 	CredFiles    map[string][]byte
 	APIKey       string
-	APIKeyFile   string
 	Prompt       string
 	Env          map[string]any
 	MCP          map[string]MCPServer
@@ -55,35 +54,20 @@ func RunAgent(ctx context.Context, o AgentOptions) (AgentResult, error) {
 	if o.WorkDir != "" {
 		defer os.RemoveAll(o.WorkDir)
 	}
-	argv, stdin, env, files, writeback, wbStore, err := buildRun(o)
+	home := jobFilesDir
+	if o.Sandbox.Mode == "none" {
+		home = o.WorkDir
+	}
+	argv, stdin, env, files, writeback, wbStore, err := buildRun(o, home)
 	if err != nil {
 		return AgentResult{Exit: -1}, err
 	}
-	if (o.Kind == "" || o.Kind == "claude") && o.Sandbox.Mode == "none" {
-		path := filepath.Join(o.WorkDir, "mcp.json")
-		if err := os.WriteFile(path, files["mcp.json"], 0o600); err != nil {
-			return AgentResult{Exit: -1}, err
-		}
-		for i := range argv {
-			if argv[i] == "--mcp-config" {
-				argv[i+1] = path
-				break
-			}
-		}
-	}
-	if o.Kind == "codex" && o.Sandbox.Mode == "none" {
-		home := filepath.Join(o.WorkDir, ".codex")
-		if err := os.MkdirAll(home, 0o700); err != nil {
-			return AgentResult{Exit: -1}, err
-		}
-		if auth, ok := files[".codex/auth.json"]; ok {
-			if err := os.WriteFile(filepath.Join(home, "auth.json"), auth, 0o600); err != nil {
-				return AgentResult{Exit: -1}, err
-			}
-		}
-		env["CODEX_HOME"] = home
-	}
 	sb := o.Sandbox
+	if sb.Mode == "none" {
+		sb.home = home
+	}
+	var stderr []byte
+	sb.stderr = &stderr
 	sb.Timeout = o.Timeout
 	sb.Env = make(map[string]string, len(o.Sandbox.Env)+len(env))
 	for k, v := range o.Sandbox.Env {
@@ -106,20 +90,22 @@ func RunAgent(ctx context.Context, o AgentOptions) (AgentResult, error) {
 		secrets = append(secrets, string(b))
 		tokenStrings(b, &secrets)
 	}
-	if o.APIKeyFile != "" {
-		secrets = append(secrets, string(files["api-key"]))
-	}
 	exit, output, stdout, wb, err := runCommand(ctx, argv, sb, secrets, stdin, true)
-	if o.Kind == "codex" && o.Sandbox.Mode == "none" && len(writeback) != 0 {
-		if changed := readCapped(filepath.Join(o.WorkDir, ".codex", "auth.json")); changed != nil && !bytes.Equal(changed, files[".codex/auth.json"]) {
-			if wb == nil {
-				wb = map[int][]byte{}
-			}
-			wb[len(o.Sandbox.Writeback)] = changed
+	for _, b := range wb {
+		secrets = append(secrets, string(b))
+		tokenStrings(b, &secrets)
+	}
+	output, stdout, stderr = Mask(output, secrets), Mask(stdout, secrets), Mask(stderr, secrets)
+	result, raw := parseResult(o.Kind, stdout)
+	if o.Kind == "agy" {
+		if m, ok := raw.(map[string]any); ok && m["status"] == "ERROR" && exit == 0 {
+			exit = 1
 		}
 	}
-	result, raw := parseResult(o.Kind, stdout)
-	out := AgentResult{Exit: exit, Output: output, Stdout: stdout, Result: result, Raw: raw, Class: classify(o.Kind, output)}
+	out := AgentResult{Exit: exit, Output: output, Stdout: stdout, Result: result, Raw: raw}
+	if exit != 0 {
+		out.Class = classify(o.Kind, raw, stderr)
+	}
 	if len(wb) > 0 {
 		out.Writeback = map[string][]byte{}
 		for i, b := range wb {
@@ -131,7 +117,7 @@ func RunAgent(ctx context.Context, o AgentOptions) (AgentResult, error) {
 	return out, err
 }
 
-func buildRun(o AgentOptions) (argv []string, stdin []byte, env map[string]string, files map[string][]byte, writeback []string, wbStore []string, err error) {
+func buildRun(o AgentOptions, home string) (argv []string, stdin []byte, env map[string]string, files map[string][]byte, writeback []string, wbStore []string, err error) {
 	kind := o.Kind
 	if kind == "" {
 		kind = "claude"
@@ -169,9 +155,9 @@ func buildRun(o AgentOptions) (argv []string, stdin []byte, env map[string]strin
 	}
 	switch kind {
 	case "claude":
-		return buildClaude(o, cmd, prompt)
+		return buildClaude(o, cmd, prompt, home)
 	case "codex":
-		return buildCodex(o, cmd, prompt)
+		return buildCodex(o, cmd, prompt, home)
 	case "agy":
 		return buildAgy(o, cmd, prompt)
 	default:
@@ -199,17 +185,32 @@ func parseResult(kind string, stdout []byte) (string, any) {
 	return result, raw
 }
 
-func classify(kind string, output []byte) string {
-	s := strings.ToLower(string(output))
-	for _, v := range []string{"resource_exhausted", "quota", "rate limit", "429", "usage limit"} {
-		if strings.Contains(s, v) {
-			return "quota"
+func classify(kind string, raw any, stderr []byte) string {
+	var structured string
+	if m, ok := raw.(map[string]any); ok {
+		switch kind {
+		case "", "claude":
+			if m["is_error"] == true {
+				structured, _ = m["result"].(string)
+			}
+		case "agy":
+			structured, _ = m["error"].(string)
 		}
 	}
-	for _, v := range []string{"invalid_grant", "not logged in", "unauthorized", "401", "please log in", "login required", "refresh token", "authentication"} {
-		if strings.Contains(s, v) {
-			return "auth"
-		}
+	if authError.MatchString(structured) {
+		return "auth"
+	}
+	if quotaError.MatchString(structured) {
+		return "quota"
+	}
+	if kind == "agy" {
+		return ""
+	}
+	if quotaError.Match(stderr) {
+		return "quota"
+	}
+	if authError.Match(stderr) {
+		return "auth"
 	}
 	return ""
 }
@@ -223,17 +224,16 @@ func tokenStrings(b []byte, secrets *[]string) {
 	walk = func(v any) {
 		switch x := v.(type) {
 		case map[string]any:
-			for k, v := range x {
-				if k == "access_token" || k == "refresh_token" || k == "accessToken" || k == "refreshToken" {
-					if s, ok := v.(string); ok {
-						*secrets = append(*secrets, s)
-					}
-				}
+			for _, v := range x {
 				walk(v)
 			}
 		case []any:
 			for _, v := range x {
 				walk(v)
+			}
+		case string:
+			if len(x) >= 20 {
+				*secrets = append(*secrets, x)
 			}
 		}
 	}
