@@ -454,8 +454,11 @@ func (p *Pipeline) nudgeWorkers() {
 }
 
 // sandbox is the action sandbox for this pipeline; template-unit runs keep
-// their per-run directories next to the state DB (the NixOS StateDirectory).
+// their per-run directories in server.actions_dir (default: next to the DB).
 func (p *Pipeline) sandbox(timeout time.Duration) action.SandboxOptions {
-	return action.SandboxOptions{Mode: p.Cfg.Server.Sandbox, Timeout: timeout,
-		Dir: filepath.Join(filepath.Dir(p.Cfg.Server.DB), "actions")}
+	dir := p.Cfg.Server.ActionsDir
+	if dir == "" {
+		dir = filepath.Join(filepath.Dir(p.Cfg.Server.DB), "actions")
+	}
+	return action.SandboxOptions{Mode: p.Cfg.Server.Sandbox, Timeout: timeout, Dir: dir}
 }

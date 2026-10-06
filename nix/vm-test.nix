@@ -30,10 +30,11 @@ pkgs.testers.runNixOSTest {
           };
           # A stand-in agent runner: same template unit as a real `claude` run.
           agents.slow = {
+            # Takes 15 s to honour SIGTERM, so overlapping copies would be visible.
             runner = [
               "sh"
               "-c"
-              "sleep 600"
+              "trap 'sleep 15; exit 0' TERM; sleep 600 & wait; wait"
               "agent"
             ];
             prompt = "p";
@@ -105,7 +106,7 @@ pkgs.testers.runNixOSTest {
 
   testScript = ''
     TOKEN = "test-token-0123456789abcdef0123456789"
-    ACTIVE = "systemctl list-units --no-legend --plain --state=active,activating 'agentgw-action@*'"
+    ACTIVE = "systemctl list-units --no-legend --plain --state=active,activating,deactivating 'agentgw-action@*'"
 
     def hook(body, sign=True):
         sig = ""
@@ -155,15 +156,36 @@ pkgs.testers.runNixOSTest {
         out = machine.succeed("sqlite3 /var/lib/agentgw/state.db \"select output from jobs where rule='sandboxed-cmd'\"")
         uid = out.split()[0]
         assert uid != "0" and "contained" in out, f"cmd not sandboxed: {out}"
+        for leak in ("LEAK-DB", "LEAK-TOKEN", "ESCAPED"):
+            assert leak not in out, f"sandbox leak {leak}: {out}"
 
     with subtest("polkit: only agentgw-action@<hex> and the allowlist"):
         denied_by_rule("systemctl start not-allowed.service")
         denied_by_rule("systemctl restart marker.service")
         denied_by_rule("systemctl start agentgw-action@not-hex.service")
         denied_by_rule("systemd-run --unit=evil.service true")
-        # A transient unit borrowing the template's name, asking for root: must not run.
-        machine.fail("runuser -u agentgw -- systemd-run --wait -p User=root --unit=agentgw-action@0123456789abcdef.service touch /root/pwned")
+        # systemd itself refuses a transient unit shadowing the template (it has
+        # a fragment file), before polkit is even asked; either refusal is fine.
+        status, out = machine.execute(
+            "runuser -u agentgw -- systemd-run --wait -p User=root --unit=agentgw-action@0123456789abcdef.service touch /root/pwned 2>&1"
+        )
+        assert status != 0 and ("fragment file" in out or "Access denied" in out), out
         machine.fail("test -e /root/pwned")
+        denied_by_rule("systemctl enable not-allowed.service")
+        denied_by_rule("systemctl daemon-reload")
+        denied_by_rule("systemctl set-property agentgw-action@0123456789abcdef.service CPUQuota=1%")
+
+    with subtest("a symlink planted by agentgw cannot redirect a root-opened file"):
+        machine.succeed("echo original > /root/victim")
+        run = "/var/lib/agentgw-actions/fedcba9876543210"
+        machine.succeed(f"install -d -m 2730 -o agentgw -g agentgw-io {run}")
+        machine.succeed(f"echo '{{\"argv\":[\"echo\",\"pwned\"]}}' > {run}/job.json")
+        machine.succeed(f"chown agentgw:agentgw-io {run}/job.json && chmod 640 {run}/job.json")
+        machine.succeed(f"runuser -u agentgw -- ln -s /root/victim {run}/stdout")
+        machine.succeed(f"runuser -u agentgw -- ln -s /root/victim2 {run}/stderr")
+        machine.fail("runuser -u agentgw -- systemctl start --wait agentgw-action@fedcba9876543210.service")
+        assert machine.succeed("cat /root/victim").strip() == "original", "symlink target was written"
+        machine.fail("test -e /root/victim2")
 
     with subtest("stopping agentgw leaves no orphaned action units (cmd and agent)"):
         assert hook('{"kind":"sleep","n":3}') == "202"
@@ -172,19 +194,25 @@ pkgs.testers.runNixOSTest {
         machine.succeed("systemctl stop agentgw.service")
         machine.wait_until_succeeds(f"test $({ACTIVE} | wc -l) -eq 0", timeout=30)
 
-    with subtest("after a crash, the orphan is stopped before its job is requeued"):
+    with subtest("after a crash, orphans are stopped before their jobs are requeued"):
         machine.succeed("systemctl start agentgw.service")
         machine.wait_for_open_port(8080)
         # The startup requeue reruns the two interrupted jobs.
-        machine.wait_until_succeeds(f"test $({ACTIVE} | wc -l) -eq 2", timeout=60)
+        machine.wait_until_succeeds(f"test $({ACTIVE} | wc -l) -eq 2", timeout=90)
         before = set(machine.succeed(f"{ACTIVE} | awk '{{print $1}}'").split())
         machine.succeed("systemctl kill -s KILL agentgw.service")
+        # Sample through the restart: the agent takes 15 s to stop, so a requeue
+        # that didn't wait would show 3-4 instances at once.
+        peak = 0
+        for _ in range(40):
+            peak = max(peak, int(machine.succeed(f"{ACTIVE} | wc -l").strip()))
+            machine.sleep(1)
+        assert peak <= 2, f"{peak} instances at once: a step ran twice concurrently"
         machine.wait_until_succeeds("systemctl is-active agentgw.service", timeout=60)
-        for unit in before:
-            machine.wait_until_fails(f"systemctl is-active {unit}", timeout=60)
-        # Requeued again in fresh instances; never two copies at once.
-        machine.wait_until_succeeds(f"test $({ACTIVE} | wc -l) -eq 2", timeout=60)
+        machine.wait_until_succeeds(f"test $({ACTIVE} | wc -l) -eq 2", timeout=90)
         after = set(machine.succeed(f"{ACTIVE} | awk '{{print $1}}'").split())
         assert not (before & after), f"orphans still running: {before & after}"
+        failed = machine.succeed("systemctl list-units --failed --no-legend --plain 'agentgw-action@*' | wc -l").strip()
+        assert failed == "0", f"{failed} failed action units left loaded"
   '';
 }

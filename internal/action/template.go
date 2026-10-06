@@ -22,8 +22,12 @@ import (
 // Sandboxed actions run in the Nix-defined template unit agentgw-action@<id>.service
 // (see nix/module.nix). Its hardening is fixed in Nix, so agentgw can only ask
 // systemd to start that unit: no transient units, no way to request User=root.
-// Each run gets <Dir>/<id>/ with job.json (passed in as the unit's "job"
-// credential) and stdout/stderr files that systemd writes for the unit.
+//
+// PID 1 never opens a path inside a directory agentgw can write (that would let
+// a compromised agentgw redirect a root-opened file with a symlink). The unit
+// runs `agentgw exec-job <dir>/<id>` as its own DynamicUser, which reads
+// job.json and creates stdout/stderr itself (O_EXCL|O_NOFOLLOW). The shared
+// directory is setgid agentgw-io so both sides can read what the other wrote.
 
 // JobSpec is what agentgw hands the unit; exec-job runs it.
 type JobSpec struct {
@@ -38,26 +42,47 @@ type JobSpec struct {
 // PrivateTmp); argv refers to files by this path. Tests override it.
 var jobFilesDir = "/tmp/agentgw"
 
+// outputCap bounds what agentgw reads back; the unit's LimitFSIZE bounds the files.
+const outputCap = 1 << 20
+
 // FilePath is the in-unit path of a JobSpec file.
 func FilePath(name string) string { return filepath.Join(jobFilesDir, name) }
 
 func templateUnit(id string) string { return "agentgw-action@" + id + ".service" }
 
+func systemctl(ctx context.Context, args ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, "systemctl", append([]string{"--no-ask-password"}, args...)...)
+}
+
 // systemd calls go through these so tests never touch the host's systemd.
 var (
 	startUnit = func(ctx context.Context, unit string) error {
-		return exec.CommandContext(ctx, "systemctl", "start", "--wait", "--", unit).Run()
+		return systemctl(ctx, "start", "--wait", "--", unit).Run()
 	}
-	unitExitStatus = func(unit string) (int, error) {
-		out, err := exec.Command("systemctl", "show", "-p", "ExecMainStatus", "--value", "--", unit).Output()
+	// unitExit reads how a failed unit's main process ended.
+	unitExit = func(unit string) (code string, status int, err error) {
+		out, err := systemctl(context.Background(), "show", "-p", "ExecMainCode", "-p", "ExecMainStatus", "--", unit).Output()
 		if err != nil {
-			return 0, err
+			return "", 0, err
 		}
-		return strconv.Atoi(strings.TrimSpace(string(out)))
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			k, v, _ := strings.Cut(line, "=")
+			switch k {
+			case "ExecMainCode":
+				code = v
+			case "ExecMainStatus":
+				status, _ = strconv.Atoi(v)
+			}
+		}
+		return code, status, nil
 	}
-	resetFailed = func(unit string) { _ = exec.Command("systemctl", "reset-failed", "--", unit).Run() }
-	stopUnits   = func(ctx context.Context, units ...string) error {
-		return exec.CommandContext(ctx, "systemctl", append([]string{"stop", "--no-block", "--"}, units...)...).Run()
+	resetFailed = func(units ...string) {
+		_ = systemctl(context.Background(), append([]string{"reset-failed", "--"}, units...)...).Run()
+	}
+	// stopUnits blocks until the units are gone (the template's TimeoutStopSec
+	// bounds it), so nothing is requeued while an old copy is still running.
+	stopUnits = func(ctx context.Context, units ...string) error {
+		return systemctl(ctx, append([]string{"stop", "--"}, units...)...).Run()
 	}
 )
 
@@ -73,57 +98,140 @@ func templateRun(ctx context.Context, dir string, spec JobSpec) (int, []byte, []
 	}
 	id := hex.EncodeToString(b)
 	runDir := filepath.Join(dir, id)
-	if err := os.MkdirAll(runDir, 0o700); err != nil {
+	if err := os.Mkdir(runDir, 0o700); err != nil { // Mkdir, not MkdirAll: an id is never shared
 		return -1, nil, nil, err
 	}
 	defer os.RemoveAll(runDir)
+	// The run dir inherits group agentgw-io from the setgid parent (created by
+	// root via tmpfiles). Group may enter and create files but not list. No
+	// setgid of our own: RestrictSUIDSGID forbids it, so files get the group
+	// by chown instead (both sides are members of agentgw-io).
+	if err := os.Chmod(runDir, 0o730); err != nil {
+		return -1, nil, nil, err
+	}
+	gid, err := dirGid(runDir)
+	if err != nil {
+		return -1, nil, nil, err
+	}
 	job, err := json.Marshal(spec)
 	if err != nil {
 		return -1, nil, nil, err
 	}
-	// Pre-create everything 0600 as agentgw; PID 1 reads job.json and opens
-	// the output files as root on the unit's behalf.
-	for name, data := range map[string][]byte{"job.json": job, "stdout": nil, "stderr": nil} {
-		if err := os.WriteFile(filepath.Join(runDir, name), data, 0o600); err != nil {
-			return -1, nil, nil, err
-		}
+	jobPath := filepath.Join(runDir, "job.json")
+	if err := os.WriteFile(jobPath, job, 0o600); err != nil {
+		return -1, nil, nil, err
+	}
+	if err := os.Chown(jobPath, -1, gid); err != nil {
+		return -1, nil, nil, fmt.Errorf("sandbox: is agentgw in group agentgw-io? %w", err)
+	}
+	if err := os.Chmod(jobPath, 0o640); err != nil {
+		return -1, nil, nil, err
 	}
 	unit := templateUnit(id)
 	runErr := startUnit(ctx, unit)
 	if ctx.Err() != nil {
 		// Cancelled or timed out: make sure the unit doesn't outlive the job.
-		sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		sctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		_ = stopUnits(sctx, unit)
 		cancel()
+		resetFailed(unit)
 	}
-	stdout, _ := os.ReadFile(filepath.Join(runDir, "stdout"))
-	stderr, _ := os.ReadFile(filepath.Join(runDir, "stderr"))
+	stdout := readCapped(filepath.Join(runDir, "stdout"))
+	stderr := readCapped(filepath.Join(runDir, "stderr"))
 	switch {
 	case ctx.Err() != nil:
 		return -1, stdout, stderr, nil
 	case runErr == nil:
 		return 0, stdout, stderr, nil
 	}
-	// The unit failed: it stays loaded as "failed", so its exit status is readable.
-	exit, err := unitExitStatus(unit)
+	// The unit failed: it stays loaded as "failed" until reset, so this is race-free.
+	code, status, err := unitExit(unit)
 	resetFailed(unit)
-	if err != nil || exit == 0 {
-		exit = 1 // failed to start, or killed by a signal (e.g. RuntimeMaxSec)
+	switch {
+	case err != nil:
+		return 1, stdout, stderr, nil
+	// systemctl show prints ExecMainCode as the CLD_* number (1 exited, 2
+	// killed, 3 dumped); accept the names too.
+	case (code == "1" || code == "exited") && status != 0:
+		return status, stdout, stderr, nil
+	case code == "2" || code == "3" || code == "killed" || code == "dumped":
+		return 128 + status, stdout, stderr, nil // status is the signal (RuntimeMaxSec, LimitFSIZE)
+	default:
+		return 1, stdout, stderr, nil // failed before the process ran
 	}
-	return exit, stdout, stderr, nil
+}
+
+func dirGid(dir string) (int, error) {
+	fi, err := os.Stat(dir)
+	if err != nil {
+		return 0, err
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, errors.New("sandbox: cannot read directory group")
+	}
+	return int(st.Gid), nil
+}
+
+func readCapped(path string) []byte {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	b, _ := io.ReadAll(io.LimitReader(f, outputCap))
+	return b
 }
 
 // StopOrphans stops agentgw-action@ instances left running by a crashed
-// agentgw (they live outside its cgroup). Call at startup before requeueing.
+// agentgw (they live outside its cgroup) and waits for them, so their jobs
+// can be requeued without two copies running at once.
 func StopOrphans(ctx context.Context) error {
-	return stopUnits(ctx, "agentgw-action@*.service")
+	err := stopUnits(ctx, "agentgw-action@*.service")
+	resetFailed("agentgw-action@*.service")
+	return err
 }
 
-// ExecJob is the `agentgw exec-job` entry point inside the template unit: it
-// reads the job credential, writes its files, runs argv, and returns the exit
-// code. stdout/stderr are the unit's (systemd points them at the run files).
-func ExecJob(credFile string, stdout, stderr io.Writer) int {
-	raw, err := os.ReadFile(credFile)
+// ExecJob is the `agentgw exec-job <run dir>` entry point inside the template
+// unit. It runs as the unit's DynamicUser: it reads job.json, creates its own
+// output files, writes the job's private files, runs argv and returns the exit
+// code (124 timeout/stopped, 125 bad job, 127 could not start).
+func ExecJob(runDir string) int {
+	gid, err := dirGid(runDir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "exec-job:", err)
+		return 125
+	}
+	// Create our own outputs (never follow a planted symlink) and give them the
+	// run dir's group so agentgw can read them back.
+	open := func(name string) (*os.File, error) {
+		f, err := os.OpenFile(filepath.Join(runDir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o640)
+		if err != nil {
+			return nil, err
+		}
+		if err := f.Chown(-1, gid); err != nil {
+			f.Close()
+			return nil, err
+		}
+		return f, f.Chmod(0o640)
+	}
+	stdout, err := open("stdout")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "exec-job:", err)
+		return 125
+	}
+	defer stdout.Close()
+	stderr, err := open("stderr")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "exec-job:", err)
+		return 125
+	}
+	defer stderr.Close()
+	return execJob(filepath.Join(runDir, "job.json"), stdout, stderr)
+}
+
+func execJob(jobFile string, stdout, stderr io.Writer) int {
+	raw, err := os.ReadFile(jobFile)
 	if err != nil {
 		fmt.Fprintln(stderr, "exec-job:", err)
 		return 125
@@ -147,6 +255,17 @@ func ExecJob(credFile string, stdout, stderr io.Writer) int {
 			return 125
 		}
 	}
+	cmdEnv := []string{"HOME=" + jobFilesDir, "LANG=C.UTF-8"}
+	if p, ok := os.LookupEnv("PATH"); ok {
+		cmdEnv = append(cmdEnv, "PATH="+p)
+	}
+	for k, v := range spec.Env {
+		if k == "" || strings.ContainsAny(k, "=\x00") || strings.Contains(v, "\x00") {
+			fmt.Fprintln(stderr, "exec-job: bad env")
+			return 125
+		}
+		cmdEnv = append(cmdEnv, k+"="+v)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 	if spec.TimeoutSec > 0 {
@@ -157,13 +276,7 @@ func ExecJob(credFile string, stdout, stderr io.Writer) int {
 	cmd := exec.CommandContext(ctx, spec.Argv[0], spec.Argv[1:]...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = 10 * time.Second
-	cmd.Env = []string{"HOME=" + jobFilesDir, "LANG=C.UTF-8"}
-	if p, ok := os.LookupEnv("PATH"); ok {
-		cmd.Env = append(cmd.Env, "PATH="+p)
-	}
-	for k, v := range spec.Env {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
+	cmd.Env = cmdEnv
 	cmd.Stdin = bytes.NewReader(spec.Stdin)
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	err = cmd.Run()

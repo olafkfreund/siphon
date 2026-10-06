@@ -10,8 +10,13 @@ let
   cfg = config.services.agentgw;
   yaml = pkgs.formats.yaml { };
   stateDir = "/var/lib/agentgw";
-  # server.db defaults into StateDirectory; everything else comes from settings.
-  settings = lib.recursiveUpdate { server.db = "${stateDir}/state.db"; } cfg.settings;
+  # Shared with agentgw-action@ instances through group agentgw-io (setgid).
+  actionsDir = "/var/lib/agentgw-actions";
+  # server.db and actions_dir default here; everything else comes from settings.
+  settings = lib.recursiveUpdate {
+    server.db = "${stateDir}/state.db";
+    server.actions_dir = actionsDir;
+  } cfg.settings;
   configFile = yaml.generate "agentgw.yaml" settings;
   units = settings.units or [ ];
 in
@@ -73,8 +78,14 @@ in
     users.users.agentgw = {
       isSystemUser = true;
       group = "agentgw";
+      extraGroups = [ "agentgw-io" ];
     };
     users.groups.agentgw = { };
+    users.groups.agentgw-io = { };
+
+    # setgid: run dirs and files inherit group agentgw-io; group may traverse
+    # but not list, so one action cannot enumerate other runs.
+    systemd.tmpfiles.rules = [ "d ${actionsDir} 2710 agentgw agentgw-io -" ];
 
     systemd.services.agentgw = {
       description = "agentgw gateway";
@@ -89,6 +100,10 @@ in
         Group = "agentgw";
         StateDirectory = "agentgw";
         StateDirectoryMode = "0700";
+        ReadWritePaths = [ actionsDir ];
+        # Explicit: the setgid hand-off breaks silently without this group
+        # (a non-member's chmod drops the setgid bit).
+        SupplementaryGroups = [ "agentgw-io" ];
         WorkingDirectory = stateDir;
         EnvironmentFile = lib.mkIf (cfg.environmentFile != null) cfg.environmentFile;
         LoadCredential = lib.mapAttrsToList (n: p: "${n}:${p}") cfg.credentials;
@@ -120,33 +135,52 @@ in
     };
 
     # Every sandboxed cmd/agent run is an instance of this template; its
-    # hardening is fixed here, so agentgw can't loosen it. Instance %i is a
-    # 16-hex run id; agentgw writes job.json and the output files beforehand.
+    # hardening is fixed here, so agentgw can't loosen it. %i is a 16-hex run
+    # id. PID 1 opens nothing in agentgw-writable directories: exec-job, as
+    # the DynamicUser, reads job.json and creates stdout/stderr itself.
     systemd.services."agentgw-action@" = {
       description = "agentgw sandboxed action %i";
       path = [ "/run/current-system/sw" ]; # tools actions may call (claude, etc.)
       serviceConfig = {
         Type = "exec";
-        ExecStart = "${cfg.package}/bin/agentgw exec-job";
-        LoadCredential = "job:${stateDir}/actions/%i/job.json";
-        StandardOutput = "file:${stateDir}/actions/%i/stdout";
-        StandardError = "file:${stateDir}/actions/%i/stderr";
-        RuntimeMaxSec = cfg.maxActionRuntime;
+        ExecStart = "${cfg.package}/bin/agentgw exec-job ${actionsDir}/%i";
         DynamicUser = true;
+        SupplementaryGroups = [ "agentgw-io" ];
+        ReadWritePaths = [ actionsDir ];
+        UMask = "0027";
+        RuntimeMaxSec = cfg.maxActionRuntime;
+        TimeoutStopSec = "20s"; # bounds agentgw's blocking stop of orphans
+        LimitFSIZE = "16M"; # caps stdout/stderr files (and anything else it writes)
+        TasksMax = 256;
         PrivateTmp = true;
         ProtectSystem = "strict";
         ProtectHome = true;
         NoNewPrivileges = true;
         PrivateDevices = true;
+        ProtectProc = "invisible";
+        ProcSubset = "pid";
         ProtectKernelTunables = true;
         ProtectKernelModules = true;
+        ProtectKernelLogs = true;
         ProtectControlGroups = true;
+        ProtectClock = true;
+        ProtectHostname = true;
         RestrictNamespaces = true;
         RestrictSUIDSGID = true;
+        RestrictRealtime = true;
         LockPersonality = true;
         CapabilityBoundingSet = "";
-        IPAddressDeny = [ "169.254.0.0/16" "fd00:ec2::254/128" ];
-        UMask = "0077";
+        RestrictAddressFamilies = [
+          "AF_UNIX"
+          "AF_INET"
+          "AF_INET6"
+        ];
+        SystemCallArchitectures = "native";
+        SystemCallFilter = [ "@system-service" ];
+        IPAddressDeny = [
+          "169.254.0.0/16"
+          "fd00:ec2::254/128"
+        ];
       };
     };
 
@@ -156,19 +190,23 @@ in
     security.polkit.enable = true;
     security.polkit.extraConfig = ''
       polkit.addRule(function(action, subject) {
-        if (subject.user != "agentgw" || action.id != "org.freedesktop.systemd1.manage-units") {
+        if (subject.user != "agentgw") {
           return polkit.Result.NOT_HANDLED;
         }
-        var unit = action.lookup("unit") || "";
-        var verb = action.lookup("verb") || "";
-        var allowed = ${builtins.toJSON units};
-        if (/^agentgw-action@[0-9a-f]{16}\.service$/.test(unit) &&
-            (verb == "start" || verb == "stop" || verb == "reset-failed")) {
-          return polkit.Result.YES;
+        if (action.id == "org.freedesktop.systemd1.manage-units") {
+          var unit = action.lookup("unit") || "";
+          var verb = action.lookup("verb") || "";
+          var allowed = ${builtins.toJSON units};
+          if (/^agentgw-action@[0-9a-f]{16}\.service$/.test(unit) &&
+              (verb == "start" || verb == "stop" || verb == "reset-failed")) {
+            return polkit.Result.YES;
+          }
+          if (allowed.indexOf(unit) >= 0 && verb == "start") {
+            return polkit.Result.YES;
+          }
         }
-        if (allowed.indexOf(unit) >= 0 && verb == "start") {
-          return polkit.Result.YES;
-        }
+        // Everything else is refused for agentgw (this rule must not be
+        // preceded by a broader rule granting it).
         return polkit.Result.NO;
       });
     '';

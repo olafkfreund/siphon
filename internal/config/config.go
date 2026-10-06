@@ -91,6 +91,9 @@ type Server struct {
 	Workers int    `yaml:"workers"`
 	Token   Secret `yaml:"token"`
 	Sandbox string `yaml:"sandbox"` // systemd|none
+	// ActionsDir holds per-run directories for sandboxed actions; the NixOS
+	// module sets it to the setgid agentgw-io directory its template unit uses.
+	ActionsDir string `yaml:"actions_dir"`
 }
 
 type Limits struct {

@@ -348,3 +348,23 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
   - **M5:** credentials and environmentFile are `types.str` with an absolute-and-outside-the-store assertion.
   - **M6:** VM polkit checks assert "Access denied" from the rule, and cover verbs, non-hex names, transient units and a transient unit with the template's name plus `User=root`.
 - The VM test now has 6 subtests and all pass, including the sandboxed cmd running as non-root unable to write agentgw's state dir, and the crash case (SIGKILL → restart → orphans stopped before requeue, no duplicate instances).
+- Template-unit follow-up review (fresh Opus reviewer; 1 critical, 2 high, 4 medium, 8 low). All fixed:
+  - **C1, a real root escalation in the first redesign.** PID 1 opened `StandardOutput=file:` (and `LoadCredential`) paths inside agentgw's writable dir, so a planted symlink could make root write anywhere.
+    - Now PID 1 opens nothing there. The unit runs `agentgw exec-job <dir>/<id>` as its DynamicUser, which reads job.json and creates its outputs with `O_EXCL|O_NOFOLLOW`.
+    - Run dirs live in `/var/lib/agentgw-actions` (tmpfiles `2710 agentgw:agentgw-io`).
+    - Both agentgw.service and the template have `SupplementaryGroups=agentgw-io`. Files get the group by chown, not setgid, because RestrictSUIDSGID forbids setting setgid; a raw `0o2730` is also ignored by Go's `os.Chmod`, and the VM test caught both.
+    - A VM subtest plants the symlink as agentgw and asserts the target is unchanged.
+  - **H1:** `LimitFSIZE=16M` and `TasksMax` on the template; agentgw reads at most 1 MiB back.
+  - **H2:** the orphan stop is blocking, with template `TimeoutStopSec=20s`, followed by reset-failed. The VM test samples peak instances through a SIGKILL and restart with an agent that takes 15 s to stop; peak ≤ 2.
+  - **M1:** reset-failed on cancel and orphan paths.
+  - **M2:** polkit refuses every other action for agentgw.
+  - **M3:** the VM asserts the action can't read the state DB or agentgw's credentials; denials need "Access denied" (or systemd's own fragment refusal for a template-named transient unit); enable/daemon-reload/set-property are checked; `ACTIVE` counts deactivating units.
+  - **M4:** README claims corrected.
+  - **L2:** signal exits map to 128+n, with ExecMainCode read numerically.
+  - **L3:** os.Mkdir for run dirs.
+  - **L4:** `--no-ask-password`.
+  - **L5:** env keys validated.
+  - **L7:** template hardening (ProtectProc, ProcSubset, ProtectKernelLogs, ProtectClock, ProtectHostname, RestrictAddressFamilies, SystemCallFilter).
+  - New config `server.actions_dir`, set by the module.
+- **Test-quality note:** an edit to the VM test's slow-stop runner silently didn't apply (nixfmt had reflowed the list), so two stop subtests passed without exercising a slow stop. It was caught by timing analysis and fixed. Edits to generated or formatted files now assert that the match exists.
+- The VM test has 7 subtests and all pass.

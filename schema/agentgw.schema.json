@@ -201,6 +201,9 @@
     "server": {
       "additionalProperties": false,
       "properties": {
+        "actions_dir": {
+          "type": "string"
+        },
         "db": {
           "type": "string"
         },

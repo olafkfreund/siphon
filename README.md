@@ -174,27 +174,37 @@ Read these before running it anywhere that matters.
   `argv[0]` can never be templated, and a templated element may not start with
   `-`. Unit names in `units:` cannot be templated either.
 - **Every `cmd` and agent runs in a fixed systemd sandbox.** The NixOS module
-  defines a template unit, `agentgw-action@.service` (DynamicUser,
+  defines a template unit, `agentgw-action@.service`: DynamicUser,
   ProtectSystem=strict, ProtectHome, PrivateTmp, NoNewPrivileges, an empty
-  capability set, the metadata addresses blocked and a `maxActionRuntime`
-  ceiling). agentgw hands each run its argv, stdin and private files (MCP
-  config, API key) as a 0600 job file loaded as a systemd credential, so
-  secrets never touch argv or a readable path. `server.sandbox: none` turns
-  this off and is warned about.
-- **agentgw cannot raise its own privileges.** The module's polkit rule lets
-  the `agentgw` user only start/stop/reset `agentgw-action@<16 hex>` instances
-  and start the units in your `units:` allowlist; transient units are refused.
-  The sandbox's settings live in Nix, so even a compromised agentgw process
-  cannot ask systemd for `User=root`. The NixOS VM test checks each denial.
-- **No orphaned actions.** Stopping agentgw stops its running instances; after
-  a crash, the next start stops leftover instances before requeueing their
-  jobs, so a step never runs twice at once.
+  capability set, a syscall filter, hidden `/proc`, the metadata addresses
+  blocked, `LimitFSIZE=16M`, `TasksMax` and a `maxActionRuntime` ceiling. An
+  action cannot read agentgw's state DB or credentials (the VM test checks).
+- **Secrets stay off argv and out of readable paths.** agentgw hands each run
+  its argv, stdin and private files (MCP config, API key) in a job file that
+  only agentgw and that run's sandbox user (via group `agentgw-io`) can read;
+  inside the unit they land in its private `/tmp`.
+- **agentgw cannot raise its own privileges.** The module's polkit rule lets the
+  `agentgw` user only start/stop/reset `agentgw-action@<16 hex>` instances and
+  start the units in your `units:` allowlist; every other polkit action
+  (transient units, enable, daemon-reload, set-property, …) is refused. systemd
+  itself never opens a file in a directory agentgw can write (the unit creates
+  its own outputs with `O_NOFOLLOW`), so a planted symlink cannot make root
+  write anywhere. The NixOS VM test checks each of these.
+- **No orphaned or doubled actions.** Stopping agentgw stops its running
+  instances and waits for them; after a crash, the next start stops leftover
+  instances and waits before requeueing their jobs, so a step never runs twice
+  at once (the VM test samples this through a kill and restart).
 - **A timed-out or cancelled unit action leaves the unit running.** Unlike a
   `cmd` or agent, an allowlisted unit is an operator-owned service: agentgw
   stops waiting for it but does not stop it.
 - **`sandbox: systemd` needs the NixOS module** (it provides the template
-  unit and polkit rule). Elsewhere, install equivalent units yourself or use
-  `sandbox: none`.
+  unit, the `agentgw-io` group, `/var/lib/agentgw-actions` and the polkit
+  rule). Elsewhere, install equivalents yourself or use `sandbox: none`.
+  With `sandbox: none` under the module, actions run as the `agentgw` user
+  itself, with its access and polkit grants: don't combine the two.
+- **Actions can reach the network**, including local services (and agentgw's
+  own API on localhost), apart from cloud metadata addresses. Keep local
+  services authenticated.
 - **Outbound requests are guarded.** `http` and `mcp` sources reject loopback,
   private, link-local, CGNAT and cloud-metadata addresses after DNS resolution
   unless the source sets `allow_private: true`. No redirects; body size and time

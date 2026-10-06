@@ -11,8 +11,8 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"text/tabwriter"
@@ -54,8 +54,12 @@ func main() {
 	case "version":
 		fmt.Println(version)
 	case "exec-job":
-		// Internal: runs inside agentgw-action@.service with the job as a credential.
-		os.Exit(action.ExecJob(filepath.Join(os.Getenv("CREDENTIALS_DIRECTORY"), "job"), os.Stdout, os.Stderr))
+		// Internal: `agentgw exec-job <run dir>` runs inside agentgw-action@.service.
+		if len(os.Args) != 3 || !filepath.IsAbs(os.Args[2]) {
+			fmt.Fprintln(os.Stderr, "usage: agentgw exec-job <absolute run dir>")
+			os.Exit(125)
+		}
+		os.Exit(action.ExecJob(os.Args[2]))
 	case "schema":
 		var b []byte
 		if b, err = config.Schema(); err == nil {

@@ -17,24 +17,19 @@ func fakeSystemd(t *testing.T, dir string) (stopped *[]string) {
 	jobFilesDir = t.TempDir()
 	var last int
 	var stops []string
-	origStart, origStatus, origReset, origStop := startUnit, unitExitStatus, resetFailed, stopUnits
+	origStart, origExit, origReset, origStop := startUnit, unitExit, resetFailed, stopUnits
 	startUnit = func(ctx context.Context, unit string) error {
 		id := strings.TrimSuffix(strings.TrimPrefix(unit, "agentgw-action@"), ".service")
-		run := filepath.Join(dir, id)
-		out, _ := os.OpenFile(filepath.Join(run, "stdout"), os.O_WRONLY, 0)
-		errf, _ := os.OpenFile(filepath.Join(run, "stderr"), os.O_WRONLY, 0)
-		defer out.Close()
-		defer errf.Close()
-		last = ExecJob(filepath.Join(run, "job.json"), out, errf)
+		last = ExecJob(filepath.Join(dir, id)) // what `agentgw exec-job <dir>/%i` does in the unit
 		if last != 0 {
 			return os.ErrInvalid // systemctl start --wait fails when the unit fails
 		}
 		return nil
 	}
-	unitExitStatus = func(string) (int, error) { return last, nil }
-	resetFailed = func(string) {}
+	unitExit = func(string) (string, int, error) { return "1", last, nil } // CLD_EXITED, as systemctl prints it
+	resetFailed = func(...string) {}
 	stopUnits = func(_ context.Context, units ...string) error { stops = append(stops, units...); return nil }
-	t.Cleanup(func() { startUnit, unitExitStatus, resetFailed, stopUnits = origStart, origStatus, origReset, origStop })
+	t.Cleanup(func() { startUnit, unitExit, resetFailed, stopUnits = origStart, origExit, origReset, origStop })
 	return &stops
 }
 
@@ -96,7 +91,7 @@ func TestExecJobRejectsPathInFileName(t *testing.T) {
 	job := filepath.Join(t.TempDir(), "job.json")
 	os.WriteFile(job, []byte(`{"argv":["true"],"files":{"../evil":"eA=="}}`), 0o600)
 	var out, errb strings.Builder
-	if code := ExecJob(job, &out, &errb); code != 125 {
+	if code := execJob(job, &out, &errb); code != 125 {
 		t.Fatalf("code=%d stderr=%q", code, errb.String())
 	}
 }
@@ -105,5 +100,45 @@ func TestStopOrphansTargetsTemplateInstances(t *testing.T) {
 	stops := fakeSystemd(t, t.TempDir())
 	if err := StopOrphans(context.Background()); err != nil || len(*stops) != 1 || (*stops)[0] != "agentgw-action@*.service" {
 		t.Fatalf("stops=%v err=%v", *stops, err)
+	}
+}
+
+// Review C1: exec-job creates its output files itself and never follows a
+// planted symlink (PID 1 no longer opens anything in the run dir).
+func TestExecJobRefusesPlantedSymlink(t *testing.T) {
+	jobFilesDir = t.TempDir()
+	run := t.TempDir()
+	target := filepath.Join(t.TempDir(), "victim")
+	os.WriteFile(target, []byte("original"), 0o600)
+	os.WriteFile(filepath.Join(run, "job.json"), []byte(`{"argv":["echo","pwned"]}`), 0o600)
+	if err := os.Symlink(target, filepath.Join(run, "stdout")); err != nil {
+		t.Fatal(err)
+	}
+	if code := ExecJob(run); code != 125 {
+		t.Fatalf("code=%d, want 125 (refused)", code)
+	}
+	if b, _ := os.ReadFile(target); string(b) != "original" {
+		t.Fatalf("symlink target modified: %q", b)
+	}
+}
+
+func TestExecJobRejectsBadEnv(t *testing.T) {
+	jobFilesDir = t.TempDir()
+	job := filepath.Join(t.TempDir(), "job.json")
+	os.WriteFile(job, []byte(`{"argv":["true"],"env":{"A=B":"x"}}`), 0o600)
+	var out, errb strings.Builder
+	if code := execJob(job, &out, &errb); code != 125 {
+		t.Fatalf("code=%d", code)
+	}
+}
+
+func TestTemplateRunSignalExit(t *testing.T) {
+	dir := t.TempDir()
+	fakeSystemd(t, dir)
+	startUnit = func(context.Context, string) error { return os.ErrInvalid }
+	unitExit = func(string) (string, int, error) { return "2", 9, nil } // CLD_KILLED
+	exit, _, _ := RunCmd(context.Background(), []string{"true"}, SandboxOptions{Mode: "systemd", Dir: dir, Timeout: time.Second}, nil)
+	if exit != 137 {
+		t.Fatalf("exit=%d, want 128+9", exit)
 	}
 }
