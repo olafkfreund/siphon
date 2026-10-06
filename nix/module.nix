@@ -63,6 +63,13 @@ in
       default = "2h";
       description = "Hard ceiling (RuntimeMaxSec) for any sandboxed action; per-action timeouts apply below it.";
     };
+
+    agentPackages = lib.mkOption {
+      type = lib.types.listOf lib.types.package;
+      default = [ ];
+      example = lib.literalExpression "[ pkgs.claude-code pkgs.codex ]";
+      description = "Agent CLIs (claude, codex, agy) made available to sandboxed agent runs.";
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -140,7 +147,8 @@ in
     # the DynamicUser, reads job.json and creates stdout/stderr itself.
     systemd.services."agentgw-action@" = {
       description = "agentgw sandboxed action %i";
-      path = [ "/run/current-system/sw" ]; # tools actions may call (claude, etc.)
+      # Agent CLIs first, then the system profile for tools actions may call.
+      path = cfg.agentPackages ++ [ "/run/current-system/sw" ];
       serviceConfig = {
         Type = "exec";
         ExecStart = "${cfg.package}/bin/agentgw exec-job ${actionsDir}/%i";
