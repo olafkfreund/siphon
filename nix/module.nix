@@ -12,15 +12,19 @@ let
   stateDir = "/var/lib/agentgw";
   # Shared with agentgw-action@ instances through group agentgw-io (setgid).
   actionsDir = "/var/lib/agentgw-actions";
-  # server.db and actions_dir default here; everything else comes from settings.
-  settings = lib.recursiveUpdate {
-    server.db = "${stateDir}/state.db";
-    server.actions_dir = actionsDir;
-  } cfg.settings;
+  # The egress proxy's unix socket; bound into restricted action units, whose
+  # own network namespace has no route to the host (setgid: group agentgw-io).
+  egressDir = "/run/agentgw";
+  # server.db, actions_dir and egress.socket default here; everything else comes from settings.
+  settings = lib.recursiveUpdate (lib.recursiveUpdate
+    {
+      server.db = "${stateDir}/state.db";
+      server.actions_dir = actionsDir;
+    }
+    (lib.optionalAttrs cfg.egress.enable { server.egress.socket = "${egressDir}/egress.sock"; })
+  ) cfg.settings;
   configFile = yaml.generate "agentgw.yaml" settings;
   units = settings.units or [ ];
-  egressListen = settings.server.egress.listen or "127.77.0.1:3128";
-  egressIP = lib.head (lib.splitString ":" egressListen); # loopback IPv4; validate enforces loopback
   metadataDeny = [
     "169.254.0.0/16"
     "fd00:ec2::254/128"
@@ -166,7 +170,10 @@ in
 
     # setgid: run dirs and files inherit group agentgw-io; group may traverse
     # but not list, so one action cannot enumerate other runs.
-    systemd.tmpfiles.rules = [ "d ${actionsDir} 2710 agentgw agentgw-io -" ];
+    systemd.tmpfiles.rules = [
+      "d ${actionsDir} 2710 agentgw agentgw-io -"
+      "d ${egressDir} 2710 agentgw agentgw-io -"
+    ];
 
     systemd.services.agentgw = {
       description = "agentgw gateway";
@@ -181,7 +188,10 @@ in
         Group = "agentgw";
         StateDirectory = "agentgw";
         StateDirectoryMode = "0700";
-        ReadWritePaths = [ actionsDir ];
+        ReadWritePaths = [
+          actionsDir
+          egressDir
+        ];
         # Explicit: the setgid hand-off breaks silently without this group
         # (a non-member's chmod drops the setgid bit).
         SupplementaryGroups = [ "agentgw-io" ];
@@ -224,13 +234,19 @@ in
     systemd.services."agentgw-action@" = actionUnit (
       if cfg.egress.enable then
         {
+          # Own network namespace: only its lo, where exec-job forwards
+          # 127.0.0.1:3128 to the proxy's unix socket. No host port is
+          # reachable; the IP filter is a second layer.
+          PrivateNetwork = true;
           IPAddressDeny = [ "any" ];
-          IPAddressAllow = [ "${egressIP}/32" ];
-          # Name lookups over local sockets would leave the IP filter's
-          # reach (DNS exfiltration); the proxy resolves names itself.
+          IPAddressAllow = [ "127.0.0.1/32" ];
+          BindPaths = [ egressDir ];
+          # Name lookups over local sockets would leave the namespace (DNS
+          # exfiltration); the proxy resolves names itself.
           InaccessiblePaths = [
             "-/run/dbus"
             "-/run/systemd/resolve"
+            "-/run/nscd"
           ];
         }
       else
