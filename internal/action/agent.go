@@ -77,6 +77,9 @@ func RunAgent(ctx context.Context, o AgentOptions) (AgentResult, error) {
 	for k, v := range env {
 		sb.Env[k] = v
 	}
+	if sb.Egress != nil {
+		sb.Env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+	}
 	sb.Files = make(map[string][]byte, len(o.Sandbox.Files)+len(files))
 	for k, v := range o.Sandbox.Files {
 		sb.Files[k] = v

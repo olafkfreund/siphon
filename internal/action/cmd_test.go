@@ -97,3 +97,26 @@ func TestRunCmdNoneKeepsParentHOME(t *testing.T) {
 		t.Fatalf("exit=%d HOME=%q err=%v", exit, output, err)
 	}
 }
+
+func TestRunCmdNoneEgressEnvAndMask(t *testing.T) {
+	proxy := "http://run-123:token-secret@127.77.0.1:3128"
+	for _, name := range []string{"HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "NO_PROXY", "no_proxy"} {
+		t.Setenv(name, "parent")
+	}
+	argv := []string{"sh", "-c", `printf '%s|%s|%s|%s|%s|%s|%s' "$HTTPS_PROXY" "$HTTP_PROXY" "$https_proxy" "$http_proxy" "$NO_PROXY" "$no_proxy" "$1"`, "sh", "arg"}
+	exit, output, err := RunCmd(context.Background(), argv, SandboxOptions{Mode: "none", Egress: &EgressEnv{ProxyURL: proxy}}, nil)
+	if err != nil || exit != 0 || string(output) != "***|***|***|***|||arg" {
+		t.Fatalf("exit=%d output=%q err=%v", exit, output, err)
+	}
+	if strings.Contains(strings.Join(argv, " "), "token-secret") {
+		t.Fatal("proxy token entered argv")
+	}
+	exit, output, err = RunCmd(context.Background(), []string{"sh", "-c", `v=${HTTPS_PROXY#http://run-123:}; printf '%s' "${v%@*}"`}, SandboxOptions{Mode: "none", Egress: &EgressEnv{ProxyURL: proxy}}, nil)
+	if err != nil || exit != 0 || string(output) != "***" {
+		t.Fatalf("token output: exit=%d output=%q err=%v", exit, output, err)
+	}
+	exit, output, err = RunCmd(context.Background(), []string{"env"}, SandboxOptions{Mode: "none"}, nil)
+	if err != nil || exit != 0 || strings.Contains(string(output), "_PROXY=") || strings.Contains(string(output), "_proxy=") {
+		t.Fatalf("open env: exit=%d output=%q err=%v", exit, output, err)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -21,7 +22,7 @@ func fakeSystemd(t *testing.T, dir string) (stopped *[]string) {
 	var stops []string
 	origStart, origExit, origReset, origStop := startUnit, unitExit, resetFailed, stopUnits
 	startUnit = func(ctx context.Context, unit string) error {
-		id := strings.TrimSuffix(strings.TrimPrefix(unit, "agentgw-action@"), ".service")
+		id := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(unit, "agentgw-action-open@"), "agentgw-action@"), ".service")
 		last = ExecJob(filepath.Join(dir, id)) // what `agentgw exec-job <dir>/%i` does in the unit
 		if last != 0 {
 			return os.ErrInvalid // systemctl start --wait fails when the unit fails
@@ -83,7 +84,7 @@ func TestTemplateRunCancelStopsUnit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	startUnit = func(ctx context.Context, unit string) error { cancel(); <-ctx.Done(); return ctx.Err() }
 	exit, _, _ := RunCmd(ctx, []string{"true"}, SandboxOptions{Mode: "systemd", Dir: dir, Timeout: time.Minute}, nil)
-	if exit != -1 || len(*stops) != 1 || !strings.HasPrefix((*stops)[0], "agentgw-action@") {
+	if exit != -1 || len(*stops) != 1 || !strings.HasPrefix((*stops)[0], "agentgw-action-open@") {
 		t.Fatalf("exit=%d stops=%v, want -1 and the instance stopped", exit, *stops)
 	}
 }
@@ -115,8 +116,69 @@ func TestExecJobRejectsPathInFileName(t *testing.T) {
 
 func TestStopOrphansTargetsTemplateInstances(t *testing.T) {
 	stops := fakeSystemd(t, t.TempDir())
-	if err := StopOrphans(context.Background()); err != nil || len(*stops) != 1 || (*stops)[0] != "agentgw-action@*.service" {
+	var reset []string
+	resetFailed = func(units ...string) { reset = append(reset, units...) }
+	if err := StopOrphans(context.Background()); err != nil || !reflect.DeepEqual(*stops, []string{"agentgw-action@*.service", "agentgw-action-open@*.service"}) {
 		t.Fatalf("stops=%v err=%v", *stops, err)
+	}
+	if !reflect.DeepEqual(reset, *stops) {
+		t.Fatalf("reset=%v stops=%v", reset, *stops)
+	}
+}
+
+func TestTemplateEgressSelectionAndEnv(t *testing.T) {
+	for _, restricted := range []bool{false, true} {
+		t.Run(map[bool]string{false: "open", true: "restricted"}[restricted], func(t *testing.T) {
+			dir := t.TempDir()
+			fakeSystemd(t, dir)
+			original := startUnit
+			var unit string
+			var spec JobSpec
+			startUnit = func(ctx context.Context, name string) error {
+				unit = name
+				id := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(name, "agentgw-action-open@"), "agentgw-action@"), ".service")
+				b, err := os.ReadFile(filepath.Join(dir, id, "job.json"))
+				if err != nil {
+					return err
+				}
+				if err := json.Unmarshal(b, &spec); err != nil {
+					return err
+				}
+				return original(ctx, name)
+			}
+			opts := SandboxOptions{Mode: "systemd", Dir: dir}
+			if restricted {
+				opts.Egress = &EgressEnv{ProxyURL: "http://run-id:token-secret@127.77.0.1:3128"}
+			}
+			exit, _, err := RunCmd(context.Background(), []string{"true"}, opts, nil)
+			if err != nil || exit != 0 {
+				t.Fatalf("exit=%d err=%v", exit, err)
+			}
+			prefix := "agentgw-action-open@"
+			if restricted {
+				prefix = "agentgw-action@"
+			}
+			if !strings.HasPrefix(unit, prefix) || !strings.HasSuffix(unit, ".service") {
+				t.Fatalf("unit=%q", unit)
+			}
+			if len(spec.Argv) != 1 || spec.Argv[0] != "true" {
+				t.Fatalf("argv=%q", spec.Argv)
+			}
+			if restricted {
+				for _, name := range []string{"HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"} {
+					if spec.Env[name] != opts.Egress.ProxyURL {
+						t.Fatalf("%s=%q", name, spec.Env[name])
+					}
+				}
+				for _, name := range []string{"NO_PROXY", "no_proxy"} {
+					if value, ok := spec.Env[name]; !ok || value != "" {
+						t.Fatalf("%s=%q present=%t", name, value, ok)
+					}
+				}
+			} else if len(spec.Env) != 0 {
+				t.Fatalf("open env=%v", spec.Env)
+			}
+		})
 	}
 }
 
@@ -190,7 +252,7 @@ func TestTemplateWriteback(t *testing.T) {
 			exit, _, _, wb, err := templateRun(context.Background(), dir, JobSpec{
 				Argv: []string{"sh", "-c", cmd}, Files: map[string][]byte{".codex/auth.json": []byte("old")},
 				Writeback: []string{".codex/auth.json"},
-			}, outputCap)
+			}, outputCap, false)
 			if err != nil || (changed && exit != 3) || (!changed && exit != 0) {
 				t.Fatalf("exit=%d err=%v", exit, err)
 			}
@@ -206,7 +268,7 @@ func TestTemplateWritebackCap(t *testing.T) {
 	fakeSystemd(t, dir)
 	_, _, _, wb, err := templateRun(context.Background(), dir, JobSpec{
 		Argv: []string{"sh", "-c", `head -c 1100000 /dev/zero > "$HOME/big"`}, Writeback: []string{"big"},
-	}, outputCap)
+	}, outputCap, false)
 	if err != nil || len(wb[0]) != outputCap {
 		t.Fatalf("writeback length=%d err=%v", len(wb[0]), err)
 	}
@@ -227,7 +289,7 @@ func TestTemplateRunIgnoresFIFOs(t *testing.T) {
 			}
 			t.Cleanup(func() { startUnit = orig })
 			started := time.Now()
-			_, stdout, _, wb, err := templateRun(context.Background(), dir, JobSpec{Writeback: []string{"token"}}, outputCap)
+			_, stdout, _, wb, err := templateRun(context.Background(), dir, JobSpec{Writeback: []string{"token"}}, outputCap, false)
 			if err != nil || len(stdout) != 0 || len(wb) != 0 || time.Since(started) >= 2*time.Second {
 				t.Fatalf("stdout=%q wb=%v err=%v elapsed=%v", stdout, wb, err, time.Since(started))
 			}
@@ -241,7 +303,7 @@ func TestWritebackErrorKeepsExitAndOutput(t *testing.T) {
 	exit, stdout, stderr, wb, err := templateRun(context.Background(), dir, JobSpec{
 		Argv:      []string{"sh", "-c", `ln -s /tmp "$HOME/linked"; printf good > "$HOME/changed"; printf answer`},
 		Writeback: []string{"linked/token", "changed"},
-	}, outputCap)
+	}, outputCap, false)
 	if err != nil || exit != 0 || string(stdout) != "answer" || !strings.Contains(string(stderr), "writeback") || string(wb[1]) != "good" {
 		t.Fatalf("exit=%d stdout=%q stderr=%q wb=%v err=%v", exit, stdout, stderr, wb, err)
 	}
