@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 7
 author: olafkfreund
 ---
@@ -111,3 +111,11 @@ Must not:
    config, or warn and allow it?
 4. **Scope of v1.** All three runners at once, or Claude first (the smallest
    step, since a long-lived subscription token exists), then Codex, then agy?
+
+## Resolutions (approved 2026-10-06, owner accepted the defaults)
+
+1. Terms of use: document each provider's terms; compliance is the operator's.
+2. Refresh: agentgw owns a credential store per login, with write-back of refreshed tokens, serialised across concurrent runs.
+3. Containment gaps: `validate` warns and the docs say what each runner can't enforce. It does not refuse.
+4. Scope: all three runners in this task.
+5. API keys stay supported for every runner (owner, 2026-10-06).
