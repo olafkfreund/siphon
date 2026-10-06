@@ -1,0 +1,305 @@
+{
+  "$id": "https://github.com/olafkfreund/MCP-AgentGateway/schema/agentgw.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "agents": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "api_key_file": {
+            "type": "string"
+          },
+          "approve": {
+            "type": "boolean"
+          },
+          "max_budget_usd": {
+            "type": "number"
+          },
+          "max_turns": {
+            "type": "integer"
+          },
+          "mcp": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "runner": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "timeout": {
+            "pattern": "^[0-9]+(ns|us|µs|ms|s|m|h)([0-9]+(ns|us|µs|ms|s|m|h))*$",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "limits": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_runs_per_day": {
+          "type": "integer"
+        },
+        "http_max_body": {
+          "oneOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^\\s*\\+?[0-9]+(\\s*(KiB|MiB|GiB|B))?\\s*$",
+              "type": "string"
+            }
+          ]
+        },
+        "http_timeout": {
+          "pattern": "^[0-9]+(ns|us|µs|ms|s|m|h)([0-9]+(ns|us|µs|ms|s|m|h))*$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "routines": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "steps": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "agent": {
+                  "type": "string"
+                },
+                "approve": {
+                  "type": "boolean"
+                },
+                "cmd": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "continue_on_error": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "if": {
+                  "type": "string"
+                },
+                "retry": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "attempts": {
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                },
+                "timeout": {
+                  "pattern": "^[0-9]+(ns|us|µs|ms|s|m|h)([0-9]+(ns|us|µs|ms|s|m|h))*$",
+                  "type": "string"
+                },
+                "unit": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "rules": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "additionalProperties": false,
+            "properties": {
+              "agent": {
+                "type": "string"
+              },
+              "cmd": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "routine": {
+                "type": "string"
+              },
+              "unit": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "allow_agent_events": {
+            "type": "boolean"
+          },
+          "approve": {
+            "type": "boolean"
+          },
+          "cooldown": {
+            "pattern": "^[0-9]+(ns|us|µs|ms|s|m|h)([0-9]+(ns|us|µs|ms|s|m|h))*$",
+            "type": "string"
+          },
+          "for_each": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "on": {
+            "type": "string"
+          },
+          "repeat": {
+            "pattern": "^[0-9]+(ns|us|µs|ms|s|m|h)([0-9]+(ns|us|µs|ms|s|m|h))*$",
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "when": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "server": {
+      "additionalProperties": false,
+      "properties": {
+        "db": {
+          "type": "string"
+        },
+        "listen": {
+          "type": "string"
+        },
+        "sandbox": {
+          "type": "string"
+        },
+        "token": {
+          "description": "env:NAME, file:/path, or (where allowed) a literal",
+          "type": "string"
+        },
+        "workers": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "sources": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_private": {
+            "type": "boolean"
+          },
+          "auth": {
+            "additionalProperties": false,
+            "properties": {
+              "bearer": {
+                "description": "env:NAME, file:/path, or (where allowed) a literal",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "body": {
+            "type": "string"
+          },
+          "command": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "headers": {
+            "additionalProperties": {
+              "description": "env:NAME, file:/path, or (where allowed) a literal",
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "poll": {
+            "pattern": "^[0-9]+(ns|us|µs|ms|s|m|h)([0-9]+(ns|us|µs|ms|s|m|h))*$",
+            "type": "string"
+          },
+          "read": {
+            "additionalProperties": false,
+            "properties": {
+              "args": {},
+              "resource": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "secret": {
+            "description": "env:NAME, file:/path, or (where allowed) a literal",
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          },
+          "signature_header": {
+            "type": "string"
+          },
+          "timestamp_header": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "units": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "title": "agentgw config",
+  "type": "object"
+}
