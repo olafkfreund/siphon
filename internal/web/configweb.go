@@ -191,13 +191,13 @@ func (s *server) cfgEdit(w http.ResponseWriter, r *http.Request, csrf string) {
 
 // itemYAMLFromRequest is the submitted item: the YAML tab's text, or the form
 // layered onto the current item.
-func (s *server) itemYAMLFromRequest(r *http.Request, kind, name string) (string, error) {
+func (s *server) itemYAMLFromRequest(r *http.Request, kind, name string) (string, []pendingSecret, error) {
 	if r.PostFormValue("mode") == "yaml" {
-		return r.PostFormValue("yaml"), nil
+		return r.PostFormValue("yaml"), nil, nil
 	}
 	eff, _, _, _, err := s.state()
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	existing, _ := itemYAML(eff, kind, name)
 	return applyForm(kind, name, existing, r.PostForm, s.Config().Server.DB)
@@ -231,6 +231,7 @@ func (s *server) cfgPost(w http.ResponseWriter, r *http.Request, csrf, verb stri
 		mutate  func(map[itemKey]store.ConfigItem)
 		summary string
 		y       string
+		pending []pendingSecret
 	)
 	_, prov, _, _, err := s.state()
 	if err != nil {
@@ -240,7 +241,7 @@ func (s *server) cfgPost(w http.ResponseWriter, r *http.Request, csrf, verb stri
 	_, exists := prov[itemKey{Kind: kind, Name: name}]
 	switch verb {
 	case "check", "save":
-		if y, err = s.itemYAMLFromRequest(r, kind, name); err != nil {
+		if y, pending, err = s.itemYAMLFromRequest(r, kind, name); err != nil {
 			bad(r.PostFormValue("yaml"), err.Error(), http.StatusUnprocessableEntity)
 			return
 		}
@@ -262,7 +263,7 @@ func (s *server) cfgPost(w http.ResponseWriter, r *http.Request, csrf, verb stri
 		}
 		var e *edit
 		if err == nil {
-			e, err = s.prepare(cur, mutate)
+			e, err = s.prepare(cur, mutate, pending)
 		}
 		var inv errInvalid
 		switch {
@@ -286,7 +287,7 @@ func (s *server) cfgPost(w http.ResponseWriter, r *http.Request, csrf, verb stri
 		}
 		return
 	}
-	_, _, applyErr, err := s.commit("portal", summary, &rev, mutate)
+	_, _, applyErr, err := s.commit("portal", summary, &rev, mutate, pending)
 	var inv errInvalid
 	switch {
 	case errors.As(err, &inv):
@@ -373,7 +374,7 @@ func (s *server) restore(id int64, rev *int64) error {
 		for _, c := range snap {
 			m[itemKey{Kind: c.Kind, Name: c.Name}] = c
 		}
-	})
+	}, nil)
 	return err
 }
 
@@ -409,12 +410,9 @@ func (s *server) addLogin(actor, name, provider, kind, value string) error {
 		if existing != nil && existing.APIKey.Ref == "" {
 			return errInvalid{"credential " + name + " is a subscription login, not an API key"}
 		}
-		ref, err := storeSecret(secretsDir(cfg.Server.DB), "credentials", name, "api_key", value)
-		if err != nil {
-			return err
-		}
-		y := fmt.Sprintf("provider: %s\napi_key: %s\n", provider, ref)
-		_, _, _, err = s.commit(actor, "credentials/"+name+" api key set", nil, putItem("credentials", name, y))
+		ps := pendingSecret{Kind: "credentials", Name: name, Key: "api_key", Value: value}
+		y := fmt.Sprintf("provider: %s\napi_key: file:%s\n", provider, ps.path(secretsDir(cfg.Server.DB)))
+		_, _, _, err := s.commit(actor, "credentials/"+name+" api key set", nil, putItem("credentials", name, y), []pendingSecret{ps})
 		return err
 	case "login", "token":
 		if existing != nil && existing.APIKey.Ref != "" {
@@ -428,7 +426,7 @@ func (s *server) addLogin(actor, name, provider, kind, value string) error {
 			return errInvalid{err.Error()}
 		}
 		if existing == nil {
-			if _, _, _, err := s.commit(actor, "credentials/"+name+" created", nil, putItem("credentials", name, "provider: "+provider+"\n")); err != nil {
+			if _, _, _, err := s.commit(actor, "credentials/"+name+" created", nil, putItem("credentials", name, "provider: "+provider+"\n"), nil); err != nil {
 				return err
 			}
 		}
@@ -472,7 +470,7 @@ func (s *server) removeLogin(actor, name string) error {
 		return err
 	}
 	if prov[itemKey{Kind: "credentials", Name: name}] == config.FromPortal {
-		if _, _, _, err := s.commit(actor, "credentials/"+name+" deleted", nil, resetItem("credentials", name)); err != nil {
+		if _, _, _, err := s.commit(actor, "credentials/"+name+" deleted", nil, resetItem("credentials", name), nil); err != nil {
 			return err
 		}
 	}

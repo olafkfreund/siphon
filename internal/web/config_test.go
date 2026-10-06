@@ -28,15 +28,18 @@ type cfgEnv struct {
 	cur     atomic.Pointer[config.Config]
 	applied atomic.Int32
 	c       *http.Cookie
+	keep    int // overlay rows the security tests expect to remain
 	csrf    string
 }
 
-func newCfgEnv(t *testing.T) *cfgEnv {
+func newCfgEnv(t *testing.T) *cfgEnv { return newCfgEnvFile(t, cfgFile) }
+
+func newCfgEnvFile(t *testing.T, content string) *cfgEnv {
 	t.Helper()
 	t.Setenv("AGW_HOOK", "s3cret")
 	ce := &cfgEnv{dir: t.TempDir()}
 	path := filepath.Join(ce.dir, "siphon.yaml")
-	if err := os.WriteFile(path, []byte(strings.ReplaceAll(cfgFile, "DIR", ce.dir)), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(strings.ReplaceAll(content, "DIR", ce.dir)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, _, err := config.LoadWithOverlay(path, nil)
@@ -101,7 +104,7 @@ func TestConfigCRUDEveryKind(t *testing.T) {
 	ce := newCfgEnv(t)
 	items := []struct{ kind, name, yaml, yaml2 string }{
 		{"rules", "r2", `{source: gh, when: "true", action: {cmd: [echo, two]}}`, `{source: gh, when: "false", action: {cmd: [echo, two]}}`},
-		{"sources", "s2", `{type: webhook, secret: env:AGW_HOOK, signature: github}`, `{type: webhook, secret: env:AGW_HOOK, signature: sha256, signature_header: X-Sig}`},
+		{"sources", "s2", `{type: http, url: "https://example.com/x", poll: 1m}`, `{type: http, url: "https://example.com/x", poll: 2m, method: POST}`},
 		{"agents", "a1", `{kind: claude, prompt: hi}`, `{kind: claude, prompt: hello}`},
 		{"routines", "ro", `{steps: [{id: s1, cmd: [echo, x]}]}`, `{steps: [{id: s1, cmd: [echo, y]}]}`},
 		{"credentials", "c1", `{provider: claude}`, `{provider: claude, concurrency: 2}`},

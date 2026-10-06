@@ -1,6 +1,8 @@
 package web
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -8,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"gopkg.in/yaml.v3"
 )
@@ -34,9 +37,8 @@ var kindFields = map[string][]field{
 	},
 	"sources": {
 		{"type", "Type", "select", []string{"http", "mcp", "webhook"}}, {"url", "URL", "text", nil},
-		{"command", "Command (one argument per line)", "lines", nil},
 		{"read.resource", "Read resource", "text", nil}, {"read.tool", "Read tool", "text", nil},
-		{"poll", "Poll every", "text", nil}, {"allow_private", "Allow private addresses", "check", nil},
+		{"poll", "Poll every", "text", nil},
 		{"method", "Method", "select", []string{"", "GET", "POST"}}, {"body", "Body", "area", nil},
 		{"secret", "Webhook secret", "secret", nil},
 		{"signature", "Signature", "select", []string{"", "github", "sha256"}},
@@ -157,24 +159,70 @@ func formFields(kind, y string) []fieldView {
 // secretsDir is where pasted secret values live, next to the database.
 func secretsDir(db string) string { return filepath.Join(filepath.Dir(db), "secrets") }
 
-// storeSecret writes value to <dir>/<kind>-<name>-<field> (0600, dir 0700) and
-// returns the file: ref. name was checked by itemName, so it cannot escape dir.
-func storeSecret(dir, kind, name, key, value string) (string, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
+// pendingSecret is a pasted secret value waiting for its save: the item YAML
+// already holds its final file: ref, but the file is only written by commit,
+// after the revision check and validation pass.
+type pendingSecret struct{ Kind, Name, Key, Value string }
+
+func (p pendingSecret) path(dir string) string {
+	return filepath.Join(dir, p.Kind+"-"+p.Name+"-"+strings.ReplaceAll(p.Key, ".", "-"))
+}
+
+// writeSecret stores the value at p.path(dir), mode 0600, in a dir that is 0700
+// and not a symlink: a temp file created exclusively (no following links),
+// synced, then renamed over the target.
+func writeSecret(dir string, p pendingSecret) error {
+	if !itemName.MatchString(p.Name) { // the name is part of the file name: keep it inside dir
+		return errors.New("bad item name")
 	}
-	p := filepath.Join(dir, kind+"-"+name+"-"+strings.ReplaceAll(key, ".", "-"))
-	if err := os.WriteFile(p, []byte(value), 0o600); err != nil {
-		return "", err
+	if fi, err := os.Lstat(dir); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+			return errors.New("secrets directory is not a plain directory")
+		}
+	} else if errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return err
+		}
+	} else {
+		return err
 	}
-	return "file:" + p, os.Chmod(p, 0o600)
+	var rnd [8]byte
+	if _, err := rand.Read(rnd[:]); err != nil {
+		return err
+	}
+	final := p.path(dir)
+	tmp := filepath.Join(dir, "."+filepath.Base(final)+"."+hex.EncodeToString(rnd[:]))
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return err
+	}
+	_, werr := f.WriteString(p.Value)
+	if serr := f.Sync(); werr == nil {
+		werr = serr
+	}
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		os.Remove(tmp)
+		return werr
+	}
+	if err := os.Rename(tmp, final); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // applyForm layers the submitted form onto the existing item YAML and returns
-// the new item YAML. A secret value is stored in a file and only its ref is
-// kept; an empty secret field keeps what is there.
-func applyForm(kind, name, existing string, form url.Values, db string) (string, error) {
+// the new item YAML. A pasted secret value becomes a pending secret and only
+// its final file: ref goes into the YAML; an empty secret field keeps what is there.
+func applyForm(kind, name, existing string, form url.Values, db string) (string, []pendingSecret, error) {
 	m := decodeMap(existing)
+	var pending []pendingSecret
 	for _, f := range kindFields[kind] {
 		raw := strings.TrimSpace(form.Get("f." + f.Key))
 		var v any
@@ -191,7 +239,7 @@ func applyForm(kind, name, existing string, form url.Values, db string) (string,
 			if raw != "" {
 				n, err := strconv.Atoi(raw)
 				if err != nil {
-					return "", fmt.Errorf("%s: not a whole number", f.Label)
+					return "", nil, fmt.Errorf("%s: not a whole number", f.Label)
 				}
 				v = n
 			}
@@ -199,7 +247,7 @@ func applyForm(kind, name, existing string, form url.Values, db string) (string,
 			if raw != "" {
 				n, err := strconv.ParseFloat(raw, 64)
 				if err != nil {
-					return "", fmt.Errorf("%s: not a number", f.Label)
+					return "", nil, fmt.Errorf("%s: not a number", f.Label)
 				}
 				v = n
 			}
@@ -231,11 +279,9 @@ func applyForm(kind, name, existing string, form url.Values, db string) (string,
 			case strings.HasPrefix(val, "env:") || strings.HasPrefix(val, "file:"):
 				v = strings.TrimSpace(val)
 			default:
-				ref, err := storeSecret(secretsDir(db), kind, name, f.Key, val)
-				if err != nil {
-					return "", errors.New("could not store the secret")
-				}
-				v = ref
+				ps := pendingSecret{Kind: kind, Name: name, Key: f.Key, Value: val}
+				pending = append(pending, ps)
+				v = "file:" + ps.path(secretsDir(db))
 			}
 		case "area":
 			if form.Get("f."+f.Key) != "" {
@@ -256,5 +302,5 @@ func applyForm(kind, name, existing string, form url.Values, db string) (string,
 		}
 	}
 	b, err := yaml.Marshal(m)
-	return string(b), err
+	return string(b), pending, err
 }

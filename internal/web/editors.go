@@ -144,7 +144,7 @@ func (s *server) runRuleTest(r *http.Request) *testView {
 	y := r.PostFormValue("yaml")
 	if r.PostFormValue("mode") != "yaml" {
 		var err error
-		if y, err = applyForm("rules", name, "", r.PostForm, cfg.Server.DB); err != nil {
+		if y, _, err = applyForm("rules", name, "", r.PostForm, cfg.Server.DB); err != nil {
 			tv.Err = err.Error()
 			return tv
 		}
@@ -258,7 +258,7 @@ func (s *server) egressPreview(w http.ResponseWriter, r *http.Request, _ string)
 	y := r.PostFormValue("yaml")
 	if r.PostFormValue("mode") != "yaml" {
 		var err error
-		if y, err = applyForm("agents", r.PostFormValue("name"), "", r.PostForm, cfg.Server.DB); err != nil {
+		if y, _, err = applyForm("agents", r.PostFormValue("name"), "", r.PostForm, cfg.Server.DB); err != nil {
 			ev.Err = err.Error()
 			s.render(w, "egresspreview", ev)
 			return

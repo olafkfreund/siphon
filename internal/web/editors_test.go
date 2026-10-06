@@ -172,7 +172,7 @@ func TestEditorsRoundTrip(t *testing.T) {
 		if it.kind == "rules" {
 			form.Set("action_kind", map[bool]string{true: "cmd", false: "agent"}[form.Get("f.action.cmd") != ""])
 		}
-		got, err := applyForm(it.kind, "x", it.y, form, "/nonexistent/s.db")
+		got, _, err := applyForm(it.kind, "x", it.y, form, "/nonexistent/s.db")
 		if err != nil {
 			t.Fatal(err)
 		}

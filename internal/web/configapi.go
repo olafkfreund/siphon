@@ -134,7 +134,7 @@ func (s *server) configAPI(mux *http.ServeMux) {
 		if _, ok := prov[itemKey{Kind: kind, Name: name}]; ok {
 			verb = "updated"
 		}
-		id, _, applyErr, err := s.commit("api", kind+"/"+name+" "+verb, body.Rev, putItem(kind, name, body.YAML))
+		id, _, applyErr, err := s.commit("api", kind+"/"+name+" "+verb, body.Rev, putItem(kind, name, body.YAML), nil)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -150,7 +150,7 @@ func (s *server) configAPI(mux *http.ServeMux) {
 		if err != nil {
 			return nil, 0, err
 		}
-		id, _, applyErr, err := s.commit("api", kind+"/"+name+" deleted", rev, mutate)
+		id, _, applyErr, err := s.commit("api", kind+"/"+name+" deleted", rev, mutate, nil)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -162,7 +162,7 @@ func (s *server) configAPI(mux *http.ServeMux) {
 		if err != nil {
 			return nil, 400, err
 		}
-		id, _, applyErr, err := s.commit("api", kind+"/"+name+" reset to file", rev, resetItem(kind, name))
+		id, _, applyErr, err := s.commit("api", kind+"/"+name+" reset to file", rev, resetItem(kind, name), nil)
 		if err != nil {
 			return nil, 0, err
 		}

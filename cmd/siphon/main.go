@@ -147,13 +147,13 @@ func loadCfg(name string, args []string, fallback bool) (*config.Config, []strin
 		return nil, nil, "", "", err
 	}
 	p := resolveConfig(fs, *path)
-	var items, last []config.Item
+	var items []config.Item
 	if !*fileOnly {
 		base, err := config.Load(p)
 		if err != nil {
 			return nil, nil, "", "", err
 		}
-		if items, last, err = dbOverlay(base.Server.DB); err != nil {
+		if items, err = dbOverlay(base.Server.DB); err != nil {
 			return nil, nil, "", "", err
 		}
 	}
@@ -161,7 +161,7 @@ func loadCfg(name string, args []string, fallback bool) (*config.Config, []strin
 	var banner string
 	var err error
 	if fallback {
-		cfg, banner, err = pickConfig(p, items, last)
+		cfg, banner, err = pickConfig(p, items)
 	} else {
 		cfg, err = tryLoad(p, items)
 	}
@@ -184,63 +184,50 @@ func tryLoad(path string, items []config.Item) (*config.Config, error) {
 	return cfg, cfg.Validate()
 }
 
-// pickConfig is serve's startup decision: file + items, else file + the last
-// valid revision's items, else the file alone. banner is set on a fallback.
-func pickConfig(path string, items, last []config.Item) (*config.Config, string, error) {
+// pickConfig is serve's startup decision: file + items, else the file with
+// only the portal's deletions applied (so what an operator removed stays removed).
+// banner is set on a fallback.
+func pickConfig(path string, items []config.Item) (*config.Config, string, error) {
 	cfg, err := tryLoad(path, items)
 	if err == nil || len(items) == 0 {
 		return cfg, "", err
 	}
-	for _, c := range []struct {
-		items []config.Item
-		name  string
-	}{{last, "the last valid revision"}, {nil, "the file alone"}} {
-		if c.name == "the last valid revision" && last == nil {
-			continue
-		}
-		if fb, ferr := tryLoad(path, c.items); ferr == nil {
-			slog.Error("portal edits could not be applied", "err", err, "fallback", c.name)
-			return fb, fmt.Sprintf("Portal edits could not be applied: %v; running on %s", err, c.name), nil
+	var tombs []config.Item
+	for _, it := range items {
+		if it.Deleted {
+			tombs = append(tombs, it)
 		}
 	}
-	return nil, "", err
+	fb, ferr := tryLoad(path, tombs)
+	if ferr != nil {
+		return nil, "", err
+	}
+	slog.Error("portal edits could not be applied", "err", err)
+	return fb, fmt.Sprintf("Portal edits could not be applied: %v; running on the file with its deletions only", err), nil
 }
 
-// dbOverlay reads the portal edits and the last revision's items from the DB,
+// dbOverlay reads the portal edits from the DB,
 // if it exists (it is never created here).
-func dbOverlay(dbPath string) (items, last []config.Item, err error) {
+func dbOverlay(dbPath string) (items []config.Item, err error) {
 	if dbPath == ":memory:" {
-		return nil, nil, nil
+		return nil, nil
 	}
 	if _, serr := os.Stat(dbPath); serr != nil {
-		return nil, nil, nil
+		return nil, nil
 	}
 	st, err := store.Open(dbPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer st.Close()
 	cis, err := store.ConfigItems(st.DB)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	for _, i := range cis {
 		items = append(items, config.Item{Kind: i.Kind, Name: i.Name, YAML: i.YAML, Deleted: i.Deleted})
 	}
-	rev, ok, err := store.LatestRevision(st.DB)
-	if err != nil || !ok {
-		return items, nil, err
-	}
-	// items_json is the revision's full snapshot: a JSON array of store.ConfigItem.
-	var snap []store.ConfigItem
-	if json.Unmarshal([]byte(rev.ItemsJSON), &snap) != nil {
-		return items, nil, nil
-	}
-	last = []config.Item{}
-	for _, i := range snap {
-		last = append(last, config.Item{Kind: i.Kind, Name: i.Name, YAML: i.YAML, Deleted: i.Deleted})
-	}
-	return items, last, nil
+	return items, nil
 }
 
 // configExport prints the effective YAML: the file with the portal edits applied.
@@ -255,7 +242,7 @@ func configExport(args []string) error {
 	if err != nil {
 		return err
 	}
-	items, _, err := dbOverlay(base.Server.DB)
+	items, err := dbOverlay(base.Server.DB)
 	if err != nil {
 		return err
 	}

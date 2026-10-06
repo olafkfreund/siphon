@@ -114,7 +114,7 @@ type edit struct {
 
 // prepare applies mutate to a copy of cur and checks the result the way
 // startup would: overlay merge, Parse, Validate. Nothing is stored.
-func (s *server) prepare(cur []store.ConfigItem, mutate func(map[itemKey]store.ConfigItem)) (*edit, error) {
+func (s *server) prepare(cur []store.ConfigItem, mutate func(map[itemKey]store.ConfigItem), pending []pendingSecret) (*edit, error) {
 	file, err := s.readFile()
 	if err != nil {
 		return nil, err
@@ -135,7 +135,12 @@ func (s *server) prepare(cur []store.ConfigItem, mutate func(map[itemKey]store.C
 	if err != nil {
 		return nil, err
 	}
-	cfg, _, err := config.LoadWithOverlay(s.ConfigPath, toItems(next))
+	// Pasted secrets are not on disk yet: validate with stand-in values.
+	stub := map[string]string{}
+	for _, p := range pending {
+		stub["file:"+p.path(secretsDir(s.Config().Server.DB))] = "placeholder"
+	}
+	cfg, _, err := config.LoadWithOverlayStub(s.ConfigPath, toItems(next), stub)
 	if err != nil {
 		return nil, errInvalid{err.Error()}
 	}
@@ -153,7 +158,7 @@ func (s *server) prepare(cur []store.ConfigItem, mutate func(map[itemKey]store.C
 // audit row in one transaction, then applies the new config. rev (if not nil)
 // must be the latest revision id. applyErr is non-nil if the revision was
 // stored but the live apply failed.
-func (s *server) commit(actor, summary string, rev *int64, mutate func(map[itemKey]store.ConfigItem)) (id int64, e *edit, applyErr error, err error) {
+func (s *server) commit(actor, summary string, rev *int64, mutate func(map[itemKey]store.ConfigItem), pending []pendingSecret) (id int64, e *edit, applyErr error, err error) {
 	s.editMu.Lock()
 	defer s.editMu.Unlock()
 	cur, latest, err := s.overlay()
@@ -163,8 +168,26 @@ func (s *server) commit(actor, summary string, rev *int64, mutate func(map[itemK
 	if rev != nil && *rev != latest {
 		return 0, nil, nil, errStale
 	}
-	if e, err = s.prepare(cur, mutate); err != nil {
+	if e, err = s.prepare(cur, mutate, pending); err != nil {
 		return 0, nil, nil, err
+	}
+	// Only now, with the revision current and the candidate valid, touch disk.
+	if len(pending) > 0 {
+		dir := secretsDir(s.Config().Server.DB)
+		for _, p := range pending {
+			if err = writeSecret(dir, p); err != nil {
+				return 0, nil, nil, err
+			}
+		}
+		// Re-load for real: the candidate above resolved stand-in values.
+		cfg, _, lerr := config.LoadWithOverlay(s.ConfigPath, toItems(e.items))
+		if lerr == nil {
+			lerr = cfg.Validate()
+		}
+		if lerr != nil {
+			return 0, nil, nil, errInvalid{lerr.Error()}
+		}
+		e.cfg = cfg
 	}
 	old := map[itemKey]store.ConfigItem{}
 	for _, c := range cur {

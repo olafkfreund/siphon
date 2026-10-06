@@ -85,18 +85,20 @@ func TestValidateReportsBadOverlay(t *testing.T) {
 
 func TestServeFallback(t *testing.T) {
 	p := overlayFixture(t)
-	bad := []config.Item{{Kind: "rules", Name: "bad", YAML: `{ source: nope, when: "true", action: { cmd: [x] } }`}}
-	good := []config.Item{{Kind: "rules", Name: "r2", YAML: `{ source: a, when: "true", action: { cmd: [echo, two] } }`}}
+	bad := config.Item{Kind: "rules", Name: "bad", YAML: `{ source: nope, when: "true", action: { cmd: [x] } }`}
+	good := config.Item{Kind: "rules", Name: "r2", YAML: `{ source: a, when: "true", action: { cmd: [echo, two] } }`}
+	gone := config.Item{Kind: "rules", Name: "r1", Deleted: true}
 
-	cfg, banner, err := pickConfig(p, bad, good)
-	if err != nil || len(cfg.Rules) != 2 || !strings.HasPrefix(banner, "Portal edits could not be applied: ") || !strings.HasSuffix(banner, "running on the last valid revision") {
-		t.Fatalf("revision fallback: %v %q %v", cfg, banner, err)
+	cfg, banner, err := pickConfig(p, []config.Item{good, bad})
+	if err != nil || len(cfg.Rules) != 1 || cfg.Rules[0].Name != "r1" || !strings.HasPrefix(banner, "Portal edits could not be applied: ") || !strings.HasSuffix(banner, "running on the file with its deletions only") {
+		t.Fatalf("fallback: %v %q %v", cfg, banner, err)
 	}
-	cfg, banner, err = pickConfig(p, bad, nil)
-	if err != nil || len(cfg.Rules) != 1 || !strings.HasSuffix(banner, "running on the file alone") {
-		t.Fatalf("file fallback: %v %q %v", cfg, banner, err)
+	// What the operator deleted stays deleted when the rest of the overlay is bad.
+	cfg, banner, err = pickConfig(p, []config.Item{gone, good, bad})
+	if err != nil || len(cfg.Rules) != 0 || banner == "" {
+		t.Fatalf("tombstone lost: %v %q %v", cfg, banner, err)
 	}
-	cfg, banner, err = pickConfig(p, good, nil)
+	cfg, banner, err = pickConfig(p, []config.Item{good})
 	if err != nil || len(cfg.Rules) != 2 || banner != "" {
 		t.Fatalf("valid overlay: %v %q %v", cfg, banner, err)
 	}

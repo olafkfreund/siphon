@@ -234,6 +234,8 @@ in
         EnvironmentFile = lib.mkIf (cfg.environmentFile != null) cfg.environmentFile;
         LoadCredential = lib.mapAttrsToList (n: p: "${n}:${p}") cfg.credentials;
         Restart = "on-failure";
+        # Never reach the cloud metadata service, whatever a portal edit sets (allow_private).
+        IPAddressDeny = metadataDeny;
         # Hardening. Actions run in siphon-action@ instances (below), started
         # over D-Bus and authorised by the polkit rule, so the gateway itself
         # needs no privileges.

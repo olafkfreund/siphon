@@ -136,3 +136,73 @@ func TestOverlayRuleNameMismatch(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+const anchored = `limits: &L { agent_runs_per_day: 5 }
+sources:
+  a: { type: http, url: "https://e.example", poll: 1m, read: { resource: r, args: *L } }
+`
+
+// A portal item must not rebind an anchor the file uses for limits.
+func TestOverlayRefusesAnchorsAndAliases(t *testing.T) {
+	for _, y := range []string{
+		`{type: http, url: "https://e.example", read: {resource: r, args: &L {agent_runs_per_day: 999}}}`,
+		`{type: http, url: "https://e.example", read: {resource: r, args: *L}}`,
+	} {
+		if _, _, err := Effective([]byte(anchored), []Item{{Kind: "sources", Name: "a", YAML: y}}); err == nil || !strings.Contains(err.Error(), "anchor") {
+			t.Errorf("%s: %v", y, err)
+		}
+	}
+	if _, _, err := Effective([]byte(anchored), nil); err != nil { // the file's own anchors are fine
+		t.Fatal(err)
+	}
+}
+
+func TestOverlayFixedSectionsBackstop(t *testing.T) {
+	a, _ := Parse([]byte("limits: {agent_runs_per_day: 5}\nunits: [a.service]\n"))
+	for name, y := range map[string]string{
+		"limits": "limits: {agent_runs_per_day: 999}\nunits: [a.service]\n",
+		"units":  "limits: {agent_runs_per_day: 5}\nunits: [a.service, b.service]\n",
+		"server": "server: {workers: 99}\nlimits: {agent_runs_per_day: 5}\nunits: [a.service]\n",
+	} {
+		b, _ := Parse([]byte(y))
+		if sameFixedSections(a, b) == nil {
+			t.Errorf("%s change not caught", name)
+		}
+	}
+	if err := sameFixedSections(a, a); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOverlayItemChecks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	os.WriteFile(path, []byte("server: { db: "+dir+"/s.db }\nsources:\n  m: { type: mcp, command: [srv], read: {resource: r}, poll: 1m }\n"), 0o600)
+	sec := dir + "/secrets"
+	for name, it := range map[string]Item{
+		"command":       {Kind: "sources", Name: "n", YAML: "{type: mcp, command: [sh], read: {resource: r}}"},
+		"changed cmd":   {Kind: "sources", Name: "m", YAML: "{type: mcp, command: [sh], read: {resource: r}}"},
+		"allow_private": {Kind: "sources", Name: "n", YAML: "{type: http, url: 'https://e.example', allow_private: true}"},
+		"env ref":       {Kind: "sources", Name: "n", YAML: "{type: webhook, secret: 'env:HOME', signature: github}"},
+		"other file":    {Kind: "credentials", Name: "n", YAML: "{provider: claude, api_key: 'file:/etc/passwd'}"},
+		"unclean path":  {Kind: "credentials", Name: "n", YAML: "{provider: claude, api_key: 'file:" + sec + "/../s.db'}"},
+		"other item":    {Kind: "credentials", Name: "n", YAML: "{provider: claude, api_key: 'file:" + sec + "/credentials-x-api_key'}"},
+		"no egress":     {Kind: "agents", Name: "n", YAML: "{kind: claude, egress: {enabled: false}}"},
+	} {
+		if _, _, err := LoadWithOverlay(path, []Item{it}); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	os.MkdirAll(sec, 0o700)
+	os.WriteFile(sec+"/credentials-n-api_key", []byte("k"), 0o600)
+	for name, it := range map[string]Item{
+		"same command":  {Kind: "sources", Name: "m", YAML: "{type: mcp, command: [srv], read: {resource: r}, poll: 2m}"},
+		"own secret":    {Kind: "credentials", Name: "n", YAML: "{provider: claude, api_key: 'file:" + sec + "/credentials-n-api_key'}"},
+		"allow a host":  {Kind: "agents", Name: "n", YAML: "{kind: claude, egress: {allow: [x.example.com]}}"},
+		"tombstone any": {Kind: "sources", Name: "m", Deleted: true},
+	} {
+		if _, _, err := LoadWithOverlay(path, []Item{it}); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}

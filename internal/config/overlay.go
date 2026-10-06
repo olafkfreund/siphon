@@ -6,6 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"reflect"
+	"slices"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -71,6 +75,11 @@ func Effective(file []byte, items []Item) ([]byte, map[Key]Provenance, error) {
 				return nil, nil, fmt.Errorf("overlay: %s %q: invalid YAML %v", it.Kind, it.Name, err)
 			}
 			body = d.Content[0]
+			if hasAnchorOrAlias(body) {
+				// An anchor in an item could rebind one the file defines and
+				// change server, limits or units when the tree is written out.
+				return nil, nil, fmt.Errorf("overlay: %s %q: YAML anchors and aliases are not allowed in portal edits", it.Kind, it.Name)
+			}
 			if n := mapGet(body, "name"); it.Kind == "rules" && n != nil && n.Value != it.Name {
 				return nil, nil, fmt.Errorf("overlay: rule name %q does not match item %q", n.Value, it.Name)
 			}
@@ -109,8 +118,15 @@ func Effective(file []byte, items []Item) ([]byte, map[Key]Provenance, error) {
 	return out.Bytes(), prov, enc.Close()
 }
 
-// LoadWithOverlay is Load with items applied to the file first.
+// LoadWithOverlay is Load with items applied to the file first. Items may only
+// change what the sandbox already bounds (see checkOverlay).
 func LoadWithOverlay(path string, items []Item) (*Config, map[Key]Provenance, error) {
+	return LoadWithOverlayStub(path, items, nil)
+}
+
+// LoadWithOverlayStub is LoadWithOverlay where stub maps secret refs to
+// stand-in values, for validating items whose secret files are not written yet.
+func LoadWithOverlayStub(path string, items []Item, stub map[string]string) (*Config, map[Key]Provenance, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, err
@@ -119,12 +135,140 @@ func LoadWithOverlay(path string, items []Item) (*Config, map[Key]Provenance, er
 	if err != nil {
 		return nil, nil, err
 	}
-	c, err := Parse(eff)
+	fileCfg, err := Parse(b)
+	if err != nil {
+		return nil, nil, err
+	}
+	fileCfg.resolveDB(path)
+	if err := checkOverlay(fileCfg, items, filepath.Join(filepath.Dir(fileCfg.Server.DB), "secrets")); err != nil {
+		return nil, nil, err
+	}
+	c, err := parse(eff, stub)
 	if err != nil {
 		return nil, nil, err
 	}
 	c.resolveDB(path)
+	if err := sameFixedSections(fileCfg, c); err != nil {
+		return nil, nil, err
+	}
 	return c, prov, nil
+}
+
+// sameFixedSections is the backstop behind the item checks: server, limits and
+// units can never differ from the file, whatever the overlay did to the YAML.
+func sameFixedSections(file, eff *Config) error {
+	if !reflect.DeepEqual(file.Server, eff.Server) || !reflect.DeepEqual(file.Limits, eff.Limits) || !reflect.DeepEqual(file.Units, eff.Units) {
+		return errors.New("overlay: server, limits and units can only be changed in siphon.yaml")
+	}
+	return nil
+}
+
+func hasAnchorOrAlias(n *yaml.Node) bool {
+	if n.Anchor != "" || n.Kind == yaml.AliasNode {
+		return true
+	}
+	for _, c := range n.Content {
+		if hasAnchorOrAlias(c) {
+			return true
+		}
+	}
+	return false
+}
+
+// A portal or API token holder must not widen the host's privileges, so an
+// overlay item may not do what siphon.yaml alone is trusted to do:
+// set a stdio MCP command, allow private addresses, turn agent egress
+// restriction off, or point a secret at anything but its own stored secret.
+// Each is allowed only if the file's same item already has the same value.
+func checkOverlay(file *Config, items []Item, secretsDir string) error {
+	dir := filepath.Clean(secretsDir)
+	for _, it := range items {
+		if it.Deleted {
+			continue
+		}
+		var refs, fileRefs map[string]string
+		switch it.Kind {
+		case "sources":
+			var s Source
+			if yaml.Unmarshal([]byte(it.YAML), &s) != nil {
+				continue // Parse reports it
+			}
+			fs := file.Sources[it.Name]
+			if fs == nil {
+				fs = &Source{}
+			}
+			if len(s.Command) > 0 && !slices.Equal(s.Command, fs.Command) {
+				return errors.New("command (stdio MCP) can only be set in siphon.yaml")
+			}
+			if s.AllowPrivate && !fs.AllowPrivate {
+				return errors.New("allow_private can only be set in siphon.yaml")
+			}
+			refs, fileRefs = sourceRefs(&s), sourceRefs(fs)
+		case "credentials":
+			var c Credential
+			if yaml.Unmarshal([]byte(it.YAML), &c) != nil {
+				continue
+			}
+			fc := file.Credentials[it.Name]
+			if fc == nil {
+				fc = &Credential{}
+			}
+			refs, fileRefs = map[string]string{"api_key": c.APIKey.Ref}, map[string]string{"api_key": fc.APIKey.Ref}
+		case "agents":
+			var a Agent
+			if yaml.Unmarshal([]byte(it.YAML), &a) != nil {
+				continue
+			}
+			fa := file.Agents[it.Name]
+			if fa == nil {
+				fa = &Agent{}
+			}
+			if a.Egress.Enabled != nil && !*a.Egress.Enabled && (fa.Egress.Enabled == nil || *fa.Egress.Enabled) {
+				return errors.New("egress.enabled: false can only be set in siphon.yaml")
+			}
+			// api_key_file is a path the runner reads: treat it as a file ref.
+			refs, fileRefs = map[string]string{"api_key_file": fileRef(a.APIKeyFile)}, map[string]string{"api_key_file": fileRef(fa.APIKeyFile)}
+		default:
+			continue
+		}
+		for path, ref := range refs {
+			if !refAllowed(ref, fileRefs[path], it.Kind, it.Name, dir) {
+				return errors.New("secret refs can only point at this item's stored secrets or keep the value from siphon.yaml")
+			}
+		}
+	}
+	return nil
+}
+
+func fileRef(path string) string {
+	if path == "" {
+		return ""
+	}
+	return "file:" + path
+}
+
+func sourceRefs(s *Source) map[string]string {
+	m := map[string]string{"secret": s.Secret.Ref}
+	if s.Auth != nil {
+		m["auth.bearer"] = s.Auth.Bearer.Ref
+	}
+	for k, v := range s.Headers {
+		m["headers."+k] = v.Ref
+	}
+	return m
+}
+
+// refAllowed: not a ref at all (Validate rejects inline values), the same ref
+// the file has at this path, or a file in dir named <kind>-<name>-*.
+func refAllowed(ref, fileRef, kind, name, dir string) bool {
+	if !strings.HasPrefix(ref, "env:") && !strings.HasPrefix(ref, "file:") {
+		return true
+	}
+	if ref == fileRef {
+		return true
+	}
+	p, ok := strings.CutPrefix(ref, "file:")
+	return ok && p == filepath.Clean(p) && filepath.Dir(p) == dir && strings.HasPrefix(filepath.Base(p), kind+"-"+name+"-")
 }
 
 func mapGet(m *yaml.Node, key string) *yaml.Node {
