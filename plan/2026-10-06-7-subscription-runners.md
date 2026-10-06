@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 7
 spec: spec/2026-10-06-7-subscription-runners.md
 ---
