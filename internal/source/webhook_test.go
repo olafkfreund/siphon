@@ -20,7 +20,7 @@ func TestWebhook(t *testing.T) {
 			calls := 0
 			h := NewWebhook(WebhookOptions{Name: "hook", Secret: "key", Signature: preset, SigHeader: "X-Signature", TimestampHeader: "X-Time", IDHeader: "X-Delivery", MaxBody: 16, Now: func() time.Time { return now }}, func(_ context.Context, ev Event, id string) (bool, error) {
 				calls++
-				if ev.Source != "hook" || !ev.ReceivedAt.Equal(now) || id != "one" || ev.Headers["x-delivery"] != "one" || ev.Headers["x-signature"] != "" || ev.Headers["x-hub-signature-256"] != "" {
+				if ev.Source != "hook" || !ev.ReceivedAt.Equal(now) || id != bodyKey(`{"n":1}`) || ev.Headers["x-delivery"] != "one" || ev.Headers["x-signature"] != "" || ev.Headers["x-hub-signature-256"] != "" {
 					t.Errorf("bad event: %+v id=%q", ev, id)
 				}
 				if ev.Data.(map[string]any)["n"] != int64(1) {
@@ -88,4 +88,10 @@ func TestWebhookRawAndFailure(t *testing.T) {
 	if w.Code != 500 || strings.Contains(w.Body.String(), "private failure") || got.Data.(map[string]any)["raw"] != "plain" || gotID != hex.EncodeToString(sum[:]) {
 		t.Fatalf("status=%d body=%q event=%+v id=%q", w.Code, w.Body.String(), got, gotID)
 	}
+}
+
+// bodyKey is the replay key: the hash of the signed body, never an unsigned header.
+func bodyKey(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])
 }

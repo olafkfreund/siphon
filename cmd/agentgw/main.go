@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -21,6 +22,7 @@ import (
 	"github.com/olafkfreund/MCP-AgentGateway/internal/rule"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/source"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
+	"github.com/olafkfreund/MCP-AgentGateway/internal/web"
 )
 
 var version = "dev"
@@ -259,6 +261,27 @@ func serve(ctx context.Context, args []string) error {
 		return err
 	}
 	defer st.Close()
-	slog.Info("agentgw serving", "workers", cfg.Server.Workers, "sources", len(cfg.Sources))
-	return (&job.Pipeline{Cfg: cfg, Store: st, Now: time.Now}).Serve(ctx)
+	p := &job.Pipeline{Cfg: cfg, Store: st, Now: time.Now}
+	srv := &http.Server{
+		Addr:              cfg.Server.Listen,
+		ReadHeaderTimeout: 10 * time.Second,
+		Handler: web.New(web.Options{
+			Token: cfg.Server.Token.Value, Store: st, Cfg: cfg, Decide: p.Decide,
+			Hooks: p.Webhooks(), Now: time.Now,
+		}),
+	}
+	httpErr := make(chan error, 1)
+	go func() { httpErr <- srv.ListenAndServe() }()
+	go func() {
+		<-ctx.Done()
+		sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		srv.Shutdown(sctx)
+	}()
+	slog.Info("agentgw serving", "listen", cfg.Server.Listen, "workers", cfg.Server.Workers, "sources", len(cfg.Sources))
+	err = p.Serve(ctx)
+	if herr := <-httpErr; herr != nil && !errors.Is(herr, http.ErrServerClosed) {
+		return herr
+	}
+	return err
 }

@@ -101,10 +101,11 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		if o.IDHeader == "" {
-			sum := sha256.Sum256(body)
-			id = hex.EncodeToString(sum[:])
-		}
+		// The replay key is the hash of the signed body: the delivery-id and
+		// timestamp headers are not covered by the HMAC, so an attacker could
+		// change them on a captured request. The delivery id stays in Headers.
+		sum := sha256.Sum256(body)
+		id = hex.EncodeToString(sum[:])
 		headers := make(map[string]string, len(r.Header))
 		for k := range r.Header {
 			if !strings.EqualFold(k, header) && !strings.EqualFold(k, "X-Hub-Signature-256") {

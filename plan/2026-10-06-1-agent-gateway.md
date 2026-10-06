@@ -301,3 +301,8 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
   - htmx 2.0.4 is vendored, byte-identical to unpkg (sha256 verified), with `allowEval:false` and no indicator styles so the CSP stays `default-src 'self'`.
   - Failed login and API auth share a per-IP bucket of 5/min. It keys on RemoteAddr only, so behind a reverse proxy all clients share one bucket (`ponytail:` note).
   - Plain POSTs redirect, so the portal works without JS.
+- Step 12/14 integration (Opus):
+  - **The webhook replay key is the SHA-256 of the signed body, not the delivery-id header.** Delivery-id and timestamp headers aren't covered by the HMAC, so a captured request could be replayed with a fresh id. The delivery id stays in `headers` for rules and tracing. Replay record and enqueue commit in one tx (`handleEvent` with a seen scope).
+  - Listen hints trigger an immediate tick; a hint within 5 s of the last tick is dropped (the next poll catches it). Listen gives up quietly on `ErrListenUnsupported` and reconnects after the poll interval on other errors.
+  - `serve` runs the HTTP server (`ReadHeaderTimeout` 10 s) and shuts it down gracefully. HandleEvent skips rules disabled via the portal/API.
+  - Smoke-tested live: healthz 200, API 401 without token, signed webhook 202 → job `done`, CSP header present, a second `serve` refused by the lock, SIGTERM exits 0.
