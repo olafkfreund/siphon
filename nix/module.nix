@@ -19,6 +19,63 @@ let
   } cfg.settings;
   configFile = yaml.generate "agentgw.yaml" settings;
   units = settings.units or [ ];
+  egressListen = settings.server.egress.listen or "127.77.0.1:3128";
+  egressIP = lib.head (lib.splitString ":" egressListen); # loopback IPv4; validate enforces loopback
+  metadataDeny = [
+    "169.254.0.0/16"
+    "fd00:ec2::254/128"
+  ];
+  actionServiceConfig = {
+    Type = "exec";
+    ExecStart = "${cfg.package}/bin/agentgw exec-job ${actionsDir}/%i";
+    DynamicUser = true;
+    SupplementaryGroups = [ "agentgw-io" ];
+    ReadWritePaths = [ actionsDir ];
+    UMask = "0027";
+    RuntimeMaxSec = cfg.maxActionRuntime;
+    TimeoutStopSec = "20s"; # bounds agentgw's blocking stop of orphans
+    LimitFSIZE = "16M"; # caps stdout/stderr files (and anything else it writes)
+    TasksMax = 256;
+    # System-wide agent CLI config must not reach agents: managed hooks,
+    # instructions or extra MCP servers there would bypass the allowlist.
+    # NixOS-managed dirs get an empty read-only tmpfs (the CLI sees no
+    # config, rather than an unreadable one); others are made inaccessible.
+    TemporaryFileSystem = map (d: "/etc/${d}:ro") (lib.filter etcManaged agentEtcDirs);
+    InaccessiblePaths = map (d: "-/etc/${d}") (lib.filter (d: !etcManaged d) agentEtcDirs);
+    PrivateTmp = true;
+    ProtectSystem = "strict";
+    ProtectHome = true;
+    NoNewPrivileges = true;
+    PrivateDevices = true;
+    ProtectProc = "invisible";
+    ProcSubset = "pid";
+    ProtectKernelTunables = true;
+    ProtectKernelModules = true;
+    ProtectKernelLogs = true;
+    ProtectControlGroups = true;
+    ProtectClock = true;
+    ProtectHostname = true;
+    RestrictNamespaces = true;
+    RestrictSUIDSGID = true;
+    RestrictRealtime = true;
+    LockPersonality = true;
+    CapabilityBoundingSet = "";
+    RestrictAddressFamilies = [
+      "AF_UNIX"
+      "AF_INET"
+      "AF_INET6"
+    ];
+    SystemCallArchitectures = "native";
+    SystemCallFilter = [ "@system-service" ];
+  };
+  # The sandboxed action unit. network is the only difference between the
+  # restricted and the open template.
+  actionUnit = network: {
+    description = "agentgw sandboxed action %i";
+    # Agent CLIs first, then the system profile for tools actions may call.
+    path = cfg.agentPackages ++ [ "/run/current-system/sw" ];
+    serviceConfig = actionServiceConfig // network;
+  };
   agentEtcDirs = [
     "claude-code"
     "codex"
@@ -69,6 +126,16 @@ in
       type = lib.types.str;
       default = "2h";
       description = "Hard ceiling (RuntimeMaxSec) for any sandboxed action; per-action timeouts apply below it.";
+    };
+
+    egress.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Restrict sandboxed agent runs (and cmd actions that opt in) to
+        agentgw's egress proxy, which allows only each run's host allowlist.
+        Runs without egress use the open agentgw-action-open@ template.
+      '';
     };
 
     agentPackages = lib.mkOption {
@@ -152,58 +219,23 @@ in
     # hardening is fixed here, so agentgw can't loosen it. %i is a 16-hex run
     # id. PID 1 opens nothing in agentgw-writable directories: exec-job, as
     # the DynamicUser, reads job.json and creates stdout/stderr itself.
-    systemd.services."agentgw-action@" = {
-      description = "agentgw sandboxed action %i";
-      # Agent CLIs first, then the system profile for tools actions may call.
-      path = cfg.agentPackages ++ [ "/run/current-system/sw" ];
-      serviceConfig = {
-        Type = "exec";
-        ExecStart = "${cfg.package}/bin/agentgw exec-job ${actionsDir}/%i";
-        DynamicUser = true;
-        SupplementaryGroups = [ "agentgw-io" ];
-        ReadWritePaths = [ actionsDir ];
-        UMask = "0027";
-        RuntimeMaxSec = cfg.maxActionRuntime;
-        TimeoutStopSec = "20s"; # bounds agentgw's blocking stop of orphans
-        LimitFSIZE = "16M"; # caps stdout/stderr files (and anything else it writes)
-        TasksMax = 256;
-        # System-wide agent CLI config must not reach agents: managed hooks,
-        # instructions or extra MCP servers there would bypass the allowlist.
-        # NixOS-managed dirs get an empty read-only tmpfs (the CLI sees no
-        # config, rather than an unreadable one); others are made inaccessible.
-        TemporaryFileSystem = map (d: "/etc/${d}:ro") (lib.filter etcManaged agentEtcDirs);
-        InaccessiblePaths = map (d: "-/etc/${d}") (lib.filter (d: !etcManaged d) agentEtcDirs);
-        PrivateTmp = true;
-        ProtectSystem = "strict";
-        ProtectHome = true;
-        NoNewPrivileges = true;
-        PrivateDevices = true;
-        ProtectProc = "invisible";
-        ProcSubset = "pid";
-        ProtectKernelTunables = true;
-        ProtectKernelModules = true;
-        ProtectKernelLogs = true;
-        ProtectControlGroups = true;
-        ProtectClock = true;
-        ProtectHostname = true;
-        RestrictNamespaces = true;
-        RestrictSUIDSGID = true;
-        RestrictRealtime = true;
-        LockPersonality = true;
-        CapabilityBoundingSet = "";
-        RestrictAddressFamilies = [
-          "AF_UNIX"
-          "AF_INET"
-          "AF_INET6"
-        ];
-        SystemCallArchitectures = "native";
-        SystemCallFilter = [ "@system-service" ];
-        IPAddressDeny = [
-          "169.254.0.0/16"
-          "fd00:ec2::254/128"
-        ];
-      };
-    };
+    # Every sandboxed cmd/agent run is an instance of one of these templates;
+    # their hardening is fixed here, so agentgw can't loosen it. %i is a
+    # 16-hex run id. PID 1 opens nothing in agentgw-writable directories:
+    # exec-job, as the DynamicUser, reads job.json and creates stdout/stderr.
+    # Restricted: the only reachable address is agentgw's egress proxy, so an
+    # agent that ignores HTTPS_PROXY gets no network at all.
+    systemd.services."agentgw-action@" = actionUnit (
+      if cfg.egress.enable then
+        {
+          IPAddressDeny = [ "any" ];
+          IPAddressAllow = [ "${egressIP}/32" ];
+        }
+      else
+        { IPAddressDeny = metadataDeny; }
+    );
+    # Open: for runs with egress off (cmd actions by default).
+    systemd.services."agentgw-action-open@" = actionUnit { IPAddressDeny = metadataDeny; };
 
     # agentgw may only start/stop/reset its own template instances and start
     # the units in settings.units. No transient units: their properties are
@@ -218,7 +250,7 @@ in
           var unit = action.lookup("unit") || "";
           var verb = action.lookup("verb") || "";
           var allowed = ${builtins.toJSON units};
-          if (/^agentgw-action@[0-9a-f]{16}\.service$/.test(unit) &&
+          if (/^agentgw-action(-open)?@[0-9a-f]{16}\.service$/.test(unit) &&
               (verb == "start" || verb == "stop" || verb == "reset-failed")) {
             return polkit.Result.YES;
           }
