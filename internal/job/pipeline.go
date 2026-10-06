@@ -29,6 +29,8 @@ type Pipeline struct {
 	Now   func() time.Time
 	// MCPTransport, if set, supplies the transport for an mcp source (tests).
 	MCPTransport func(source string) mcp.Transport
+
+	runFn func(context.Context, store.QueuedJob) (string, int, string) // tests only
 }
 
 // Payload is what a job row carries: the action and the env it renders with.
@@ -160,24 +162,37 @@ func (p *Pipeline) needsApproval(r config.Rule) bool {
 func (p *Pipeline) RunQueued(ctx context.Context) (int, error) {
 	n := 0
 	for {
-		if err := ctx.Err(); err != nil {
-			return n, err
-		}
-		j, ok, err := store.ClaimJob(p.Store.DB, p.Now())
-		if err != nil || !ok {
-			return n, err
-		}
-		state, exit, out := p.run(ctx, j)
-		if err := ctx.Err(); err != nil {
-			// Interrupted, not failed: leave the job running so the startup
-			// requeue (plan step 8) picks it up instead of losing the event.
-			return n, err
-		}
-		if err := store.FinishJob(p.Store.DB, j.ID, state, exit, out, p.Now()); err != nil {
+		ran, err := p.runOne(ctx)
+		if err != nil || !ran {
 			return n, err
 		}
 		n++
 	}
+}
+
+// runOne claims and runs a single job; ran is false when the queue is empty.
+func (p *Pipeline) runOne(ctx context.Context) (ran bool, err error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	j, ok, err := store.ClaimJob(p.Store.DB, p.Now())
+	if err != nil || !ok {
+		return false, err
+	}
+	exec := p.run
+	if p.runFn != nil {
+		exec = p.runFn
+	}
+	state, exit, out := exec(ctx, j)
+	if err := ctx.Err(); err != nil {
+		// Interrupted, not failed: leave the job running so the startup
+		// requeue picks it up instead of losing the event.
+		return false, err
+	}
+	if err := store.FinishJob(p.Store.DB, j.ID, state, exit, out, p.Now()); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, exit int, output string) {
@@ -207,6 +222,9 @@ func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, ex
 
 // RunOnce polls every polled source once, then runs whatever got queued.
 func (p *Pipeline) RunOnce(ctx context.Context) error {
+	if err := p.Requeue(); err != nil {
+		return err
+	}
 	var errs []error
 	for _, name := range sortedSources(p.Cfg) {
 		if p.Cfg.Sources[name].Type == "webhook" {

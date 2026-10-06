@@ -256,3 +256,10 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
   - `FinishJob` only transitions `running` jobs (L5).
   - Errors in `source_state` and on stderr are masked (L1).
 - Not in the original step-2 list: the `Source.ID` field (webhook delivery id). Cooldown is per rule across all keys, so N new ids with cooldown C take (N-1)·C to all fire. This is documented in `rule.go`.
+- Step 8:
+  - **Retry/backoff moves to step 15.** Only routine steps carry `retry`, so Phase 1 has nothing to retry.
+  - The startup requeue (`store.RequeueRunning`, max 3 attempts) runs in both `Serve` and `RunOnce`.
+  - A source poll failure is logged and the loop continues.
+  - Retention also removes approvals of purged jobs and nulls `parent_id` on surviving children.
+  - Workers are woken by a nudge channel plus a 1 s idle poll.
+- Step 9/11 (agent auth): `claude --bare` authenticates only via `ANTHROPIC_API_KEY` or an `apiKeyHelper` passed with `--settings` (per `claude --help`). In the systemd sandbox, the API key file goes in via `LoadCredential`, and a generated settings JSON sets `apiKeyHelper` to read `/run/credentials/<unit>/<name>`. This is wired in step 11.

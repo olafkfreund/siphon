@@ -98,3 +98,95 @@ func TestFinishJobOnlyRunning(t *testing.T) {
 		t.Fatal("second finish must fail")
 	}
 }
+
+func TestRequeueRunning(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	now := time.UnixMilli(1_700_000_000_000)
+	tx, _ := s.DB.Begin()
+	id, _ := InsertJob(tx, Job{Rule: "r", ActionJSON: "{}", State: "running"}, now)
+	queued, _ := InsertJob(tx, Job{Rule: "r", ActionJSON: "{}"}, now)
+	tx.Commit()
+
+	state := func() (string, int) {
+		var st string
+		var at int
+		s.DB.QueryRow(`SELECT state, attempt FROM jobs WHERE id=?`, id).Scan(&st, &at)
+		return st, at
+	}
+	for i, want := range []struct {
+		state string
+		att   int
+	}{{"queued", 1}, {"queued", 2}, {"failed", 3}} {
+		rq, f, err := RequeueRunning(s.DB, now)
+		if err != nil || rq+f != 1 {
+			t.Fatalf("round %d: %d %d %v", i, rq, f, err)
+		}
+		if st, at := state(); st != want.state || at != want.att {
+			t.Fatalf("round %d: %s/%d", i, st, at)
+		}
+		if want.state == "queued" { // simulate the next claim
+			s.DB.Exec(`UPDATE jobs SET state='running' WHERE id=?`, id)
+		}
+	}
+	if rq, f, _ := RequeueRunning(s.DB, now); rq+f != 0 {
+		t.Fatal("failed job must not be touched")
+	}
+	var st string
+	s.DB.QueryRow(`SELECT state FROM jobs WHERE id=?`, queued).Scan(&st)
+	if st != "queued" {
+		t.Fatal("queued job changed")
+	}
+	var n int
+	s.DB.QueryRow(`SELECT COUNT(*) FROM audit WHERE job_id=?`, id).Scan(&n)
+	if n != 3 {
+		t.Fatalf("audit rows: %d", n)
+	}
+}
+
+func TestCleanup(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	now := time.UnixMilli(1_800_000_000_000)
+	day := 24 * time.Hour
+	mk := func(state string, finished time.Time, parent int64) int64 {
+		tx, _ := s.DB.Begin()
+		id, err := InsertJob(tx, Job{Rule: "r", ActionJSON: "{}", State: state, ParentID: parent}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx.Exec(`UPDATE jobs SET finished_at=? WHERE id=?`, ms(finished), id)
+		tx.Commit()
+		return id
+	}
+	oldDone := mk("done", now.Add(-31*day), 0)
+	freshDone := mk("done", now.Add(-29*day), 0)
+	oldQueued := mk("queued", now.Add(-40*day), 0)
+	child := mk("done", now.Add(-1*day), oldDone) // parent is purged, child survives
+	s.DB.Exec(`INSERT INTO approvals(job_id, token_hash, expires_at) VALUES (?, x'00', 0)`, oldDone)
+	tx, _ := s.DB.Begin()
+	Audit(tx, now.Add(-31*day), "a", "old", 0, "")
+	Audit(tx, now.Add(-1*day), "a", "new", 0, "")
+	MarkSeen(tx, "x", "old", now.Add(-8*day))
+	MarkSeen(tx, "x", "new", now.Add(-6*day))
+	tx.Commit()
+
+	if err := Cleanup(s.DB, now); err != nil {
+		t.Fatal(err)
+	}
+	exists := func(id int64) bool {
+		var n int
+		s.DB.QueryRow(`SELECT COUNT(*) FROM jobs WHERE id=?`, id).Scan(&n)
+		return n == 1
+	}
+	if exists(oldDone) || !exists(freshDone) || !exists(oldQueued) || !exists(child) {
+		t.Fatal("wrong jobs retained")
+	}
+	count := func(q string) (n int) { s.DB.QueryRow(q).Scan(&n); return }
+	if count(`SELECT COUNT(*) FROM audit WHERE event='old'`) != 0 || count(`SELECT COUNT(*) FROM audit WHERE event='new'`) != 1 {
+		t.Fatal("audit retention")
+	}
+	if count(`SELECT COUNT(*) FROM seen_event`) != 1 || count(`SELECT COUNT(*) FROM approvals`) != 0 {
+		t.Fatal("seen_event/approvals retention")
+	}
+}

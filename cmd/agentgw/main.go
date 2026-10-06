@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -28,6 +29,7 @@ commands:
   validate [-config f]                    check a config file
   rules test [-config f] <rule> <event>   dry-run a rule against a saved event (JSON file)
   run-once [-config f]                    poll every source once and run matching actions
+  serve [-config f]                       run the daemon
   version                                 print the version
 `
 
@@ -52,6 +54,8 @@ func main() {
 		err = rulesTest(ctx, args[1:])
 	case "run-once":
 		err = runOnce(ctx, args)
+	case "serve":
+		err = serve(ctx, args)
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
@@ -162,4 +166,18 @@ func runOnce(ctx context.Context, args []string) error {
 		return errors.New(string(action.Mask([]byte(err.Error()), cfg.Secrets())))
 	}
 	return nil
+}
+
+func serve(ctx context.Context, args []string) error {
+	cfg, _, err := load("serve", args)
+	if err != nil {
+		return err
+	}
+	st, err := store.Open(cfg.Server.DB)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	slog.Info("agentgw serving", "workers", cfg.Server.Workers, "sources", len(cfg.Sources))
+	return (&job.Pipeline{Cfg: cfg, Store: st, Now: time.Now}).Serve(ctx)
 }
