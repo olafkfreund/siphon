@@ -99,6 +99,10 @@ func (s MCP) Listen(ctx context.Context, onChange func()) error {
 	if s.Transport == nil && (len(s.Options.Command) == 0) == (s.Options.URL == "") {
 		return errors.New("declare exactly one command or URL")
 	}
+	timeout := s.Options.Timeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "agentgw", Version: "1"}, &mcp.ClientOptions{
 		ResourceUpdatedHandler: func(_ context.Context, req *mcp.ResourceUpdatedNotificationRequest) {
 			if req.Params != nil && req.Params.URI == s.Options.Resource {
@@ -106,7 +110,13 @@ func (s MCP) Listen(ctx context.Context, onChange func()) error {
 			}
 		},
 	})
-	session, err := client.Connect(ctx, s.transport(ctx, true), nil)
+	connectCtx, cancel := context.WithTimeout(ctx, timeout)
+	transport := &deadlineTransport{Transport: s.transport(ctx, true)}
+	session, err := client.Connect(connectCtx, transport, nil)
+	if transport.stop != nil {
+		transport.stop()
+	}
+	cancel()
 	if err != nil {
 		return err
 	}
@@ -115,10 +125,31 @@ func (s MCP) Listen(ctx context.Context, onChange func()) error {
 	if caps == nil || caps.Resources == nil || !caps.Resources.Subscribe {
 		return ErrListenUnsupported
 	}
-	if err := session.Subscribe(ctx, &mcp.SubscribeParams{URI: s.Options.Resource}); err != nil {
+	subscribeCtx, cancel := context.WithTimeout(ctx, timeout)
+	stop := context.AfterFunc(subscribeCtx, func() { transport.conn.Close() })
+	err = session.Subscribe(subscribeCtx, &mcp.SubscribeParams{URI: s.Options.Resource})
+	stop()
+	cancel()
+	if err != nil {
 		return err
 	}
+	onChange()
 	return session.Wait()
+}
+
+type deadlineTransport struct {
+	mcp.Transport
+	conn mcp.Connection
+	stop func() bool
+}
+
+func (t *deadlineTransport) Connect(ctx context.Context) (mcp.Connection, error) {
+	conn, err := t.Transport.Connect(ctx)
+	if err == nil {
+		t.conn = conn
+		t.stop = context.AfterFunc(ctx, func() { conn.Close() })
+	}
+	return conn, err
 }
 
 func (s MCP) transport(ctx context.Context, stream bool) mcp.Transport {
@@ -136,12 +167,7 @@ func (s MCP) transport(ctx context.Context, stream bool) mcp.Transport {
 	}
 	if transport == nil {
 		var client *http.Client
-		if stream {
-			// Negative limits select a guarded client with only a dial timeout.
-			client = guardedClient(o.AllowPrivate, -1, -1)
-		} else {
-			client = guardedClient(o.AllowPrivate, o.Timeout, o.MaxBody)
-		}
+		client = guardedClient(o.AllowPrivate, o.Timeout, o.MaxBody, stream)
 		if o.Bearer != "" {
 			client.Transport = bearerTransport{base: client.Transport, token: o.Bearer}
 		}

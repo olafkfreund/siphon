@@ -57,6 +57,13 @@ func TestMCPListen(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("subscription timed out")
 	}
+	select {
+	case <-changed:
+	case err := <-done:
+		t.Fatalf("Listen ended before initial read: %v", err)
+	case <-ctx.Done():
+		t.Fatal("initial read timed out")
+	}
 	if err := server.ResourceUpdated(ctx, &mcp.ResourceUpdatedNotificationParams{URI: "test://value"}); err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +79,15 @@ func TestMCPListen(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("Listen did not stop on cancellation")
+	}
+}
+
+func TestMCPListenConnectTimeout(t *testing.T) {
+	_, clientSide := mcp.NewInMemoryTransports()
+	start := time.Now()
+	err := (MCP{Options: MCPOptions{Resource: "test://value", Timeout: 20 * time.Millisecond}, Transport: clientSide}).Listen(context.Background(), func() {})
+	if err == nil || time.Since(start) > time.Second {
+		t.Fatalf("Listen returned %v after %s", err, time.Since(start))
 	}
 }
 
