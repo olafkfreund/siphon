@@ -216,11 +216,10 @@ shows name, provider, token expiry and last write-back, never a secret.
 ### Trust: the login lives in the agent's sandbox
 
 A subscription agent has its login, **including the refresh token**, in its own
-sandbox HOME while it runs. A prompt-injected agent could send it out: network
-egress is open apart from the cloud metadata addresses. Use a dedicated or
-low-value account for each credential, and restrict egress where that matters
-(an HTTP proxy, or systemd `IPAddressAllow`/`IPAddressDeny` through a module
-override). On write-back agentgw re-validates the file's shape, drops unknown
+sandbox HOME while it runs. A prompt-injected agent could try to send it out.
+With egress restriction on (the default, see "Egress restriction") it can reach
+only the hosts on its allowlist, which narrows that to those hosts but doesn't
+eliminate it. Use a dedicated or low-value account for each credential. On write-back agentgw re-validates the file's shape, drops unknown
 fields, and for codex refuses a login that belongs to a different account
 (account id, else the id-token subject; two empty subjects count as different).
 That check reads fields the sandboxed CLI controls, so it stops naive swaps
@@ -313,6 +312,65 @@ operator's responsibility.
 - On NixOS add the CLIs to `services.agentgw.agentPackages` so the action
   unit can find them.
 
+## Egress restriction
+
+Agents hold logins and read untrusted data, so their network is restricted
+by default. On the NixOS module the sandbox can reach **only agentgw's egress
+proxy** (an HTTP CONNECT proxy on `server.egress.listen`, default
+`127.77.0.1:3128`, loopback only). Each run gets its own proxy credential in
+`HTTPS_PROXY` (never argv) and its own allowlist; there is no DNS inside the
+sandbox, and the proxy applies the same private-address guard as sources. It
+tunnels bytes without inspecting TLS.
+
+On NixOS each restricted run has its own network namespace and an empty
+`/run`: `exec-job` forwards `127.0.0.1:3128` inside it to the proxy's unix
+socket (`server.egress.socket`, set by the module), so no host port or host
+daemon socket (nscd, D-Bus, nix-daemon, ...) is reachable. Don't run
+`agentgw run-once` alongside `serve` with the same socket path.
+
+An agent's allowlist is the built-in provider hosts for its kind and login type,
+plus the host:port of each `mcp:` source with a `url`, plus
+`agents.<name>.egress.allow`, plus `server.egress.allow`.
+
+| kind | subscription | API key |
+|---|---|---|
+| claude | `api.anthropic.com`, `platform.claude.com` | `api.anthropic.com` |
+| codex | `chatgpt.com`, `auth.openai.com` | `api.openai.com` |
+| agy | `oauth2.googleapis.com`, `daily-cloudcode-pa.googleapis.com`, `cloudcode-pa.googleapis.com`, `www.googleapis.com`, `lh3.googleusercontent.com` | `generativelanguage.googleapis.com` |
+
+Verified 2026-10-06 with each CLI behind a filtering proxy. Provider hosts can
+change with a CLI update; a blocked host shows up in the job output
+(`egress: blocked <host:port> (N)`) and as an `egress_blocked` audit row, and
+you can fix it without a release by adding it to `egress.allow`.
+
+```yaml
+server:
+  egress:
+    allow: []                  # extra hosts for every run: host, host:port or *.suffix
+agents:
+  triage:
+    egress: { allow: [api.github.com] }   # enabled defaults to true; enabled: false opens the network
+rules:
+  - name: deploy
+    egress: { enabled: true, allow: [hooks.example.com] }   # cmd actions are opt-in
+```
+
+- `cmd` actions are unrestricted unless the rule sets `egress.enabled` (they
+  then get only their listed hosts) or `server.egress.cmd_default: true`.
+- Allowed ports: `host:443`, or the exact `host:port` of an allowed MCP URL or
+  allow entry. `*.suffix` matches subdomains only.
+- `agentgw validate -v` prints each agent's and each egress-enabled rule's
+  effective list.
+- **Residual risk:** this narrows exfiltration to the allowed hosts; it does
+  not eliminate it, because a prompt-injected agent can still abuse an allowed
+  provider or operator endpoint.
+- With `sandbox: none` nothing is enforced (`validate` warns); the proxy
+  variables are still set, so cooperative CLIs are filtered anyway.
+- Turn it off with `services.agentgw.egress.enable = false` on NixOS, or per
+  agent with `egress: { enabled: false }`. With the module option off, runs
+  still get the proxy variables but nothing enforces them (the sandbox keeps
+  only the metadata-address deny).
+
 ## Security notes
 
 Read these before running it anywhere that matters.
@@ -342,9 +400,9 @@ Read these before running it anywhere that matters.
   user (via group `agentgw-io`) can read; inside the unit they land in its
   private `/tmp`. The exception is deliberate: **a subscription agent holds its
   login's refresh token in its own sandbox HOME**, and a prompt-injected agent
-  could exfiltrate it over the open network. Use a dedicated or low-value
-  account per credential and restrict egress where that matters (see
-  "Agents and subscriptions"). agy also takes its prompt as an argv element.
+  could try to exfiltrate it. Egress restriction limits it to the allowlisted
+  hosts (see "Egress restriction"); use a dedicated or low-value account per
+  credential. agy also takes its prompt as an argv element.
 - **agentgw cannot raise its own privileges.** The module's polkit rule lets the
   `agentgw` user only start/stop/reset `agentgw-action@<16 hex>` instances and
   start the units in your `units:` allowlist; every other polkit action
@@ -364,9 +422,10 @@ Read these before running it anywhere that matters.
   rule). Elsewhere, install equivalents yourself or use `sandbox: none`.
   With `sandbox: none` under the module, actions run as the `agentgw` user
   itself, with its access and polkit grants: don't combine the two.
-- **Actions can reach the network**, including local services (and agentgw's
-  own API on localhost), apart from cloud metadata addresses. Keep local
-  services authenticated.
+- **Agents reach only their allowlist; `cmd` actions can reach the network**
+  unless a rule opts in to egress restriction (see "Egress restriction"), so
+  keep local services authenticated. With restriction off, a run also reaches
+  local services and agentgw's own API, apart from cloud metadata addresses.
 - **Outbound requests are guarded.** `http` and `mcp` sources reject loopback,
   private, link-local, CGNAT and cloud-metadata addresses after DNS resolution
   unless the source sets `allow_private: true`. No redirects; body size and time

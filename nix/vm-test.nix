@@ -1,7 +1,34 @@
 { self, pkgs }:
 
+let
+  # The real agent CLIs (claude-code is unfree), run in the restricted
+  # template to prove they start without nscd and reach the network only
+  # through the forwarder.
+  unfree = import pkgs.path {
+    inherit (pkgs.stdenv.hostPlatform) system;
+    config.allowUnfreePredicate = p: (p.pname or "") == "claude-code";
+  };
+  realClis = pkgs.writeShellScriptBin "real-cli-check" ''
+    t=$(mktemp -d)
+    ${unfree.claude-code}/bin/claude --version >/dev/null 2>&1; echo "claude-version-rc=$?"
+    ${pkgs.codex}/bin/codex --version >/dev/null 2>&1; echo "codex-version-rc=$?"
+    HOME=$t ANTHROPIC_API_KEY=sk-ant-dummy timeout 90 ${unfree.claude-code}/bin/claude --bare -p hi 2>&1 | tail -5
+    HOME=$t CODEX_HOME=$t OPENAI_API_KEY=sk-dummy timeout 90 ${pkgs.codex}/bin/codex exec --skip-git-repo-check hi </dev/null 2>&1 | tail -5
+    true
+  '';
+in
 pkgs.testers.runNixOSTest {
   name = "agentgw";
+
+  # A host outside the sandbox: the only way to it from a restricted action
+  # is agentgw's egress proxy.
+  nodes.external = {
+    networking.firewall.allowedTCPPorts = [ 8080 ];
+    systemd.services.web = {
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig.ExecStart = "${pkgs.python3}/bin/python3 -m http.server 8080 --directory ${pkgs.writeTextDir "index.html" "external-ok"}";
+    };
+  };
 
   nodes.machine =
     { pkgs, ... }:
@@ -20,7 +47,8 @@ pkgs.testers.runNixOSTest {
         };
         settings = {
           server = {
-            listen = "127.0.0.1:8080";
+            # All addresses: the restricted sandbox must still not reach it.
+            listen = "0.0.0.0:8080";
             token = "file:/run/credentials/agentgw.service/token";
           };
           sources.gh = {
@@ -45,6 +73,19 @@ pkgs.testers.runNixOSTest {
             claude-max.provider = "claude";
             chatgpt.provider = "codex";
             google.provider = "agy";
+          };
+          # A LAN MCP server: its host:port joins the allowlist of agents using it.
+          sources.ext = {
+            type = "mcp";
+            url = "http://external:8080/mcp";
+            read.resource = "x://a";
+            allow_private = true;
+          };
+          agents.probe = {
+            command = "egress-probe";
+            prompt = "p";
+            approve = false;
+            mcp = [ "ext" ];
           };
           agents.ac = {
             kind = "claude";
@@ -132,6 +173,39 @@ pkgs.testers.runNixOSTest {
               cooldown = "1s";
               action.agent = "ag";
             }
+            {
+              name = "egress-agent";
+              source = "gh";
+              when = ''event.kind == "probe"'';
+              on = "each";
+              id = "event.n";
+              cooldown = "1s";
+              action.agent = "probe";
+            }
+            {
+              name = "real-clis";
+              source = "gh";
+              when = ''event.kind == "real"'';
+              on = "each";
+              id = "event.n";
+              action.cmd = [ "real-cli-check" ];
+              egress.enabled = true;
+            }
+            {
+              # cmd actions default to egress off: open template, no proxy.
+              name = "open-cmd";
+              source = "gh";
+              when = ''event.kind == "open"'';
+              on = "each";
+              id = "event.n";
+              action.cmd = [
+                "curl"
+                "-s"
+                "-m"
+                "10"
+                "http://external:8080/"
+              ];
+            }
           ];
           units = [ "marker.service" ];
         };
@@ -151,6 +225,23 @@ pkgs.testers.runNixOSTest {
       # it, tries to read agentgw's credential store (must fail), rewrites its
       # login with a marker (write-back), and answers.
       services.agentgw.agentPackages = [
+        # Runs in the restricted template: only the proxy is reachable.
+        (pkgs.writeShellScriptBin "egress-probe" ''
+          ip=$(awk '$2 == "external" || $3 == "external" {print $1; exit}' /etc/hosts)
+          [ -e /run/nscd/socket ] && echo NSCD-VISIBLE
+          [ -e /nix/var/nix/daemon-socket/socket ] && echo NIX-DAEMON-VISIBLE
+          ls /run/systemd/units >/dev/null 2>&1 && echo UNIT-IDS-VISIBLE
+          find /sys/fs/cgroup -name 'agentgw-action*' 2>/dev/null | grep -q . && echo CGROUP-IDS-VISIBLE
+          echo "slash-run=$(ls /run | tr '\n' ' ')"
+          echo "via-proxy=$(curl -s -m 10 --proxytunnel http://external:8080/)"
+          echo "blocked=$(curl -s -m 10 -o /dev/null -w '%{http_connect}' --proxytunnel http://blocked.example:8080/)"
+          curl -s -m 5 --noproxy '*' "http://$ip:8080/" >/dev/null && echo RAW-IP-REACHED
+          curl -s -m 5 --noproxy '*' http://127.0.0.1:8080/healthz >/dev/null && echo API-REACHED
+          curl -s -m 5 --noproxy '*' http://127.77.0.1:8080/healthz >/dev/null && echo API-REACHED-77
+          [ -e /run/dbus/system_bus_socket ] && echo DBUS-VISIBLE
+          echo "proxy-env=''${HTTPS_PROXY:+set}"
+        '')
+        realClis
         (pkgs.writeShellScriptBin "slow-agent" "trap 'sleep 15; exit 0' TERM; sleep 600 & wait; wait")
         (pkgs.writeShellScriptBin "claude" ''
           f="$HOME/.claude/.credentials.json"
@@ -190,7 +281,8 @@ pkgs.testers.runNixOSTest {
 
   testScript = ''
     TOKEN = "test-token-0123456789abcdef0123456789"
-    ACTIVE = "systemctl list-units --no-legend --plain --state=active,activating,deactivating 'agentgw-action@*'"
+    UNITS = "'agentgw-action@*' 'agentgw-action-open@*'"
+    ACTIVE = f"systemctl list-units --no-legend --plain --state=active,activating,deactivating {UNITS}"
 
     def hook(body, sign=True):
         sig = ""
@@ -206,7 +298,7 @@ pkgs.testers.runNixOSTest {
     def dump():
         print(machine.execute(f"curl -s -H 'Authorization: Bearer {TOKEN}' 'http://127.0.0.1:8080/api/jobs'")[1])
         print(machine.execute("sqlite3 /var/lib/agentgw/state.db 'select id,rule,state,exit_code,output from jobs' 2>&1")[1])
-        print(machine.execute("journalctl -u agentgw -u 'agentgw-action@*' -u marker -u polkit --no-pager | tail -80")[1])
+        print(machine.execute("journalctl -u agentgw -u 'agentgw-action@*' -u 'agentgw-action-open@*' -u marker -u polkit --no-pager | tail -80")[1])
 
     def denied_by_rule(cmd):
         # polkit's own rule must say no ("Access denied"), not merely the
@@ -305,6 +397,56 @@ pkgs.testers.runNixOSTest {
         listing = machine.succeed(f"runuser -u agentgw -- {agw} credentials ls -config {cfg}")
         assert "refreshed" not in listing and "r1" not in listing.split(), f"ls leaked a token: {listing}"
 
+    with subtest("egress: restricted agents reach only allowlisted hosts via the proxy"):
+        external.wait_for_open_port(8080)
+        assert hook('{"kind":"probe","n":200}') == "202"
+        assert hook('{"kind":"open","n":201}') == "202"
+        try:
+            for rule in ["egress-agent", "open-cmd"]:
+                machine.wait_until_succeeds(
+                    f"sqlite3 /var/lib/agentgw/state.db \"select state from jobs where rule='{rule}'\" | grep -qx done",
+                    timeout=60,
+                )
+        except Exception:
+            dump()
+            raise
+        out = machine.succeed("sqlite3 /var/lib/agentgw/state.db \"select output from jobs where rule='egress-agent'\"")
+        assert "via-proxy=external-ok" in out, f"allowed host not reached via the proxy: {out}"
+        assert "blocked=403" in out, f"disallowed host not refused: {out}"
+        assert "egress: blocked blocked.example:8080 (1)" in out, f"blocked host not reported: {out}"
+        assert "RAW-IP-REACHED" not in out, f"IP filter bypassed: {out}"
+        assert "API-REACHED" not in out, f"agentgw API reachable from the sandbox: {out}"
+        assert "DBUS-VISIBLE" not in out, f"system bus reachable from the sandbox: {out}"
+        assert "API-REACHED-77" not in out, f"wildcard-bound API reachable via the proxy address: {out}"
+        assert "NSCD-VISIBLE" not in out, f"nscd (host name resolution) reachable from the sandbox: {out}"
+        for leak in ("NIX-DAEMON-VISIBLE", "UNIT-IDS-VISIBLE", "CGROUP-IDS-VISIBLE"):
+            assert leak not in out, f"{leak}: {out}"
+        entries = set(out.split("slash-run=")[1].split("\n")[0].split())
+        assert entries <= {"agentgw", "current-system"}, f"unexpected /run entries in the sandbox: {entries}"
+        assert "proxy-env=set" in out and "run-" not in out, f"proxy env missing or token leaked: {out}"
+        n = machine.succeed("sqlite3 /var/lib/agentgw/state.db \"select count(*) from audit where event='egress_blocked' and detail='blocked.example:8080'\"").strip()
+        assert n == "1", f"egress_blocked audited {n} times"
+        out = machine.succeed("sqlite3 /var/lib/agentgw/state.db \"select output from jobs where rule='open-cmd'\"")
+        assert "external-ok" in out, f"cmd without egress could not reach the network: {out}"
+
+    with subtest("real claude and codex start in the restricted sandbox and reach only the proxy"):
+        assert hook('{"kind":"real","n":300}') == "202"
+        try:
+            machine.wait_until_succeeds(
+                "sqlite3 /var/lib/agentgw/state.db \"select state from jobs where rule='real-clis'\" | grep -qx done",
+                timeout=300,
+            )
+        except Exception:
+            dump()
+            raise
+        out = machine.succeed("sqlite3 /var/lib/agentgw/state.db \"select output from jobs where rule='real-clis'\"")
+        print(out)
+        assert "claude-version-rc=0" in out and "codex-version-rc=0" in out, f"a CLI failed to start: {out}"
+        for crash in ("uv_os_get_passwd", "getpwuid", "No user exists"):
+            assert crash not in out, f"user lookup failed without nscd: {out}"
+        assert "egress: blocked api.anthropic.com:443" in out, f"claude never reached the proxy: {out}"
+        assert "egress: blocked api.openai.com:443" in out, f"codex never reached the proxy: {out}"
+
     with subtest("stopping agentgw leaves no orphaned action units (cmd and agent)"):
         assert hook('{"kind":"sleep","n":3}') == "202"
         assert hook('{"kind":"agent","n":4}') == "202"
@@ -330,7 +472,7 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds(f"test $({ACTIVE} | wc -l) -eq 2", timeout=90)
         after = set(machine.succeed(f"{ACTIVE} | awk '{{print $1}}'").split())
         assert not (before & after), f"orphans still running: {before & after}"
-        failed = machine.succeed("systemctl list-units --failed --no-legend --plain 'agentgw-action@*' | wc -l").strip()
+        failed = machine.succeed(f"systemctl list-units --failed --no-legend --plain {UNITS} | wc -l").strip()
         assert failed == "0", f"{failed} failed action units left loaded"
   '';
 }

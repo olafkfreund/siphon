@@ -20,6 +20,7 @@ import (
 	"github.com/olafkfreund/MCP-AgentGateway/internal/action"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/config"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/cred"
+	"github.com/olafkfreund/MCP-AgentGateway/internal/egress"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/rule"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/source"
 	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
@@ -38,6 +39,8 @@ type Pipeline struct {
 
 	runFn func(context.Context, store.QueuedJob) (string, int, string) // tests only
 	rnd   func() float64                                               // retry jitter source; tests inject
+
+	egress *egress.Proxy // set by startEgress when any run has an allowlist
 }
 
 // runUnit starts a unit and waits for it; tests stub it. The step/action
@@ -325,15 +328,21 @@ func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, ex
 		if err != nil {
 			return "failed", -1, err.Error()
 		}
-		code, out, err := action.RunCmd(ctx, argv,
-			p.sandbox(cmdTimeout), p.Cfg.Secrets())
+		opts := p.sandbox(cmdTimeout)
+		allow, on := p.ruleEgress(j.Rule)
+		var finish func() string
+		if opts.Egress, finish, err = p.egressFor(j.ID, allow, on); err != nil {
+			return "failed", -1, err.Error()
+		}
+		code, out, err := action.RunCmd(ctx, argv, opts, p.Cfg.Secrets())
+		tail := finish()
 		if err != nil {
-			return "failed", code, string(out) + err.Error()
+			return "failed", code, string(out) + err.Error() + tail
 		}
 		if code != 0 {
-			return "failed", code, string(out)
+			return "failed", code, string(out) + tail
 		}
-		return "done", 0, string(out)
+		return "done", 0, string(out) + tail
 	case pl.Action.Agent != "":
 		return p.runAgent(ctx, j, pl)
 	case pl.Action.Unit != "":
@@ -417,11 +426,18 @@ func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload,
 		}
 		opts.CredFiles, start = files, files
 	}
+	allow, on := p.Cfg.AgentEgress(a)
+	egEnv, finish, eerr := p.egressFor(j.ID, allow, on)
+	if eerr != nil {
+		return "failed", -1, eerr.Error(), nil
+	}
+	opts.Sandbox.Egress = egEnv
 	res, err := action.RunAgent(ctx, opts)
+	egressTail := finish()
 	if c != nil {
 		p.saveWriteback(j, credName, c.Provider, start, res.Writeback)
 	}
-	out := string(res.Output)
+	out := string(res.Output) + egressTail
 	if err != nil {
 		return "failed", res.Exit, out + err.Error(), nil
 	}
@@ -510,6 +526,11 @@ func (p *Pipeline) audit(event string, jobID int64, detail string) {
 // RunOnce polls every polled source once, then runs whatever got queued.
 func (p *Pipeline) RunOnce(ctx context.Context) error {
 	if err := p.Requeue(); err != nil {
+		return err
+	}
+	ectx, stopEgress := context.WithCancel(ctx)
+	defer stopEgress()
+	if err := p.startEgress(ectx); err != nil {
 		return err
 	}
 	if err := p.ExpireApprovals(); err != nil {

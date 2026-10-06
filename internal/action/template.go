@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -19,7 +20,7 @@ import (
 	"time"
 )
 
-// Sandboxed actions run in the Nix-defined template unit agentgw-action@<id>.service
+// Sandboxed actions run in a Nix-defined agentgw-action template unit
 // (see nix/module.nix). Its hardening is fixed in Nix, so agentgw can only ask
 // systemd to start that unit: no transient units, no way to request User=root.
 //
@@ -37,6 +38,33 @@ type JobSpec struct {
 	Files      map[string][]byte `json:"files,omitempty"` // written 0600 under jobFilesDir
 	Writeback  []string          `json:"writeback,omitempty"`
 	TimeoutSec int               `json:"timeout_sec"`
+	// EgressSocket: exec-job forwards forwardAddr to this unix socket.
+	EgressSocket string `json:"egress_socket,omitempty"`
+}
+
+// forwardAddr is where exec-job listens inside the unit's private network
+// namespace; the run's proxy URL points here. Tests override it.
+var forwardAddr = "127.0.0.1:3128"
+
+// forward copies each connection accepted on ln to the unix socket sock until ln is closed.
+func forward(ln net.Listener, sock string) {
+	for {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go func() {
+			u, err := net.Dial("unix", sock)
+			if err != nil {
+				c.Close()
+				return
+			}
+			go func() { io.Copy(u, c); u.Close(); c.Close() }()
+			io.Copy(c, u)
+			u.Close()
+			c.Close()
+		}()
+	}
 }
 
 // jobFilesDir is where exec-job writes JobSpec.Files inside the unit (its
@@ -49,7 +77,12 @@ const outputCap = 1 << 20
 // FilePath is the in-unit path of a JobSpec file.
 func FilePath(name string) string { return filepath.Join(jobFilesDir, name) }
 
-func templateUnit(id string) string { return "agentgw-action@" + id + ".service" }
+func templateUnit(id string, restricted bool) string {
+	if restricted {
+		return "agentgw-action@" + id + ".service"
+	}
+	return "agentgw-action-open@" + id + ".service"
+}
 
 func systemctl(ctx context.Context, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, "systemctl", append([]string{"--no-ask-password"}, args...)...)
@@ -87,9 +120,9 @@ var (
 	}
 )
 
-// templateRun runs spec in a fresh agentgw-action@ instance and returns its
+// templateRun runs spec in a fresh agentgw-action instance and returns its
 // exit code and (stdout, stderr). exit -1 means it never ran or was cancelled.
-func templateRun(ctx context.Context, dir string, spec JobSpec, captureLimit int) (int, []byte, []byte, map[int][]byte, error) {
+func templateRun(ctx context.Context, dir string, spec JobSpec, captureLimit int, restricted bool) (int, []byte, []byte, map[int][]byte, error) {
 	if dir == "" {
 		return -1, nil, nil, nil, errors.New("sandbox: no action directory configured")
 	}
@@ -128,7 +161,7 @@ func templateRun(ctx context.Context, dir string, spec JobSpec, captureLimit int
 	if err := os.Chmod(jobPath, 0o640); err != nil {
 		return -1, nil, nil, nil, err
 	}
-	unit := templateUnit(id)
+	unit := templateUnit(id, restricted)
 	runErr := startUnit(ctx, unit)
 	if ctx.Err() != nil {
 		// Cancelled or timed out: make sure the unit doesn't outlive the job.
@@ -356,12 +389,12 @@ func saveWriteback(home, runDir string, gid, i int, name string, files map[strin
 	return nil
 }
 
-// StopOrphans stops agentgw-action@ instances left running by a crashed
+// StopOrphans stops agentgw-action instances left running by a crashed
 // agentgw (they live outside its cgroup) and waits for them, so their jobs
 // can be requeued without two copies running at once.
 func StopOrphans(ctx context.Context) error {
-	err := stopUnits(ctx, "agentgw-action@*.service")
-	resetFailed("agentgw-action@*.service")
+	err := stopUnits(ctx, "agentgw-action@*.service", "agentgw-action-open@*.service")
+	resetFailed("agentgw-action@*.service", "agentgw-action-open@*.service")
 	return err
 }
 
@@ -409,6 +442,9 @@ func execJob(runDir, jobFile string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "exec-job:", err)
 		return 125
 	}
+	// It holds the run's proxy token and logins: don't leave it readable by
+	// other runs (all share group agentgw-io) for the run's lifetime.
+	os.Remove(jobFile)
 	var spec JobSpec
 	if err := json.Unmarshal(raw, &spec); err != nil || len(spec.Argv) == 0 {
 		fmt.Fprintln(stderr, "exec-job: bad job spec")
@@ -445,6 +481,15 @@ func execJob(runDir, jobFile string, stdout, stderr io.Writer) int {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(spec.TimeoutSec)*time.Second)
 		defer cancel()
+	}
+	if spec.EgressSocket != "" {
+		ln, err := net.Listen("tcp", forwardAddr)
+		if err != nil {
+			fmt.Fprintln(stderr, "egress forwarder:", err)
+			return 1
+		}
+		defer ln.Close()
+		go forward(ln, spec.EgressSocket)
 	}
 	cmd := exec.CommandContext(ctx, spec.Argv[0], spec.Argv[1:]...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }

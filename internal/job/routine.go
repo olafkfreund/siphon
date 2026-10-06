@@ -245,9 +245,15 @@ func (p *Pipeline) execOnce(ctx context.Context, j store.QueuedJob, st config.St
 		if err != nil {
 			return stepResult{Exit: -1, Output: err.Error()}
 		}
-		code, o, so, err := action.RunCmdSplit(ctx, argv,
-			p.sandbox(timeout), p.Cfg.Secrets())
-		exit, out, stdout = code, string(o), so
+		opts := p.sandbox(timeout)
+		allow, on := p.ruleEgress(j.Rule) // cmd steps follow their rule's egress
+		egEnv, finish, eerr := p.egressFor(j.ID, allow, on)
+		if eerr != nil {
+			return stepResult{Exit: -1, Output: eerr.Error()}
+		}
+		opts.Egress = egEnv
+		code, o, so, err := action.RunCmdSplit(ctx, argv, opts, p.Cfg.Secrets())
+		exit, out, stdout = code, string(o)+finish(), so
 		if err != nil {
 			out += err.Error()
 		}

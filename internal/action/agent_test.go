@@ -99,3 +99,15 @@ func TestTokenStringsMasksEveryLongJSONValue(t *testing.T) {
 		t.Fatalf("masked=%q", got)
 	}
 }
+
+func TestRunAgentEgressDisablesNonessentialTraffic(t *testing.T) {
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "codex")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nprintf '%s' \"$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	got, err := RunAgent(context.Background(), AgentOptions{Kind: "codex", Command: stub, Prompt: "p", WorkDir: filepath.Join(dir, "home"), Sandbox: SandboxOptions{Mode: "none", Egress: &EgressEnv{ProxyURL: "http://run-id:token@127.77.0.1:3128"}}})
+	if err != nil || got.Exit != 0 || string(got.Stdout) != "1" {
+		t.Fatalf("result=%+v err=%v", got, err)
+	}
+}

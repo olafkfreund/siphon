@@ -439,3 +439,126 @@ func TestFollowupValidation(t *testing.T) {
 		t.Fatal("no mcp: no allowlist warning")
 	}
 }
+
+func hostsOf(a []HostPort) string {
+	var s []string
+	for _, h := range a {
+		s = append(s, h.String())
+	}
+	return strings.Join(s, ",")
+}
+
+func TestEgressLists(t *testing.T) {
+	key := filepath.Join(t.TempDir(), "k")
+	os.WriteFile(key, []byte("sk\n"), 0o600)
+	y := `
+server: {egress: {allow: [global.example.com]}}
+sources:
+  m1: {type: mcp, url: "https://mcp.example.com/x", read: {tool: t}}
+  m2: {type: mcp, url: "http://10.0.0.5:9000/mcp", allow_private: true, read: {tool: t}}
+  m3: {type: mcp, command: [srv], read: {tool: t}}
+credentials:
+  cx: {provider: codex}
+  cc: {provider: claude}
+  ck: {provider: codex, api_key: "file:` + key + `"}
+agents:
+  sub:  {kind: codex, credential: cx, mcp: [m1, m2, m3], egress: {allow: ["api.github.com", "*.corp.example:8443"]}}
+  key:  {kind: codex, credential: ck}
+  off:  {kind: codex, credential: cx, egress: {enabled: false}}
+  cl:   {}
+`
+	c, err := Parse([]byte(y))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	got, on := c.AgentEgress(c.Agents["sub"])
+	want := "chatgpt.com:443,auth.openai.com:443,mcp.example.com:443,10.0.0.5:9000 (allow_private),api.github.com:443,*.corp.example:8443,global.example.com:443"
+	if !on || hostsOf(got) != want {
+		t.Fatalf("sub: %v\n%s", on, hostsOf(got))
+	}
+	if got, _ := c.AgentEgress(c.Agents["key"]); hostsOf(got) != "api.openai.com:443,global.example.com:443" {
+		t.Fatalf("key: %s", hostsOf(got))
+	}
+	if got, on := c.AgentEgress(c.Agents["off"]); on || got != nil {
+		t.Fatal("off must be disabled")
+	}
+	if got, on := c.AgentEgress(c.Agents["cl"]); !on || !strings.HasPrefix(hostsOf(got), "api.anthropic.com:443,platform.claude.com:443") {
+		t.Fatalf("legacy claude: %s", hostsOf(got))
+	}
+	for kind, wantFirst := range map[string]string{"claude": "api.anthropic.com:443", "agy": "oauth2.googleapis.com:443"} {
+		c, _ := Parse([]byte("credentials: {x: {provider: " + kind + "}}\nagents: {a: {kind: " + kind + "}}"))
+		if got, _ := c.AgentEgress(c.Agents["a"]); !strings.HasPrefix(hostsOf(got), wantFirst) {
+			t.Errorf("%s: %s", kind, hostsOf(got))
+		}
+	}
+	if c.Server.Egress.Listen != "127.77.0.1:3128" {
+		t.Fatal("default listen")
+	}
+}
+
+func TestRuleEgress(t *testing.T) {
+	c, _ := Parse([]byte("server: {egress: {allow: [g.example.com]}}"))
+	if _, on := c.RuleEgress(Rule{}); on {
+		t.Fatal("cmd egress is opt-in")
+	}
+	got, on := c.RuleEgress(Rule{Egress: EgressRule{Enabled: true, Allow: []string{"h.example.com:8080"}}})
+	if !on || hostsOf(got) != "h.example.com:8080,g.example.com:443" {
+		t.Fatalf("%v %s", on, hostsOf(got))
+	}
+	c, _ = Parse([]byte("server: {egress: {cmd_default: true}}"))
+	if got, on := c.RuleEgress(Rule{}); !on || len(got) != 0 {
+		t.Fatal("cmd_default must enable with an empty list")
+	}
+}
+
+func TestEgressValidation(t *testing.T) {
+	for y, want := range map[string]string{
+		"server: {egress: {listen: \"0.0.0.0:3128\"}}":                                                            "loopback",
+		"server: {egress: {listen: \"example.com:3128\"}}":                                                        "loopback",
+		"server: {egress: {listen: \"[::1]:3128\"}}":                                                              "IPv4 loopback",
+		"server: {egress: {socket: rel/egress.sock}}":                                                             "egress.socket",
+		"server: {egress: {socket: /run/agentgw/egress.sock}}":                                                    "",
+		"server: {egress: {allow: [\"bad host\"]}}":                                                               "egress.allow",
+		"server: {egress: {allow: [\"a.com:0\"]}}":                                                                "port must be",
+		"server: {egress: {allow: [\"a.com:70000\"]}}":                                                            "port must be",
+		"server: {egress: {allow: [\"*.a.com\", \"b.com:8443\"]}}":                                                "",
+		"agents: {a: {egress: {allow: [\"http://x\"]}}}":                                                          "agents.a.egress.allow",
+		"rules: [{name: r, source: agent-result, when: \"true\", action: {cmd: [x]}, egress: {allow: [\"-x\"]}}]": "rules[0].egress.allow",
+	} {
+		c, err := Parse([]byte(y))
+		if err == nil {
+			err = c.Validate()
+		}
+		if want == "" && err != nil || want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
+			t.Errorf("%s: want %q, got %v", y, want, err)
+		}
+	}
+	c, _ := Parse([]byte("server: {sandbox: none}\ncredentials: {x: {provider: claude}}\nagents: {a: {}, b: {egress: {enabled: false}}}"))
+	n := 0
+	for _, w := range c.Warnings() {
+		if strings.Contains(w, "egress allowlists are not enforced with sandbox: none") {
+			n++
+			if !strings.Contains(w, "agent a") {
+				t.Errorf("wrong agent: %s", w)
+			}
+		}
+	}
+	if n != 1 {
+		t.Fatalf("want one warning, got %d", n)
+	}
+}
+
+// An agent missing from config, or a snapshot from before egress existed,
+// must be restricted, never open.
+func TestAgentEgressFailsClosed(t *testing.T) {
+	c, _ := Parse([]byte("agents: {a: {kind: codex}}"))
+	if _, on := c.AgentEgress(nil); !on {
+		t.Fatal("nil agent ran unrestricted")
+	}
+	if got, on := c.AgentEgress(&Agent{Kind: "codex"}); !on || hostsOf(got) != "chatgpt.com:443,auth.openai.com:443" {
+		t.Fatalf("old snapshot: %v %s", on, hostsOf(got))
+	}
+}

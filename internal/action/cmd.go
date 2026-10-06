@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -57,6 +58,32 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 	if len(argv) == 0 {
 		return -1, nil, nil, nil, errors.New("empty command")
 	}
+	egressSocket := ""
+	if opts.Egress != nil {
+		proxyURL := opts.Egress.ProxyURL
+		secrets = append(secrets, proxyURL)
+		if opts.Mode != "none" && opts.Egress.Socket != "" {
+			if u, err := url.Parse(proxyURL); err == nil {
+				u.Host = forwardAddr
+				proxyURL, egressSocket = u.String(), opts.Egress.Socket
+				secrets = append(secrets, proxyURL)
+			}
+		}
+		baseEnv := opts.Env
+		opts.Env = map[string]string{}
+		for k, v := range baseEnv {
+			opts.Env[k] = v
+		}
+		for _, name := range []string{"HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"} {
+			opts.Env[name] = proxyURL
+		}
+		opts.Env["NO_PROXY"], opts.Env["no_proxy"] = "", ""
+		if u, err := url.Parse(opts.Egress.ProxyURL); err == nil && u.User != nil {
+			if token, ok := u.User.Password(); ok {
+				secrets = append(secrets, token)
+			}
+		}
+	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = 30 * time.Second
 	}
@@ -83,8 +110,8 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 		exit, so, se, writeback, err := templateRun(ctx, opts.Dir, JobSpec{
 			Argv: argv, Stdin: stdin, Env: opts.Env, Files: opts.Files,
 			Writeback:  opts.Writeback,
-			TimeoutSec: timeoutSeconds(opts.Timeout),
-		}, outputCap+maxExtra)
+			TimeoutSec: timeoutSeconds(opts.Timeout), EgressSocket: egressSocket,
+		}, outputCap+maxExtra, opts.Egress != nil)
 		appendWritebackSecrets(writeback, &secrets)
 		output := capBytes(Mask(append(so, se...), secrets), 64<<10)
 		var stdoutBytes []byte

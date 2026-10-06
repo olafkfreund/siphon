@@ -47,6 +47,9 @@ func (p *Pipeline) Serve(ctx context.Context) error {
 	if err := p.Requeue(); err != nil {
 		return err
 	}
+	if err := p.startEgress(ctx); err != nil {
+		return err
+	}
 	if p.nudge == nil { // literal Pipelines in tests; serve uses New
 		p.nudge = make(chan struct{}, 64)
 	}
