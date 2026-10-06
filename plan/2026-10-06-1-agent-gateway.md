@@ -229,3 +229,9 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
   - `auth.oauth` on MCP sources is deferred; v1 supports `auth.bearer` only (the spec listed OAuth via go-sdk). `KnownFields` rejects `oauth` until a later step adds it.
   - Added source fields `method`, `headers`, `body`, `signature_header` and `timestamp_header`, and `rule.approve`.
   - `Load` does not fail on an unresolved `env:`/`file:` ref; `Validate` reports it, so all errors are listed at once.
+- Step 4:
+  - **Cooldown defers rather than drops.** A fire suppressed by cooldown leaves rule state untouched, so an edge that is still true, or an unseen `each` id, fires once the cooldown expires. The plan left this open.
+  - `dryRun` uses a SAVEPOINT rolled back inside `Evaluate`.
+  - An item whose expression errors is skipped and its error returned, without blocking the other items.
+  - On a `when` timeout, the expr goroutine is abandoned, bounded by expr's memory budget.
+  - Added the `store.RuleLastFired` helper.

@@ -166,3 +166,12 @@ func Audit(tx *sql.Tx, now time.Time, actor, event string, jobID int64, detail s
 	_, err := tx.Exec(`INSERT INTO audit(at,actor,event,job_id,detail) VALUES (?,?,?,?,?)`, ms(now), actor, event, jid, detail)
 	return err
 }
+
+// RuleLastFired is the latest fire time of any key of rule (zero if never).
+func RuleLastFired(tx *sql.Tx, rule string) (time.Time, error) {
+	var t sql.NullInt64
+	if err := tx.QueryRow(`SELECT MAX(last_fired_at) FROM rule_state WHERE rule=?`, rule).Scan(&t); err != nil || !t.Valid {
+		return time.Time{}, err
+	}
+	return time.UnixMilli(t.Int64), nil
+}
