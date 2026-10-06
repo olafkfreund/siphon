@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -123,6 +125,9 @@ func (p *Pipeline) HandleEvent(ctx context.Context, ev rule.Event, dryRun bool) 
 			if err != nil {
 				return nil, nil, err
 			}
+			if id == 0 {
+				continue // skipped by the loop guard or the agent cap (audited)
+			}
 			ids = append(ids, id)
 			if link != "" {
 				links = append(links, link)
@@ -143,6 +148,18 @@ func (p *Pipeline) HandleEvent(ctx context.Context, ev rule.Event, dryRun bool) 
 // enqueue inserts the job; for pending_approval it also creates the approval
 // in the same tx and returns its link path.
 func (p *Pipeline) enqueue(tx *sql.Tx, r config.Rule, f rule.Fire, depth int, now time.Time) (id int64, link string, err error) {
+	if depth > config.MaxDepth {
+		return 0, "", store.Audit(tx, now, "rule:"+r.Name, "skip_depth", 0, fmt.Sprintf("depth %d > %d", depth, config.MaxDepth))
+	}
+	if r.Action.Agent != "" {
+		n, err := store.CountAgentJobsSince(tx, now.Add(-24*time.Hour))
+		if err != nil {
+			return 0, "", err
+		}
+		if n >= p.Cfg.Limits.AgentRunsPerDay {
+			return 0, "", store.Audit(tx, now, "rule:"+r.Name, "skip_agent_cap", 0, fmt.Sprintf("%d agent runs in 24h", n))
+		}
+	}
 	b, err := json.Marshal(Payload{Action: r.Action, Env: f.Env})
 	if err != nil {
 		return 0, "", err
@@ -231,9 +248,50 @@ func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, ex
 			return "failed", code, string(out)
 		}
 		return "done", 0, string(out)
+	case pl.Action.Agent != "":
+		return p.runAgent(ctx, j, pl)
 	default:
-		return "failed", -1, "action type not implemented yet (unit/agent/routine arrive in later plan phases)"
+		return "failed", -1, "action type not implemented yet (unit/routine arrive in plan phase 3)"
 	}
+}
+
+// runAgent runs the agent and feeds its JSON result back as an agent-result
+// event one level deeper; rules see it only with allow_agent_events (loop guard).
+func (p *Pipeline) runAgent(ctx context.Context, j store.QueuedJob, pl Payload) (string, int, string) {
+	a := p.Cfg.Agents[pl.Action.Agent]
+	if a == nil {
+		return "failed", -1, "unknown agent " + pl.Action.Agent
+	}
+	servers := map[string]action.MCPServer{}
+	for _, name := range a.MCP {
+		s := p.Cfg.Sources[name]
+		h := headerValues(s.Headers)
+		if s.Auth != nil && s.Auth.Bearer.Value != "" {
+			h["Authorization"] = "Bearer " + s.Auth.Bearer.Value
+		}
+		servers[name] = action.MCPServer{URL: s.URL, Command: s.Command, Headers: h}
+	}
+	res, err := action.RunAgent(ctx, action.AgentOptions{
+		Runner: a.Runner, Prompt: a.Prompt, Env: pl.Env, MCP: servers,
+		AllowedTools: a.AllowedTools, MaxTurns: a.MaxTurns, MaxBudgetUSD: a.MaxBudgetUSD,
+		Timeout: time.Duration(a.Timeout), Sandbox: action.SandboxOptions{Mode: p.Cfg.Server.Sandbox},
+		Secrets: p.Cfg.Secrets(), WorkDir: filepath.Join(filepath.Dir(p.Cfg.Server.DB), "jobs", strconv.FormatInt(j.ID, 10)),
+		APIKeyFile: a.APIKeyFile,
+	})
+	out := string(res.Output)
+	if err != nil {
+		return "failed", res.Exit, out + err.Error()
+	}
+	if res.Exit != 0 {
+		return "failed", res.Exit, out
+	}
+	if data, derr := source.DecodeJSON(res.Output); derr == nil {
+		ev := rule.Event{Source: config.AgentResultSource, Data: data, Depth: j.Depth + 1}
+		if _, _, herr := p.HandleEvent(ctx, ev, false); herr != nil {
+			slog.Warn("agent-result rules", "job", j.ID, "err", herr)
+		}
+	}
+	return "done", 0, out
 }
 
 // RunOnce polls every polled source once, then runs whatever got queued.

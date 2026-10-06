@@ -303,3 +303,11 @@ func Cleanup(db *sql.DB, now time.Time) error {
 	}
 	return tx.Commit()
 }
+
+// CountAgentJobsSince counts agent jobs created at or after since (daily cap).
+func CountAgentJobsSince(tx *sql.Tx, since time.Time) (int, error) {
+	var n int
+	err := tx.QueryRow(`SELECT count(*) FROM jobs WHERE created_at >= ?
+		AND COALESCE(json_extract(action_json, '$.action.Agent'), '') != ''`, ms(since)).Scan(&n)
+	return n, err
+}

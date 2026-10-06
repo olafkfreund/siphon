@@ -267,3 +267,10 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
   - The approval id is the job id (one approval per job): `approve|deny <job id>` and `/a/<job id>/<token>`.
   - The one-shot link (with its token) is logged at slog info after commit, so the operator can see it. The audit row stores `/a/<id>/***`.
   - Smoke-tested by hand: `run-once`, then `jobs ls`, then `approve` (a second approve is rejected), then `run-once` again, ending in a `done` job.
+- Step 9 (Codex): `RunAgent` returns the result. Emitting the `agent-result` event happens in the pipeline (step 11). `SandboxOptions.Unit` was added for explicit unit names, so the MCP config reaches the DynamicUser sandbox as `LoadCredential` at `/run/credentials/<unit>/mcp.json`.
+- Step 11:
+  - The agent's `mcp.json`, which may hold bearer headers, is deleted after every run.
+  - New agent field `api_key_file`. It is passed as credential `api-key` with `--settings {"apiKeyHelper":"cat <path>"}`, and the path is restricted to `^/[A-Za-z0-9/._-]+$` because apiKeyHelper runs through a shell.
+  - The depth cap (`config.MaxDepth`=2) and the daily agent cap (a rolling 24 h window) are enforced at enqueue, audited as `skip_depth` and `skip_agent_cap`.
+  - Agent-result rule errors are logged and do not fail the agent job.
+  - The manual real-`claude` check is still open: it needs the owner's API key.

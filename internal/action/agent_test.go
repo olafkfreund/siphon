@@ -29,14 +29,10 @@ func TestRunAgent(t *testing.T) {
 		Sandbox:      SandboxOptions{Mode: "none"},
 		WorkDir:      dir,
 	}
-	got, err := RunAgent(context.Background(), o)
-	if err != nil || got.Exit != 0 {
-		t.Fatalf("exit=%d output=%q err=%v", got.Exit, got.Output, err)
-	}
+	// agentArgv writes the scoped MCP config; check it before RunAgent removes it.
 	path := filepath.Join(dir, "mcp.json")
-	want := []string{"--bare", "-p", "check item", "--strict-mcp-config", "--mcp-config", path, "--tools", "", "--allowedTools", "mcp__read__get,Read", "--permission-mode", "dontAsk", "--max-turns", "3", "--max-budget-usd", "1.25", "--output-format", "json"}
-	if !reflect.DeepEqual(got.JSON, anySlice(want)) {
-		t.Fatalf("argv=%#v want=%#v", got.JSON, want)
+	if _, _, err := agentArgv(o); err != nil {
+		t.Fatal(err)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -66,6 +62,17 @@ func TestRunAgent(t *testing.T) {
 	}}
 	if !reflect.DeepEqual(config, expected) {
 		t.Fatalf("config=%#v", config)
+	}
+	got, err := RunAgent(context.Background(), o)
+	if err != nil || got.Exit != 0 {
+		t.Fatalf("exit=%d output=%q err=%v", got.Exit, got.Output, err)
+	}
+	want := []string{"--bare", "-p", "check item", "--strict-mcp-config", "--mcp-config", path, "--tools", "", "--allowedTools", "mcp__read__get,Read", "--permission-mode", "dontAsk", "--max-turns", "3", "--max-budget-usd", "1.25", "--output-format", "json"}
+	if !reflect.DeepEqual(got.JSON, anySlice(want)) {
+		t.Fatalf("argv=%#v want=%#v", got.JSON, want)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("mcp.json must be removed after the run (holds bearer headers), stat err=%v", err)
 	}
 
 	o.Runner = []string{stub, "--echo-config"}
@@ -124,4 +131,31 @@ func contains(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// Step 11: --bare reads only ANTHROPIC_API_KEY or apiKeyHelper, so the key file
+// reaches the sandbox as a credential and apiKeyHelper points at it.
+func TestAgentAPIKeyCredential(t *testing.T) {
+	o := AgentOptions{Prompt: "p", WorkDir: t.TempDir(), APIKeyFile: "/run/agenix/anthropic", Sandbox: SandboxOptions{Mode: "systemd"}}
+	argv, sb, err := agentArgv(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sb.Credentials["api-key"] != "/run/agenix/anthropic" {
+		t.Fatalf("credentials=%v", sb.Credentials)
+	}
+	want := `{"apiKeyHelper":"cat /run/credentials/` + sb.Unit + `/api-key"}`
+	for i, a := range argv {
+		if a == "--settings" && argv[i+1] == want {
+			return
+		}
+	}
+	t.Fatalf("argv lacks --settings %s: %q", want, argv)
+}
+
+func TestAgentAPIKeyPathRejected(t *testing.T) {
+	o := AgentOptions{Prompt: "p", WorkDir: t.TempDir(), APIKeyFile: "/tmp/x;rm -rf ~", Sandbox: SandboxOptions{Mode: "none"}}
+	if _, _, err := agentArgv(o); err == nil {
+		t.Fatal("unsafe api key path accepted")
+	}
 }

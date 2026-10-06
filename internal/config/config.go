@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -22,6 +23,11 @@ import (
 
 // AgentResultSource is the built-in source for agent JSON results (loop guard).
 const AgentResultSource = "agent-result"
+
+// MaxDepth caps agent-result chains (loop guard): an event at a deeper depth never enqueues.
+const MaxDepth = 2
+
+var safePath = regexp.MustCompile(`^/[A-Za-z0-9/._-]+$`)
 
 // Duration unmarshals from strings like "5m".
 type Duration time.Duration
@@ -150,6 +156,9 @@ type Agent struct {
 	MaxBudgetUSD float64  `yaml:"max_budget_usd"`
 	Timeout      Duration `yaml:"timeout"`
 	Approve      *bool    `yaml:"approve"` // default true
+	// APIKeyFile is passed to the runner as a systemd credential and read by
+	// claude's apiKeyHelper (--bare only reads ANTHROPIC_API_KEY or apiKeyHelper).
+	APIKeyFile string `yaml:"api_key_file"`
 }
 
 type Routine struct {
@@ -405,6 +414,9 @@ func (c *Config) Validate() error {
 		}
 		if len(a.Runner) > 0 && strings.Contains(a.Runner[0], "{{") {
 			add("%s: runner[0] must not be templated", p)
+		}
+		if a.APIKeyFile != "" && !safePath.MatchString(a.APIKeyFile) {
+			add("%s: api_key_file must be an absolute path of [A-Za-z0-9/._-]", p)
 		}
 		checkTemplate(p+" prompt", a.Prompt, add)
 	}

@@ -11,11 +11,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"text/template"
 	"time"
 )
+
+var safePath = regexp.MustCompile(`^/[A-Za-z0-9/._-]+$`)
 
 type MCPServer struct {
 	URL     string
@@ -35,6 +38,7 @@ type AgentOptions struct {
 	Sandbox      SandboxOptions
 	Secrets      []string
 	WorkDir      string
+	APIKeyFile   string // optional; exposed to the runner via --settings apiKeyHelper
 }
 
 type AgentResult struct {
@@ -48,6 +52,8 @@ func RunAgent(ctx context.Context, o AgentOptions) (AgentResult, error) {
 	if err != nil {
 		return AgentResult{Exit: -1}, err
 	}
+	// The MCP config can hold bearer headers: never leave it behind.
+	defer os.Remove(filepath.Join(o.WorkDir, "mcp.json"))
 	exit, output, err := runCommand(ctx, argv, sandbox, o.Secrets)
 	result := AgentResult{Exit: exit, Output: output}
 	dec := json.NewDecoder(bytes.NewReader(output))
@@ -141,6 +147,14 @@ func agentArgv(o AgentOptions) ([]string, SandboxOptions, error) {
 		sandbox.Credentials["mcp.json"] = path
 		path = "/run/credentials/" + sandbox.Unit + "/mcp.json"
 	}
+	keyPath := o.APIKeyFile
+	if keyPath != "" && !safePath.MatchString(keyPath) {
+		return nil, sandbox, fmt.Errorf("api key file %q: only [A-Za-z0-9/._-] allowed", keyPath)
+	}
+	if keyPath != "" && sandbox.Unit != "" {
+		sandbox.Credentials["api-key"] = keyPath
+		keyPath = "/run/credentials/" + sandbox.Unit + "/api-key"
+	}
 	argv := append([]string(nil), runner...)
 	argv = append(argv, prompt.String(), "--strict-mcp-config", "--mcp-config", path, "--tools", "")
 	if len(o.AllowedTools) > 0 {
@@ -152,6 +166,11 @@ func agentArgv(o AgentOptions) ([]string, SandboxOptions, error) {
 	}
 	if o.MaxBudgetUSD != 0 {
 		argv = append(argv, "--max-budget-usd", strconv.FormatFloat(o.MaxBudgetUSD, 'f', -1, 64))
+	}
+	if keyPath != "" {
+		// apiKeyHelper runs through a shell; keyPath is config-only and safePath-checked.
+		settings, _ := json.Marshal(map[string]string{"apiKeyHelper": "cat " + keyPath})
+		argv = append(argv, "--settings", string(settings))
 	}
 	argv = append(argv, "--output-format", "json")
 	return argv, sandbox, nil
