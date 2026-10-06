@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 14
 author: olafkfreund
 ---
@@ -105,3 +105,17 @@ or a home-lab container host) has no way to run it at all.
    `sandbox: none` and says so.
 5. **Architectures.** x86_64-linux only, or aarch64-linux as well (for
    Raspberry Pi and ARM home labs)?
+
+## Decisions at approval (2026-10-06)
+
+The owner approved the proposals:
+1. microvm.nix.
+2. No agent CLIs in the published image; a documented `FROM` adds your
+   own.
+3. Push to `ghcr.io` on version tags.
+4. No in-container isolation for now: the image runs `sandbox: none` and
+   says so.
+5. Architectures: x86_64-linux and aarch64-linux.
+
+The project is being renamed to Siphon (#16), so the outputs use the new
+name (`siphon`).
