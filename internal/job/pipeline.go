@@ -323,12 +323,14 @@ func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, ex
 // runAgent runs the agent and feeds its JSON result back as an agent-result
 // event one level deeper; rules see it only with allow_agent_events (loop guard).
 func (p *Pipeline) runAgent(ctx context.Context, j store.QueuedJob, pl Payload) (string, int, string) {
-	state, exit, out, _ := p.agentExec(ctx, j, pl)
+	state, exit, out, _ := p.agentExec(ctx, j, pl, false)
 	return state, exit, out
 }
 
 // agentExec is runAgent that also returns the agent's stdout (routine steps parse it).
-func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload) (string, int, string, []byte) {
+// wait=false (plain agent jobs) puts the job back in the queue when its login
+// is busy instead of tying up a worker; routine steps (wait=true) block.
+func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload, wait bool) (string, int, string, []byte) {
 	a := p.Cfg.Agents[pl.Action.Agent]
 	if a == nil {
 		return "failed", -1, "unknown agent " + pl.Action.Agent, nil
@@ -361,7 +363,19 @@ func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload)
 	default:
 		// One run per login at a time (default): rotating refresh tokens
 		// would otherwise invalidate each other.
-		release, err := cred.Acquire(ctx, credName, c.Concurrency)
+		actx := ctx
+		if !wait {
+			var cancel context.CancelFunc
+			actx, cancel = context.WithTimeout(ctx, 50*time.Millisecond)
+			defer cancel()
+		}
+		release, err := cred.Acquire(actx, credName, c.Concurrency)
+		if err != nil && !wait && ctx.Err() == nil {
+			if rerr := store.RequeueJob(p.Store.DB, j.ID, j.ResumeStep, j.Output, p.Now().Add(credBusyRetry)); rerr != nil {
+				return "failed", -1, rerr.Error(), nil
+			}
+			return stateRequeued, 0, "", nil
+		}
 		if err != nil {
 			return "failed", -1, "waiting for credential " + credName + ": " + err.Error(), nil
 		}
@@ -408,21 +422,35 @@ func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload)
 	return "done", 0, out, res.Stdout
 }
 
+// credBusyRetry is how long a plain agent job waits in the queue when its
+// login is busy. ponytail: fixed; tune if logins queue deeply.
+const credBusyRetry = 5 * time.Second
+
 // saveWriteback stores refreshed login files: shape-checked, then
 // compare-and-swap against what this run started with.
 func (p *Pipeline) saveWriteback(j store.QueuedJob, credName, provider string, start, wb map[string][]byte) {
 	st := cred.StoreFor(p.Cfg)
 	for file, b := range wb {
-		_, norm, err := cred.Validate(provider, cred.ImportFile, b)
+		_, norm, err := cred.ValidateFor(provider, true, b)
 		if err != nil {
 			slog.Warn("credential write-back rejected", "credential", credName, "file", file, "err", err)
 			continue
 		}
-		if err := st.Save(credName, file, start[file], norm); err != nil {
+		// A run must not swap the owner's login for another account (a
+		// prompt-injected agent controls what it writes back).
+		if !cred.SameAccount(provider, start[file], norm) {
+			slog.Warn("credential write-back rejected: account changed", "credential", credName, "file", file)
+			p.audit("credential_writeback_rejected", j.ID, credName)
+			continue
+		}
+		wrote, err := st.Save(credName, file, start[file], norm)
+		if err != nil {
 			slog.Warn("credential write-back failed", "credential", credName, "err", err)
 			continue
 		}
-		p.audit("credential_refreshed", j.ID, credName)
+		if wrote {
+			p.audit("credential_refreshed", j.ID, credName)
+		}
 	}
 }
 

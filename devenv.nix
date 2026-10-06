@@ -31,7 +31,7 @@
 
   # https://devenv.sh/tests/ — `devenv test` runs this before devenv:enterTest.
   tasks."agentgw:test" = {
-    exec = "go vet ./... && go test ./...";
+    exec = "go vet ./... && go test -race ./...";
     before = [ "devenv:enterTest" ];
   };
 }

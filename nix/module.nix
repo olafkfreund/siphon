@@ -160,6 +160,14 @@ in
         TimeoutStopSec = "20s"; # bounds agentgw's blocking stop of orphans
         LimitFSIZE = "16M"; # caps stdout/stderr files (and anything else it writes)
         TasksMax = 256;
+        # System-wide agent CLI config must not reach agents: managed hooks,
+        # instructions or extra MCP servers there would bypass the allowlist.
+        InaccessiblePaths = [
+          "-/etc/claude-code"
+          "-/etc/codex"
+          "-/etc/gemini"
+          "-/etc/antigravity"
+        ];
         PrivateTmp = true;
         ProtectSystem = "strict";
         ProtectHome = true;
