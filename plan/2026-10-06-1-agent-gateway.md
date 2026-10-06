@@ -263,3 +263,7 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
   - Retention also removes approvals of purged jobs and nulls `parent_id` on surviving children.
   - Workers are woken by a nudge channel plus a 1 s idle poll.
 - Step 9/11 (agent auth): `claude --bare` authenticates only via `ANTHROPIC_API_KEY` or an `apiKeyHelper` passed with `--settings` (per `claude --help`). In the systemd sandbox, the API key file goes in via `LoadCredential`, and a generated settings JSON sets `apiKeyHelper` to read `/run/credentials/<unit>/<name>`. This is wired in step 11.
+- Step 10:
+  - The approval id is the job id (one approval per job): `approve|deny <job id>` and `/a/<job id>/<token>`.
+  - The one-shot link (with its token) is logged at slog info after commit, so the operator can see it. The audit row stores `/a/<id>/***`.
+  - Smoke-tested by hand: `run-once`, then `jobs ls`, then `approve` (a second approve is rejected), then `run-once` again, ending in a `done` job.

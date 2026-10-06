@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -106,6 +107,7 @@ func (p *Pipeline) HandleEvent(ctx context.Context, ev rule.Event, dryRun bool) 
 	now := p.Now()
 	var fires []rule.Fire
 	var ids []int64
+	var links []string
 	var errs []error
 	for _, r := range p.Cfg.Rules {
 		fs, err := rule.Evaluate(ctx, tx, r, ev, now, dryRun)
@@ -117,35 +119,49 @@ func (p *Pipeline) HandleEvent(ctx context.Context, ev rule.Event, dryRun bool) 
 			continue
 		}
 		for _, f := range fs {
-			id, err := p.enqueue(tx, r, f, ev.Depth, now)
+			id, link, err := p.enqueue(tx, r, f, ev.Depth, now)
 			if err != nil {
 				return nil, nil, err
 			}
 			ids = append(ids, id)
+			if link != "" {
+				links = append(links, link)
+			}
 		}
 	}
 	if !dryRun {
 		if err := tx.Commit(); err != nil {
 			return nil, nil, err
 		}
+		for _, l := range links { // after commit, so a rolled-back job never logs a link
+			slog.Info("approval required", "link", l)
+		}
 	}
 	return fires, ids, errors.Join(errs...)
 }
 
-func (p *Pipeline) enqueue(tx *sql.Tx, r config.Rule, f rule.Fire, depth int, now time.Time) (int64, error) {
+// enqueue inserts the job; for pending_approval it also creates the approval
+// in the same tx and returns its link path.
+func (p *Pipeline) enqueue(tx *sql.Tx, r config.Rule, f rule.Fire, depth int, now time.Time) (id int64, link string, err error) {
 	b, err := json.Marshal(Payload{Action: r.Action, Env: f.Env})
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	state := "queued"
 	if p.needsApproval(r) {
-		state = "pending_approval" // approvals rows and decisions arrive in plan step 10
+		state = "pending_approval"
 	}
-	id, err := store.InsertJob(tx, store.Job{Rule: r.Name, ActionJSON: string(b), State: state, RunAfter: now, Depth: depth}, now)
+	id, err = store.InsertJob(tx, store.Job{Rule: r.Name, ActionJSON: string(b), State: state, RunAfter: now, Depth: depth}, now)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
-	return id, store.Audit(tx, now, "rule:"+r.Name, "fire", id, f.Key)
+	if err := store.Audit(tx, now, "rule:"+r.Name, "fire", id, f.Key); err != nil {
+		return 0, "", err
+	}
+	if state == "pending_approval" {
+		link, err = p.newApproval(tx, id, now)
+	}
+	return id, link, err
 }
 
 func (p *Pipeline) needsApproval(r config.Rule) bool {
@@ -223,6 +239,9 @@ func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, ex
 // RunOnce polls every polled source once, then runs whatever got queued.
 func (p *Pipeline) RunOnce(ctx context.Context) error {
 	if err := p.Requeue(); err != nil {
+		return err
+	}
+	if err := p.ExpireApprovals(); err != nil {
 		return err
 	}
 	var errs []error

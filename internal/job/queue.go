@@ -42,6 +42,7 @@ func (p *Pipeline) Serve(ctx context.Context) error {
 		spawn(func() { p.worker(ctx, nudge) })
 	}
 	spawn(func() { p.retention(ctx) })
+	spawn(func() { p.expiryLoop(ctx) })
 
 	wg.Wait()
 	return nil
@@ -94,6 +95,21 @@ func (p *Pipeline) retention(ctx context.Context) {
 	for {
 		if err := store.Cleanup(p.Store.DB, p.Now()); err != nil {
 			slog.Error("retention", "err", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func (p *Pipeline) expiryLoop(ctx context.Context) {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		if err := p.ExpireApprovals(); err != nil {
+			slog.Error("approval sweep", "err", err)
 		}
 		select {
 		case <-ctx.Done():
