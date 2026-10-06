@@ -22,6 +22,22 @@ webhook  ─┘        cooldown, repeat             agent    claude, codex or ag
   per id; `repeat` and `cooldown` limit how often.
 - **Actions** run as jobs in a worker pool, with approval, audit and retention.
 
+## Development
+
+The project ships a [devenv](https://devenv.sh) shell (Go, gopls, sqlite, jq,
+curl, openssl) with `GOTOOLCHAIN=local`, so Go never downloads a toolchain:
+
+```sh
+devenv shell        # or `devenv allow` once, to activate on cd
+run-tests           # go vet + go test -race
+schema              # regenerate schema/agentgw.schema.json
+vm-test             # the NixOS VM test (nix build .#checks.x86_64-linux.vm)
+agentgw validate -config examples/agentgw.yaml
+devenv test         # what CI runs: vet + tests; fails on any failing test
+```
+
+`nix develop` still works for anyone without devenv.
+
 ## Quick start
 
 Needs Nix with flakes. The example config needs these in the environment

@@ -162,3 +162,7 @@ Revert the merge commit. The old `runner`/`api_key_file` configs keep working th
   - Written ahead of steps 4–5 against the approved decisions.
   - Step 8 must confirm or correct three README claims: the `claude setup-token` path, agy `GEMINI_API_KEY`, and the exact re-login message.
   - The README had no previous agent-auth section, so "Agents and subscriptions" is new.
+- **Owner request mid-task: a proper devenv shell.** Added `devenv.nix`, `devenv.yaml` and `devenv.lock` (Go from devenv-nixpkgs rolling, gopls, sqlite, jq, curl, openssl, `GOTOOLCHAIN=local`), with scripts `run-tests`, `schema`, `vm-test` and `agentgw`, plus a test task hooked before `devenv:enterTest`.
+  - `go.mod` relaxed from `go 1.26.8` to `go 1.26.0`, because devenv's nixpkgs has Go 1.26.7.
+  - Verified: `devenv test` passes, and fails with exit 1 on a deliberately failing canary test; `nix build` is unchanged.
+  - Not run: `devenv allow` (the user's consent).

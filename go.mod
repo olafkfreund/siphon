@@ -1,6 +1,6 @@
 module github.com/olafkfreund/MCP-AgentGateway
 
-go 1.26.8
+go 1.26.0
 
 require (
 	github.com/expr-lang/expr v1.17.8
