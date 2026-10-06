@@ -171,3 +171,7 @@ Revert the merge commit. The old `runner`/`api_key_file` configs keep working th
   - The agent-result event keeps a JSON-object answer's own fields at the top level, alongside `kind`/`result`/`raw`, so existing rules (`event.ok`) still match.
   - Classification applies to failed runs only.
   - Write-back is shape-validated with `cred.Validate`, then compare-and-swap saved, then audited as `credential_refreshed`.
+- Step 6:
+  - The VM test has a new subtest. Stand-in `claude`/`codex`/`agy` CLIs installed via `agentPackages` run in the template-unit sandbox on imported credentials. Each finds its login at the expected HOME path, can't read `/var/lib/agentgw/credentials`, and rewrites its login; all three markers land in the store via write-back, and `credentials ls` prints no tokens.
+  - **Behaviour note:** the deprecated `runner:` alias keeps only `runner[0]` (as approved), so a legacy runner that relied on extra args (the old VM `sh -c …` stand-in) must move to `command:`. The VM test was migrated.
+  - VM test: 8/8.
