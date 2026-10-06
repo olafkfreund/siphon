@@ -108,6 +108,13 @@
                   "properties": {
                     "attempts": {
                       "type": "integer"
+                    },
+                    "base": {
+                      "pattern": "^[0-9]+(ns|us|µs|ms|s|m|h)([0-9]+(ns|us|µs|ms|s|m|h))*$",
+                      "type": "string"
+                    },
+                    "factor": {
+                      "type": "number"
                     }
                   },
                   "type": "object"

@@ -318,3 +318,15 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
   - "byte-identical" htmx means identical below the added header comment (official SRI hash verified by the reviewer).
   - Bug found by the step-14 pipeline test (review L7): `MCP.Listen` blocked in `session.Wait()` ignoring ctx, so `serve` would hang on SIGTERM with an active subscription. The session is now closed on ctx cancel. go-sdk v1.8.0 uses `subscriptions/listen` (2026-07-28) under `Subscribe`, per the stack trace.
   - `listenDebounce` is a package var so tests can shorten it.
+- Step 15:
+  - Routine execution lives in `internal/job/routine.go`, not `internal/action`, because it needs the pipeline's agent/cmd runners.
+  - Progress `{steps, awaiting}` lives in the job `output` column, with `resume_step` as the next index and no migration. It is saved after every step, so a crash re-runs only the interrupted step.
+  - `retry.attempts` is total tries, with backoff `base*factor^n` (10 s, ×2, capped at 1 h) and ±20 % jitter.
+  - Each `approve` step creates a new approvals row, and `DecideApproval` uses the latest row.
+  - The payload carries `agent: true` for agent actions and agent-containing routines, so the daily cap counts both (Phase 1 L3).
+  - **The unit action was written by Opus, not the coder:** the coder agent's command guard blocks any command whose text contains `systemctl start`. The owner chose this.
+  - The allowlist is checked three times: in config, at runtime (`action.RunUnit`) and by polkit.
+- Steps 17–18:
+  - `cmd` actions now run in named `agentgw-run-<hex>.service` units, so the polkit rule can allow only `agentgw-(run|agent)-*` transient units (start/stop) and the `units` allowlist (start).
+  - **Residual risk:** polkit cannot see transient-unit properties, so control of the `agentgw` account is root-equivalent (it could request `User=root`). This is documented in the module and the README.
+  - The service runs with `NoNewPrivileges=true` (D-Bus plus polkit needs no setuid) and `CapabilityBoundingSet=""`.

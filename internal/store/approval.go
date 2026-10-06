@@ -39,7 +39,7 @@ func DecideApproval(db *sql.DB, jobID int64, approve bool, by, token string, now
 	var decision sql.NullString
 	var state string
 	err = tx.QueryRow(`SELECT a.token_hash, a.expires_at, a.decision, j.state
-		FROM approvals a JOIN jobs j ON j.id=a.job_id WHERE a.job_id=?`, jobID).Scan(&hash, &expires, &decision, &state)
+		FROM approvals a JOIN jobs j ON j.id=a.job_id WHERE a.job_id=? ORDER BY a.id DESC LIMIT 1`, jobID).Scan(&hash, &expires, &decision, &state)
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("job %d has no approval: %w", jobID, ErrNotFound)
 	}

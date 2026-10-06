@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -35,6 +36,30 @@ type Pipeline struct {
 	MCPTransport func(source string) mcp.Transport
 
 	runFn func(context.Context, store.QueuedJob) (string, int, string) // tests only
+	sleep func(context.Context, time.Duration) error                   // retry backoff; tests inject
+	rnd   func() float64                                               // jitter source; tests inject
+}
+
+// runUnit starts a unit and waits for it; tests stub it. The step/action
+// timeout arrives as the ctx deadline (cmdTimeout if there is none).
+var runUnit = func(ctx context.Context, p *Pipeline, unit string) (int, string) {
+	timeout := cmdTimeout
+	if d, ok := ctx.Deadline(); ok {
+		timeout = time.Until(d)
+	}
+	exit, out, err := action.RunUnit(ctx, unit, p.Cfg.Units, timeout, p.Cfg.Secrets())
+	if err != nil {
+		return exit, string(out) + err.Error()
+	}
+	return exit, string(out)
+}
+
+// unit re-checks the allowlist at runtime before anything is started.
+func (p *Pipeline) unit(ctx context.Context, name string) (int, string) {
+	if !slices.Contains(p.Cfg.Units, name) {
+		return -1, fmt.Sprintf("unit not allowlisted: %q", name)
+	}
+	return runUnit(ctx, p, name)
 }
 
 // New returns a Pipeline ready for Serve. The worker nudge channel is made
@@ -47,6 +72,9 @@ func New(cfg *config.Config, st *store.Store, now func() time.Time) *Pipeline {
 type Payload struct {
 	Action config.Action  `json:"action"`
 	Env    map[string]any `json:"env"`
+	// Agent marks jobs that run an agent (directly or in a routine step); the
+	// daily agent cap counts them.
+	Agent bool `json:"agent,omitempty"`
 }
 
 // Poll fetches one event from a polled source.
@@ -171,7 +199,8 @@ func (p *Pipeline) enqueue(tx *sql.Tx, r config.Rule, f rule.Fire, ev rule.Event
 	if depth > config.MaxDepth {
 		return 0, "", store.Audit(tx, now, "rule:"+r.Name, "skip_depth", 0, fmt.Sprintf("depth %d > %d", depth, config.MaxDepth))
 	}
-	if r.Action.Agent != "" {
+	hasAgent := r.Action.Agent != "" || p.routineHasAgent(r.Action.Routine)
+	if hasAgent {
 		n, err := store.CountAgentJobsSince(tx, now.Add(-24*time.Hour))
 		if err != nil {
 			return 0, "", err
@@ -180,7 +209,7 @@ func (p *Pipeline) enqueue(tx *sql.Tx, r config.Rule, f rule.Fire, ev rule.Event
 			return 0, "", store.Audit(tx, now, "rule:"+r.Name, "skip_agent_cap", 0, fmt.Sprintf("%d agent runs in 24h", n))
 		}
 	}
-	b, err := json.Marshal(Payload{Action: r.Action, Env: f.Env})
+	b, err := json.Marshal(Payload{Action: r.Action, Env: f.Env, Agent: hasAgent})
 	if err != nil {
 		return 0, "", err
 	}
@@ -237,6 +266,9 @@ func (p *Pipeline) runOne(ctx context.Context) (ran bool, err error) {
 		exec = p.runFn
 	}
 	state, exit, out := exec(ctx, j)
+	if state == statePaused {
+		return true, nil // routine waiting for approval; PauseJob already recorded it
+	}
 	if err := ctx.Err(); err != nil && exit == -1 {
 		// Killed by cancellation (exit -1 = signalled or never started): leave
 		// it running so the startup requeue retries it. A job that completed
@@ -271,17 +303,33 @@ func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, ex
 		return "done", 0, string(out)
 	case pl.Action.Agent != "":
 		return p.runAgent(ctx, j, pl)
+	case pl.Action.Unit != "":
+		uctx, cancel := context.WithTimeout(ctx, cmdTimeout)
+		defer cancel()
+		if code, out := p.unit(uctx, pl.Action.Unit); code != 0 {
+			return "failed", code, out
+		} else {
+			return "done", 0, out
+		}
+	case pl.Action.Routine != "":
+		return p.runRoutine(ctx, j, pl)
 	default:
-		return "failed", -1, "action type not implemented yet (unit/routine arrive in plan phase 3)"
+		return "failed", -1, "job has no action"
 	}
 }
 
 // runAgent runs the agent and feeds its JSON result back as an agent-result
 // event one level deeper; rules see it only with allow_agent_events (loop guard).
 func (p *Pipeline) runAgent(ctx context.Context, j store.QueuedJob, pl Payload) (string, int, string) {
+	state, exit, out, _ := p.agentExec(ctx, j, pl)
+	return state, exit, out
+}
+
+// agentExec is runAgent that also returns the agent's stdout (routine steps parse it).
+func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload) (string, int, string, []byte) {
 	a := p.Cfg.Agents[pl.Action.Agent]
 	if a == nil {
-		return "failed", -1, "unknown agent " + pl.Action.Agent
+		return "failed", -1, "unknown agent " + pl.Action.Agent, nil
 	}
 	servers := map[string]action.MCPServer{}
 	for _, name := range a.MCP {
@@ -301,10 +349,10 @@ func (p *Pipeline) runAgent(ctx context.Context, j store.QueuedJob, pl Payload) 
 	})
 	out := string(res.Output)
 	if err != nil {
-		return "failed", res.Exit, out + err.Error()
+		return "failed", res.Exit, out + err.Error(), nil
 	}
 	if res.Exit != 0 {
-		return "failed", res.Exit, out
+		return "failed", res.Exit, out, res.Stdout
 	}
 	if data, derr := source.DecodeJSON(res.Stdout); derr == nil {
 		ev := rule.Event{Source: config.AgentResultSource, Data: data, Depth: j.Depth + 1, ParentID: j.ID}
@@ -314,7 +362,7 @@ func (p *Pipeline) runAgent(ctx context.Context, j store.QueuedJob, pl Payload) 
 	} else {
 		slog.Warn("agent stdout is not JSON; no agent-result event", "job", j.ID, "err", derr)
 	}
-	return "done", 0, out
+	return "done", 0, out, res.Stdout
 }
 
 // RunOnce polls every polled source once, then runs whatever got queued.

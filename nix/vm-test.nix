@@ -74,6 +74,7 @@ pkgs.testers.runNixOSTest {
       };
 
       environment.systemPackages = [
+        pkgs.sqlite
         pkgs.curl
         pkgs.openssl
         pkgs.jq
@@ -100,6 +101,11 @@ pkgs.testers.runNixOSTest {
         out = machine.succeed(f"curl -sf -H 'Authorization: Bearer {TOKEN}' http://127.0.0.1:8080/api/jobs")
         return json.loads(out)
 
+    def dump():
+        print(machine.execute(f"curl -s -H 'Authorization: Bearer {TOKEN}' 'http://127.0.0.1:8080/api/jobs'")[1])
+        print(machine.execute("sqlite3 /var/lib/agentgw/state.db 'select id,rule,state,exit_code,output from jobs' 2>&1")[1])
+        print(machine.execute("journalctl -u agentgw -u 'agentgw-run-*' -u marker -u polkit --no-pager | tail -60")[1])
+
     machine.wait_for_unit("agentgw.service")
     machine.wait_for_open_port(8080)
 
@@ -113,7 +119,11 @@ pkgs.testers.runNixOSTest {
     with subtest("signed webhooks run a sandboxed cmd and an allowlisted unit"):
         assert hook('{"kind":"cmd","n":1}') == "202"
         assert hook('{"kind":"unit","n":2}') == "202"
-        machine.wait_until_succeeds("test -e /var/lib/marker/done", timeout=60)
+        try:
+            machine.wait_until_succeeds("test -e /var/lib/marker/done", timeout=60)
+        except Exception:
+            dump()
+            raise
         machine.wait_until_succeeds(
             f"curl -sf -H 'Authorization: Bearer {TOKEN}' http://127.0.0.1:8080/api/jobs"
             " | jq -e '[.[] | select(.state==\"done\")] | length == 2'",
