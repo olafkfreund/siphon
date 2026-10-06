@@ -13,7 +13,7 @@ import (
 )
 
 // listenDebounce is the minimum gap between hint-triggered ticks of one source.
-const listenDebounce = 5 * time.Second
+var listenDebounce = 5 * time.Second // var so tests can shorten it
 
 // Webhooks returns one verified handler per webhook source, for /hook/{source}.
 func (p *Pipeline) Webhooks() map[string]http.Handler {

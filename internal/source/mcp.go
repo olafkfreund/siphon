@@ -134,7 +134,13 @@ func (s MCP) Listen(ctx context.Context, onChange func()) error {
 		return err
 	}
 	onChange()
-	return session.Wait()
+	// Wait ignores ctx: close the session on cancellation, or serve hangs on SIGTERM.
+	defer context.AfterFunc(ctx, func() { session.Close() })()
+	err = session.Wait()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 
 type deadlineTransport struct {

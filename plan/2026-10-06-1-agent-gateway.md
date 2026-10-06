@@ -316,3 +316,5 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
   - The step-10 CLI `--server` (talking to `/api`) is dropped. The local-DB CLI plus portal/API cover it; YAGNI.
   - The plan's `web/server.go` is `web/web.go`.
   - "byte-identical" htmx means identical below the added header comment (official SRI hash verified by the reviewer).
+  - Bug found by the step-14 pipeline test (review L7): `MCP.Listen` blocked in `session.Wait()` ignoring ctx, so `serve` would hang on SIGTERM with an active subscription. The session is now closed on ctx cancel. go-sdk v1.8.0 uses `subscriptions/listen` (2026-07-28) under `Subscribe`, per the stack trace.
+  - `listenDebounce` is a package var so tests can shorten it.
