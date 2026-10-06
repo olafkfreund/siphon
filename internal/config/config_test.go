@@ -519,6 +519,8 @@ func TestEgressValidation(t *testing.T) {
 		"server: {egress: {listen: \"0.0.0.0:3128\"}}":                                                            "loopback",
 		"server: {egress: {listen: \"example.com:3128\"}}":                                                        "loopback",
 		"server: {egress: {listen: \"[::1]:3128\"}}":                                                              "IPv4 loopback",
+		"server: {egress: {socket: rel/egress.sock}}":                                                             "egress.socket",
+		"server: {egress: {socket: /run/agentgw/egress.sock}}":                                                    "",
 		"server: {egress: {allow: [\"bad host\"]}}":                                                               "egress.allow",
 		"server: {egress: {allow: [\"a.com:0\"]}}":                                                                "port must be",
 		"server: {egress: {allow: [\"a.com:70000\"]}}":                                                            "port must be",

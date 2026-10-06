@@ -13,9 +13,12 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/olafkfreund/MCP-AgentGateway/internal/source"
@@ -63,6 +66,37 @@ func (p *Proxy) Start(ctx context.Context) error {
 	p.mu.Lock()
 	p.addr = listener.Addr().String()
 	p.mu.Unlock()
+	return p.serve(ctx, listener)
+}
+
+// ServeUnix serves the proxy on a unix socket (0660, group of the parent
+// directory) and removes it when ctx is done.
+func (p *Proxy) ServeUnix(ctx context.Context, path string) error {
+	os.Remove(path)
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(path)
+	if err := os.Chmod(path, 0o660); err != nil {
+		listener.Close()
+		return err
+	}
+	fi, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		listener.Close()
+		return err
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+		if err := os.Chown(path, -1, int(st.Gid)); err != nil && !errors.Is(err, syscall.EPERM) {
+			listener.Close()
+			return err
+		}
+	}
+	return p.serve(ctx, listener)
+}
+
+func (p *Proxy) serve(ctx context.Context, listener net.Listener) error {
 	defer listener.Close()
 	stop := context.AfterFunc(ctx, func() { listener.Close() })
 	defer stop()

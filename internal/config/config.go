@@ -104,6 +104,7 @@ type EgressServer struct {
 	Listen     string   `yaml:"listen"` // loopback ip:port
 	Allow      []string `yaml:"allow"`  // global extra hosts: host, host:port or *.suffix[:port]
 	CmdDefault bool     `yaml:"cmd_default"`
+	Socket     string   `yaml:"socket"` // optional unix socket path (absolute)
 }
 
 // EgressAgent is an agent's egress setting; Enabled defaults to true.
@@ -552,6 +553,9 @@ func (c *Config) Validate() error {
 	// IPv4 only: the NixOS module derives the sandbox's IPAddressAllow=<ip>/32 from it.
 	if h, _, err := net.SplitHostPort(c.Server.Egress.Listen); err != nil || net.ParseIP(h).To4() == nil || !net.ParseIP(h).IsLoopback() {
 		add("server.egress.listen: must be an IPv4 loopback ip:port like 127.77.0.1:3128, got %q", c.Server.Egress.Listen)
+	}
+	if sock := c.Server.Egress.Socket; sock != "" && !filepath.IsAbs(sock) {
+		add("server.egress.socket: must be empty or an absolute path, got %q", sock)
 	}
 	checkAllow := func(p string, list []string) {
 		for _, e := range list {

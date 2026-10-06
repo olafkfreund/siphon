@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -51,7 +52,7 @@ func (p *Pipeline) startEgress(ctx context.Context) error {
 		listen = egressListenOverride
 	}
 	px := egress.New(listen, nil)
-	errc := make(chan error, 1)
+	errc := make(chan error, 2)
 	go func() { errc <- px.Start(ctx) }()
 	deadline := time.After(5 * time.Second)
 	for px.Addr() == "" {
@@ -61,6 +62,21 @@ func (p *Pipeline) startEgress(ctx context.Context) error {
 		case <-deadline:
 			return errors.New("egress proxy did not start listening")
 		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if sock := p.Cfg.Server.Egress.Socket; sock != "" {
+		go func() { errc <- px.ServeUnix(ctx, sock) }()
+		for {
+			if _, err := os.Stat(sock); err == nil {
+				break
+			}
+			select {
+			case err := <-errc:
+				return fmt.Errorf("egress proxy on %s: %w", sock, err)
+			case <-deadline:
+				return errors.New("egress proxy socket did not appear")
+			case <-time.After(10 * time.Millisecond):
+			}
 		}
 	}
 	p.egress = px

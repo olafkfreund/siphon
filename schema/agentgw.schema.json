@@ -279,6 +279,9 @@
             },
             "listen": {
               "type": "string"
+            },
+            "socket": {
+              "type": "string"
             }
           },
           "type": "object"

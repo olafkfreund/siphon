@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -191,5 +192,54 @@ func TestBlockedCap(t *testing.T) {
 	p.block(r, "bad\x00\nhost:443")
 	if len(r.blocked) != maxBlocked+1 || r.blocked["other"] != 200-maxBlocked+1 {
 		t.Fatalf("%d hosts, other=%d", len(r.blocked), r.blocked["other"])
+	}
+}
+
+func TestServeUnix(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer upstream.Close()
+	u, _ := url.Parse(upstream.URL)
+	host, portText, _ := net.SplitHostPort(u.Host)
+	var port int
+	fmt.Sscan(portText, &port)
+	p := New("127.0.0.1:0", source.ResolveAllowed)
+	sock := t.TempDir() + "/egress.sock"
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- p.ServeUnix(ctx, sock) }()
+	for {
+		if _, err := os.Stat(sock); err == nil {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Skipf("unix socket unavailable: %v", err)
+		case <-time.After(time.Millisecond):
+		}
+	}
+	if fi, _ := os.Stat(sock); fi.Mode().Perm() != 0o660 {
+		t.Fatalf("mode = %v", fi.Mode().Perm())
+	}
+	proxyURL, _, _ := p.Register([]Entry{{Host: host, Port: port, AllowPrivate: true}})
+	pu, _ := url.Parse(proxyURL)
+	token, _ := pu.User.Password()
+	auth := base64.StdEncoding.EncodeToString([]byte(pu.User.Username() + ":" + token))
+	for target, want := range map[string]int{u.Host: 200, "other.example:443": 403} {
+		conn, err := net.Dial("unix", sock)
+		if err != nil {
+			t.Fatal(err)
+		}
+		conn.SetDeadline(time.Now().Add(3 * time.Second))
+		fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\nProxy-Authorization: Basic %s\r\n\r\n", target, target, auth)
+		resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		conn.Close()
+		if err != nil || resp.StatusCode != want {
+			t.Fatalf("%s: %v %v", target, resp, err)
+		}
+	}
+	cancel()
+	<-done
+	if _, err := os.Stat(sock); !os.IsNotExist(err) {
+		t.Fatalf("socket not removed: %v", err)
 	}
 }
