@@ -34,22 +34,9 @@ func guardedClient(allowPrivate bool, timeout time.Duration, maxBody int64, stre
 			if err != nil {
 				return nil, err
 			}
-			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			ips, err := ResolveAllowed(ctx, host, allowPrivate)
 			if err != nil {
 				return nil, err
-			}
-			if len(ips) == 0 {
-				return nil, errors.New("no address found")
-			}
-			for _, ip := range ips {
-				addr, ok := netip.AddrFromSlice(ip.IP)
-				if !ok {
-					return nil, errors.New("invalid resolved IP")
-				}
-				addr = addr.Unmap()
-				if blockedIP(addr, allowPrivate) {
-					return nil, fmt.Errorf("blocked address: %s", addr)
-				}
 			}
 			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
 		},
@@ -61,6 +48,30 @@ func guardedClient(allowPrivate bool, timeout time.Duration, maxBody int64, stre
 		maxBody = 1 << 20
 	}
 	return &http.Client{Transport: limitedTransport{base: transport, limit: maxBody}, Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+}
+
+// ResolveAllowed resolves host and rejects it if any returned address is blocked.
+func ResolveAllowed(ctx context.Context, host string, allowPrivate bool) ([]netip.Addr, error) {
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	if len(ips) == 0 {
+		return nil, errors.New("no address found")
+	}
+	addrs := make([]netip.Addr, 0, len(ips))
+	for _, ip := range ips {
+		addr, ok := netip.AddrFromSlice(ip.IP)
+		if !ok {
+			return nil, errors.New("invalid resolved IP")
+		}
+		addr = addr.Unmap()
+		if blockedIP(addr, allowPrivate) {
+			return nil, fmt.Errorf("blocked address: %s", addr)
+		}
+		addrs = append(addrs, addr)
+	}
+	return addrs, nil
 }
 
 func blockedIP(addr netip.Addr, allowPrivate bool) bool {
