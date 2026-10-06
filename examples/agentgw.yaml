@@ -1,0 +1,129 @@
+# yaml-language-server: $schema=../schema/agentgw.schema.json
+#
+# A complete example. Secrets are only ever env:NAME or file:/path references.
+# Needed in the environment to validate: AGENTGW_TOKEN (32+ chars), FACTORY_TOKEN,
+# METRICS_API_KEY, GH_WEBHOOK_SECRET, PARTNER_WEBHOOK_SECRET.
+# Run it unsandboxed for a quick look with `sandbox: none` (not for real use).
+
+server:
+  listen: 127.0.0.1:8080            # portal + API + /hook/<source>; plain HTTP, put TLS in front
+  db: state.db                      # relative paths are resolved next to this file
+  workers: 4
+  token: env:AGENTGW_TOKEN          # portal login and API bearer token, 32+ characters
+  sandbox: systemd                  # systemd (default) | none
+
+limits:
+  agent_runs_per_day: 50            # rolling 24 h; routines containing an agent count once
+  http_max_body: 1MiB
+  http_timeout: 30s
+
+sources:
+  # MCP server over HTTP. Polls exactly the declared read, nothing else.
+  factory:
+    type: mcp
+    url: http://factory.lan:8090/mcp
+    read: { resource: "factory://tasks/running" }
+    poll: 1m
+    allow_private: true             # LAN server: lifts the private-address guard (warned at load)
+    auth: { bearer: env:FACTORY_TOKEN }
+
+  # MCP server over stdio, reading through one operator-declared read-only tool.
+  local-mcp:
+    type: mcp
+    command: [my-mcp-server, --stdio]
+    read: { tool: list_alerts, args: { severity: critical } }
+    poll: 5m
+
+  # Plain REST endpoint (GET by default, POST optional).
+  disk:
+    type: http
+    url: https://metrics.example.com/api/disk
+    poll: 5m
+    headers:
+      Accept: application/json      # harmless literals are fine
+      X-Api-Key: env:METRICS_API_KEY  # secret-looking headers must be references
+
+  # Webhooks: POST /hook/<source>, HMAC-verified.
+  github:
+    type: webhook
+    secret: env:GH_WEBHOOK_SECRET
+    signature: github               # X-Hub-Signature-256, sha256=<hex>
+    id: header.X-GitHub-Delivery
+
+  partner:
+    type: webhook
+    secret: env:PARTNER_WEBHOOK_SECRET
+    signature: sha256               # generic preset: hex HMAC-SHA256 of the body
+    signature_header: X-Partner-Signature
+    timestamp_header: X-Partner-Timestamp   # ±5 min window; only for providers that sign it
+
+rules:
+  # on: each, one fire per item id, an agent triages it (approval on by default).
+  - name: task-failed
+    source: factory
+    for_each: event.tasks           # split one payload into items
+    id: item.id
+    when: 'item.status == "failed"'
+    on: each
+    cooldown: 10m                   # mandatory for agent actions
+    action: { agent: triage-task }
+
+  # on: edge fires on false -> true; repeat re-fires while it stays true.
+  - name: disk-full
+    source: disk
+    when: 'event.used_pct > 90'
+    on: edge
+    repeat: 6h
+    action: { unit: nix-gc.service }   # starts an allowlisted systemd unit and waits for it
+
+  # A plain command; argv only, rendered per element, never through a shell.
+  - name: critical-alert
+    source: local-mcp
+    for_each: event.alerts
+    id: item.id
+    when: 'item.severity == "critical"'
+    on: each
+    action: { cmd: [notify-send, "Alert", "{{.item.summary}}"] }
+
+  # A routine on a signed webhook; it contains an agent step, so it needs a cooldown.
+  - name: pr-opened
+    source: github
+    when: 'headers["X-GitHub-Event"] == "pull_request" && event.action == "opened"'
+    on: each
+    id: event.number
+    cooldown: 1m
+    action: { routine: review-pr }
+
+  - name: partner-event
+    source: partner
+    when: 'event.type == "invoice.paid"'
+    approve: true                   # a human approves before this runs
+    action: { cmd: [echo, "invoice {{.event.id}} paid"] }
+
+  # Agent results re-enter as events on the built-in agent-result source,
+  # but only rules that opt in see them (loop guard, max depth 2).
+  - name: triage-followup
+    source: agent-result
+    allow_agent_events: true
+    when: 'event.ok == true'
+    action: { cmd: [echo, "triage finished"] }
+
+agents:
+  triage-task:
+    runner: [claude, --bare, -p]    # default; any argv runner works
+    prompt: "Task {{.item.id}} failed: {{.item.error}}. Diagnose with the factory tools and report as JSON."
+    mcp: [factory]                  # only these sources are exposed to the agent
+    allowed_tools: [mcp__factory__task_get_logs, mcp__factory__task_status]
+    max_turns: 15
+    max_budget_usd: 1
+    timeout: 10m
+    approve: true                   # default true for agents
+
+routines:
+  review-pr:
+    steps:
+      - { id: fetch, cmd: [gh, pr, view, "{{.event.number}}", --json, "title,body"], retry: { attempts: 3, base: 5s, factor: 2 } }
+      - { id: review, agent: triage-task, if: 'steps.fetch.exit == 0', timeout: 10m, approve: true }
+      - { id: notify, cmd: [notify-send, "PR reviewed"], continue_on_error: true }
+
+units: [nix-gc.service]             # allowlist for unit actions and unit steps
