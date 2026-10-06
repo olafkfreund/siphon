@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -77,7 +78,7 @@ func (s HTTP) Poll(ctx context.Context) (Event, error) {
 	}
 	headers := make(map[string]string, len(resp.Header))
 	for k := range resp.Header {
-		headers[k] = resp.Header.Get(k)
+		headers[strings.ToLower(k)] = resp.Header.Get(k)
 	}
 	return Event{Source: o.Name, ReceivedAt: time.Now(), Headers: headers, Data: data}, nil
 }

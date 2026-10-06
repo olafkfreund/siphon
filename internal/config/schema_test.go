@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"reflect"
+	"regexp"
 	"testing"
+	"time"
 )
 
 func TestSchemaUpToDate(t *testing.T) {
@@ -46,5 +49,26 @@ func TestSchemaRuleStructure(t *testing.T) {
 	}
 	if rule["additionalProperties"] != false {
 		t.Fatal("Rule must reject unknown fields")
+	}
+}
+
+func TestSchemaDurationPattern(t *testing.T) {
+	s, err := schemaFor(reflect.TypeFor[Duration]())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pattern, err := regexp.Compile(s["pattern"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{
+		"0", "+0", "-0", "1ns", "1us", "1µs", "1μs", "1ms", "1s", "1m", "1h",
+		"1.5h", ".5h", "1.h", "2h45m", "-1.5h", "+2h45m",
+		"", "+", ".", ".h", "1", "1.5", "1e3s", "1h-2m", "1d", " 1s", "1s ",
+	} {
+		_, parseErr := time.ParseDuration(value)
+		if got, want := pattern.MatchString(value), parseErr == nil; got != want {
+			t.Errorf("duration %q: schema matches %t, ParseDuration accepts %t", value, got, want)
+		}
 	}
 }

@@ -48,6 +48,11 @@ func RunCmd(ctx context.Context, argv []string, opts SandboxOptions, secrets []s
 	return exit, output, err
 }
 
+// RunCmdSplit also returns stdout alone for callers that parse JSON output.
+func RunCmdSplit(ctx context.Context, argv []string, opts SandboxOptions, secrets []string) (exit int, output, stdout []byte, err error) {
+	return runCommand(ctx, argv, opts, secrets, nil, true)
+}
+
 func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets []string, stdin []byte, separateStdout bool) (int, []byte, []byte, error) {
 	if len(argv) == 0 {
 		return -1, nil, nil, errors.New("empty command")
@@ -91,7 +96,10 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 		if mode == "systemd" {
 			// Killing the systemd-run client does not stop the transient unit
 			// (it belongs to PID 1); stop it explicitly so no action outlives us.
-			_ = exec.Command(stopUnitArgv(opts.Unit)[0], stopUnitArgv(opts.Unit)[1:]...).Run()
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer stopCancel()
+			stopArgv := stopUnitArgv(opts.Unit)
+			_ = exec.CommandContext(stopCtx, stopArgv[0], stopArgv[1:]...).Run()
 		}
 		return cmd.Process.Signal(syscall.SIGTERM)
 	}
