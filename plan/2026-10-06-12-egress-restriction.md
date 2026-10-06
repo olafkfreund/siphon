@@ -114,3 +114,61 @@ Revert the merge. Operators can disable it without a revert: `services.agentgw.e
   - The restricted template hides `/run/dbus` and `/run/systemd/resolve`, closing DNS exfiltration over local sockets; the VM probe asserts the bus is gone.
   - The README notes that with `egress.enable = false` the proxy variables are not enforced.
   - **Open, needs an owner decision:** the IP filter is IP-only, so services bound to all addresses are reachable on 127.77.0.1:<port>. nscd also still resolves names for the sandbox.
+
+## Amendment 1 (status: draft): private netns, unix-socket proxy, no nscd
+
+This implements spec Amendment 1 (approved). These decisions carry over and are binding:
+- The restricted template gets `PrivateNetwork=yes`, keeps `IPAddressDeny=any`, and changes `IPAddressAllow` to `127.0.0.1/32`.
+- The proxy also listens on a unix socket at `/run/agentgw/egress.sock` (`agentgw:agentgw-io`, `0660`), which is bind-mounted into the restricted template.
+- `exec-job` forwards `127.0.0.1:3128` inside the namespace to that socket. The run's `HTTPS_PROXY` points there, and proxy auth and allowlists are unchanged.
+- The TCP listener stays, for `sandbox: none`.
+- The restricted template also hides `/run/nscd`.
+- The open template is unchanged.
+
+| # | Step | Who | Lane |
+|---|---|---|---|
+| 7 | Proxy unix listener + config | coder | `internal/egress`, `internal/config`, `internal/job` |
+| 8 | Forwarder in exec-job + env rewrite | coder (after 7) | `internal/action` |
+| 9 | Module: netns, bind, nscd, socket setting | Opus | `nix/module.nix` |
+| 10 | VM test: wildcard-bound API, no DNS, real CLIs | Opus | `nix/vm-test.nix` |
+
+7. **Unix listener.**
+   - `server.egress.socket` is a string, default `""` (no unix listener); the module sets it. `validate` requires an absolute path when it is set.
+   - `(*Proxy).ServeUnix(ctx, path)`:
+     - removes a stale socket, listens, `chmod 0660`, and changes the socket's group to the parent directory's group (agentgw is a member);
+     - serves with the same handler as TCP and removes the socket when ctx is done.
+   - `startEgress` starts it next to TCP when it is set, and a start error stops agentgw, the same as TCP.
+   - Test: CONNECT through the unix socket reaches an allowed `httptest` host and gets 403 for another.
+8. **Forwarder.**
+   - `EgressEnv` gains `Socket string`. In systemd mode, when `Socket != ""`:
+     - the proxy URL's host part is rewritten to `127.0.0.1:3128` (the credentials are kept);
+     - `JobSpec` gains `EgressSocket string`.
+   - In `execJob`, when `spec.EgressSocket != ""`:
+     - listen on `127.0.0.1:3128` before starting the child;
+     - for each connection, dial the unix socket and copy both ways;
+     - close the listener when the child exits.
+     - If the listen fails, the job fails (exit 1, with a message on stderr). It never runs without the forwarder.
+   - `sandbox: none` and an empty socket are unchanged (TCP URL).
+   - Masking still covers the token.
+   - Tests: the env rewrite and the job spec field via the fake systemd seam; an `execJob` unit test with a temp unix socket echo server, where the child (a test helper) connects to `127.0.0.1:3128` and gets the echo. Skip if the port is taken.
+9. **Module.**
+   - agentgw.service: `RuntimeDirectory = "agentgw"`, `RuntimeDirectoryMode = "0750"`, with the group set via `RuntimeDirectory` ownership to `agentgw-io` (or chgrp in the Go step; whichever works under `RestrictSUIDSGID`, logged as a deviation).
+   - Set `settings.server.egress.socket` by default to `/run/agentgw/egress.sock` when `egress.enable`.
+   - Restricted template:
+     - `PrivateNetwork = true`
+     - `IPAddressAllow = [ "127.0.0.1/32" ]`
+     - `BindPaths = [ "/run/agentgw/egress.sock" ]`
+     - add `-/run/nscd` to `InaccessiblePaths`.
+   - The open template is unchanged.
+10. **VM test.**
+    - agentgw listens on `0.0.0.0:8080`; the existing curls still use 127.0.0.1.
+    - The probe must fail to reach `127.77.0.1:8080`, `127.0.0.1:8080` and the external IP (taken from `/etc/hosts`), and `getent hosts external` must fail.
+    - The allowed host still works through the proxy.
+    - The real `claude-code` (unfree, allowed in the test's pkgs) and `codex` packages are added to `agentPackages` and run inside the restricted template through a cmd with egress enabled. Each runs `--version` (exit 0), then one prompt with a dummy API key that must fail with a network or auth error, not a user-lookup crash.
+    - All existing subtests stay green.
+
+**Order:** 7 → 8 → 9 → 10.
+
+**Review:** the same fresh Opus security reviewer, on the amendment's diff, before the PR.
+
+**Rollback:** revert the amendment commits. The previous design (IP filter only) still works.
