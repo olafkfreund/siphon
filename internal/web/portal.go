@@ -174,7 +174,7 @@ func (s *server) page(w http.ResponseWriter, r *http.Request, name string, v vie
 		poll = v.JobV.State == "running" || v.JobV.State == "queued" || v.JobV.State == "pending_approval"
 	}
 	s.render(w, "layout", layout{Title: titles[name], Path: r.URL.RequestURI(), CSRF: v.CSRF, Active: active[name],
-		Pending: len(pending), Poll: poll, Body: template.HTML(body.String())})
+		Pending: len(pending), Poll: poll, Banner: s.Banner, Body: template.HTML(body.String())})
 }
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {

@@ -214,7 +214,9 @@ in
       serviceConfig = {
         ExecStartPre = [
           "+${migrateLegacyState}"
-          "${cfg.package}/bin/siphon validate -config ${configFile}"
+          # -file-only: a bad portal edit must not stop the service; serve falls
+          # back to the last valid revision and shows a banner instead.
+          "${cfg.package}/bin/siphon validate -file-only -config ${configFile}"
         ];
         ExecStart = "${cfg.package}/bin/siphon serve -config ${configFile}";
         User = "siphon";

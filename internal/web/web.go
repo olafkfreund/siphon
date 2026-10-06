@@ -35,6 +35,7 @@ type Options struct {
 	// Config returns the live config (Pipeline.Config); Apply makes a new one live (Pipeline.Apply).
 	Config func() *config.Config
 	Apply  func(*config.Config) error
+	Banner string // shown in red on every page (startup fallback notice)
 	// Decide approves or denies a pending job (Pipeline.Decide). Nil uses the store directly.
 	Decide func(jobID int64, approve bool, by string) error
 	// Hooks are mounted at POST /hook/{source}, unauthenticated: HMAC is their auth.

@@ -36,7 +36,8 @@ var version = "dev"
 const usage = `usage: siphon <command> [flags]
 
 commands:
-  validate [-config f] [-v]               check a config file (-v: print egress allowlists)
+  validate [-config f] [-v] [-file-only]  check the config (file + portal edits; -file-only: file alone; -v: print egress allowlists)
+  config export [-config f]               print the effective YAML (file + portal edits)
   rules test [-config f] <rule> <event>   dry-run a rule against a saved event (JSON file)
   run-once [-config f]                    poll every source once and run matching actions
   serve [-config f]                       run the daemon
@@ -76,6 +77,12 @@ func main() {
 		}
 	case "validate":
 		err = validate(args)
+	case "config":
+		if len(args) == 0 || args[0] != "export" {
+			err = errors.New("usage: siphon config export [-config f]")
+			break
+		}
+		err = configExport(args[1:])
 	case "rules":
 		if len(args) == 0 || args[0] != "test" {
 			err = errors.New("usage: siphon rules test [-config f] <rule> <event.json>")
@@ -123,21 +130,145 @@ func resolveConfig(fs *flag.FlagSet, path string) string {
 	return path
 }
 
-// load parses -config from args, loads and validates it; rest are positional args.
+// load parses -config from args, loads and validates it (file plus portal
+// edits unless -file-only); rest are positional args.
 func load(name string, args []string) (*config.Config, []string, error) {
+	cfg, rest, _, err := loadCfg(name, args, false)
+	return cfg, rest, err
+}
+
+// loadCfg is load; with fallback, an overlay that makes the config invalid is
+// replaced by the last valid revision (or the file alone) and banner says so.
+func loadCfg(name string, args []string, fallback bool) (*config.Config, []string, string, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	path := fs.String("config", "siphon.yaml", "config file")
+	fileOnly := fs.Bool("file-only", false, "ignore portal edits")
 	if err := fs.Parse(args); err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
-	cfg, err := config.Load(resolveConfig(fs, *path))
-	if err != nil {
-		return nil, nil, err
+	p := resolveConfig(fs, *path)
+	var items, last []config.Item
+	if !*fileOnly {
+		base, err := config.Load(p)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		if items, last, err = dbOverlay(base.Server.DB); err != nil {
+			return nil, nil, "", err
+		}
+	}
+	var cfg *config.Config
+	var banner string
+	var err error
+	if fallback {
+		cfg, banner, err = pickConfig(p, items, last)
+	} else {
+		cfg, err = tryLoad(p, items)
+	}
+	if cfg == nil {
+		return nil, nil, "", err
 	}
 	for _, w := range cfg.Warnings() {
 		fmt.Fprintln(os.Stderr, "warning:", w)
 	}
-	return cfg, fs.Args(), cfg.Validate()
+	return cfg, fs.Args(), banner, err
+}
+
+// tryLoad loads the file plus items and validates; the config is returned
+// with a Validate error so `validate` can still list warnings first.
+func tryLoad(path string, items []config.Item) (*config.Config, error) {
+	cfg, _, err := config.LoadWithOverlay(path, items)
+	if err != nil {
+		return nil, err
+	}
+	return cfg, cfg.Validate()
+}
+
+// pickConfig is serve's startup decision: file + items, else file + the last
+// valid revision's items, else the file alone. banner is set on a fallback.
+func pickConfig(path string, items, last []config.Item) (*config.Config, string, error) {
+	cfg, err := tryLoad(path, items)
+	if err == nil || len(items) == 0 {
+		return cfg, "", err
+	}
+	for _, c := range []struct {
+		items []config.Item
+		name  string
+	}{{last, "the last valid revision"}, {nil, "the file alone"}} {
+		if c.name == "the last valid revision" && last == nil {
+			continue
+		}
+		if fb, ferr := tryLoad(path, c.items); ferr == nil {
+			slog.Error("portal edits could not be applied", "err", err, "fallback", c.name)
+			return fb, fmt.Sprintf("Portal edits could not be applied: %v; running on %s", err, c.name), nil
+		}
+	}
+	return nil, "", err
+}
+
+// dbOverlay reads the portal edits and the last revision's items from the DB,
+// if it exists (it is never created here).
+func dbOverlay(dbPath string) (items, last []config.Item, err error) {
+	if dbPath == ":memory:" {
+		return nil, nil, nil
+	}
+	if _, serr := os.Stat(dbPath); serr != nil {
+		return nil, nil, nil
+	}
+	st, err := store.Open(dbPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer st.Close()
+	cis, err := store.ConfigItems(st.DB)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, i := range cis {
+		items = append(items, config.Item{Kind: i.Kind, Name: i.Name, YAML: i.YAML, Deleted: i.Deleted})
+	}
+	rev, ok, err := store.LatestRevision(st.DB)
+	if err != nil || !ok {
+		return items, nil, err
+	}
+	// items_json is the revision's full snapshot: a JSON array of store.ConfigItem.
+	var snap []store.ConfigItem
+	if json.Unmarshal([]byte(rev.ItemsJSON), &snap) != nil {
+		return items, nil, nil
+	}
+	last = []config.Item{}
+	for _, i := range snap {
+		last = append(last, config.Item{Kind: i.Kind, Name: i.Name, YAML: i.YAML, Deleted: i.Deleted})
+	}
+	return items, last, nil
+}
+
+// configExport prints the effective YAML: the file with the portal edits applied.
+func configExport(args []string) error {
+	fs := flag.NewFlagSet("config export", flag.ContinueOnError)
+	path := fs.String("config", "siphon.yaml", "config file")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	p := resolveConfig(fs, *path)
+	base, err := config.Load(p)
+	if err != nil {
+		return err
+	}
+	items, _, err := dbOverlay(base.Server.DB)
+	if err != nil {
+		return err
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return err
+	}
+	out, _, err := config.Effective(b, items)
+	if err != nil {
+		return err
+	}
+	_, err = os.Stdout.Write(out)
+	return err
 }
 
 func validate(args []string) error {
@@ -340,7 +471,7 @@ func openLocal(fs *flag.FlagSet, args []string) (*store.Store, []string, error) 
 }
 
 func serve(ctx context.Context, args []string) error {
-	cfg, _, err := load("serve", args)
+	cfg, _, banner, err := loadCfg("serve", args, true)
 	if err != nil {
 		return err
 	}
@@ -368,7 +499,7 @@ func serve(ctx context.Context, args []string) error {
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		Handler: web.New(web.Options{
-			Token: cfg.Server.Token.Value, Store: st, Config: p.Config, Apply: p.Apply, Decide: p.Decide,
+			Token: cfg.Server.Token.Value, Store: st, Config: p.Config, Apply: p.Apply, Banner: banner, Decide: p.Decide,
 			Hooks: p.Webhooks(), Now: time.Now,
 		}),
 	}
