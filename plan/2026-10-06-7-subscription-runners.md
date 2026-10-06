@@ -175,3 +175,11 @@ Revert the merge commit. The old `runner`/`api_key_file` configs keep working th
   - The VM test has a new subtest. Stand-in `claude`/`codex`/`agy` CLIs installed via `agentPackages` run in the template-unit sandbox on imported credentials. Each finds its login at the expected HOME path, can't read `/var/lib/agentgw/credentials`, and rewrites its login; all three markers land in the store via write-back, and `credentials ls` prints no tokens.
   - **Behaviour note:** the deprecated `runner:` alias keeps only `runner[0]` (as approved), so a legacy runner that relied on extra args (the old VM `sh -c …` stand-in) must move to `command:`. The VM test was migrated.
   - VM test: 8/8.
+- Step 8 (live checks, 2026-10-06, `sandbox: none`, credentials imported into agentgw's store from the owner's real logins; access tokens still valid for hours to days, so no refresh or rotation touched the owner's own sessions):
+  - **Claude (Max):** done, 2 turns, `get_status` called, no denials, result `{"severity": "medium"}`.
+  - **Codex (ChatGPT plan):** done, `demo/get_status` completed, result `medium`.
+  - Import stripped all `mcpOAuth` entries, `credentials ls` showed expiry only, and no access-token prefix appears in any job output.
+  - **agy:** authentication verified earlier, but the full run is pending because the account quota resets about 9.5 h after 12:00.
+  - **Not verified (need the owner):** `claude setup-token` with `CLAUDE_CODE_OAUTH_TOKEN`, an agy API key with `GEMINI_API_KEY`, and API-key runs per provider. The README now labels these "not yet verified".
+  - README corrections: the re-login and quota messages now match the code, and the claim that "validate rejects agy API key" (never implemented) is removed.
+  - **Observation:** `/etc/codex/hooks` (system-wide codex config) ran during the codex job. System `/etc` CLI config applies inside the sandbox too, and the README says so.

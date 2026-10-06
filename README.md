@@ -205,7 +205,7 @@ sandbox never sees; agentgw hands each run only the files it needs.
 | Provider | Log in | Import |
 |---|---|---|
 | claude | `claude` (then `/login`) | `sudo -u agentgw agentgw credentials import -config <path> claude-max < ~/.claude/.credentials.json` |
-| claude, non-rotating | `claude setup-token` | `... credentials import -config <path> -token-stdin claude-max` (paste the token on stdin) |
+| claude, non-rotating (not yet verified live) | `claude setup-token` | `... credentials import -config <path> -token-stdin claude-max` (paste the token on stdin; used as `CLAUDE_CODE_OAUTH_TOKEN`) |
 | codex | `codex login` | `sudo -u agentgw agentgw credentials import -config <path> chatgpt < ~/.codex/auth.json` |
 | agy | `agy` (sign in) | `sudo -u agentgw agentgw credentials import -config <path> google < ~/.gemini/antigravity-cli/antigravity-oauth-token` |
 
@@ -238,16 +238,31 @@ enter job output, and credential contents are masked in it.
 login so two runs never race a rotating refresh token; extra jobs wait.
 
 If a login stops working, the job fails with
-`credential <name> needs re-login: <command>` and the audit log records
-`credential_reauth`. Log in again and re-import. Quota errors are reported as
-`quota/rate limit: ...` and are not treated as auth failures.
+`credential <name> needs re-login: log in with <kind> on the host, then run
+agentgw credentials import <name>`, and the audit log records
+`credential_reauth`. Quota errors are reported as
+`quota/rate limit reached for <name>` and are not treated as auth failures.
+Each refreshed token that is saved back is audited as `credential_refreshed`.
+
+Verified live (2026-10-06) on real subscriptions: a Claude Max login and a
+ChatGPT-plan Codex login, each imported with `credentials import`, ran an
+agent that called an allowlisted MCP tool. Antigravity authenticated but was
+blocked by the account's own quota at the time; its full run is pending.
 
 ### API keys
 
 Set `api_key: env:NAME` or `file:/path` on the credential. Claude runs with
 `--bare` and `ANTHROPIC_API_KEY`; codex gets `{"OPENAI_API_KEY": ...}` in its
-`auth.json` with `forced_login_method=api`; agy uses `GEMINI_API_KEY` (if the
-CLI does not honour it, `validate` rejects an agy API-key credential).
+`auth.json` with `forced_login_method=api`; agy gets `GEMINI_API_KEY` (not yet
+verified against a live agy).
+
+### Where the CLIs come from
+
+Install them into the sandbox with `services.agentgw.agentPackages`
+(`pkgs.claude-code`, `pkgs.codex`; agy is not in nixpkgs, so use your own
+package). System-wide CLI configuration under `/etc` (for example
+`/etc/codex/`) is visible inside the sandbox and applies to agent runs; the
+user's own `~/.claude`, `~/.codex` and `~/.gemini` are not.
 
 ### Subscriptions and terms
 
