@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-// Sandboxed actions run in the Nix-defined template unit agentgw-action@<id>.service
+// Sandboxed actions run in a Nix-defined agentgw-action template unit
 // (see nix/module.nix). Its hardening is fixed in Nix, so agentgw can only ask
 // systemd to start that unit: no transient units, no way to request User=root.
 //
@@ -49,7 +49,12 @@ const outputCap = 1 << 20
 // FilePath is the in-unit path of a JobSpec file.
 func FilePath(name string) string { return filepath.Join(jobFilesDir, name) }
 
-func templateUnit(id string) string { return "agentgw-action@" + id + ".service" }
+func templateUnit(id string, restricted bool) string {
+	if restricted {
+		return "agentgw-action@" + id + ".service"
+	}
+	return "agentgw-action-open@" + id + ".service"
+}
 
 func systemctl(ctx context.Context, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, "systemctl", append([]string{"--no-ask-password"}, args...)...)
@@ -87,9 +92,9 @@ var (
 	}
 )
 
-// templateRun runs spec in a fresh agentgw-action@ instance and returns its
+// templateRun runs spec in a fresh agentgw-action instance and returns its
 // exit code and (stdout, stderr). exit -1 means it never ran or was cancelled.
-func templateRun(ctx context.Context, dir string, spec JobSpec, captureLimit int) (int, []byte, []byte, map[int][]byte, error) {
+func templateRun(ctx context.Context, dir string, spec JobSpec, captureLimit int, restricted bool) (int, []byte, []byte, map[int][]byte, error) {
 	if dir == "" {
 		return -1, nil, nil, nil, errors.New("sandbox: no action directory configured")
 	}
@@ -128,7 +133,7 @@ func templateRun(ctx context.Context, dir string, spec JobSpec, captureLimit int
 	if err := os.Chmod(jobPath, 0o640); err != nil {
 		return -1, nil, nil, nil, err
 	}
-	unit := templateUnit(id)
+	unit := templateUnit(id, restricted)
 	runErr := startUnit(ctx, unit)
 	if ctx.Err() != nil {
 		// Cancelled or timed out: make sure the unit doesn't outlive the job.
@@ -356,12 +361,12 @@ func saveWriteback(home, runDir string, gid, i int, name string, files map[strin
 	return nil
 }
 
-// StopOrphans stops agentgw-action@ instances left running by a crashed
+// StopOrphans stops agentgw-action instances left running by a crashed
 // agentgw (they live outside its cgroup) and waits for them, so their jobs
 // can be requeued without two copies running at once.
 func StopOrphans(ctx context.Context) error {
-	err := stopUnits(ctx, "agentgw-action@*.service")
-	resetFailed("agentgw-action@*.service")
+	err := stopUnits(ctx, "agentgw-action@*.service", "agentgw-action-open@*.service")
+	resetFailed("agentgw-action@*.service", "agentgw-action-open@*.service")
 	return err
 }
 
