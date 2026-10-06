@@ -332,3 +332,19 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
   - The service runs with `NoNewPrivileges=true` (D-Bus plus polkit needs no setuid) and `CapabilityBoundingSet=""`.
   - **The VM test caught a real bug, now fixed:** stopping agentgw left `agentgw-run-*` transient units running (killing the systemd-run client doesn't stop a PID 1-owned unit). On cancellation, runCommand now also asks systemd to stop the named unit (`--no-block`). All five VM subtests pass: health/auth, unsigned webhook 401, sandboxed cmd + allowlisted unit end to end, polkit refusing non-allowlisted units and arbitrary transient units, and no orphaned units after stop.
 - Step 19: adding a source takes one new file plus cases in three places (config `validateSource`, `Pipeline.Poll`, schema regeneration), not "one switch case". The docs state the real number. `examples/agentgw.yaml` covers every source type, rule mode and action type, and passes `agentgw validate`.
+- Phase 3 review (fresh Opus reviewer; 1 critical, 2 high, 6 medium, 6 low):
+  - Coder fixed C1 (agent steps honour the agent's approve), H1 (routine snapshot plus awaited-step id), M3 (retry requeues with run_after, no worker sleep), M4 (no retry on agent steps), L1–L4, and the M2/L6 docs.
+  - Codex fixed M2 (http header keys lower-cased), L5 (the stop call has a 10 s bound) and L6 (schema Duration pattern), and folded RunCmdSplit into cmd.go.
+- **H2: sandbox redesigned at the owner's direction ("template unit now").** This changes the spec decision "systemd-run transient units".
+  - Every sandboxed cmd/agent run is an instance of the Nix-defined `agentgw-action@.service`, whose hardening is fixed in Nix.
+  - agentgw writes `<state>/actions/<id>/job.json` (argv, stdin, env, private files, timeout; 0600). The unit gets it as `LoadCredential=job:…`, and the hidden `agentgw exec-job` runs it inside the unit, writing files to its PrivateTmp.
+  - systemd writes stdout/stderr to pre-created 0600 files. The exit code comes from `start --wait`; on failure it is `ExecMainStatus` followed by `reset-failed`.
+  - polkit allows only start/stop/reset-failed on `^agentgw-action@[0-9a-f]{16}\.service$` and start on the allowlist. Transient units are refused, which removes the root-equivalence.
+  - The agent's MCP config and API key travel in the job file, and apiKeyHelper reads the unit-private copy.
+  - New module option `maxActionRuntime` (default 2h) as the RuntimeMaxSec ceiling.
+  - `sandbox: systemd` now needs the NixOS module.
+- My other fixes from that review:
+  - **M1:** startup stops `agentgw-action@*` orphans before RequeueRunning.
+  - **M5:** credentials and environmentFile are `types.str` with an absolute-and-outside-the-store assertion.
+  - **M6:** VM polkit checks assert "Access denied" from the rule, and cover verbs, non-hex names, transient units and a transient unit with the template's name plus `User=root`.
+- The VM test now has 6 subtests and all pass, including the sandboxed cmd running as non-root unable to write agentgw's state dir, and the crash case (SIGKILL → restart → orphans stopped before requeue, no duplicate instances).

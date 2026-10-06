@@ -173,20 +173,28 @@ Read these before running it anywhere that matters.
 - **No shell, ever.** `cmd` is an argv array, rendered element by element.
   `argv[0]` can never be templated, and a templated element may not start with
   `-`. Unit names in `units:` cannot be templated either.
-- **Every `cmd` and agent runs in a systemd sandbox** (`systemd-run` with
-  DynamicUser, ProtectSystem=strict, ProtectHome, PrivateTmp, NoNewPrivileges,
-  a runtime limit and the metadata address blocked). Secrets reach actions
-  through credentials, never argv. `server.sandbox: none` turns this off and is
-  warned about.
-- **polkit residual risk.** The NixOS module's polkit rule lets the `agentgw`
-  user start only `agentgw-run-*` / `agentgw-agent-*` transient units and the
-  units in your `units:` allowlist. polkit cannot see a transient unit's
-  properties, so it cannot stop that user from asking for `User=root`:
-  **control of the `agentgw` account is root-equivalent.** Run agentgw only on
-  hosts where that is acceptable, and keep its config, token and state private.
+- **Every `cmd` and agent runs in a fixed systemd sandbox.** The NixOS module
+  defines a template unit, `agentgw-action@.service` (DynamicUser,
+  ProtectSystem=strict, ProtectHome, PrivateTmp, NoNewPrivileges, an empty
+  capability set, the metadata addresses blocked and a `maxActionRuntime`
+  ceiling). agentgw hands each run its argv, stdin and private files (MCP
+  config, API key) as a 0600 job file loaded as a systemd credential, so
+  secrets never touch argv or a readable path. `server.sandbox: none` turns
+  this off and is warned about.
+- **agentgw cannot raise its own privileges.** The module's polkit rule lets
+  the `agentgw` user only start/stop/reset `agentgw-action@<16 hex>` instances
+  and start the units in your `units:` allowlist; transient units are refused.
+  The sandbox's settings live in Nix, so even a compromised agentgw process
+  cannot ask systemd for `User=root`. The NixOS VM test checks each denial.
+- **No orphaned actions.** Stopping agentgw stops its running instances; after
+  a crash, the next start stops leftover instances before requeueing their
+  jobs, so a step never runs twice at once.
 - **A timed-out or cancelled unit action leaves the unit running.** Unlike a
-  `cmd` or agent (its transient unit is stopped), an allowlisted unit is an
-  operator-owned service: agentgw stops waiting for it but does not stop it.
+  `cmd` or agent, an allowlisted unit is an operator-owned service: agentgw
+  stops waiting for it but does not stop it.
+- **`sandbox: systemd` needs the NixOS module** (it provides the template
+  unit and polkit rule). Elsewhere, install equivalent units yourself or use
+  `sandbox: none`.
 - **Outbound requests are guarded.** `http` and `mcp` sources reject loopback,
   private, link-local, CGNAT and cloud-metadata addresses after DNS resolution
   unless the source sets `allow_private: true`. No redirects; body size and time

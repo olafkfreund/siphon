@@ -246,7 +246,7 @@ func (p *Pipeline) execOnce(ctx context.Context, j store.QueuedJob, st config.St
 			return stepResult{Exit: -1, Output: err.Error()}
 		}
 		code, o, so, err := action.RunCmdSplit(ctx, argv,
-			action.SandboxOptions{Mode: p.Cfg.Server.Sandbox, Timeout: timeout}, p.Cfg.Secrets())
+			p.sandbox(timeout), p.Cfg.Secrets())
 		exit, out, stdout = code, string(o), so
 		if err != nil {
 			out += err.Error()

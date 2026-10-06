@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"os/signal"
 	"strconv"
 	"syscall"
@@ -52,6 +53,9 @@ func main() {
 	switch cmd, args := os.Args[1], os.Args[2:]; cmd {
 	case "version":
 		fmt.Println(version)
+	case "exec-job":
+		// Internal: runs inside agentgw-action@.service with the job as a credential.
+		os.Exit(action.ExecJob(filepath.Join(os.Getenv("CREDENTIALS_DIRECTORY"), "job"), os.Stdout, os.Stderr))
 	case "schema":
 		var b []byte
 		if b, err = config.Schema(); err == nil {

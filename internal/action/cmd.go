@@ -3,8 +3,6 @@ package action
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -60,24 +58,33 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 	if opts.Timeout <= 0 {
 		opts.Timeout = 30 * time.Second
 	}
-	var cancel context.CancelFunc
-	ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
-	defer cancel()
 	mode := opts.Mode
 	if mode == "" {
 		mode = "systemd"
 	}
+	limit := opts.Timeout
+	if mode == "systemd" {
+		limit += 30 * time.Second // exec-job enforces Timeout inside the unit; this is the backstop
+	}
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithTimeout(ctx, limit)
+	defer cancel()
+	maxExtra := 0
+	for _, secret := range secrets {
+		maxExtra = max(maxExtra, len(secret))
+	}
 	switch mode {
 	case "systemd":
-		if opts.Unit == "" {
-			// Named units let the NixOS polkit rule allow only agentgw-* transient units.
-			id := make([]byte, 8)
-			if _, err := rand.Read(id); err != nil {
-				return -1, nil, nil, err
-			}
-			opts.Unit = "agentgw-run-" + hex.EncodeToString(id) + ".service"
+		exit, so, se, err := templateRun(ctx, opts.Dir, JobSpec{
+			Argv: argv, Stdin: stdin, Env: opts.Env, Files: opts.Files,
+			TimeoutSec: int(opts.Timeout / time.Second),
+		})
+		output := capBytes(Mask(append(so, se...), secrets), 64<<10)
+		var stdoutBytes []byte
+		if separateStdout {
+			stdoutBytes = capBytes(Mask(so, secrets), 1<<20)
 		}
-		argv = SandboxArgv(argv, opts)
+		return exit, output, stdoutBytes, err
 	case "none":
 	default:
 		return -1, nil, nil, fmt.Errorf("invalid sandbox mode %q", mode)
@@ -92,24 +99,8 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 			cmd.Env = append(cmd.Env, name+"="+value)
 		}
 	}
-	cmd.Cancel = func() error {
-		if mode == "systemd" {
-			// Killing the systemd-run client does not stop the transient unit
-			// (it belongs to PID 1); stop it explicitly so no action outlives us.
-			stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer stopCancel()
-			stopArgv := stopUnitArgv(opts.Unit)
-			_ = exec.CommandContext(stopCtx, stopArgv[0], stopArgv[1:]...).Run()
-		}
-		return cmd.Process.Signal(syscall.SIGTERM)
-	}
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = 10 * time.Second
-	maxExtra := 0
-	for _, secret := range secrets {
-		if len(secret) > maxExtra {
-			maxExtra = len(secret)
-		}
-	}
 	buf := &cappedBuffer{limit: 64<<10 + maxExtra}
 	cmd.Stdout, cmd.Stderr = buf, buf
 	var stdout *cappedBuffer
@@ -167,4 +158,11 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 		_, _ = b.buf.Write(p[:min(len(p), b.limit-b.buf.Len())])
 	}
 	return n, nil
+}
+
+func capBytes(b []byte, n int) []byte {
+	if len(b) > n {
+		return b[:n]
+	}
+	return b
 }

@@ -3,8 +3,6 @@ package action
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -100,48 +98,34 @@ func agentArgv(o AgentOptions) ([]string, []byte, SandboxOptions, error) {
 	if err != nil {
 		return nil, nil, o.Sandbox, err
 	}
-	file, err := os.CreateTemp(o.WorkDir, ".mcp-*")
-	if err != nil {
-		return nil, nil, o.Sandbox, err
-	}
-	defer os.Remove(file.Name())
-	if err := file.Chmod(0600); err != nil {
-		file.Close()
-		return nil, nil, o.Sandbox, err
-	}
-	if _, err := file.Write(config); err != nil {
-		file.Close()
-		return nil, nil, o.Sandbox, err
-	}
-	if err := file.Close(); err != nil {
-		return nil, nil, o.Sandbox, err
-	}
-	path := filepath.Join(o.WorkDir, "mcp.json")
-	if err := os.Rename(file.Name(), path); err != nil {
-		return nil, nil, o.Sandbox, err
-	}
 	sandbox := o.Sandbox
 	sandbox.Timeout = o.Timeout
-	if sandbox.Mode == "" || sandbox.Mode == "systemd" {
-		id := make([]byte, 8)
-		if _, err := rand.Read(id); err != nil {
-			return nil, nil, sandbox, err
-		}
-		sandbox.Unit = "agentgw-agent-" + hex.EncodeToString(id) + ".service"
-		sandbox.Credentials = make(map[string]string, len(o.Sandbox.Credentials)+1)
-		for name, value := range o.Sandbox.Credentials {
-			sandbox.Credentials[name] = value
-		}
-		sandbox.Credentials["mcp.json"] = path
-		path = "/run/credentials/" + sandbox.Unit + "/mcp.json"
-	}
 	keyPath := o.APIKeyFile
 	if keyPath != "" && !safePath.MatchString(keyPath) {
 		return nil, nil, sandbox, fmt.Errorf("api key file %q: only [A-Za-z0-9/._-] allowed", keyPath)
 	}
-	if keyPath != "" && sandbox.Unit != "" {
-		sandbox.Credentials["api-key"] = keyPath
-		keyPath = "/run/credentials/" + sandbox.Unit + "/api-key"
+	var path string
+	if sandbox.Mode == "" || sandbox.Mode == "systemd" {
+		// The MCP config (bearer headers) and API key travel inside the job spec
+		// and land only in the unit's private /tmp, never in a readable path.
+		sandbox.Files = map[string][]byte{"mcp.json": config}
+		for k, v := range o.Sandbox.Files {
+			sandbox.Files[k] = v
+		}
+		path = FilePath("mcp.json")
+		if keyPath != "" {
+			key, err := os.ReadFile(keyPath)
+			if err != nil {
+				return nil, nil, sandbox, fmt.Errorf("api key file: %w", err)
+			}
+			sandbox.Files["api-key"] = key
+			keyPath = FilePath("api-key")
+		}
+	} else {
+		path = filepath.Join(o.WorkDir, "mcp.json")
+		if err := os.WriteFile(path, config, 0o600); err != nil {
+			return nil, nil, sandbox, err
+		}
 	}
 	argv := append([]string(nil), runner...)
 	argv = append(argv, "--strict-mcp-config", "--mcp-config", path, "--tools", "")

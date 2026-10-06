@@ -1,43 +1,13 @@
 package action
 
-import (
-	"fmt"
-	"sort"
-	"time"
-)
+import "time"
 
+// SandboxOptions selects how an action runs. Mode "systemd" (default) runs it
+// in the agentgw-action@ template unit (template.go); "none" runs it directly.
 type SandboxOptions struct {
-	Mode        string
-	Timeout     time.Duration
-	Credentials map[string]string
-	Unit        string
-}
-
-func SandboxArgv(argv []string, o SandboxOptions) []string {
-	seconds := int64((o.Timeout + time.Second - 1) / time.Second)
-	if seconds < 1 {
-		seconds = 1
-	}
-	result := []string{"systemd-run", "--wait", "--pipe", "--collect", "--quiet", "--setenv=HOME=/tmp",
-		"--property=DynamicUser=yes", "--property=ProtectSystem=strict", "--property=ProtectHome=yes",
-		"--property=PrivateTmp=yes", "--property=NoNewPrivileges=yes",
-		"--property=IPAddressDeny=169.254.0.0/16", fmt.Sprintf("--property=RuntimeMaxSec=%ds", seconds)}
-	if o.Unit != "" {
-		result = append(result, "--unit="+o.Unit)
-	}
-	keys := make([]string, 0, len(o.Credentials))
-	for name := range o.Credentials {
-		keys = append(keys, name)
-	}
-	sort.Strings(keys)
-	for _, name := range keys {
-		result = append(result, "--property=LoadCredential="+name+":"+o.Credentials[name])
-	}
-	return append(append(result, "--"), argv...)
-}
-
-// stopUnitArgv stops an action's transient unit on cancellation (polkit allows
-// stop for agentgw-* units). --no-block: never hold up our own exit.
-var stopUnitArgv = func(unit string) []string {
-	return []string{"systemctl", "stop", "--no-block", "--", unit}
+	Mode    string
+	Timeout time.Duration
+	Dir     string            // systemd: per-run directories live here (<state>/actions)
+	Env     map[string]string // systemd: extra child env (secrets stay off argv)
+	Files   map[string][]byte // systemd: private files, at FilePath(name) inside the unit
 }

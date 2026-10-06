@@ -294,7 +294,7 @@ func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, ex
 			return "failed", -1, err.Error()
 		}
 		code, out, err := action.RunCmd(ctx, argv,
-			action.SandboxOptions{Mode: p.Cfg.Server.Sandbox, Timeout: cmdTimeout}, p.Cfg.Secrets())
+			p.sandbox(cmdTimeout), p.Cfg.Secrets())
 		if err != nil {
 			return "failed", code, string(out) + err.Error()
 		}
@@ -344,7 +344,7 @@ func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload)
 	res, err := action.RunAgent(ctx, action.AgentOptions{
 		Runner: a.Runner, Prompt: a.Prompt, Env: pl.Env, MCP: servers,
 		AllowedTools: a.AllowedTools, MaxTurns: a.MaxTurns, MaxBudgetUSD: a.MaxBudgetUSD,
-		Timeout: time.Duration(a.Timeout), Sandbox: action.SandboxOptions{Mode: p.Cfg.Server.Sandbox},
+		Timeout: time.Duration(a.Timeout), Sandbox: p.sandbox(0),
 		Secrets: p.Cfg.Secrets(), WorkDir: filepath.Join(filepath.Dir(p.Cfg.Server.DB), "jobs", strconv.FormatInt(j.ID, 10)),
 		APIKeyFile: a.APIKeyFile,
 	})
@@ -451,4 +451,11 @@ func (p *Pipeline) nudgeWorkers() {
 	case p.nudge <- struct{}{}:
 	default:
 	}
+}
+
+// sandbox is the action sandbox for this pipeline; template-unit runs keep
+// their per-run directories next to the state DB (the NixOS StateDirectory).
+func (p *Pipeline) sandbox(timeout time.Duration) action.SandboxOptions {
+	return action.SandboxOptions{Mode: p.Cfg.Server.Sandbox, Timeout: timeout,
+		Dir: filepath.Join(filepath.Dir(p.Cfg.Server.DB), "actions")}
 }
