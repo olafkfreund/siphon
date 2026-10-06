@@ -83,7 +83,7 @@ func TestAgentResultLoopGuard(t *testing.T) {
 	if n := count(t, p, `SELECT count(*) FROM jobs WHERE state='done'`); n != 2 {
 		t.Fatalf("done jobs = %d, want 2 (agent + follows-agents)", n)
 	}
-	if n := count(t, p, `SELECT count(*) FROM jobs WHERE rule='follows-agents' AND depth=1 AND output LIKE 'followed%'`); n != 1 {
+	if n := count(t, p, `SELECT count(*) FROM jobs WHERE rule='follows-agents' AND depth=1 AND parent_id IS NOT NULL AND output LIKE 'followed%'`); n != 1 {
 		t.Fatalf("follows-agents depth-1 job missing")
 	}
 	if n := count(t, p, `SELECT count(*) FROM jobs WHERE rule='ignores-agents'`); n != 0 {
@@ -118,5 +118,35 @@ func TestDailyAgentCap(t *testing.T) {
 	}
 	if count(t, p, `SELECT count(*) FROM audit WHERE event='skip_agent_cap'`) != 1 {
 		t.Fatal("skip_agent_cap not audited")
+	}
+}
+
+// Phase 1 review M1: a job that completed while cancellation arrived is
+// recorded (never re-run); one killed by cancellation (exit -1) stays running.
+func TestCancellationFinishSemantics(t *testing.T) {
+	for _, tc := range []struct {
+		exit int
+		want string
+	}{{0, "done"}, {-1, "running"}} {
+		p := guardPipeline(t, "")
+		ctx, cancel := context.WithCancel(context.Background())
+		tx, _ := p.Store.DB.Begin()
+		if _, err := store.InsertJob(tx, store.Job{Rule: "x", ActionJSON: "{}"}, p.Now()); err != nil {
+			t.Fatal(err)
+		}
+		tx.Commit()
+		p.runFn = func(context.Context, store.QueuedJob) (string, int, string) {
+			cancel() // cancellation lands while the action runs
+			if tc.exit == 0 {
+				return "done", 0, "ok"
+			}
+			return "failed", -1, "killed"
+		}
+		p.runOne(ctx)
+		var state string
+		p.Store.DB.QueryRow(`SELECT state FROM jobs`).Scan(&state)
+		if state != tc.want {
+			t.Fatalf("exit %d: state %s, want %s", tc.exit, state, tc.want)
+		}
 	}
 }

@@ -109,7 +109,7 @@ func (p *Pipeline) HandleEvent(ctx context.Context, ev rule.Event, dryRun bool) 
 	now := p.Now()
 	var fires []rule.Fire
 	var ids []int64
-	var links []string
+	var approvalIDs []int64
 	var errs []error
 	for _, r := range p.Cfg.Rules {
 		fs, err := rule.Evaluate(ctx, tx, r, ev, now, dryRun)
@@ -121,7 +121,7 @@ func (p *Pipeline) HandleEvent(ctx context.Context, ev rule.Event, dryRun bool) 
 			continue
 		}
 		for _, f := range fs {
-			id, link, err := p.enqueue(tx, r, f, ev.Depth, now)
+			id, link, err := p.enqueue(tx, r, f, ev, now)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -130,7 +130,7 @@ func (p *Pipeline) HandleEvent(ctx context.Context, ev rule.Event, dryRun bool) 
 			}
 			ids = append(ids, id)
 			if link != "" {
-				links = append(links, link)
+				approvalIDs = append(approvalIDs, id)
 			}
 		}
 	}
@@ -138,8 +138,10 @@ func (p *Pipeline) HandleEvent(ctx context.Context, ev rule.Event, dryRun bool) 
 		if err := tx.Commit(); err != nil {
 			return nil, nil, err
 		}
-		for _, l := range links { // after commit, so a rolled-back job never logs a link
-			slog.Info("approval required", "link", l)
+		for _, id := range approvalIDs { // after commit, so a rolled-back job is never announced
+			// ponytail: the one-shot token is a credential and is never logged;
+			// operators approve by id via the CLI. Delivering /a/<id>/<token> is step 13's job.
+			slog.Info("approval required", "job", id, "approve", fmt.Sprintf("agentgw approve %d", id))
 		}
 	}
 	return fires, ids, errors.Join(errs...)
@@ -147,7 +149,8 @@ func (p *Pipeline) HandleEvent(ctx context.Context, ev rule.Event, dryRun bool) 
 
 // enqueue inserts the job; for pending_approval it also creates the approval
 // in the same tx and returns its link path.
-func (p *Pipeline) enqueue(tx *sql.Tx, r config.Rule, f rule.Fire, depth int, now time.Time) (id int64, link string, err error) {
+func (p *Pipeline) enqueue(tx *sql.Tx, r config.Rule, f rule.Fire, ev rule.Event, now time.Time) (id int64, link string, err error) {
+	depth := ev.Depth
 	if depth > config.MaxDepth {
 		return 0, "", store.Audit(tx, now, "rule:"+r.Name, "skip_depth", 0, fmt.Sprintf("depth %d > %d", depth, config.MaxDepth))
 	}
@@ -168,7 +171,7 @@ func (p *Pipeline) enqueue(tx *sql.Tx, r config.Rule, f rule.Fire, depth int, no
 	if p.needsApproval(r) {
 		state = "pending_approval"
 	}
-	id, err = store.InsertJob(tx, store.Job{Rule: r.Name, ActionJSON: string(b), State: state, RunAfter: now, Depth: depth}, now)
+	id, err = store.InsertJob(tx, store.Job{Rule: r.Name, ActionJSON: string(b), State: state, RunAfter: now, Depth: depth, ParentID: ev.ParentID}, now)
 	if err != nil {
 		return 0, "", err
 	}
@@ -217,9 +220,10 @@ func (p *Pipeline) runOne(ctx context.Context) (ran bool, err error) {
 		exec = p.runFn
 	}
 	state, exit, out := exec(ctx, j)
-	if err := ctx.Err(); err != nil {
-		// Interrupted, not failed: leave the job running so the startup
-		// requeue picks it up instead of losing the event.
+	if err := ctx.Err(); err != nil && exit == -1 {
+		// Killed by cancellation (exit -1 = signalled or never started): leave
+		// it running so the startup requeue retries it. A job that completed
+		// before cancellation is recorded below, so it never runs twice.
 		return false, err
 	}
 	if err := store.FinishJob(p.Store.DB, j.ID, state, exit, out, p.Now()); err != nil {
@@ -286,7 +290,7 @@ func (p *Pipeline) runAgent(ctx context.Context, j store.QueuedJob, pl Payload) 
 		return "failed", res.Exit, out
 	}
 	if data, derr := source.DecodeJSON(res.Output); derr == nil {
-		ev := rule.Event{Source: config.AgentResultSource, Data: data, Depth: j.Depth + 1}
+		ev := rule.Event{Source: config.AgentResultSource, Data: data, Depth: j.Depth + 1, ParentID: j.ID}
 		if _, _, herr := p.HandleEvent(ctx, ev, false); herr != nil {
 			slog.Warn("agent-result rules", "job", j.ID, "err", herr)
 		}
