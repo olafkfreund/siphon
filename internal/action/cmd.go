@@ -3,6 +3,8 @@ package action
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -62,6 +64,14 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 	}
 	switch mode {
 	case "systemd":
+		if opts.Unit == "" {
+			// Named units let the NixOS polkit rule allow only agentgw-* transient units.
+			id := make([]byte, 8)
+			if _, err := rand.Read(id); err != nil {
+				return -1, nil, nil, err
+			}
+			opts.Unit = "agentgw-run-" + hex.EncodeToString(id) + ".service"
+		}
 		argv = SandboxArgv(argv, opts)
 	case "none":
 	default:

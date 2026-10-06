@@ -20,6 +20,12 @@
         };
       });
 
+      nixosModules.default = import ./nix/module.nix self;
+
+      checks = forAll (pkgs: {
+        vm = import ./nix/vm-test.nix { inherit self pkgs; };
+      });
+
       devShells = forAll (pkgs: {
         default = pkgs.mkShell { packages = with pkgs; [ go gopls sqlite ]; };
       });
