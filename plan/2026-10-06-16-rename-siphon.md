@@ -189,3 +189,10 @@ copies, never moves), so a revert loses no data. Undo the repo rename with
   it keeps the literal name out of the file.
 - **Step 2:** the migration's marker file is created before the `chown`.
   The VM test caught the marker being owned by root.
+- **Review fixes (step 4 reviewer):**
+  - The migration script has `set -eu` and a `.migrating` marker, so an interrupted copy is retried. It never runs again after it completed (it checks the `MIGRATED_FROM_AGENTGW` marker), so an admin reset of state doesn't bring old state back.
+  - A config without `db:` keeps using an existing `agentgw.db`, with a warning (`TestLegacyDefaultDB`).
+  - The VM test asserts a fresh install has no marker.
+  - The README covers an explicit `server.db` under the old path.
+  - The argv0 notice now prints before the usage exit.
+  - **Accepted:** `nix run .#agentgw` runs `siphon` without the notice (`mainProgram`). The README URLs resolve once the repo is renamed, right after merge.

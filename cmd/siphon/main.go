@@ -49,12 +49,12 @@ commands:
 `
 
 func main() {
+	if filepath.Base(os.Args[0]) == "agentgw" { // legacy-name
+		fmt.Fprintln(os.Stderr, "agentgw is now siphon; this alias goes away in v0.2.0") // legacy-name
+	}
 	if len(os.Args) < 2 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
-	}
-	if filepath.Base(os.Args[0]) == "agentgw" { // legacy-name
-		fmt.Fprintln(os.Stderr, "agentgw is now siphon; this alias goes away in v0.2.0") // legacy-name
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

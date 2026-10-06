@@ -3,7 +3,7 @@ package action
 import "time"
 
 // SandboxOptions selects how an action runs. Mode "systemd" (default) runs it
-// in an siphon-action template unit (template.go); "none" runs it directly.
+// in a siphon-action template unit (template.go); "none" runs it directly.
 type SandboxOptions struct {
 	Mode      string
 	Timeout   time.Duration

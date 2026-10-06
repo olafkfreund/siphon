@@ -99,12 +99,19 @@ let
   etcManaged = d: lib.any (k: k == d || lib.hasPrefix "${d}/" k) (lib.attrNames config.environment.etc);
   # One-time move of an old install's state (copy, never move: rollback-safe).
   migrateLegacyState = pkgs.writeShellScript "siphon-migrate-state" ''
+    set -eu
     old=/var/lib/agentgw # legacy-name
-    if [ -e "$old/state.db" ] && [ ! -e ${stateDir}/state.db ]; then
-      ${pkgs.coreutils}/bin/cp -a "$old/." ${stateDir}/
-      ${pkgs.coreutils}/bin/touch ${stateDir}/MIGRATED_FROM_AGENTGW # legacy-name
-      ${pkgs.coreutils}/bin/chown -R siphon:siphon ${stateDir}
-      echo "siphon: migrated state from $old to ${stateDir} (old copy kept)"
+    new=${stateDir}
+    # Runs once: never after it completed (an admin may reset state later),
+    # and again if a previous copy was interrupted (.migrating left behind).
+    [ -e "$new/MIGRATED_FROM_AGENTGW" ] && exit 0 # legacy-name
+    if [ -e "$old/state.db" ] && { [ ! -e "$new/state.db" ] || [ -e "$new/.migrating" ]; }; then
+      ${pkgs.coreutils}/bin/touch "$new/.migrating"
+      ${pkgs.coreutils}/bin/cp -a "$old/." "$new/"
+      ${pkgs.coreutils}/bin/touch "$new/MIGRATED_FROM_AGENTGW" # legacy-name
+      ${pkgs.coreutils}/bin/chown -R siphon:siphon "$new"
+      ${pkgs.coreutils}/bin/rm "$new/.migrating"
+      echo "siphon: migrated state from $old to $new (old copy kept)"
     fi
   '';
 in

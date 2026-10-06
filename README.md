@@ -472,3 +472,5 @@ sandboxing and SSRF lessons). No Windmill code was copied.
 - On first start, state is copied from `/var/lib/agentgw` to `/var/lib/siphon`; the old copy is kept. <!-- legacy-name -->
 - `agentgw.yaml` is still read if `siphon.yaml` is missing. <!-- legacy-name -->
 - The `agentgw` binary is a symlink to `siphon` and prints a deprecation notice. <!-- legacy-name -->
+- Without a `db:` setting, an existing `agentgw.db` next to the config is still used (with a warning) until you rename it to `siphon.db`. <!-- legacy-name -->
+- If you set `settings.server.db` to a path under `/var/lib/agentgw`, change it to `/var/lib/siphon`: only the default state is migrated. <!-- legacy-name -->

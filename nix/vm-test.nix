@@ -398,6 +398,7 @@ pkgs.testers.runNixOSTest {
         assert "refreshed" not in listing and "r1" not in listing.split(), f"ls leaked a token: {listing}"
 
     with subtest("state from an old agentgw install is migrated"):  # legacy-name
+        machine.fail("test -e /var/lib/siphon/MIGRATED_FROM_AGENTGW")  # legacy-name: fresh install untouched
         jobs_before = machine.succeed("sqlite3 /var/lib/siphon/state.db 'select count(*) from jobs'").strip()
         machine.succeed("systemctl stop siphon.service")
         machine.succeed("mv /var/lib/siphon /var/lib/agentgw && chown -R root:root /var/lib/agentgw")  # legacy-name
