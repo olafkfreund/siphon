@@ -393,3 +393,22 @@ func TestAliasMappingAndWarningsAbsent(t *testing.T) {
 		t.Fatalf("spurious: %v", c.Warnings())
 	}
 }
+
+func TestLegacyExemptionAndNames(t *testing.T) {
+	key := filepath.Join(t.TempDir(), "k")
+	os.WriteFile(key, []byte("sk\n"), 0o600)
+	c, _ := Parse([]byte("agents: {a: {api_key_file: " + key + "}, b: {}}"))
+	if err := c.Validate(); err != nil {
+		t.Fatalf("legacy mix must validate: %v", err)
+	}
+	for yaml, want := range map[string]string{
+		"credentials: {Bad_Name: {provider: claude}}":                                            "name must match",
+		"credentials: {_apikey_x: {provider: claude}}":                                           "reserved",
+		"credentials: {_apikey_a: {provider: claude}}\nagents: {a: {api_key_file: " + key + "}}": "collides",
+	} {
+		c, _ := Parse([]byte(yaml))
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: want %q, got %v", yaml, want, err)
+		}
+	}
+}

@@ -80,18 +80,25 @@ func TestSaveCAS(t *testing.T) {
 	}
 	get := func() string { f, _ := s.Load("c"); return string(f["credentials.json"]) }
 	// still at starting bytes: swap
-	if err := s.Save("c", "credentials.json", v1, v2); err != nil || get() != string(v2) {
+	if w, err := s.Save("c", "credentials.json", v1, v2); err != nil || !w || get() != string(v2) {
 		t.Fatalf("cas swap: %v", err)
 	}
 	// stale writer (old=v1) with older expiry than stored v2: keep v2
-	if err := s.Save("c", "credentials.json", v1, claudeJSON("a0", 500)); err != nil || get() != string(v2) {
+	if w, err := s.Save("c", "credentials.json", v1, claudeJSON("a0", 500)); err != nil || w || get() != string(v2) {
 		t.Fatalf("older must lose: %v", err)
 	}
 	// stale writer with later expiry: wins
-	if err := s.Save("c", "credentials.json", v1, v3); err != nil || get() != string(v3) {
+	if w, err := s.Save("c", "credentials.json", v1, v3); err != nil || !w || get() != string(v3) {
 		t.Fatalf("newer must win: %v", err)
 	}
-	if err := s.Save("c", "../evil", nil, v1); err == nil {
+	prev, _ := os.ReadFile(filepath.Join(s.Dir, "c", "credentials.json.prev"))
+	if string(prev) != string(v2) {
+		t.Fatalf(".prev = %s", prev)
+	}
+	if fi, _ := os.Stat(filepath.Join(s.Dir, "c", "credentials.json.prev")); fi.Mode().Perm() != 0o600 {
+		t.Fatal(".prev mode")
+	}
+	if _, err := s.Save("c", "../evil", nil, v1); err == nil {
 		t.Fatal("bad file name accepted")
 	}
 }
@@ -153,4 +160,55 @@ func TestAcquireSerialises(t *testing.T) {
 	}
 	rel()
 	rel() // idempotent
+}
+
+func TestNormalizeDropsUnknownFields(t *testing.T) {
+	_, b, _ := Validate("codex", ImportFile, []byte(`{"tokens":{"access_token":"a","refresh_token":"r","account_id":"acc","evil":"E1"},"extra":"E2"}`))
+	_, g, _ := Validate("agy", ImportFile, []byte(`{"token":{"access_token":"a","refresh_token":"r","evil":"E3"},"extra":"E4"}`))
+	_, c, _ := Validate("claude", ImportFile, []byte(`{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","scopes":["x"],"evil":"E5"}}`))
+	for _, x := range []string{"E1", "E2", "E3", "E4", "E5"} {
+		if strings.Contains(string(b)+string(g)+string(c), x) {
+			t.Fatalf("%s survived normalisation", x)
+		}
+	}
+	if !strings.Contains(string(b), `"account_id":"acc"`) || !strings.Contains(string(c), `"scopes":["x"]`) {
+		t.Fatalf("known fields lost: %s %s", b, c)
+	}
+}
+
+func TestValidateForSubscription(t *testing.T) {
+	key := []byte(`{"OPENAI_API_KEY":"sk-1"}`)
+	if _, _, err := ValidateFor("codex", true, key); err == nil {
+		t.Fatal("api-key-only auth.json accepted for subscription")
+	}
+	if _, _, err := ValidateFor("codex", false, key); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSameAccount(t *testing.T) {
+	jwt := func(sub string) string {
+		return "h." + base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"`+sub+`"}`)) + ".s"
+	}
+	mk := func(acc, sub string) []byte {
+		return []byte(`{"tokens":{"access_token":"a","refresh_token":"r","account_id":"` + acc + `","id_token":"` + jwt(sub) + `"}}`)
+	}
+	for _, c := range []struct {
+		o, n []byte
+		want bool
+	}{
+		{mk("A", "u1"), mk("A", "u1"), true},
+		{mk("A", "u1"), mk("B", "u1"), false},
+		{mk("", "u1"), mk("", "u1"), true},
+		{mk("", "u1"), mk("", "u2"), false},
+		{mk("A", "u1"), mk("", "u1"), false},
+		{mk("A", "u1"), []byte("junk"), false},
+	} {
+		if got := SameAccount("codex", c.o, c.n); got != c.want {
+			t.Errorf("%s vs %s: %v", c.o, c.n, got)
+		}
+	}
+	if !SameAccount("claude", []byte("a"), []byte("b")) {
+		t.Fatal("claude has no identity: must be true")
+	}
 }

@@ -213,6 +213,19 @@ Import checks the file's shape. For Claude only the `claudeAiOauth` object is
 kept (MCP OAuth entries are dropped). `agentgw credentials ls -config <path>`
 shows name, provider, token expiry and last write-back, never a secret.
 
+### Trust: the login lives in the agent's sandbox
+
+A subscription agent has its login, **including the refresh token**, in its own
+sandbox HOME while it runs. A prompt-injected agent could send it out: network
+egress is open apart from the cloud metadata addresses. Use a dedicated or
+low-value account for each credential, and restrict egress where that matters
+(an HTTP proxy, or systemd `IPAddressAllow`/`IPAddressDeny` through a module
+override). On write-back agentgw re-validates the file's shape, drops unknown
+fields, and for codex refuses a login that belongs to a different account.
+Claude and agy logins carry no account id to compare. Each replace keeps the
+previous file as `<file>.prev` (0600) in the credential's store directory, so
+a bad write-back can be undone by copying it back.
+
 ### What each kind can enforce
 
 | Control | claude | codex | agy |
@@ -221,6 +234,11 @@ shows name, provider, token expiry and last write-back, never a secret.
 | Exact MCP tool allowlist | yes | yes (`enabled_tools`, per-tool approval) | no: only the listed MCP servers are configured |
 | `max_turns`, `max_budget_usd` | yes | no (timeout only) | no (`--print-timeout` and timeout) |
 | Prompt delivery | stdin | stdin | one `--print=<prompt>` argv element |
+
+agy's prompt is therefore on its argv: other users on the host can see it only
+under `sandbox: none` (the systemd sandbox hides `/proc`), and prompts over
+about 128 KiB fail. MCP bearer headers stay off argv: Codex gets its MCP
+configuration from a config file in its private HOME, not from `-c` flags.
 
 `agentgw validate` prints one warning per agent for each control its kind
 cannot enforce. Nothing is refused: the systemd sandbox remains the outer
@@ -251,8 +269,9 @@ blocked by the account's own quota at the time; its full run is pending.
 
 ### API keys
 
-Set `api_key: env:NAME` or `file:/path` on the credential. Claude runs with
-`--bare` and `ANTHROPIC_API_KEY`; codex gets `{"OPENAI_API_KEY": ...}` in its
+Set `api_key: env:NAME` or `file:/path` on the credential. The key is read
+when the config loads, so changing it needs a restart. Claude runs with
+`--bare` and receives the key as `ANTHROPIC_API_KEY`; codex gets `{"OPENAI_API_KEY": ...}` in its
 `auth.json` with `forced_login_method=api`; agy gets `GEMINI_API_KEY` (not yet
 verified against a live agy).
 
@@ -278,7 +297,10 @@ operator's responsibility.
   `kind: claude` with `command: <runner[0]>`; arguments after the binary are
   ignored, and `validate` warns about both. Replace it with `kind`/`command`.
 - `api_key_file: /path` still works: it becomes an implicit API-key credential
-  for the agent's kind. Prefer a `credentials:` entry with `api_key: file:/path`.
+  for the agent's kind (named `_apikey_<agent>`, a reserved prefix). Prefer a `credentials:` entry with `api_key: file:/path`.
+- Credential names are lower-case `[a-z0-9][a-z0-9_-]*`.
+- With `sandbox: none`, agent runs get a private temporary HOME; plain `cmd`
+  actions keep yours.
 - On NixOS add the CLIs to `services.agentgw.agentPackages` so the action
   unit can find them.
 
@@ -305,10 +327,15 @@ Read these before running it anywhere that matters.
   capability set, a syscall filter, hidden `/proc`, the metadata addresses
   blocked, `LimitFSIZE=16M`, `TasksMax` and a `maxActionRuntime` ceiling. An
   action cannot read agentgw's state DB or credentials (the VM test checks).
-- **Secrets stay off argv and out of readable paths.** agentgw hands each run
-  its argv, stdin and private files (MCP config, API key) in a job file that
-  only agentgw and that run's sandbox user (via group `agentgw-io`) can read;
-  inside the unit they land in its private `/tmp`.
+- **Secrets stay off argv and out of readable paths, with one exception.**
+  agentgw hands each run its argv, stdin and private files (MCP config, API key,
+  subscription login) in a job file that only agentgw and that run's sandbox
+  user (via group `agentgw-io`) can read; inside the unit they land in its
+  private `/tmp`. The exception is deliberate: **a subscription agent holds its
+  login's refresh token in its own sandbox HOME**, and a prompt-injected agent
+  could exfiltrate it over the open network. Use a dedicated or low-value
+  account per credential and restrict egress where that matters (see
+  "Agents and subscriptions"). agy also takes its prompt as an argv element.
 - **agentgw cannot raise its own privileges.** The module's polkit rule lets the
   `agentgw` user only start/stop/reset `agentgw-action@<16 hex>` instances and
   start the units in your `units:` allowlist; every other polkit action

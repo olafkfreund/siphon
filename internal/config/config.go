@@ -160,6 +160,10 @@ type Credential struct {
 	Concurrency int    `yaml:"concurrency"` // parallel jobs on this login, default 1
 }
 
+const implicitPrefix = "_apikey_" // credentials made from api_key_file
+
+var credName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
 var kinds = []string{"claude", "codex", "agy"}
 
 type Agent struct {
@@ -271,7 +275,11 @@ func Parse(b []byte) (*Config, error) {
 			if c.Credentials == nil {
 				c.Credentials = map[string]*Credential{}
 			}
-			a.Credential = "_apikey_" + name
+			a.Credential = implicitPrefix + name
+			if c.Credentials[a.Credential] != nil {
+				c.resolveErrs = append(c.resolveErrs, fmt.Errorf("agents.%s: implicit credential name %q collides with a declared credential", name, a.Credential))
+				continue
+			}
 			c.Credentials[a.Credential] = &Credential{Provider: a.Kind, APIKey: Secret{Ref: "file:" + a.APIKeyFile}, Concurrency: 1}
 			continue
 		}
@@ -411,6 +419,17 @@ func (c *Config) Warnings() []string {
 	return w
 }
 
+// declaredCredentials counts credentials from the credentials: block, not api_key_file ones.
+func (c *Config) declaredCredentials() int {
+	n := 0
+	for name := range c.Credentials {
+		if !strings.HasPrefix(name, implicitPrefix) {
+			n++
+		}
+	}
+	return n
+}
+
 // AgentCredential returns the agent's credential name and entry, or "", nil.
 func (c *Config) AgentCredential(agent string) (string, *Credential) {
 	a := c.Agents[agent]
@@ -545,6 +564,12 @@ func (c *Config) Validate() error {
 	for _, name := range sortedKeys(c.Credentials) {
 		cr := c.Credentials[name]
 		p := "credentials." + name
+		if !credName.MatchString(name) && !strings.HasPrefix(name, implicitPrefix) {
+			add("%s: name must match [a-z0-9][a-z0-9_-]*", p)
+		}
+		if strings.HasPrefix(name, implicitPrefix) && !implicitFor(c, name) {
+			add("%s: names starting with %s are reserved", p, implicitPrefix)
+		}
 		switch {
 		case cr == nil:
 			add("%s: empty", p)
@@ -588,7 +613,7 @@ func (c *Config) Validate() error {
 		}
 		if a.Credential == "" {
 			// Pre-credentials configs (claude, none declared) keep their ambient login until step 5.
-			if a.Kind != "claude" || len(c.Credentials) > 0 {
+			if a.Kind != "claude" || c.declaredCredentials() > 0 {
 				add("%s: credential is required (no unique %s subscription credential to default to)", p, a.Kind)
 			}
 		} else if cr := c.Credentials[a.Credential]; cr == nil {
@@ -760,4 +785,10 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(k)
 	return k
+}
+
+// implicitFor reports whether name is the api_key_file credential of an existing agent.
+func implicitFor(c *Config, name string) bool {
+	a := c.Agents[strings.TrimPrefix(name, implicitPrefix)]
+	return a != nil && a.Credential == name && a.APIKeyFile != ""
 }

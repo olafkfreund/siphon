@@ -67,47 +67,111 @@ func Validate(provider string, kind ImportKind, raw []byte) (name string, normal
 	}
 	switch provider {
 	case "claude":
-		var top map[string]json.RawMessage
-		if json.Unmarshal(raw, &top) != nil || top["claudeAiOauth"] == nil {
-			return "", nil, errors.New("claude: want a JSON file with a claudeAiOauth object")
+		var top struct {
+			O *claudeOAuth `json:"claudeAiOauth"`
 		}
-		var o struct{ AccessToken, RefreshToken string }
-		if json.Unmarshal(top["claudeAiOauth"], &o) != nil || o.AccessToken == "" || o.RefreshToken == "" {
-			return "", nil, errors.New("claude: claudeAiOauth needs accessToken and refreshToken")
+		if json.Unmarshal(raw, &top) != nil || top.O == nil || top.O.AccessToken == "" || top.O.RefreshToken == "" {
+			return "", nil, errors.New("claude: want a JSON file with claudeAiOauth.accessToken and refreshToken")
 		}
-		b, _ := json.Marshal(map[string]json.RawMessage{"claudeAiOauth": top["claudeAiOauth"]})
+		b, _ := json.Marshal(top) // known fields only: mcpOAuth and the rest are dropped
 		return "credentials.json", b, nil
 	case "codex":
 		var a codexAuth
-		if json.Unmarshal(raw, &a) != nil || !((a.Tokens.Access != "" && a.Tokens.Refresh != "") || (a.APIKey != nil && *a.APIKey != "")) {
+		if json.Unmarshal(raw, &a) != nil || !((a.Tokens != nil && a.Tokens.Access != "" && a.Tokens.Refresh != "") || (a.APIKey != nil && *a.APIKey != "")) {
 			return "", nil, errors.New("codex: auth.json needs tokens.access_token and refresh_token, or OPENAI_API_KEY")
 		}
-		return "auth.json", raw, nil
+		b, _ := json.Marshal(a)
+		return "auth.json", b, nil
 	case "agy":
 		var a agyToken
 		if json.Unmarshal(raw, &a) != nil || a.Token.Access == "" || a.Token.Refresh == "" {
 			return "", nil, errors.New("agy: want token.access_token and token.refresh_token")
 		}
-		return "antigravity-oauth-token", raw, nil
+		b, _ := json.Marshal(a)
+		return "antigravity-oauth-token", b, nil
 	}
 	return "", nil, fmt.Errorf("unknown provider %q", provider)
 }
 
+type claudeOAuth struct {
+	AccessToken           string   `json:"accessToken"`
+	RefreshToken          string   `json:"refreshToken"`
+	ExpiresAt             int64    `json:"expiresAt,omitempty"`
+	RefreshTokenExpiresAt int64    `json:"refreshTokenExpiresAt,omitempty"`
+	Scopes                []string `json:"scopes,omitempty"`
+	SubscriptionType      string   `json:"subscriptionType,omitempty"`
+	RateLimitTier         string   `json:"rateLimitTier,omitempty"`
+}
+
 type codexAuth struct {
-	Tokens struct {
-		Access  string `json:"access_token"`
-		Refresh string `json:"refresh_token"`
-	} `json:"tokens"`
-	APIKey *string `json:"OPENAI_API_KEY"`
+	AuthMode string       `json:"auth_mode,omitempty"`
+	APIKey   *string      `json:"OPENAI_API_KEY"`
+	Tokens   *codexTokens `json:"tokens,omitempty"`
+	LastRef  string       `json:"last_refresh,omitempty"`
+}
+
+type codexTokens struct {
+	ID      string `json:"id_token,omitempty"`
+	Access  string `json:"access_token"`
+	Refresh string `json:"refresh_token"`
+	Account string `json:"account_id,omitempty"`
 }
 
 type agyToken struct {
 	Token struct {
 		Access  string `json:"access_token"`
 		Refresh string `json:"refresh_token"`
-		Expiry  string `json:"expiry"`
+		Type    string `json:"token_type,omitempty"`
+		Expiry  string `json:"expiry,omitempty"`
 	} `json:"token"`
+	AuthMethod string `json:"auth_method,omitempty"`
 }
+
+// ValidateFor is Validate for a login file; for a subscription codex
+// credential it also rejects an API-key-only auth.json.
+func ValidateFor(provider string, subscription bool, raw []byte) (name string, normalized []byte, err error) {
+	name, normalized, err = Validate(provider, ImportFile, raw)
+	if err == nil && subscription && provider == "codex" {
+		var a codexAuth
+		if json.Unmarshal(normalized, &a) != nil || a.Tokens == nil || a.Tokens.Access == "" {
+			return "", nil, errors.New("codex: a subscription credential needs a ChatGPT login (tokens), not an API-key-only auth.json")
+		}
+	}
+	return
+}
+
+// SameAccount reports whether new belongs to the same account as old, so a
+// compromised sandbox can't swap in another login. Only codex carries a
+// stable identity (account_id, else the id_token sub claim). Claude and agy
+// logins have none, so this returns true for them: a known limitation.
+func SameAccount(provider string, old, new []byte) bool {
+	if provider != "codex" {
+		return true
+	}
+	var o, n codexAuth
+	if json.Unmarshal(old, &o) != nil || json.Unmarshal(new, &n) != nil || o.Tokens == nil || n.Tokens == nil {
+		return false
+	}
+	if o.Tokens.Account != "" || n.Tokens.Account != "" {
+		return o.Tokens.Account == n.Tokens.Account
+	}
+	return jwtSub(o.Tokens.ID) == jwtSub(n.Tokens.ID)
+}
+
+func jwtClaims(tok string) (c struct {
+	Exp float64 `json:"exp"`
+	Sub string  `json:"sub"`
+}) {
+	parts := strings.Split(tok, ".")
+	if len(parts) == 3 {
+		if p, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(parts[1], "=")); err == nil {
+			json.Unmarshal(p, &c)
+		}
+	}
+	return
+}
+
+func jwtSub(tok string) string { return jwtClaims(tok).Sub }
 
 // Expiry returns the access-token expiry of file's contents, or zero if unknown.
 func Expiry(provider, file string, b []byte) time.Time {
@@ -123,19 +187,10 @@ func Expiry(provider, file string, b []byte) time.Time {
 		}
 	case "codex":
 		var a codexAuth
-		if json.Unmarshal(b, &a) != nil {
-			return time.Time{}
-		}
-		parts := strings.Split(a.Tokens.Access, ".")
-		if len(parts) != 3 {
-			return time.Time{}
-		}
-		p, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(parts[1], "="))
-		var c struct {
-			Exp float64 `json:"exp"`
-		}
-		if err == nil && json.Unmarshal(p, &c) == nil && c.Exp > 0 {
-			return time.Unix(int64(c.Exp), 0)
+		if json.Unmarshal(b, &a) == nil && a.Tokens != nil {
+			if e := jwtClaims(a.Tokens.Access).Exp; e > 0 {
+				return time.Unix(int64(e), 0)
+			}
 		}
 	case "agy":
 		var a agyToken
@@ -233,24 +288,32 @@ func (s Store) Put(name, file string, b []byte) error {
 	})
 }
 
-// Save writes back a refreshed login file. If the store still holds old it
-// replaces it with new; otherwise someone else wrote meanwhile and the copy
-// with the later token expiry wins (ties keep the stored one).
-func (s Store) Save(name, file string, old, new []byte) error {
+// Save writes back a refreshed login file and reports whether it wrote. If
+// the store still holds old it replaces it with new; otherwise someone else
+// wrote meanwhile and the copy with the later token expiry wins (ties keep
+// the stored one). Every replace keeps the previous bytes as <file>.prev.
+func (s Store) Save(name, file string, old, new []byte) (wrote bool, err error) {
 	prov, ok := fileProvider[file]
 	if !ok {
-		return fmt.Errorf("unknown credential file %q", file)
+		return false, fmt.Errorf("unknown credential file %q", file)
 	}
-	return s.lock(name, func(d string) error {
+	err = s.lock(name, func(d string) error {
 		cur, err := os.ReadFile(filepath.Join(d, file))
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		if !bytes.Equal(cur, old) && !Expiry(prov, file, new).After(Expiry(prov, file, cur)) {
+		if bytes.Equal(cur, new) || (!bytes.Equal(cur, old) && !Expiry(prov, file, new).After(Expiry(prov, file, cur))) {
 			return nil
 		}
+		if cur != nil {
+			if err := writeAtomic(d, file+".prev", cur); err != nil {
+				return err
+			}
+		}
+		wrote = true
 		return writeAtomic(d, file, new)
 	})
+	return wrote, err
 }
 
 // Info reports the latest token expiry and file mtime across a credential's files.

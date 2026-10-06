@@ -374,11 +374,10 @@ func credentials(args []string) error {
 	if err != nil {
 		return err
 	}
-	kind := cred.ImportFile
+	file, b, err := cred.ValidateFor(c.Provider, true, raw)
 	if *token {
-		kind = cred.ImportToken
+		file, b, err = cred.Validate(c.Provider, cred.ImportToken, raw)
 	}
-	file, b, err := cred.Validate(c.Provider, kind, raw)
 	if err != nil {
 		return err
 	}
