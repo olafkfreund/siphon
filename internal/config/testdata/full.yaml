@@ -1,4 +1,4 @@
-server: { listen: ":8080", db: /tmp/agentgw/state.db, workers: 4, token: env:AGW_TOKEN, sandbox: systemd }
+server: { listen: ":8080", db: /tmp/siphon/state.db, workers: 4, token: env:AGW_TOKEN, sandbox: systemd }
 limits: { agent_runs_per_day: 50, http_max_body: 1MiB, http_timeout: 30s }
 
 sources:

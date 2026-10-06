@@ -21,7 +21,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/source"
+	"github.com/olafkfreund/siphon/internal/source"
 )
 
 type Entry struct {
@@ -101,7 +101,7 @@ func (p *Proxy) serve(ctx context.Context, listener net.Listener) error {
 	stop := context.AfterFunc(ctx, func() { listener.Close() })
 	defer stop()
 	// All connections (pre-auth and tunnels): bounded so a run cannot
-	// exhaust agentgw's fds; tunnels have their own, lower cap.
+	// exhaust siphon's fds; tunnels have their own, lower cap.
 	pending := make(chan struct{}, 512)
 	for {
 		conn, err := listener.Accept()
@@ -195,7 +195,7 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 	valid := ok && r != nil && subtle.ConstantTimeCompare([]byte(token), []byte(r.token)) == 1
 	p.mu.Unlock()
 	if !valid {
-		io.WriteString(conn, "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"agentgw\"\r\nContent-Length: 0\r\n\r\n")
+		io.WriteString(conn, "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"siphon\"\r\nContent-Length: 0\r\n\r\n")
 		return
 	}
 	host, portText, err := net.SplitHostPort(req.Host)

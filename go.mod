@@ -1,4 +1,4 @@
-module github.com/olafkfreund/MCP-AgentGateway
+module github.com/olafkfreund/siphon
 
 go 1.26.8
 

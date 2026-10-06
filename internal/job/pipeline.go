@@ -17,13 +17,13 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/action"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/config"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/cred"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/egress"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/rule"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/source"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
+	"github.com/olafkfreund/siphon/internal/action"
+	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/cred"
+	"github.com/olafkfreund/siphon/internal/egress"
+	"github.com/olafkfreund/siphon/internal/rule"
+	"github.com/olafkfreund/siphon/internal/source"
+	"github.com/olafkfreund/siphon/internal/store"
 )
 
 // cmdTimeout bounds a cmd action; ponytail: fixed until a rule needs its own.
@@ -222,7 +222,7 @@ func (p *Pipeline) handleEvent(ctx context.Context, ev rule.Event, dryRun bool, 
 		for _, id := range approvalIDs { // after commit, so a rolled-back job is never announced
 			// ponytail: the one-shot token is a credential and is never logged;
 			// operators approve by id in the portal, API or CLI (no token link; plan deviation).
-			slog.Info("approval required", "job", id, "approve", fmt.Sprintf("agentgw approve %d", id))
+			slog.Info("approval required", "job", id, "approve", fmt.Sprintf("siphon approve %d", id))
 		}
 	}
 	return fires, ids, false, errors.Join(errs...), nil
@@ -422,7 +422,7 @@ func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload,
 		defer release()
 		files, err := st.Load(credName)
 		if err != nil || len(files) == 0 {
-			return "failed", 1, fmt.Sprintf("credential %s is not imported: run `agentgw credentials import %s < <login file>`", credName, credName), nil
+			return "failed", 1, fmt.Sprintf("credential %s is not imported: run `siphon credentials import %s < <login file>`", credName, credName), nil
 		}
 		opts.CredFiles, start = files, files
 	}
@@ -445,7 +445,7 @@ func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload,
 		// Classify only failures: a successful answer may well mention "401".
 		switch res.Class {
 		case "auth":
-			msg := fmt.Sprintf("credential %s needs re-login: log in with %s on the host, then run `agentgw credentials import %s`", credName, a.Kind, credName)
+			msg := fmt.Sprintf("credential %s needs re-login: log in with %s on the host, then run `siphon credentials import %s`", credName, a.Kind, credName)
 			p.audit("credential_reauth", j.ID, credName)
 			return "failed", res.Exit, msg + "\n" + out, res.Stdout
 		case "quota":

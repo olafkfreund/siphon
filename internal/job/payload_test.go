@@ -3,7 +3,7 @@ package job
 import (
 	"testing"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/action"
+	"github.com/olafkfreund/siphon/internal/action"
 )
 
 // Review H1: large integers must survive the job payload round trip.

@@ -371,7 +371,7 @@ func Lock(dbPath string) (unlock func(), err error) {
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close()
-		return nil, fmt.Errorf("another agentgw (serve or run-once) holds %s", dbPath)
+		return nil, fmt.Errorf("another siphon (serve or run-once) holds %s", dbPath)
 	}
 	return func() { f.Close() }, nil // closing releases the flock
 }

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/config"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
+	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/store"
 )
 
 const tok = "s3cret-token"
@@ -212,7 +212,7 @@ func TestLoginCookieAttributes(t *testing.T) {
 	e := newEnv(t, nil)
 	w := e.do("POST", "/login", url.Values{"token": {tok}}, nil)
 	c := w.Result().Cookies()[0]
-	if c.Name != "agentgw_session" || !c.HttpOnly || c.SameSite != http.SameSiteStrictMode || c.Secure || strings.Contains(c.Value, tok) {
+	if c.Name != "siphon_session" || !c.HttpOnly || c.SameSite != http.SameSiteStrictMode || c.Secure || strings.Contains(c.Value, tok) {
 		t.Fatalf("%+v", c)
 	}
 	w = e.do("POST", "/login", url.Values{"token": {tok}}, func(r *http.Request) { r.Header.Set("X-Forwarded-Proto", "https") })

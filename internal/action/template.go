@@ -20,17 +20,17 @@ import (
 	"time"
 )
 
-// Sandboxed actions run in a Nix-defined agentgw-action template unit
-// (see nix/module.nix). Its hardening is fixed in Nix, so agentgw can only ask
+// Sandboxed actions run in a Nix-defined siphon-action template unit
+// (see nix/module.nix). Its hardening is fixed in Nix, so siphon can only ask
 // systemd to start that unit: no transient units, no way to request User=root.
 //
-// PID 1 never opens a path inside a directory agentgw can write (that would let
-// a compromised agentgw redirect a root-opened file with a symlink). The unit
-// runs `agentgw exec-job <dir>/<id>` as its own DynamicUser, which reads
+// PID 1 never opens a path inside a directory siphon can write (that would let
+// a compromised siphon redirect a root-opened file with a symlink). The unit
+// runs `siphon exec-job <dir>/<id>` as its own DynamicUser, which reads
 // job.json and creates stdout/stderr itself (O_EXCL|O_NOFOLLOW). The shared
-// directory is setgid agentgw-io so both sides can read what the other wrote.
+// directory is setgid siphon-io so both sides can read what the other wrote.
 
-// JobSpec is what agentgw hands the unit; exec-job runs it.
+// JobSpec is what siphon hands the unit; exec-job runs it.
 type JobSpec struct {
 	Argv       []string          `json:"argv"`
 	Stdin      []byte            `json:"stdin,omitempty"`
@@ -69,9 +69,9 @@ func forward(ln net.Listener, sock string) {
 
 // jobFilesDir is where exec-job writes JobSpec.Files inside the unit (its
 // PrivateTmp); argv refers to files by this path. Tests override it.
-var jobFilesDir = "/tmp/agentgw"
+var jobFilesDir = "/tmp/siphon"
 
-// outputCap bounds what agentgw reads back; the unit's LimitFSIZE bounds the files.
+// outputCap bounds what siphon reads back; the unit's LimitFSIZE bounds the files.
 const outputCap = 1 << 20
 
 // FilePath is the in-unit path of a JobSpec file.
@@ -79,9 +79,9 @@ func FilePath(name string) string { return filepath.Join(jobFilesDir, name) }
 
 func templateUnit(id string, restricted bool) string {
 	if restricted {
-		return "agentgw-action@" + id + ".service"
+		return "siphon-action@" + id + ".service"
 	}
-	return "agentgw-action-open@" + id + ".service"
+	return "siphon-action-open@" + id + ".service"
 }
 
 func systemctl(ctx context.Context, args ...string) *exec.Cmd {
@@ -120,7 +120,7 @@ var (
 	}
 )
 
-// templateRun runs spec in a fresh agentgw-action instance and returns its
+// templateRun runs spec in a fresh siphon-action instance and returns its
 // exit code and (stdout, stderr). exit -1 means it never ran or was cancelled.
 func templateRun(ctx context.Context, dir string, spec JobSpec, captureLimit int, restricted bool) (int, []byte, []byte, map[int][]byte, error) {
 	if dir == "" {
@@ -136,10 +136,10 @@ func templateRun(ctx context.Context, dir string, spec JobSpec, captureLimit int
 		return -1, nil, nil, nil, err
 	}
 	defer os.RemoveAll(runDir)
-	// The run dir inherits group agentgw-io from the setgid parent (created by
+	// The run dir inherits group siphon-io from the setgid parent (created by
 	// root via tmpfiles). Group may enter and create files but not list. No
 	// setgid of our own: RestrictSUIDSGID forbids it, so files get the group
-	// by chown instead (both sides are members of agentgw-io).
+	// by chown instead (both sides are members of siphon-io).
 	if err := os.Chmod(runDir, 0o730); err != nil {
 		return -1, nil, nil, nil, err
 	}
@@ -156,7 +156,7 @@ func templateRun(ctx context.Context, dir string, spec JobSpec, captureLimit int
 		return -1, nil, nil, nil, err
 	}
 	if err := os.Chown(jobPath, -1, gid); err != nil {
-		return -1, nil, nil, nil, fmt.Errorf("sandbox: is agentgw in group agentgw-io? %w", err)
+		return -1, nil, nil, nil, fmt.Errorf("sandbox: is siphon in group siphon-io? %w", err)
 	}
 	if err := os.Chmod(jobPath, 0o640); err != nil {
 		return -1, nil, nil, nil, err
@@ -389,16 +389,16 @@ func saveWriteback(home, runDir string, gid, i int, name string, files map[strin
 	return nil
 }
 
-// StopOrphans stops agentgw-action instances left running by a crashed
-// agentgw (they live outside its cgroup) and waits for them, so their jobs
+// StopOrphans stops siphon-action instances left running by a crashed
+// siphon (they live outside its cgroup) and waits for them, so their jobs
 // can be requeued without two copies running at once.
 func StopOrphans(ctx context.Context) error {
-	err := stopUnits(ctx, "agentgw-action@*.service", "agentgw-action-open@*.service")
-	resetFailed("agentgw-action@*.service", "agentgw-action-open@*.service")
+	err := stopUnits(ctx, "siphon-action@*.service", "siphon-action-open@*.service")
+	resetFailed("siphon-action@*.service", "siphon-action-open@*.service")
 	return err
 }
 
-// ExecJob is the `agentgw exec-job <run dir>` entry point inside the template
+// ExecJob is the `siphon exec-job <run dir>` entry point inside the template
 // unit. It runs as the unit's DynamicUser: it reads job.json, creates its own
 // output files, writes the job's private files, runs argv and returns the exit
 // code (124 timeout/stopped, 125 bad job, 127 could not start).
@@ -409,7 +409,7 @@ func ExecJob(runDir string) int {
 		return 125
 	}
 	// Create our own outputs (never follow a planted symlink) and give them the
-	// run dir's group so agentgw can read them back.
+	// run dir's group so siphon can read them back.
 	open := func(name string) (*os.File, error) {
 		f, err := os.OpenFile(filepath.Join(runDir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o640)
 		if err != nil {
@@ -443,7 +443,7 @@ func execJob(runDir, jobFile string, stdout, stderr io.Writer) int {
 		return 125
 	}
 	// It holds the run's proxy token and logins: don't leave it readable by
-	// other runs (all share group agentgw-io) for the run's lifetime.
+	// other runs (all share group siphon-io) for the run's lifetime.
 	os.Remove(jobFile)
 	var spec JobSpec
 	if err := json.Unmarshal(raw, &spec); err != nil || len(spec.Argv) == 0 {

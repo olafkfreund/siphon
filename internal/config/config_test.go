@@ -224,7 +224,7 @@ func TestLoadMakesDBRelativeToConfig(t *testing.T) {
 	for in, want := range map[string]string{
 		"state.db":      filepath.Join(dir, "state.db"),
 		"/abs/state.db": "/abs/state.db",
-		"":              filepath.Join(dir, "agentgw.db"), // default is relative too
+		"":              filepath.Join(dir, "siphon.db"), // default is relative too
 	} {
 		body := "server: {}\n"
 		if in != "" {
@@ -520,7 +520,7 @@ func TestEgressValidation(t *testing.T) {
 		"server: {egress: {listen: \"example.com:3128\"}}":                                                        "loopback",
 		"server: {egress: {listen: \"[::1]:3128\"}}":                                                              "IPv4 loopback",
 		"server: {egress: {socket: rel/egress.sock}}":                                                             "egress.socket",
-		"server: {egress: {socket: /run/agentgw/egress.sock}}":                                                    "",
+		"server: {egress: {socket: /run/siphon/egress.sock}}":                                                     "",
 		"server: {egress: {allow: [\"bad host\"]}}":                                                               "egress.allow",
 		"server: {egress: {allow: [\"a.com:0\"]}}":                                                                "port must be",
 		"server: {egress: {allow: [\"a.com:70000\"]}}":                                                            "port must be",
@@ -560,5 +560,24 @@ func TestAgentEgressFailsClosed(t *testing.T) {
 	}
 	if got, on := c.AgentEgress(&Agent{Kind: "codex"}); !on || hostsOf(got) != "chatgpt.com:443,auth.openai.com:443" {
 		t.Fatalf("old snapshot: %v %s", on, hostsOf(got))
+	}
+}
+
+// legacy-name: a config without db: keeps using an existing agentgw.db.
+func TestLegacyDefaultDB(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "siphon.yaml")
+	os.WriteFile(cfg, nil, 0o600)
+	if c, _ := Load(cfg); filepath.Base(c.Server.DB) != "siphon.db" || len(c.Warnings()) > 0 && strings.Contains(strings.Join(c.Warnings(), ""), "rename it") {
+		t.Fatalf("fresh dir: %s", c.Server.DB)
+	}
+	os.WriteFile(filepath.Join(dir, "agentgw.db"), nil, 0o600) // legacy-name
+	c, _ := Load(cfg)
+	if filepath.Base(c.Server.DB) != "agentgw.db" || !strings.Contains(strings.Join(c.Warnings(), "\n"), "rename it to siphon.db") { // legacy-name
+		t.Fatalf("legacy: %s %v", c.Server.DB, c.Warnings())
+	}
+	os.WriteFile(filepath.Join(dir, "siphon.db"), nil, 0o600)
+	if c, _ := Load(cfg); filepath.Base(c.Server.DB) != "siphon.db" {
+		t.Fatalf("both exist: %s", c.Server.DB)
 	}
 }

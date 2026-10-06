@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/source"
+	"github.com/olafkfreund/siphon/internal/source"
 )
 
 func startProxy(t *testing.T, resolve func(context.Context, string, bool) ([]netip.Addr, error)) *Proxy {

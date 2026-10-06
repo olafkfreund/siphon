@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/config"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/store"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/web"
+	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/store"
+	"github.com/olafkfreund/siphon/internal/web"
 )
 
 // Signed webhook → job, through the real web handler and pipeline. Replaying

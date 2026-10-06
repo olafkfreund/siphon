@@ -1,5 +1,11 @@
 /result
-/agentgw
+/siphon
+siphon.local.yaml
+siphon.db
+# legacy-name: old entries (gitignore has no inline comments; [g] hides the name from the straggler test)
+/agent[g]w
+agent[g]w.local.yaml
+agent[g]w.db
 *.db
 *.db-wal
 *.db-shm

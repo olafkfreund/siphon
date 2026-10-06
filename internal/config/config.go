@@ -1,4 +1,4 @@
-// Package config loads and validates agentgw.yaml, the only source of truth.
+// Package config loads and validates siphon.yaml, the only source of truth.
 package config
 
 import (
@@ -79,12 +79,13 @@ type Config struct {
 	Sources map[string]*Source `yaml:"sources"`
 	Rules   []Rule             `yaml:"rules"`
 	Agents  map[string]*Agent  `yaml:"agents"`
-	// Credentials are logins agentgw owns: subscription (store files) or, with api_key, an API key.
+	// Credentials are logins siphon owns: subscription (store files) or, with api_key, an API key.
 	Credentials map[string]*Credential `yaml:"credentials"`
 	Routines    map[string]*Routine    `yaml:"routines"`
 	Units       []string               `yaml:"units"`
 
 	resolveErrs []error
+	legacyDB    string // set when the default db fell back to an old agentgw.db // legacy-name
 }
 
 type Server struct {
@@ -94,7 +95,7 @@ type Server struct {
 	Token   Secret `yaml:"token"`
 	Sandbox string `yaml:"sandbox"` // systemd|none
 	// ActionsDir holds per-run directories for sandboxed actions; the NixOS
-	// module sets it to the setgid agentgw-io directory its template unit uses.
+	// module sets it to the setgid siphon-io directory its template unit uses.
 	ActionsDir string       `yaml:"actions_dir"`
 	Egress     EgressServer `yaml:"egress"`
 }
@@ -248,12 +249,21 @@ func Load(path string) (*Config, error) {
 	if d := c.Server.DB; d != "" && d != ":memory:" && !filepath.IsAbs(d) {
 		c.Server.DB = filepath.Join(filepath.Dir(path), d)
 	}
+	// The default db was agentgw.db before the rename: keep using an existing one. // legacy-name
+	if filepath.Base(c.Server.DB) == "siphon.db" {
+		old := filepath.Join(filepath.Dir(c.Server.DB), "agentgw.db") // legacy-name
+		if _, err := os.Stat(c.Server.DB); errors.Is(err, os.ErrNotExist) {
+			if _, err := os.Stat(old); err == nil {
+				c.Server.DB, c.legacyDB = old, old
+			}
+		}
+	}
 	return c, nil
 }
 
 func Parse(b []byte) (*Config, error) {
 	c := &Config{
-		Server: Server{Listen: ":8080", DB: "agentgw.db", Workers: 4, Sandbox: "systemd", Egress: EgressServer{Listen: "127.77.0.1:3128"}},
+		Server: Server{Listen: ":8080", DB: "siphon.db", Workers: 4, Sandbox: "systemd", Egress: EgressServer{Listen: "127.77.0.1:3128"}},
 		Limits: Limits{AgentRunsPerDay: 50, HTTPMaxBody: 1 << 20, HTTPTimeout: Duration(30 * time.Second)},
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(b))
@@ -407,6 +417,9 @@ func (c *Config) Secrets() []string {
 // Warnings lists non-fatal findings.
 func (c *Config) Warnings() []string {
 	var w []string
+	if c.legacyDB != "" {
+		w = append(w, fmt.Sprintf("using %s: rename it to siphon.db (the old default name goes away in v0.2.0)", c.legacyDB)) // legacy-name
+	}
 	if c.Server.Sandbox == "none" {
 		w = append(w, "server.sandbox is none: actions run unsandboxed")
 		if c.Server.Egress.CmdDefault {

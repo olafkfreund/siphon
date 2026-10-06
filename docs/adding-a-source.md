@@ -65,7 +65,7 @@ Example: a `file` source that reads a local JSON file.
 
 4. **The schema:** run
    `UPDATE_SCHEMA=1 go test ./internal/config/ -run TestSchemaUpToDate`
-   so `schema/agentgw.schema.json` matches the new fields (the test fails when it
+   so `schema/siphon.schema.json` matches the new fields (the test fails when it
    is stale).
 
 5. **A test** next to the source (`internal/source/file_test.go`) and a

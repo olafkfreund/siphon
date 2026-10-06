@@ -126,7 +126,7 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 	default:
 		return -1, nil, nil, nil, fmt.Errorf("invalid sandbox mode %q", mode)
 	}
-	runDir, err := os.MkdirTemp("", "agentgw-action-")
+	runDir, err := os.MkdirTemp("", "siphon-action-")
 	if err != nil {
 		return -1, nil, nil, nil, err
 	}

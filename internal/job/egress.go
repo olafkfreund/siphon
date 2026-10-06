@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/action"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/config"
-	"github.com/olafkfreund/MCP-AgentGateway/internal/egress"
+	"github.com/olafkfreund/siphon/internal/action"
+	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/egress"
 )
 
 // needsEgress reports whether any agent or rule runs with an allowlist, so
@@ -40,7 +40,7 @@ var egressMu sync.Mutex
 
 // startEgress starts the egress proxy when needed and waits until it is
 // listening. serve/run-once call it up front so a proxy that can't start
-// stops agentgw; egressFor calls it lazily for pipelines used directly.
+// stops siphon; egressFor calls it lazily for pipelines used directly.
 func (p *Pipeline) startEgress(ctx context.Context) error {
 	egressMu.Lock()
 	defer egressMu.Unlock()

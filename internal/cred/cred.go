@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/olafkfreund/MCP-AgentGateway/internal/config"
+	"github.com/olafkfreund/siphon/internal/config"
 )
 
 // Store keeps each credential in <Dir>/<name>/, one file per login file.
@@ -230,7 +230,7 @@ func (s Store) Load(name string) (map[string][]byte, error) {
 		out[f] = b
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("credential %q has no imported login (agentgw credentials import)", name)
+		return nil, fmt.Errorf("credential %q has no imported login (siphon credentials import)", name)
 	}
 	return out, nil
 }
