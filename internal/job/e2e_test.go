@@ -89,6 +89,31 @@ func TestRunOnceEdgeEndToEnd(t *testing.T) {
 		}
 	}
 
+	// A cancelled run must not mark queued jobs failed (review H2).
+	value.Store(5)
+	now = now.Add(time.Minute)
+	_ = p.RunOnce(ctx)
+	value.Store(40)
+	now = now.Add(time.Minute)
+	if _, err := p.Tick(ctx, "factory"); err != nil {
+		t.Fatal(err)
+	}
+	cctx, ccancel := context.WithCancel(ctx)
+	ccancel()
+	if _, err := p.RunQueued(cctx); err == nil {
+		t.Fatal("RunQueued on a cancelled context returned nil")
+	}
+	var queued int
+	if err := st.DB.QueryRow(`SELECT count(*) FROM jobs WHERE state='queued'`).Scan(&queued); err != nil {
+		t.Fatal(err)
+	}
+	if queued != 1 {
+		t.Fatalf("queued jobs after cancelled run = %d, want 1", queued)
+	}
+	if _, err := st.DB.Exec(`DELETE FROM jobs WHERE state='queued'`); err != nil {
+		t.Fatal(err)
+	}
+
 	rows, err := st.DB.Query(`SELECT state, output FROM jobs ORDER BY id`)
 	if err != nil {
 		t.Fatal(err)

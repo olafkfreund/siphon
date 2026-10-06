@@ -48,7 +48,7 @@ func (p *Pipeline) Poll(ctx context.Context, name string) (rule.Event, error) {
 	switch s.Type {
 	case "http":
 		ev, err = source.HTTP{Options: source.HTTPOptions{
-			Name: name, URL: s.URL, Method: s.Method, Headers: s.Headers, Body: []byte(s.Body),
+			Name: name, URL: s.URL, Method: s.Method, Headers: headerValues(s.Headers), Body: []byte(s.Body),
 			AllowPrivate: s.AllowPrivate, MaxBody: int64(p.Cfg.Limits.HTTPMaxBody), Timeout: time.Duration(p.Cfg.Limits.HTTPTimeout),
 		}}.Poll(ctx)
 	case "mcp":
@@ -160,11 +160,19 @@ func (p *Pipeline) needsApproval(r config.Rule) bool {
 func (p *Pipeline) RunQueued(ctx context.Context) (int, error) {
 	n := 0
 	for {
+		if err := ctx.Err(); err != nil {
+			return n, err
+		}
 		j, ok, err := store.ClaimJob(p.Store.DB, p.Now())
 		if err != nil || !ok {
 			return n, err
 		}
 		state, exit, out := p.run(ctx, j)
+		if err := ctx.Err(); err != nil {
+			// Interrupted, not failed: leave the job running so the startup
+			// requeue (plan step 8) picks it up instead of losing the event.
+			return n, err
+		}
 		if err := store.FinishJob(p.Store.DB, j.ID, state, exit, out, p.Now()); err != nil {
 			return n, err
 		}
@@ -221,4 +229,17 @@ func sortedSources(c *config.Config) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// headerValues resolves secret-capable header values: refs use the resolved
+// Value, inline literals the Ref text.
+func headerValues(h map[string]config.Secret) map[string]string {
+	out := make(map[string]string, len(h))
+	for k, v := range h {
+		out[k] = v.Value
+		if out[k] == "" {
+			out[k] = v.Ref
+		}
+	}
+	return out
 }
