@@ -38,11 +38,5 @@ func allowedFile(f string) bool {
 	if f == "schema/agentgw.schema.json" { // legacy-name
 		return true
 	}
-	// TODO(plan step 2/3): remove
-	for _, p := range []string{"flake.nix", "nix/", "devenv.nix", "README.md", "docs/", ".gitignore"} {
-		if f == p || strings.HasSuffix(p, "/") && strings.HasPrefix(f, p) {
-			return true
-		}
-	}
 	return false
 }

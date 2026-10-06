@@ -181,3 +181,11 @@ copies, never moves), so a revert loses no data. Undo the repo rename with
   that, and `nixos-rebuild switch` already stops units whose templates were
   removed. So no legacy orphan stop is kept (the spec's polkit row
   already says the old rule isn't kept).
+- **Step 3:** `docs/brand/` (the logo, `mark-bare.svg` and the brand guide)
+  is brought in from #15's branch, so the README header's logo resolves on
+  main. #15 then rebases over identical files.
+- **Step 3:** gitignore has no inline comments, so the old entries sit
+  under a `# legacy-name` line as `agent[g]w…`. It is the same pattern, and
+  it keeps the literal name out of the file.
+- **Step 2:** the migration's marker file is created before the `chown`.
+  The VM test caught the marker being owned by root.
