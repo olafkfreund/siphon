@@ -29,7 +29,7 @@ func schemaFor(t reflect.Type) (map[string]any, error) {
 	}
 	switch t {
 	case reflect.TypeFor[Duration]():
-		return map[string]any{"type": "string", "pattern": `^[0-9]+(ns|us|µs|ms|s|m|h)([0-9]+(ns|us|µs|ms|s|m|h))*$`}, nil
+		return map[string]any{"type": "string", "pattern": `^[-+]?(0|(([0-9]+(\.[0-9]*)?|\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$`}, nil
 	case reflect.TypeFor[ByteSize]():
 		return map[string]any{"oneOf": []any{
 			map[string]any{"type": "integer", "minimum": 0},
