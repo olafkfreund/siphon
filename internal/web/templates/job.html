@@ -1,0 +1,9 @@
+{{define "job"}}{{with .Job}}<h1>Job {{.ID}}</h1>
+<dl><dt>Rule</dt><dd>{{.Rule}}</dd><dt>State</dt><dd>{{.State}}</dd><dt>Attempt</dt><dd>{{.Attempt}}</dd>
+<dt>Created</dt><dd>{{tm .CreatedAt}}</dd><dt>Started</dt><dd>{{tp .StartedAt}}</dd><dt>Finished</dt><dd>{{tp .FinishedAt}}</dd>
+<dt>Exit</dt><dd>{{exit .ExitCode}}</dd><dt>Depth</dt><dd>{{.Depth}}</dd>
+{{if .ParentID}}<dt>Parent</dt><dd><a href="/jobs/{{.ParentID}}">{{.ParentID}}</a></dd>{{end}}</dl>
+{{if eq .State "pending_approval"}}<p>
+<form method="post" action="/approvals/{{.ID}}/approve" hx-post="/approvals/{{.ID}}/approve" hx-target="#main"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>Approve</button></form>
+<form method="post" action="/approvals/{{.ID}}/deny" hx-post="/approvals/{{.ID}}/deny" hx-target="#main"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>Deny</button></form></p>{{end}}
+<h2>Output</h2><pre>{{.Output}}</pre>{{end}}{{end}}

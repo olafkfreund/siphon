@@ -1,0 +1,7 @@
+{{define "rules"}}<h1>Rules</h1>
+<table><tr><th>Name</th><th>Source</th><th>On</th><th>Action</th><th>State</th><th>Last fired</th><th></th></tr>
+{{range .Rules}}<tr><td>{{.Name}}</td><td>{{.Source}}</td><td>{{.On}}</td><td>{{.Action}}</td>
+<td>{{if .Enabled}}enabled{{else}}disabled{{end}}{{if .Overridden}} <span class="badge">overridden</span>{{end}}</td><td>{{tp .LastFired}}</td>
+<td>{{$verb := "disable"}}{{if not .Enabled}}{{$verb = "enable"}}{{end}}
+<form method="post" action="/rules/{{pe .Name}}/{{$verb}}" hx-post="/rules/{{pe .Name}}/{{$verb}}" hx-target="#main"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form></td></tr>
+{{else}}<tr><td colspan="7">none</td></tr>{{end}}</table>{{end}}

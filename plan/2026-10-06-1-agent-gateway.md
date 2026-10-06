@@ -296,3 +296,8 @@ Each step is a single commit. Cite "Plan step N" in the commit body. Run `nix de
   - **The one-shot `/a/<id>/<token>` link is not built.** Tokens are never logged (Phase 1 M5), so nothing could deliver one. Approvals go through the authenticated portal/API and the CLI. The store's token path stays for a future notification action. Review carry-over L4 becomes rate-limiting of login/API auth failures.
   - **Webhook replay** is checked by the integrator's `Deliver` callback: `seen_event` MarkSeen in the same tx as `HandleEvent`, so the replay record and the enqueue commit together. `internal/source` only verifies.
   - **Portal session:** the cookie holds an HMAC of the token with a per-process random key, so a restart logs users out. CSRF uses an HMAC of the session.
+- Step 13:
+  - A rule override only disables. Enabling deletes the override row and restores the config default, so "overridden" means "disabled at runtime".
+  - htmx 2.0.4 is vendored, byte-identical to unpkg (sha256 verified), with `allowEval:false` and no indicator styles so the CSP stays `default-src 'self'`.
+  - Failed login and API auth share a per-IP bucket of 5/min. It keys on RemoteAddr only, so behind a reverse proxy all clients share one bucket (`ponytail:` note).
+  - Plain POSTs redirect, so the portal works without JS.

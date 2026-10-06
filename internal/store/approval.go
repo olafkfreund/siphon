@@ -128,23 +128,26 @@ func ExpireApprovals(db *sql.DB, now time.Time) (int, error) {
 
 // JobRow is one line of `jobs ls`.
 type JobRow struct {
-	ID        int64
-	Rule      string
-	State     string
-	Attempt   int
-	CreatedAt time.Time
-	ExitCode  *int
+	ID        int64     `json:"id"`
+	Rule      string    `json:"rule"`
+	State     string    `json:"state"`
+	Attempt   int       `json:"attempt"`
+	CreatedAt time.Time `json:"created_at"`
+	ExitCode  *int      `json:"exit_code"`
 }
 
-// ListJobs returns the newest jobs first (limit 200); state "" means all.
-func ListJobs(db *sql.DB, state string) ([]JobRow, error) {
+// ListJobs returns the newest 200 jobs first; state "" means all.
+func ListJobs(db *sql.DB, state string) ([]JobRow, error) { return QueryJobs(db, state, 200) }
+
+// QueryJobs returns the newest jobs first, at most limit; state "" means all.
+func QueryJobs(db *sql.DB, state string, limit int) ([]JobRow, error) {
 	q := `SELECT id, rule, state, attempt, created_at, exit_code FROM jobs`
 	var args []any
 	if state != "" {
 		q += ` WHERE state=?`
 		args = append(args, state)
 	}
-	rows, err := db.Query(q+` ORDER BY id DESC LIMIT 200`, args...)
+	rows, err := db.Query(q+` ORDER BY id DESC LIMIT ?`, append(args, limit)...)
 	if err != nil {
 		return nil, err
 	}
