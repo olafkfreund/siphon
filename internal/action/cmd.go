@@ -40,6 +40,10 @@ func Render(argv []string, data any) ([]string, error) {
 }
 
 func RunCmd(ctx context.Context, argv []string, opts SandboxOptions, secrets []string) (int, []byte, error) {
+	return runCommand(ctx, argv, opts, secrets)
+}
+
+func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets []string) (int, []byte, error) {
 	if len(argv) == 0 {
 		return -1, nil, errors.New("empty command")
 	}
@@ -55,7 +59,7 @@ func RunCmd(ctx context.Context, argv []string, opts SandboxOptions, secrets []s
 	}
 	switch mode {
 	case "systemd":
-		argv = SandboxArgv(argv, opts.Timeout, opts.Credentials)
+		argv = SandboxArgv(argv, opts.Timeout, opts.Credentials, opts.Unit)
 	case "none":
 	default:
 		return -1, nil, fmt.Errorf("invalid sandbox mode %q", mode)
