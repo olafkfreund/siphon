@@ -1,0 +1,71 @@
+server: { listen: ":8080", db: /tmp/agentgw/state.db, workers: 4, token: env:AGW_TOKEN, sandbox: systemd }
+limits: { agent_runs_per_day: 50, http_max_body: 1MiB, http_timeout: 30s }
+
+sources:
+  factory:
+    type: mcp
+    url: http://p510:8090/mcp
+    read: { resource: "factory://tasks/running" }
+    poll: 1m
+    allow_private: true
+    auth: { bearer: env:AGW_FACTORY }
+  local:
+    type: mcp
+    command: [my-mcp-server, --stdio]
+    read: { tool: list_tasks, args: { state: running } }
+  disk:
+    type: http
+    url: https://metrics.local/api/disk
+    poll: 5m
+  github:
+    type: webhook
+    secret: env:AGW_GH
+    signature: github
+    id: header.X-GitHub-Delivery
+
+rules:
+  - name: task-failed
+    source: factory
+    for_each: event.tasks
+    id: item.id
+    when: 'item.status == "failed"'
+    on: each
+    cooldown: 10m
+    action: { agent: triage-task }
+  - name: disk-full
+    source: disk
+    when: 'event.used_pct > 90'
+    on: edge
+    repeat: 6h
+    action: { unit: nix-gc.service }
+  - name: pr-opened
+    source: github
+    when: 'headers["X-GitHub-Event"] == "pull_request" && event.action == "opened"'
+    on: each
+    id: event.number
+    cooldown: 1m
+    action: { routine: review-pr }
+  - name: followup
+    source: agent-result
+    allow_agent_events: true
+    when: 'event.ok'
+    action: { cmd: [echo, "{{.event.summary}}"] }
+
+agents:
+  triage-task:
+    runner: [claude, --bare, -p]
+    prompt: "Task {{.item.id}} failed: {{.item.error}}. Diagnose and report."
+    mcp: [factory]
+    allowed_tools: [mcp__factory__task_get_logs]
+    max_turns: 15
+    max_budget_usd: 1
+    timeout: 10m
+
+routines:
+  review-pr:
+    steps:
+      - { id: fetch, cmd: [gh, pr, view, "{{.event.number}}"] }
+      - { id: review, agent: triage-task, if: 'steps.fetch.exit == 0', retry: { attempts: 2 }, timeout: 5m, approve: true }
+      - { id: notify, cmd: [notify-send, "PR reviewed"], continue_on_error: true }
+
+units: [nix-gc.service]

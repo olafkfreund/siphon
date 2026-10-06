@@ -1,0 +1,76 @@
+package source
+
+import (
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/netip"
+	"testing"
+	"time"
+)
+
+func TestBlockedIP(t *testing.T) {
+	for _, tt := range []struct {
+		ip      string
+		blocked bool
+	}{
+		{"169.254.169.254", true},
+		{"10.1.2.3", true},
+		{"127.0.0.1", true},
+		{"100.64.0.1", true},
+		{"0.0.0.0", true},
+		{"::1", true},
+		{"fe80::1", true},
+		{"::ffff:169.254.169.254", true},
+		{"64:ff9b::101:101", true},
+		{"64:ff9b:1::101:101", true},
+		{"2002:0101:0101::", true},
+		{"::101:101", true},
+		{"192.0.0.1", true},
+		{"198.18.0.1", true},
+		{"168.63.129.16", true},
+		{"100.100.100.200", true},
+		{"fd00:ec2::254", true},
+		{"1.1.1.1", false},
+		{"2606:4700:4700::1111", false},
+	} {
+		t.Run(tt.ip, func(t *testing.T) {
+			addr := netip.MustParseAddr(tt.ip)
+			if got := blockedIP(addr, false); got != tt.blocked {
+				t.Fatalf("blockedIP(%s) = %v, want %v", tt.ip, got, tt.blocked)
+			}
+			if blockedIP(addr, true) {
+				t.Fatalf("blockedIP(%s, allowPrivate=true) = true", tt.ip)
+			}
+		})
+	}
+}
+
+func TestGuardedClientDoesNotRedirect(t *testing.T) {
+	client := guardedClient(true, time.Second, 100)
+	if client.CheckRedirect(nil, nil) != http.ErrUseLastResponse {
+		t.Fatal("client follows redirects")
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("local sockets unavailable: %v", err)
+	}
+	listener.Close()
+	redirected := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/next" {
+			redirected = true
+			return
+		}
+		http.Redirect(w, r, "/next", http.StatusFound)
+	}))
+	defer server.Close()
+	resp, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound || redirected {
+		t.Fatalf("status=%d redirected=%v", resp.StatusCode, redirected)
+	}
+}

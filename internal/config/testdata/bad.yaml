@@ -1,0 +1,16 @@
+server: { sandbox: none, token: hunter2 }
+sources:
+  factory: { type: mcp, url: http://x/mcp, read: { resource: "r://x" } }
+  gh: { type: webhook, secret: inline-secret, signature: md5 }
+  odd: { type: ftp }
+rules:
+  - { name: a, source: nope, when: 'event.x >', action: { cmd: [true] } }
+  - { name: b, source: factory, when: 'true', action: { agent: triage } }
+  - { name: c, source: factory, when: 'true', action: { unit: evil.service } }
+  - { name: d, source: factory, when: 'true', on: each, action: { routine: r } }
+  - { name: e, source: factory, when: 'true', action: { routine: missing } }
+agents:
+  triage: { mcp: [ghost] }
+routines:
+  r: { steps: [{ id: s, agent: triage }] }
+units: ["{{.x}}.service"]
