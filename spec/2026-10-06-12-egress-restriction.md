@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 12
 intent: intent/2026-10-06-12-egress-restriction.md
 ---
