@@ -5,7 +5,9 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/olafkfreund/siphon/internal/store"
 )
@@ -21,11 +23,17 @@ type view struct {
 	Approvals []store.PendingApproval
 	Audit     []store.AuditRow
 	Dash      *dashView
+	JobV      *jobView
+	Logins    []loginView
+	Egress    *egressView
+	Counts    map[string]int
+	ActionOf  map[int64]store.JobAction
 }
 
 type layout struct {
 	Title, Path, CSRF, Active, Banner string
 	Pending                           int
+	Poll                              bool // lists and live jobs refresh; editors never do
 	Body                              template.HTML
 }
 
@@ -62,7 +70,11 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 	page("/rules", "rules", func(_ *http.Request, v *view) (ok bool, err error) { v.Rules, err = s.rules(); return true, err })
 	page("/jobs", "jobs", func(r *http.Request, v *view) (ok bool, err error) {
 		v.State = r.URL.Query().Get("state")
-		v.Jobs, err = store.QueryJobs(s.Store.DB, v.State, 200)
+		if v.Jobs, err = store.QueryJobs(s.Store.DB, v.State, 200); err != nil {
+			return true, err
+		}
+		d, err := store.GetDashboard(s.Store.DB, time.Time{})
+		v.Counts = d.Counts
 		return true, err
 	})
 	page("/jobs/{id}", "job", func(r *http.Request, v *view) (bool, error) {
@@ -70,14 +82,23 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 		if err != nil {
 			return false, nil
 		}
-		j, ok, err := s.job(id)
-		v.Job = j
+		j, ok, err := s.jobDetail(id)
+		v.JobV = j
 		return ok, err
 	})
 	page("/approvals", "approvals", func(_ *http.Request, v *view) (ok bool, err error) {
-		v.Approvals, err = store.PendingApprovals(s.Store.DB)
+		d, err := store.GetDashboard(s.Store.DB, s.Now().Add(-24*time.Hour))
+		v.ActionOf = map[int64]store.JobAction{}
+		for _, p := range d.Pending {
+			v.ActionOf[p.ID] = p
+		}
+		if err == nil {
+			v.Approvals, err = store.PendingApprovals(s.Store.DB)
+		}
 		return true, err
 	})
+	page("/logins", "logins", func(_ *http.Request, v *view) (bool, error) { v.Logins = s.logins(); return true, nil })
+	page("/egress", "egress", func(_ *http.Request, v *view) (ok bool, err error) { v.Egress, err = s.egress(); return true, err })
 	page("/audit", "audit", func(_ *http.Request, v *view) (ok bool, err error) {
 		v.Audit, err = store.ListAudit(s.Store.DB, 200)
 		return true, err
@@ -120,14 +141,18 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 	}))
 }
 
+// backPath is where a form may ask to return: the dashboard or a job page
+// (never an arbitrary URL).
+var backPath = regexp.MustCompile(`^/(jobs/[0-9]+)?$`)
+
 // afterPost answers an htmx POST with the refreshed partial, a plain form POST with a redirect.
 func (s *server) afterPost(w http.ResponseWriter, r *http.Request, path, name string, v view) {
 	if r.Header.Get("HX-Request") == "true" {
 		s.render(w, name, v)
 		return
 	}
-	if r.PostFormValue("back") == "/" { // the dashboard's approve/deny
-		path = "/"
+	if b := r.PostFormValue("back"); backPath.MatchString(b) { // dashboard or job page
+		path = b
 	}
 	http.Redirect(w, r, path, http.StatusSeeOther)
 }
@@ -144,8 +169,12 @@ func (s *server) page(w http.ResponseWriter, r *http.Request, name string, v vie
 		return
 	}
 	pending, _ := store.PendingApprovals(s.Store.DB)
+	poll := polls[name]
+	if v.JobV != nil {
+		poll = v.JobV.State == "running" || v.JobV.State == "queued" || v.JobV.State == "pending_approval"
+	}
 	s.render(w, "layout", layout{Title: titles[name], Path: r.URL.RequestURI(), CSRF: v.CSRF, Active: active[name],
-		Pending: len(pending), Body: template.HTML(body.String())})
+		Pending: len(pending), Poll: poll, Body: template.HTML(body.String())})
 }
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {

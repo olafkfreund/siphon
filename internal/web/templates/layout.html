@@ -14,6 +14,8 @@
     <div class="sep">Configure</div>
     <a href="/rules"{{if eq .Active "rules"}} aria-current="page"{{end}}>{{template "icon" "flow"}}Rules</a>
     <a href="/sources"{{if eq .Active "sources"}} aria-current="page"{{end}}>{{template "icon" "src"}}Sources</a>
+    <a href="/logins"{{if eq .Active "logins"}} aria-current="page"{{end}}>{{template "icon" "key"}}Logins</a>
+    <a href="/egress"{{if eq .Active "egress"}} aria-current="page"{{end}}>{{template "icon" "shield"}}Egress</a>
     <div class="sep">Records</div>
     <a href="/audit"{{if eq .Active "audit"}} aria-current="page"{{end}}>{{template "icon" "audit"}}Audit</a>
   </nav>
@@ -24,7 +26,7 @@
 </aside>
 <div>
   <div class="topbar"><img src="/static/mark-bare.svg" alt="">siphon<span class="sp"></span>{{if .Pending}}<a class="pill pending_approval" href="/approvals">✋ {{.Pending}}</a>{{end}}<button type="button" data-action="menu" aria-label="Menu">{{template "icon" "menu"}}</button></div>
-  <main class="main" id="main" hx-get="{{.Path}}" hx-trigger="every 5s" hx-swap="innerHTML">{{if .Banner}}<div class="banner" role="alert">{{.Banner}}</div>{{end}}{{.Body}}</main>
+  <main class="main" id="main"{{if .Poll}} hx-get="{{.Path}}" hx-trigger="every 5s" hx-swap="innerHTML"{{end}}>{{if .Banner}}<div class="banner" role="alert">{{.Banner}}</div>{{end}}{{.Body}}</main>
 </div>
 </div>
 <div id="live" class="sr-only" aria-live="polite"></div>

@@ -1,9 +1,46 @@
-{{define "job"}}{{with .Job}}<h1>Job {{.ID}}</h1>
-<dl><dt>Rule</dt><dd>{{.Rule}}</dd><dt>State</dt><dd>{{.State}}</dd><dt>Attempt</dt><dd>{{.Attempt}}</dd>
-<dt>Created</dt><dd>{{tm .CreatedAt}}</dd><dt>Started</dt><dd>{{tp .StartedAt}}</dd><dt>Finished</dt><dd>{{tp .FinishedAt}}</dd>
-<dt>Exit</dt><dd>{{exit .ExitCode}}</dd><dt>Depth</dt><dd>{{.Depth}}</dd>
-{{if .ParentID}}<dt>Parent</dt><dd><a href="/jobs/{{.ParentID}}">{{.ParentID}}</a></dd>{{end}}</dl>
-{{if eq .State "pending_approval"}}<p>
-<form method="post" action="/approvals/{{.ID}}/approve" hx-post="/approvals/{{.ID}}/approve" hx-target="#main"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>Approve</button></form>
-<form method="post" action="/approvals/{{.ID}}/deny" hx-post="/approvals/{{.ID}}/deny" hx-target="#main"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>Deny</button></form></p>{{end}}
-<h2>Output</h2><pre>{{.Output}}</pre>{{end}}{{end}}
+{{define "job"}}{{with .JobV}}
+<div class="top"><div><div class="muted small"><a href="/jobs">Jobs</a> / {{.ID}}</div><h1 class="title-row">Job {{.ID}} {{template "pill" .State}}</h1></div><span class="sp"></span>
+{{if eq .State "pending_approval"}}
+  <form method="post" action="/approvals/{{.ID}}/deny"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/jobs/{{.ID}}"><button class="btn no">Deny</button></form>
+  <form method="post" action="/approvals/{{.ID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/jobs/{{.ID}}"><button class="btn ok">Approve &amp; run</button></form>
+{{end}}</div>
+<div class="grid g2">
+  <div class="stack">
+    <section class="card" aria-labelledby="what"><h2 id="what">{{if eq .State "pending_approval"}}What will run{{else}}What ran{{end}}</h2>
+      {{if eq .Kind "agent"}}<dl>
+        <dt>Agent</dt><dd><b>{{.Target}}</b>{{with .Agent}} · {{.Kind}}{{if .Credential}} · login <b>{{.Credential}}</b>{{end}}{{end}}</dd>
+        {{with .Agent}}<dt>Limits</dt><dd>{{if .MaxTurns}}{{.MaxTurns}} turns · {{end}}{{if .MaxBudgetUSD}}${{.MaxBudgetUSD}} · {{end}}{{dur .Timeout}}</dd>{{end}}
+        <dt>Can reach</dt><dd>{{range $i, $h := .CanReach}}{{if $i}} · {{end}}<code>{{$h.Host}}{{if ne $h.Port 443}}:{{$h.Port}}{{end}}</code>{{else}}<span class="muted">any host (egress off)</span>{{end}}</dd>
+      </dl>
+      <div class="muted small">Prompt</div><pre>{{.Prompt}}</pre>
+      {{else if eq .Kind "cmd"}}<dl><dt>Command</dt><dd>sandboxed, argv only</dd></dl><pre>{{range $i, $a := .Argv}}{{if $i}} {{end}}{{$a}}{{end}}</pre>
+      {{else if eq .Kind "unit"}}<dl><dt>Unit</dt><dd><code>{{.Target}}</code> (allowlisted)</dd></dl>
+      {{else if eq .Kind "routine"}}<dl><dt>Routine</dt><dd><b>{{.Target}}</b> · {{len .Steps}} steps</dd></dl>
+      {{else}}<p class="muted">No action details stored for this job.</p>{{end}}
+    </section>
+    <section class="card" aria-labelledby="out"><div class="top tight"><h2 id="out">Output</h2><span class="sp"></span>{{if .Output}}<button type="button" class="btn sm" data-action="copy" data-target="job-output">{{template "icon" "copy"}}Copy</button>{{end}}</div>
+      {{if .Output}}<pre id="job-output">{{.Output}}</pre>{{else}}<p class="muted">{{if eq .State "running"}}Running, output appears when the run finishes.{{else}}No output.{{end}}</p>{{end}}
+      {{if .Blocked}}<h2 class="mt">Blocked hosts</h2>
+        {{range .Blocked}}<div class="blocked"><code>{{.Host}}</code><span class="muted">{{.Count}}×</span><span class="sp"></span></div>{{end}}
+        <p class="muted small">The sandbox refused these. If one is needed, add it to the agent's <code>egress.allow</code>.</p>{{end}}
+    </section>
+  </div>
+  <div class="stack">
+    <section class="card" aria-labelledby="det"><h2 id="det">Details</h2><dl>
+      <dt>Rule</dt><dd>{{.Rule}}</dd>
+      <dt>Created</dt><dd>{{tm .CreatedAt}} · {{ago .CreatedAt}}</dd>
+      {{if .StartedAt}}<dt>Started</dt><dd>{{tp .StartedAt}}</dd>{{end}}
+      {{if .FinishedAt}}<dt>Finished</dt><dd>{{tp .FinishedAt}}</dd>{{end}}
+      {{if .Duration}}<dt>Duration</dt><dd>{{.Duration}}</dd>{{end}}
+      <dt>Exit</dt><dd>{{exit .ExitCode}}</dd>
+      <dt>Attempt</dt><dd>{{.Attempt}}</dd>
+      {{if .ParentID}}<dt>Parent</dt><dd><a href="/jobs/{{.ParentID}}">{{.ParentID}}</a></dd>{{end}}
+      {{if .Depth}}<dt>Depth</dt><dd>{{.Depth}}</dd>{{end}}
+    </dl></section>
+    {{if .Event}}<section class="card" aria-labelledby="ev"><h2 id="ev">Triggering event</h2><pre>{{.Event}}</pre></section>{{end}}
+    {{if .Steps}}<section class="card" aria-labelledby="st"><h2 id="st">Routine steps</h2><ol class="timeline">
+      {{range .Steps}}<li>{{template "pill" .State}}<div><b>{{.ID}}</b><div class="muted small">{{.Kind}} {{.Target}}</div></div></li>{{end}}
+    </ol></section>{{end}}
+  </div>
+</div>
+{{end}}{{end}}

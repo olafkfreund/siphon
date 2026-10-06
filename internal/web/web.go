@@ -80,7 +80,13 @@ func New(o Options) http.Handler {
 			}
 			return itoa(*e)
 		},
-		"pe":  url.PathEscape,
+		"pe": url.PathEscape,
+		"dur": func(d config.Duration) string {
+			if d == 0 {
+				return "no timeout"
+			}
+			return time.Duration(d).String() + " timeout"
+		},
 		"ago": func(t time.Time) string { return ago(o.Now(), t) },
 		"agop": func(t *time.Time) string {
 			if t == nil {

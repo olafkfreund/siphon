@@ -121,6 +121,36 @@ dt { color: var(--muted) } dd { margin: 0 }
 .chip { border: 1px solid var(--line); border-radius: 999px; padding: .25rem .75rem; font-size: .82rem; background: var(--surface); color: var(--text) }
 .chip[aria-current=page] { background: var(--text); color: var(--surface); border-color: var(--text) }
 
+/* rules: the flow view (source -> condition -> action) */
+.rule-card { display: flex; flex-direction: column; gap: .4rem }
+.rule-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap }
+.rule-head form { display: flex }
+.flow { display: flex; align-items: center; margin: .5rem 0 }
+.node { flex: 1; min-width: 0; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: .55rem .7rem; font-size: .84rem }
+.node.cond { flex: 1.5 }
+.node small { display: block; font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted) }
+.node code { display: block; overflow-wrap: anywhere; font-size: .8rem }
+.pipe { width: 40px; height: 14px; flex: none }
+.pipe line { stroke: var(--current); stroke-width: 3; stroke-dasharray: 4 6; stroke-linecap: round; animation: flow 1.2s linear infinite }
+.flow.off .pipe line { stroke: var(--line); animation: none }
+.flow.off .node { opacity: .65 }
+@keyframes flow { to { stroke-dashoffset: -20 } }
+.badge { font-size: .7rem; font-weight: 700; border-radius: 6px; padding: .1rem .4rem; background: var(--surface-2); color: var(--muted) }
+.badge.ovr { color: var(--wait-text); background: color-mix(in srgb, var(--amber) 20%, transparent) }
+button.switch { width: 40px; height: 22px; padding: 0; border: 0; border-radius: 999px; background: var(--line); position: relative; flex: none }
+button.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .2s ease-out }
+button.switch.on { background: var(--grad) }
+button.switch.on::after { transform: translateX(18px) }
+
+/* job detail */
+.title-row { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap }
+.top.tight { margin-bottom: .4rem }
+.top form { display: flex }
+.timeline { list-style: none; margin: 0; padding: 0 }
+.timeline li { display: flex; gap: .7rem; padding: .45rem 0; align-items: flex-start }
+.blocked { display: flex; align-items: center; gap: .6rem; padding: .5rem .7rem; border-radius: 10px; background: color-mix(in srgb, var(--coral) 9%, transparent); margin-bottom: .4rem }
+.wrap { overflow-wrap: anywhere }
+
 /* forms */
 label { display: inline-flex; flex-direction: column; gap: .3rem; font-size: .82rem; font-weight: 600 }
 input, select, textarea { font: inherit; font-weight: 400; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: .55rem .7rem }
@@ -156,6 +186,7 @@ input, select, textarea { font: inherit; font-weight: 400; color: var(--text); b
   .topbar button { padding: .35rem; border: 0 }
   .main { padding: 1rem }
   .g4 { grid-template-columns: 1fr 1fr } .g2, .g2e { grid-template-columns: 1fr }
+  .flow { flex-direction: column; align-items: stretch } .pipe { transform: rotate(90deg); margin: .1rem auto }
   .need { flex-wrap: wrap } .need .acts { width: 100% } .need .acts form, .need .acts .btn { flex: 1 } .need .acts button { width: 100%; justify-content: center }
   .hide-sm { display: none }
 }

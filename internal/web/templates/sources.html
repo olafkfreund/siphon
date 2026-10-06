@@ -1,4 +1,8 @@
-{{define "sources"}}<h1>Sources</h1>
-<table><tr><th>Name</th><th>Type</th><th>Poll</th><th>Last poll</th><th>Last error</th></tr>
-{{range .Sources}}<tr><td>{{.Name}}</td><td>{{.Type}}</td><td>{{.Poll}}</td><td>{{tp .LastPollAt}}</td><td>{{.LastError}}</td></tr>
-{{else}}<tr><td colspan="5">none</td></tr>{{end}}</table>{{end}}
+{{define "sources"}}<div class="top"><div><h1>Sources</h1><div class="muted">Where Siphon draws events in from.</div></div></div>
+<div class="grid g2e">
+{{range .Sources}}<section class="card" aria-label="Source {{.Name}}">
+  <div class="rule-head"><span class="dot {{.Health}}" title="{{.Health}}"></span><b>{{.Name}}</b><span class="pill tag">{{.Type}}</span><span class="sp"></span>{{if .Poll}}<span class="muted small">every {{.Poll}}</span>{{end}}</div>
+  <p class="small {{if .LastError}}err{{else}}muted{{end}} mt">{{if .LastError}}{{.LastError}}{{else if .LastPollAt}}{{if eq .Type "webhook"}}Last delivery{{else}}Last poll{{end}} {{agop .LastPollAt}}{{else}}{{if eq .Type "webhook"}}Waiting for the first delivery.{{else}}Not polled yet.{{end}}{{end}}</p>
+</section>
+{{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>Nothing in the current yet. Add a source to <code>siphon.yaml</code>.</section>{{end}}
+</div>{{end}}

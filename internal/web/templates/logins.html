@@ -1,0 +1,6 @@
+{{define "logins"}}<div class="top"><div><h1>Logins</h1><div class="muted">Accounts Siphon's agents run as. Secrets stay in the store and are never shown.</div></div></div>
+<section class="card"><table><thead><tr><th>Name</th><th>Provider</th><th>Type</th><th>Expires</th><th class="hide-sm">Last refresh</th></tr></thead><tbody>
+{{range .Logins}}<tr><td><b>{{.Name}}</b></td><td>{{.Provider}}</td><td>{{.Type}}</td><td><span class="pill {{.ExpiryClass}}">{{.Expiry}}</span></td><td class="hide-sm muted">{{.Written}}</td></tr>
+{{else}}<tr><td colspan="5"><div class="empty">No logins configured. Add one under <code>credentials:</code> in <code>siphon.yaml</code>.</div></td></tr>{{end}}
+</tbody></table></section>
+<p class="muted small mt">Import a login with <code>siphon credentials import &lt;name&gt; &lt; login-file</code>; adding one here comes with portal editing.</p>{{end}}

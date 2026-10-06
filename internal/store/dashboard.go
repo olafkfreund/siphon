@@ -97,3 +97,10 @@ func jobActions(db *sql.DB, where string, since int64, limit int) ([]JobAction, 
 	}
 	return out, rows.Err()
 }
+
+// JobPayload returns a job's stored action payload (JSON) and the routine
+// step it resumes at, for the job detail page.
+func JobPayload(db *sql.DB, id int64) (payload string, resumeStep int, err error) {
+	err = db.QueryRow(`SELECT action_json, resume_step FROM jobs WHERE id=?`, id).Scan(&payload, &resumeStep)
+	return
+}

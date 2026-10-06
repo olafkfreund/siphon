@@ -25,7 +25,12 @@ type sourceView struct {
 type ruleView struct {
 	Name       string     `json:"name"`
 	Source     string     `json:"source"`
+	SourceType string     `json:"source_type"`
+	When       string     `json:"when"`
 	On         string     `json:"on"`
+	Cooldown   string     `json:"cooldown,omitempty"`
+	Kind       string     `json:"kind"`
+	Target     string     `json:"target"`
 	Action     string     `json:"action"`
 	Enabled    bool       `json:"enabled"`
 	Overridden bool       `json:"overridden"`
@@ -91,7 +96,16 @@ func (s *server) rules() ([]ruleView, error) {
 		if on == "" {
 			on = "edge"
 		}
-		v := ruleView{Name: r.Name, Source: r.Source, On: on, Action: actionSummary(r.Action), Enabled: !off[r.Name], Overridden: off[r.Name]}
+		v := ruleView{Name: r.Name, Source: r.Source, When: r.When, On: on, Action: actionSummary(r.Action), Enabled: !off[r.Name], Overridden: off[r.Name]}
+		if src := s.Cfg.Sources[r.Source]; src != nil {
+			v.SourceType = src.Type
+		} else if r.Source == "agent-result" {
+			v.SourceType = "agent results"
+		}
+		if r.Cooldown > 0 {
+			v.Cooldown = time.Duration(r.Cooldown).String()
+		}
+		v.Kind, v.Target, _ = strings.Cut(v.Action, ": ")
 		if t, ok := fired[r.Name]; ok {
 			v.LastFired = &t
 		}
@@ -120,9 +134,11 @@ func (s *server) job(id int64) (store.JobDetail, bool, error) {
 // Page titles and which nav entry each page lights up.
 var (
 	titles = map[string]string{"dashboard": "Dashboard", "jobs": "Jobs", "job": "Job", "approvals": "Approvals",
-		"rules": "Rules", "sources": "Sources", "audit": "Audit"}
+		"rules": "Rules", "sources": "Sources", "audit": "Audit", "logins": "Logins", "egress": "Egress"}
 	active = map[string]string{"dashboard": "dash", "jobs": "jobs", "job": "jobs", "approvals": "approvals",
-		"rules": "rules", "sources": "sources", "audit": "audit"}
+		"rules": "rules", "sources": "sources", "audit": "audit", "logins": "logins", "egress": "egress"}
+	// Pages that refresh themselves every 5 s (job detail decides by state).
+	polls = map[string]bool{"dashboard": true, "jobs": true, "approvals": true, "sources": true, "audit": true}
 )
 
 type dashView struct {

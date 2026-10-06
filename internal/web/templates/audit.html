@@ -1,4 +1,5 @@
-{{define "audit"}}<h1>Audit</h1>
-<table><tr><th>Time</th><th>Actor</th><th>Event</th><th>Job</th><th>Detail</th></tr>
-{{range .Audit}}<tr><td>{{tm .At}}</td><td>{{.Actor}}</td><td>{{.Event}}</td><td>{{if .JobID}}<a href="/jobs/{{.JobID}}">{{.JobID}}</a>{{end}}</td><td>{{.Detail}}</td></tr>
-{{else}}<tr><td colspan="5">none</td></tr>{{end}}</table>{{end}}
+{{define "audit"}}<div class="top"><div><h1>Audit</h1><div class="muted">Who did what, newest first.</div></div></div>
+<section class="card"><table><thead><tr><th>Time</th><th>Event</th><th class="hide-sm">Actor</th><th>Job</th><th>Detail</th></tr></thead><tbody>
+{{range .Audit}}<tr><td class="muted small" title="{{tm .At}}">{{ago .At}}</td><td><span class="pill tag">{{.Event}}</span></td><td class="hide-sm">{{.Actor}}</td><td>{{if .JobID}}<a href="/jobs/{{.JobID}}">{{.JobID}}</a>{{end}}</td><td class="small wrap">{{.Detail}}</td></tr>
+{{else}}<tr><td colspan="5"><div class="empty">No audit entries yet.</div></td></tr>{{end}}
+</tbody></table></section>{{end}}

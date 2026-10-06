@@ -250,7 +250,7 @@ func TestPortalShowsOverridden(t *testing.T) {
 	c, csrf := e.login()
 	e.do("POST", "/rules/disk-full/disable", url.Values{"csrf": {csrf}}, func(r *http.Request) { r.AddCookie(c) })
 	body := e.do("GET", "/rules", nil, func(r *http.Request) { r.AddCookie(c) }).Body.String()
-	if !strings.Contains(body, "overridden") || !strings.Contains(body, "Enable") {
+	if !strings.Contains(body, "turned off in the portal") || !strings.Contains(body, "Enable disk-full") {
 		t.Fatal(body)
 	}
 }
