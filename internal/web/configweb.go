@@ -27,6 +27,18 @@ type cfgView struct {
 	Fields                     []fieldView
 	YAML, Errors, Diff, Notice string
 	Rev                        int64
+	// Editor extras (editors.go).
+	Base       string // /config/<kind>/<name|new>
+	Side       string // which side panel: rules, sources, agents, routines
+	F          map[string]fieldView
+	ActionKind string
+	SourceOpts []optPair
+	AgentOpts  []string
+	UnitOpts   []string
+	RoutineOpt []string
+	Health     *sourceView
+	LastEvent  string
+	Steps      []stepRow
 }
 
 type cfgRow struct{ Name, Prov string }
@@ -73,6 +85,8 @@ func (s *server) configRoutes(mux *http.ServeMux) {
 	})
 	h("GET /history/{id}", s.histItem)
 	h("POST /history/{id}/restore", s.histRestore)
+	mux.HandleFunc("POST /rules/test", s.portal(s.ruleTest))
+	mux.HandleFunc("POST /agents/egress-preview", s.portal(s.egressPreview))
 	mux.HandleFunc("POST /logins", s.portal(s.loginAdd))
 	mux.HandleFunc("POST /logins/{name}/delete", s.portal(s.loginDelete))
 	s.configAPI(mux)
@@ -144,6 +158,9 @@ func (s *server) editView(kind, name string, isNew bool, y string) (*cfgView, er
 	v.HasForm = len(v.Fields) > 0
 	if isNew {
 		v.Prov = "new"
+	}
+	if err := s.editExtras(v); err != nil {
+		return nil, err
 	}
 	return v, nil
 }

@@ -162,3 +162,13 @@ func SetSourceEvent(db *sql.DB, source string, data any) error {
 		ON CONFLICT(source) DO UPDATE SET json=excluded.json`, source, string(b))
 	return err
 }
+
+// SourceEvent is the last event JSON stored for source ("" if none yet).
+func SourceEvent(db *sql.DB, source string) (string, error) {
+	var j string
+	err := db.QueryRow(`SELECT json FROM source_state WHERE source=?`, source).Scan(&j)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return j, err
+}

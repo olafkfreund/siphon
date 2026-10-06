@@ -93,7 +93,8 @@ func New(o Options) http.Handler {
 			}
 			return itoa(*e)
 		},
-		"pe": url.PathEscape,
+		"pe":       url.PathEscape,
+		"diffhtml": diffHTML,
 		"dur": func(d config.Duration) string {
 			if d == 0 {
 				return "no timeout"

@@ -354,14 +354,7 @@ func rulesTest(ctx context.Context, args []string) error {
 		}
 		data = m["event"]
 	}
-	st, err := store.Open(":memory:")
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-	cfg.Rules = []config.Rule{*r}
-	p := job.New(cfg, st, time.Now)
-	fires, _, evalErr := p.HandleEvent(ctx, rule.Event{Source: r.Source, Headers: headers, Data: data}, true)
+	fires, evalErr := rule.DryRun(ctx, *r, rule.Event{Source: r.Source, Headers: headers, Data: data})
 
 	type out struct {
 		Key  string   `json:"key"`

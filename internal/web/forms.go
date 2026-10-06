@@ -248,6 +248,13 @@ func applyForm(kind, name, existing string, form url.Values, db string) (string,
 		}
 		setPath(m, f.Key, v)
 	}
+	if k := form.Get("action_kind"); kind == "rules" && k != "" { // the Then selector: only its field counts
+		for _, o := range []string{"cmd", "agent", "unit", "routine"} {
+			if o != k {
+				setPath(m, "action."+o, nil)
+			}
+		}
+	}
 	b, err := yaml.Marshal(m)
 	return string(b), err
 }

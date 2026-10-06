@@ -1,6 +1,10 @@
 package web
 
-import "strings"
+import (
+	"html"
+	"html/template"
+	"strings"
+)
 
 // unifiedDiff is a small line diff (LCS) with 3 lines of context, for the
 // review step and the revision log. ponytail: O(n*m), fine for config-sized text.
@@ -73,4 +77,20 @@ func splitLines(s string) []string {
 		return nil
 	}
 	return strings.Split(strings.TrimSuffix(s, "\n"), "\n")
+}
+
+// diffHTML colours the +/- lines of a unified diff (everything else is escaped text).
+func diffHTML(d string) template.HTML {
+	var b strings.Builder
+	for _, l := range strings.Split(strings.TrimSuffix(d, "\n"), "\n") {
+		e := html.EscapeString(l)
+		switch {
+		case strings.HasPrefix(l, "+"):
+			e = `<span class="add">` + e + `</span>`
+		case strings.HasPrefix(l, "-"):
+			e = `<span class="del">` + e + `</span>`
+		}
+		b.WriteString(e + "\n")
+	}
+	return template.HTML(b.String())
 }

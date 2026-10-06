@@ -304,15 +304,7 @@ func (p *Pipeline) enqueue(tx *sql.Tx, cfg *config.Config, r config.Rule, f rule
 	return id, link, err
 }
 
-func needsApproval(cfg *config.Config, r config.Rule) bool {
-	if r.Approve {
-		return true
-	}
-	if a := cfg.Agents[r.Action.Agent]; a != nil && a.Approve != nil {
-		return *a.Approve
-	}
-	return false
-}
+func needsApproval(cfg *config.Config, r config.Rule) bool { return cfg.NeedsApproval(r) }
 
 // RunQueued runs runnable jobs one by one until none are left; returns how many ran.
 func (p *Pipeline) RunQueued(ctx context.Context) (int, error) {

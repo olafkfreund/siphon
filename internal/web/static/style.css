@@ -190,3 +190,28 @@ input, select, textarea { font: inherit; font-weight: 400; color: var(--text); b
   .need { flex-wrap: wrap } .need .acts { width: 100% } .need .acts form, .need .acts .btn { flex: 1 } .need .acts button { width: 100%; justify-content: center }
   .hide-sm { display: none }
 }
+
+/* editors */
+label.f { display: flex; flex-direction: column; gap: .3rem; font-size: .82rem; font-weight: 600; margin-bottom: .9rem }
+.seg label { position: relative; cursor: pointer }
+.seg label input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer }
+.seg label span { display: block }
+.seg label input:checked + span { background: var(--surface); box-shadow: var(--shadow) }
+.seg label input:focus-visible + span { outline: 2px solid var(--current) }
+form:has(input[name="action_kind"][value="agent"]:checked) .act:not(.act-agent),
+form:has(input[name="action_kind"][value="cmd"]:checked) .act:not(.act-cmd),
+form:has(input[name="action_kind"][value="unit"]:checked) .act:not(.act-unit),
+form:has(input[name="action_kind"][value="routine"]:checked) .act:not(.act-routine) { display: none }
+.diff pre { border-radius: 0 }
+.row-actions { display: flex; gap: .6rem; margin-top: 1rem; justify-content: flex-end }
+.seg { display: inline-flex; background: var(--surface-2); border-radius: 999px; padding: 3px }
+.seg span { padding: .3rem .8rem; border-radius: 999px; font-size: .82rem; font-weight: 600; cursor: pointer }
+.seg span.on { background: var(--surface); box-shadow: var(--shadow) }
+.tabs { display: flex; gap: 1rem; border-bottom: 1px solid var(--line); margin-bottom: 1rem }
+.tabs span { padding: .4rem 0; font-weight: 600; color: var(--muted) }
+.tabs span.on { color: var(--text); box-shadow: inset 0 -2px 0 var(--current) }
+.test { background: var(--surface-2); border-radius: 12px; padding: .8rem; font-size: .85rem }
+.match { display: flex; gap: .5rem; align-items: center; padding: .35rem 0 }
+.match .y { color: var(--kelp); font-weight: 800 } .match .n { color: var(--muted); font-weight: 800 }
+pre .add { color: #5ef0b4 } pre .del { color: #ff8fa0 }
+.diff { border: 1px solid var(--line); border-radius: 12px; overflow: hidden }

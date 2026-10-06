@@ -1,8 +1,8 @@
-{{define "rules"}}<div class="top"><div><h1>Rules</h1><div class="muted">What Siphon watches for, and what it jets out.</div></div></div>
+{{define "rules"}}<div class="top"><div><h1>Rules</h1><div class="muted">What Siphon watches for, and what it jets out.</div></div><span class="sp"></span><a class="btn primary" href="/config/rules/new">New rule</a></div>
 <div class="grid g2e">
 {{range .Rules}}<section class="card rule-card" aria-label="Rule {{.Name}}">
   <div class="rule-head"><b>{{.Name}}</b>{{if .Overridden}}<span class="badge ovr">turned off in the portal</span>{{end}}<span class="sp"></span>
-    <span class="muted small">{{if .Enabled}}{{if .LastFired}}fired {{agop .LastFired}}{{else}}not fired yet{{end}}{{else}}disabled{{end}}</span>
+    <a class="btn sm" href="/config/rules/{{pe .Name}}">Edit</a><span class="muted small">{{if .Enabled}}{{if .LastFired}}fired {{agop .LastFired}}{{else}}not fired yet{{end}}{{else}}disabled{{end}}</span>
     {{$verb := "disable"}}{{if not .Enabled}}{{$verb = "enable"}}{{end}}
     <form method="post" action="/rules/{{pe .Name}}/{{$verb}}" hx-post="/rules/{{pe .Name}}/{{$verb}}" hx-target="#main"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="switch{{if .Enabled}} on{{end}}" role="switch" aria-checked="{{if .Enabled}}true{{else}}false{{end}}" aria-label="{{if .Enabled}}Disable{{else}}Enable{{end}} {{.Name}}"></button></form>
   </div>

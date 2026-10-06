@@ -234,6 +234,18 @@ type Retry struct {
 
 const MaxRetryAttempts = 10
 
+// NeedsApproval reports whether a job from r waits for a person: the rule says
+// so, or its agent does.
+func (c *Config) NeedsApproval(r Rule) bool {
+	if r.Approve {
+		return true
+	}
+	if a := c.Agents[r.Action.Agent]; a != nil && a.Approve != nil {
+		return *a.Approve
+	}
+	return false
+}
+
 // Load reads path, applies defaults and resolves secret refs. Unresolvable
 // refs are reported by Validate, so `validate` lists every problem at once.
 func Load(path string) (*Config, error) {

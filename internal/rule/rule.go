@@ -58,6 +58,22 @@ func compile(src string) (*vm.Program, error) {
 	return p, nil
 }
 
+// DryRun evaluates r against ev on a throwaway in-memory store: it reports what
+// would fire and writes nothing anywhere. `rules test` and the portal tester share it.
+func DryRun(ctx context.Context, r config.Rule, ev Event) ([]Fire, error) {
+	st, err := store.Open(":memory:")
+	if err != nil {
+		return nil, err
+	}
+	defer st.Close()
+	tx, err := st.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	return Evaluate(ctx, tx, r, ev, time.Now(), true)
+}
+
 // Eval evaluates an expression with the same compile cache and 100 ms timeout
 // that rules use (routine `if` expressions share it).
 func Eval(ctx context.Context, src string, env map[string]any) (any, error) {
