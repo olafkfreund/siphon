@@ -171,3 +171,8 @@ unchanged. Remove the microvm flake input with the revert.
   - **The port is fixed at 127.0.0.1:8090**, since microvm.nix bakes `forwardPorts` at build time. `SIPHON_VM_PORT` was dropped, and so was `SIPHON_VM_NOKVM`: the runner always passes `-enable-kvm`, and the wrapper refuses to start without `/dev/kvm`.
   - The shared `config/` dir is 0755 inside a 0700 `$SIPHON_VM_DIR`, so the guest's siphon user can read it over 9p and other host users can't. An earlier 0700 made the config unreadable in the guest.
   - Verified locally: boot, portal 200, a webhook job is done, a restart keeps the job (the `state.img` volume). The CI check is `ci/microvm-test.sh` in the `vm` job.
+- **Step 1 (coder):**
+  - `config.InContainer` is a func var (a seam).
+  - The container default and the `systemd` error are in parse and `Validate`.
+  - `applyListenEnv` handles `SIPHON_LISTEN`.
+  - The Unsandboxed banner is set at startup from `sandbox == none`. `server.*` is file-only, so it can only change with a restart.

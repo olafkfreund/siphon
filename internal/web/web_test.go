@@ -459,3 +459,15 @@ func TestDisablingRuleCancelsBacklog(t *testing.T) {
 		t.Fatal("audit row missing")
 	}
 }
+
+// Plan step 1: the Unsandboxed banner is permanent when set, absent otherwise.
+func TestUnsandboxedBanner(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		e := newEnv(t, func(o *Options) { o.Unsandboxed = on })
+		c, _ := e.login()
+		body := e.do("GET", "/rules", nil, func(r *http.Request) { r.AddCookie(c) }).Body.String()
+		if got := strings.Contains(body, "Unsandboxed:"); got != on {
+			t.Errorf("Unsandboxed=%v: banner shown=%v", on, got)
+		}
+	}
+}
