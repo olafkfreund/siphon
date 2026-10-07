@@ -71,6 +71,18 @@ type bridgeFake struct {
 	stops   *[]string
 }
 
+// sockDir is a run-dir root short enough for <dir>/<id>/mcp.sock: a unix
+// socket path is at most 107 bytes, and t.TempDir under a long TMPDIR (CI's
+// nix develop) is not.
+func sockDir(t *testing.T) string {
+	dir, err := os.MkdirTemp("/tmp", "sb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
 func newBridgeFake(t *testing.T, dir string) *bridgeFake {
 	f := &bridgeFake{stops: fakeSystemd(t, dir)}
 	agentStart := startUnit
@@ -115,11 +127,11 @@ func envServer(extra map[string]string) MCPServer {
 	for k, v := range extra {
 		env[k] = v
 	}
-	return MCPServer{Command: []string{"srv", "--flag"}, Env: env, Egress: &EgressEnv{ProxyURL: "http://u:pw@127.77.0.1:3128", Socket: "/run/egress.sock"}}
+	return MCPServer{Command: []string{"SRV_CMD", "--flag"}, Env: env, Egress: &EgressEnv{ProxyURL: "http://u:pw@127.77.0.1:3128", Socket: "/run/egress.sock"}}
 }
 
 func TestBridgeUnitLifecycle(t *testing.T) {
-	dir := t.TempDir()
+	dir := sockDir(t)
 	f := newBridgeFake(t, dir)
 	state := t.TempDir()
 	o := AgentOptions{Sandbox: SandboxOptions{Mode: "systemd", Dir: dir, Egress: &EgressEnv{}}, Timeout: time.Minute, StateDir: state, AllowedTools: []string{"mcp__gh__check"},
@@ -151,7 +163,7 @@ func TestBridgeUnitLifecycle(t *testing.T) {
 	}
 	var spec mcpbridge.Spec
 	json.Unmarshal(job.Files["bridge.json"], &spec)
-	if len(job.Files) != 1 || strings.Contains(string(job.Files["bridge.json"]), "tok-123") || spec.Socket != sock || spec.Token != tok || strings.Join(spec.Command, " ") != "srv --flag" || strings.Join(spec.Tools, ",") != "check" {
+	if len(job.Files) != 1 || strings.Contains(string(job.Files["bridge.json"]), "tok-123") || spec.Socket != sock || spec.Token != tok || strings.Join(spec.Command, " ") != "SRV_CMD --flag" || strings.Join(spec.Tools, ",") != "check" {
 		t.Fatalf("spec %+v files %v", spec, job.Files)
 	}
 	// The secret lives only in bridge-secrets/<id> (0600, in a 0700 dir), for LoadCredential.
@@ -179,7 +191,7 @@ func TestBridgeUnitLifecycle(t *testing.T) {
 }
 
 func TestBridgeSocketNeverAppears(t *testing.T) {
-	dir := t.TempDir()
+	dir := sockDir(t)
 	f := newBridgeFake(t, dir)
 	_ = f
 	startUnit = func(context.Context, string) error { return os.ErrInvalid } // the unit dies at once
@@ -255,7 +267,7 @@ func TestRunDirSticky(t *testing.T) {
 func TestAgentConfigRewrittenForBridge(t *testing.T) {
 	for _, kind := range []string{"claude", "codex"} {
 		t.Run(kind, func(t *testing.T) {
-			dir := t.TempDir()
+			dir := sockDir(t)
 			f := newBridgeFake(t, dir)
 			stub := filepath.Join(t.TempDir(), "agent")
 			os.WriteFile(stub, []byte("#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = --mcp-config ] && cat \"$2\"; shift; done\ncat \"$CODEX_HOME/config.toml\" 2>/dev/null\nenv\n"), 0o755)
@@ -269,7 +281,7 @@ func TestAgentConfigRewrittenForBridge(t *testing.T) {
 				t.Fatalf("%v %+v", err, res)
 			}
 			out := string(res.Stdout)
-			if !strings.Contains(out, "127.0.0.1:3200/mcp") || !strings.Contains(out, "Bearer ") || strings.Contains(out, "tok-123") || strings.Contains(out, "srv") {
+			if !strings.Contains(out, "127.0.0.1:3200/mcp") || !strings.Contains(out, "Bearer ") || strings.Contains(out, "tok-123") || strings.Contains(out, "SRV_CMD") {
 				t.Fatalf("agent saw:\n%s", out)
 			}
 			_, _, agent := f.snap()
