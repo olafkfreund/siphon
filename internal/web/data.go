@@ -134,14 +134,14 @@ func (s *server) job(id int64) (store.JobDetail, bool, error) {
 // Page titles and which nav entry each page lights up.
 var (
 	titles = map[string]string{"dashboard": "Dashboard", "jobs": "Jobs", "job": "Job", "approvals": "Approvals",
-		"rules": "Rules", "sources": "Sources", "audit": "Audit", "logins": "Logins", "egress": "Egress",
+		"rules": "Rules", "sources": "Sources", "audit": "Audit", "logins": "Connections", "egress": "Egress",
 		"cfglist": "Config", "cfgedit": "Edit", "history": "History", "historyitem": "Revision"}
 	active = map[string]string{"dashboard": "dash", "jobs": "jobs", "job": "jobs", "approvals": "approvals",
 		"rules": "rules", "sources": "sources", "audit": "audit", "logins": "logins", "egress": "egress",
 		"cfglist": "rules", "cfgedit": "rules", "history": "history", "historyitem": "history"}
 	// Config kinds as people read them, and the nav entry each lights up.
-	kindTitle = map[string]string{"rules": "Rules", "sources": "Sources", "agents": "Agents", "routines": "Routines", "credentials": "Logins"}
-	kindOne   = map[string]string{"rules": "rule", "sources": "source", "agents": "agent", "routines": "routine", "credentials": "login"}
+	kindTitle = map[string]string{"rules": "Rules", "sources": "Sources", "agents": "Agents", "routines": "Routines", "credentials": "Connections"}
+	kindOne   = map[string]string{"rules": "rule", "sources": "source", "agents": "agent", "routines": "routine", "credentials": "connection"}
 	kindNav   = map[string]string{"rules": "rules", "sources": "sources", "agents": "agents", "routines": "routines", "credentials": "logins"}
 	provLabel = map[string]string{"file": "from siphon.yaml", "portal": "added in the portal", "override": "overrides siphon.yaml", "deleted": "deleted in the portal"}
 	// Pages that refresh themselves every 5 s (job detail decides by state).

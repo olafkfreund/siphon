@@ -36,6 +36,14 @@
     else btn.focus();
   }
 
+  // Model endpoint tiles show the provider's default URL as the placeholder.
+  document.addEventListener("change", function (e) {
+    var t = e.target;
+    if (t.name !== "preset" || !t.form) return;
+    var u = t.form.querySelector("input[name=url]");
+    if (u) u.placeholder = t.dataset.url || "https://…/v1";
+  });
+
   // Forms that delete something ask first (data-confirm holds the question).
   document.addEventListener("submit", function (e) {
     var q = e.target.getAttribute && e.target.getAttribute("data-confirm");

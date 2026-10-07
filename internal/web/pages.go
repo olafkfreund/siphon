@@ -162,6 +162,9 @@ func (s *server) logins() []loginView {
 	st := cred.StoreFor(s.Config())
 	out := []loginView{}
 	for name, c := range s.Config().Credentials {
+		if c.Provider == "ollama" || c.Provider == "openai" {
+			continue // listed under Models
+		}
 		v := loginView{Name: name, Provider: providerName[c.Provider], Key: c.Provider, Type: "Subscription", Expiry: "not connected", ExpiryClass: "cancelled", Written: "—", Status: "missing"}
 		if c.APIKey.Ref != "" {
 			v.Type, v.Expiry, v.Status = "API key", "no expiry", "apikey"

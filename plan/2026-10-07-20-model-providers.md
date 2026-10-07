@@ -208,3 +208,12 @@ the new providers and `kind: model` disappear.
   - New helpers: `config.ModelURL` (parses, refuses userinfo, defaults the port) and `(*Config).PrivateEndpoint`.
   - The overlay check refuses a host when any resolved address is private.
   - `api_key_file` on a model agent falls out through the provider check.
+- **Step 4 (Opus):**
+  - `/connections` serves the existing logins template, extended with the Models section. `GET /logins` redirects with 301 and keeps the query. The `POST /logins…` form actions stay as they are.
+  - Test and model listing run in the daemon:
+    - the existing guard, with `allowPrivate` only for listed endpoints, plus an explicit link-local and metadata refusal until step 2's mode lands;
+    - dials only the checked addresses, no redirects;
+    - output is model ids only, with errors classified (no bodies or addresses);
+    - a 60 s cache.
+  - The agent editor's `model` field suggests models from the chosen connection (`GET /connections/models-for`, htmx datalist). The `kind` select gains `model`.
+  - `app.js` sets the URL placeholder from the selected tile (progressive). An empty URL uses the preset's default on the server.

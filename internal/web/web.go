@@ -94,6 +94,7 @@ func New(o Options) http.Handler {
 			return itoa(*e)
 		},
 		"pe":        url.PathEscape,
+		"tools":     toolsHint,
 		"kindtitle": func(k string) string { return kindTitle[k] },
 		"kindone":   func(k string) string { return kindOne[k] },
 		"prov":      func(p string) string { return provLabel[p] },

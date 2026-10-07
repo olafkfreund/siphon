@@ -89,6 +89,7 @@ func (s *server) configRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /rules/test", s.portal(s.ruleTest))
 	mux.HandleFunc("POST /agents/egress-preview", s.portal(s.egressPreview))
 	mux.HandleFunc("POST /logins", s.portal(s.loginAdd))
+	s.modelRoutes(mux)
 	mux.HandleFunc("POST /logins/{name}/delete", s.portal(s.loginDelete))
 	s.configAPI(mux)
 }
@@ -445,7 +446,8 @@ func (s *server) loginAdd(w http.ResponseWriter, r *http.Request, csrf string) {
 	err := s.addLogin("portal", name, provider, kind, r.PostFormValue("value"))
 	var inv errInvalid
 	if errors.As(err, &inv) { // show the problem on the page; the value is never echoed
-		v := view{CSRF: csrf, Logins: s.logins(), LoginForm: &loginForm{Name: name, Provider: provider, Kind: kind, Err: inv.msg}}
+		v := s.connectionsView(r, csrf)
+		v.LoginForm = &loginForm{Name: name, Provider: provider, Kind: kind, Err: inv.msg}
 		s.pageStatus(w, r, "logins", v, http.StatusUnprocessableEntity)
 		return
 	}
@@ -453,7 +455,7 @@ func (s *server) loginAdd(w http.ResponseWriter, r *http.Request, csrf string) {
 		s.fail(w, err)
 		return
 	}
-	http.Redirect(w, r, "/logins?added="+url.QueryEscape(name), http.StatusSeeOther)
+	http.Redirect(w, r, "/connections?added="+url.QueryEscape(name), http.StatusSeeOther)
 }
 
 func (s *server) loginDelete(w http.ResponseWriter, r *http.Request, _ string) {
@@ -465,7 +467,7 @@ func (s *server) loginDelete(w http.ResponseWriter, r *http.Request, _ string) {
 		s.fail(w, err)
 		return
 	}
-	http.Redirect(w, r, "/logins", http.StatusSeeOther)
+	http.Redirect(w, r, "/connections", http.StatusSeeOther)
 }
 
 func (s *server) removeLogin(actor, name string) error {

@@ -400,7 +400,7 @@ func TestLoginsAddDelete(t *testing.T) {
 	if ce.cur.Load().Credentials["bad"] != nil {
 		t.Fatal("an invalid login created a credential")
 	}
-	page := ce.get("/logins").Body.String()
+	page := ce.get("/connections").Body.String()
 	if !strings.Contains(page, "t1") || strings.Contains(page, key) || strings.Contains(page, "setup-token-value") {
 		t.Fatal("logins page wrong or leaking")
 	}
