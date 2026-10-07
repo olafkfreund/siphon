@@ -178,18 +178,22 @@ func CleanURL(raw string) (string, error) {
 var actorBad = regexp.MustCompile(`[^\w.@:-]`)
 
 // Actor is the audit label: cli:<user>.
-func Actor() string {
+func Actor() string { return ActorLabel("") }
+
+// ActorLabel is cli:<user><suffix>, kept within the server's 64 characters.
+func ActorLabel(suffix string) string {
 	u := actorBad.ReplaceAllString(os.Getenv("USER"), "_")
 	if u == "" {
 		u = "unknown"
 	}
-	return "cli:" + u[:min(len(u), 60)]
+	return "cli:" + u[:min(len(u), 60-len(suffix))] + suffix
 }
 
 // Client calls the API with the bearer token.
 type Client struct {
 	Conn
-	HTTP *http.Client
+	HTTP  *http.Client
+	Label string // audit label; empty means Actor()
 }
 
 func New(c Conn) *Client {
@@ -212,7 +216,7 @@ func (c *Client) Do(method, path string, body, out any) error {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
-	req.Header.Set("X-Siphon-Actor", Actor())
+	req.Header.Set("X-Siphon-Actor", firstOf(c.Label, Actor()))
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

@@ -104,28 +104,48 @@ func buildLogout(fs *flag.FlagSet) func(*cli, []string) error {
 	}
 }
 
+type callFn func(method, path string, body, out any) error
+
+type statusData struct {
+	sources, rules, approvals, jobs []map[string]any
+	states                          map[string]int
+	disabled                        []string
+}
+
+func fetchStatus(call callFn) (*statusData, error) {
+	d := &statusData{states: map[string]int{}}
+	for path, out := range map[string]*[]map[string]any{"/api/sources": &d.sources, "/api/rules": &d.rules, "/api/approvals": &d.approvals, "/api/jobs?limit=100": &d.jobs} {
+		if err := call("GET", path, nil, out); err != nil {
+			return nil, err
+		}
+	}
+	for _, j := range d.jobs {
+		d.states[str(j, "state")]++
+	}
+	for _, r := range d.rules {
+		if r["enabled"] == false {
+			d.disabled = append(d.disabled, str(r, "name"))
+		}
+	}
+	sort.Strings(d.disabled)
+	return d, nil
+}
+
+// json is the -o json shape of `status`.
+func (d *statusData) json() map[string]any {
+	return map[string]any{"sources": d.sources, "rules": map[string]any{"total": len(d.rules), "disabled": nonNil(d.disabled)},
+		"approvals": len(d.approvals), "jobs": d.states}
+}
+
 func buildStatus(fs *flag.FlagSet) func(*cli, []string) error {
 	return func(c *cli, args []string) error {
-		var sources, rules, approvals, jobs []map[string]any
-		for path, out := range map[string]*[]map[string]any{"/api/sources": &sources, "/api/rules": &rules, "/api/approvals": &approvals, "/api/jobs?limit=100": &jobs} {
-			if err := c.call("GET", path, nil, out); err != nil {
-				return err
-			}
+		d, err := fetchStatus(c.call)
+		if err != nil {
+			return err
 		}
-		states := map[string]int{}
-		for _, j := range jobs {
-			states[str(j, "state")]++
-		}
-		var disabled []string
-		for _, r := range rules {
-			if r["enabled"] == false {
-				disabled = append(disabled, str(r, "name"))
-			}
-		}
-		sort.Strings(disabled)
+		sources, rules, approvals, states, disabled := d.sources, d.rules, d.approvals, d.states, d.disabled
 		if c.json() {
-			return c.jsonOut(map[string]any{"sources": sources, "rules": map[string]any{"total": len(rules), "disabled": nonNil(disabled)},
-				"approvals": len(approvals), "jobs": states})
+			return c.jsonOut(d.json())
 		}
 		fmt.Fprintf(c.out, "sources: %d\n", len(sources))
 		for _, s := range sources {

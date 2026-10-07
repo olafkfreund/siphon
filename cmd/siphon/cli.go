@@ -9,6 +9,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"sync"
 	"text/tabwriter"
 
 	"github.com/olafkfreund/siphon/internal/client"
@@ -101,6 +102,7 @@ func commands() []command {
 		{Name: "explain", Usage: "explain source|rule|agent|routine|credential", Mode: "client", build: buildExplain, Summary: "every field of a config kind: type, required, default, allowed values", Example: "siphon explain rule -o json"},
 		{Name: "inventory", Usage: "inventory", Mode: "client", build: buildInventory, Summary: "names of everything configured plus the operator's allowlists (never secrets)", Example: "siphon inventory -o json"},
 		{Name: "guide", Usage: "guide", Mode: "client", build: buildGuide, Summary: "print the guide for LLM agents (docs/llm.md)", Example: "siphon guide"},
+		{Name: "mcp", Usage: "mcp [--allow-write] [--allow-secrets]", Mode: "client", build: buildMCP, Summary: "run an MCP server on stdio so an assistant can inspect and (with --allow-write) change this siphon", Example: "claude mcp add siphon -- siphon mcp"},
 		{Name: "help", Usage: "help [command] [--json]", Mode: "client", build: buildHelp, Summary: "usage; --json is the machine-readable command list", Example: "siphon help --json"},
 
 		{Name: "validate", Usage: "validate [-config f] [-v] [-file-only]", Mode: "local", Summary: "check the config (file + portal edits; -file-only: file alone; -v: print egress allowlists)", Example: "siphon validate -config siphon.yaml",
@@ -205,6 +207,8 @@ type cli struct {
 	isTTY      bool // stdin is a terminal: prompts allowed
 	rd         *bufio.Reader
 	stdinUsed  bool
+	mu         sync.Mutex // api() is called from concurrent MCP tool calls
+	actor      string     // audit label override (the MCP server)
 	cl         *client.Client
 	runEditor  func(path string) error // tests replace it
 	secretRead func() (string, error)  // no-echo prompt; tests replace it
@@ -226,6 +230,8 @@ func (c *cli) jsonOut(v any) error {
 }
 
 func (c *cli) api() (*client.Client, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.cl != nil {
 		return c.cl, nil
 	}
@@ -234,6 +240,7 @@ func (c *cli) api() (*client.Client, error) {
 		return nil, err
 	}
 	c.cl = client.New(conn)
+	c.cl.Label = c.actor
 	return c.cl, nil
 }
 
