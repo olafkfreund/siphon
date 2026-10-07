@@ -552,7 +552,9 @@ func credentials(args []string) error {
 		for _, name := range names {
 			c := cfg.Credentials[name]
 			exp, wrote := "-", "-"
-			if c.APIKey.Ref == "" {
+			if c.IsModel() { // a model endpoint: nothing to import
+				exp = "endpoint " + c.URL
+			} else if c.APIKey.Ref == "" {
 				exp, wrote = "not imported", "-"
 				if e, w, err := st.Info(name); err == nil {
 					exp, wrote = tstr(e), tstr(w)
