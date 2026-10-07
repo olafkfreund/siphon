@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/store"
 )
 
@@ -19,7 +20,7 @@ const idlePoll = time.Second
 var stopOrphans = action.StopOrphans
 
 func (p *Pipeline) Requeue() error {
-	if p.Cfg.Server.Sandbox != "none" {
+	if p.Config().Server.Sandbox != "none" {
 		// A crashed siphon leaves its siphon-action@ units running (they live
 		// outside our cgroup); stop them before their jobs are requeued, so a
 		// step never runs twice at once.
@@ -47,7 +48,7 @@ func (p *Pipeline) Serve(ctx context.Context) error {
 	if err := p.Requeue(); err != nil {
 		return err
 	}
-	if err := p.startEgress(ctx); err != nil {
+	if err := p.startEgress(ctx, p.Config()); err != nil {
 		return err
 	}
 	if p.nudge == nil { // literal Pipelines in tests; serve uses New
@@ -57,27 +58,44 @@ func (p *Pipeline) Serve(ctx context.Context) error {
 	var wg sync.WaitGroup
 	spawn := func(f func()) { wg.Add(1); go func() { defer wg.Done(); f() }() }
 
-	for _, name := range sortedSources(p.Cfg) {
-		if s := p.Cfg.Sources[name]; s.Type != "webhook" {
-			hint := make(chan struct{}, 1)
-			spawn(func() { p.listen(ctx, name, hint) })
-			spawn(func() { p.pollLoop(ctx, name, time.Duration(s.Poll), hint) })
-		}
-	}
-	for i := 0; i < p.Cfg.Server.Workers; i++ {
+	p.applyMu.Lock()
+	p.serveCtx = ctx
+	p.stopPollers = p.startPollers(ctx, p.Config())
+	p.applyMu.Unlock()
+	for i := 0; i < p.Config().Server.Workers; i++ {
 		spawn(func() { p.worker(ctx, nudge) })
 	}
 	spawn(func() { p.retention(ctx) })
 	spawn(func() { p.expiryLoop(ctx) })
 
 	wg.Wait()
+	p.applyMu.Lock()
+	p.stopPollers() // ctx is cancelled: this just waits for the pollers to exit
+	p.stopPollers = nil
+	p.applyMu.Unlock()
 	return nil
 }
 
-func (p *Pipeline) pollLoop(ctx context.Context, name string, every time.Duration, hint <-chan struct{}) {
+// startPollers runs one listener and one poll loop per polled source of cfg
+// (a "generation"); stop cancels them and waits for them to exit.
+func (p *Pipeline) startPollers(ctx context.Context, cfg *config.Config) (stop func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	var wg sync.WaitGroup
+	for _, name := range sortedSources(cfg) {
+		if s := cfg.Sources[name]; s.Type != "webhook" {
+			hint := make(chan struct{}, 1)
+			wg.Add(2)
+			go func() { defer wg.Done(); p.listen(ctx, cfg, name, hint) }()
+			go func() { defer wg.Done(); p.pollLoop(ctx, cfg, name, time.Duration(s.Poll), hint) }()
+		}
+	}
+	return func() { cancel(); wg.Wait() }
+}
+
+func (p *Pipeline) pollLoop(ctx context.Context, cfg *config.Config, name string, every time.Duration, hint <-chan struct{}) {
 	t := time.NewTicker(every)
 	defer t.Stop()
-	last := p.tickAndNudge(ctx, name)
+	last := p.tickAndNudge(ctx, cfg, name)
 	var trailing <-chan time.Time // armed when a hint lands inside the debounce window
 	for {
 		select {
@@ -96,13 +114,13 @@ func (p *Pipeline) pollLoop(ctx context.Context, name string, every time.Duratio
 			}
 		}
 		trailing = nil
-		last = p.tickAndNudge(ctx, name)
+		last = p.tickAndNudge(ctx, cfg, name)
 	}
 }
 
-func (p *Pipeline) tickAndNudge(ctx context.Context, name string) time.Time {
+func (p *Pipeline) tickAndNudge(ctx context.Context, cfg *config.Config, name string) time.Time {
 	start := p.Now()
-	ids, err := p.Tick(ctx, name)
+	ids, err := p.tick(ctx, cfg, name)
 	if err != nil && ctx.Err() == nil {
 		slog.Warn("poll failed", "source", name, "err", err)
 	}

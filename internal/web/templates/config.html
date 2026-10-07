@@ -1,0 +1,112 @@
+{{define "cfglist"}}{{with .Cfg}}<div class="top"><div><h1>{{kindtitle .Kind}}</h1><div class="muted">From <code>siphon.yaml</code> and from portal edits. Every save is a revision you can restore.</div></div><span class="sp"></span>
+<a class="btn primary" href="/config/{{.Kind}}/new">New {{kindone .Kind}}</a></div>
+<nav class="small mb">{{$k := .Kind}}{{range .Kinds}}<a href="/config/{{.}}"{{if eq . $k}} aria-current="page"{{end}}>{{.}}</a> {{end}} · <a href="/history">History</a></nav>
+{{if .Notice}}<div class="banner" role="status">{{.Notice}}</div>{{end}}
+<section class="card"><table><thead><tr><th>Name</th><th>From</th><th></th></tr></thead><tbody>
+{{range .Rows}}<tr><td>{{if eq .Prov "deleted"}}<s>{{.Name}}</s>{{else}}<a href="/config/{{$k}}/{{pe .Name}}"><b>{{.Name}}</b></a>{{end}}</td><td><span class="badge{{if eq .Prov "portal"}} portal{{else if eq .Prov "override"}} ovr{{end}}">{{prov .Prov}}</span></td>
+<td>{{if ne .Prov "file"}}<form method="post" action="/config/{{$k}}/{{pe .Name}}/reset" class="sm"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{$.Cfg.Rev}}"><button>Reset to file</button></form>{{end}}</td></tr>
+{{else}}<tr><td colspan="3"><div class="empty">Nothing here yet.</div></td></tr>{{end}}
+</tbody></table></section>{{end}}{{end}}
+
+{{define "cfgedit"}}{{with .Cfg}}{{$c := .}}<div class="top"><div><div class="muted small"><a href="/config/{{.Kind}}">{{kindtitle .Kind}}</a> / {{if .New}}new{{else}}{{.Name}}{{end}}</div><h1>{{if .New}}New {{kindone .Kind}}{{else}}Edit {{kindone .Kind}} <span class="muted">{{.Name}}</span>{{end}}</h1></div><span class="sp"></span>{{if .Prov}}<span class="badge{{if eq .Prov "portal"}} portal{{else if eq .Prov "override"}} ovr{{end}}">{{prov .Prov}}</span>{{end}}</div>
+{{if .Errors}}<div class="banner" role="alert"><pre>{{.Errors}}</pre></div>{{end}}
+{{if .Diff}}<section class="card mb"><h2>Changes</h2><div class="diff"><pre>{{diffhtml .Diff}}</pre></div>
+{{if .Done}}<form method="post" action="{{.Base}}/save"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><input type="hidden" name="mode" value="yaml"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="yaml" value="{{.YAML}}"><div class="row-actions"><button class="btn primary">Confirm and save</button></div></form>{{end}}</section>{{end}}
+{{if .HasForm}}<form method="post" action="{{.Base}}/save" class="mb">
+<input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><input type="hidden" name="mode" value="form">
+<div class="grid g2"><div class="card">
+{{if .New}}<label class="f">Name<input name="name" value="{{.Name}}" required></label>{{else}}<input type="hidden" name="name" value="{{.Name}}"><label class="f">Name<input value="{{.Name}}" disabled></label>{{end}}
+{{if eq .Side "rules"}}{{template "ruleform" .}}{{else}}{{template "genfields" .}}{{end}}
+<div class="row-actions"><button class="btn" formaction="{{.Base}}/check">Review changes</button><button class="btn primary">Save &amp; apply</button></div>
+</div>
+{{if eq .Side "rules"}}<div class="card tester-card"><h2>{{template "icon" "play"}} Test it</h2>
+<div class="seg mb"><label><input type="radio" name="event_src" value="last" checked><span>{{template "icon" "bolt"}}Last event</span></label><label><input type="radio" name="event_src" value="paste"><span>{{template "icon" "copy"}}Paste JSON</span></label></div>
+<label class="f paste">Event JSON<textarea name="event_json" rows="5" class="mono" aria-label="Event JSON"></textarea></label>
+<label class="f paste">Headers JSON (optional)<textarea name="headers_json" rows="2" class="mono" aria-label="Headers JSON"></textarea></label>
+<div id="tester" hx-post="/rules/test" hx-trigger="input changed delay:400ms from:closest form, load" hx-target="#tester" hx-include="closest form"></div>
+<div class="muted small mt">Live as you type · nothing runs</div></div>
+{{else if eq .Side "sources"}}<div class="card"><h2>Health</h2>
+{{with .Health}}<p><span class="dot {{.Health}}" title="{{.Health}}"></span>{{.Health}}{{if .LastError}} · <span class="err">{{.LastError}}</span>{{else if .LastPollAt}} · last {{agop .LastPollAt}}{{end}}</p>{{else}}<p class="muted">Not running yet.</p>{{end}}
+<h2>Last event</h2>{{if .LastEvent}}<pre>{{.LastEvent}}</pre>{{else}}<p class="muted">No event yet.</p>{{end}}</div>
+{{else if eq .Side "agents"}}<div class="card"><h2>Effective egress</h2>
+<div id="egress" hx-post="/agents/egress-preview" hx-trigger="input changed delay:400ms from:closest form, load" hx-target="#egress" hx-include="closest form"></div>
+<div class="muted small mt">Recomputed as you type · nothing is saved</div></div>
+{{else}}<div class="card"><p class="muted">Edit the fields on the left, or open “Edit as YAML” below for everything else.</p></div>{{end}}
+</div></form>{{end}}
+{{if .Steps}}<section class="card mb"><h2>Steps</h2><ol class="small">{{range .Steps}}<li><b>{{.ID}}</b> · {{.Kind}} <code>{{.Target}}</code>{{if .Flags}} <span class="muted">· {{.Flags}}</span>{{end}}</li>{{end}}</ol></section>{{end}}
+<details class="card mb yaml-edit"{{if not .HasForm}} open{{end}}><summary>Edit as YAML</summary>
+<form method="post" action="{{.Base}}/save">
+<input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><input type="hidden" name="mode" value="yaml">
+{{if .New}}<label class="f">Name<input name="name" value="{{.Name}}" required></label>{{else}}<input type="hidden" name="name" value="{{.Name}}">{{end}}
+<textarea name="yaml" rows="14" class="mono" aria-label="YAML">{{.YAML}}</textarea>
+<div class="row-actions"><button class="btn" formaction="{{.Base}}/check">Review changes</button><button class="btn primary">Save &amp; apply</button></div>
+</form></details>
+{{if and .Exists (ne .Prov "file")}}<form method="post" action="{{.Base}}/reset" class="sm"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><button>Reset to file</button></form>{{end}}
+{{if .Exists}}<form method="post" action="{{.Base}}/delete" class="sm"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><button class="btn no">Delete</button></form>{{end}}
+{{end}}{{end}}
+
+{{define "genfields"}}{{range .Fields}}{{if not .Adv}}{{template "field" .}}{{end}}{{end}}
+{{$adv := false}}{{range .Fields}}{{if .Adv}}{{$adv = true}}{{end}}{{end}}{{if $adv}}<details class="more"><summary>More options</summary>{{range .Fields}}{{if .Adv}}{{template "field" .}}{{end}}{{end}}</details>{{end}}{{end}}
+
+{{define "field"}}<label class="f">{{.Label}} {{if eq .Kind "area"}}<textarea name="{{.Name}}" rows="5">{{.Value}}</textarea>
+{{else if eq .Kind "lines"}}<textarea name="{{.Name}}" rows="3">{{.Value}}</textarea>
+{{else if eq .Kind "check"}}<input type="checkbox" name="{{.Name}}" value="on"{{if .Checked}} checked{{end}}>
+{{else if eq .Kind "tri"}}{{$v := .Value}}<select name="{{.Name}}"><option value="">default</option><option value="true"{{if eq $v "true"}} selected{{end}}>yes</option><option value="false"{{if eq $v "false"}} selected{{end}}>no</option></select>
+{{else if eq .Kind "select"}}{{$v := .Value}}<select name="{{.Name}}">{{range .Opts}}<option value="{{.}}"{{if eq . $v}} selected{{end}}>{{.}}</option>{{end}}</select>
+{{else if eq .Kind "secret"}}<input type="password" name="{{.Name}}" autocomplete="off" placeholder="{{if .Set}}•••• set (stored){{else}}not set{{end}}"><span class="hint">env:NAME, file:/path, or paste a value</span>
+{{else}}<input name="{{.Name}}" value="{{.Value}}">{{end}}</label>{{end}}
+
+{{define "ruleform"}}{{$s := index .F "source"}}{{$on := index .F "on"}}{{$k := .ActionKind}}
+<ol class="flowsteps" aria-label="Rule steps">
+<li class="fs"><div class="fs-head"><span class="fs-ico src">{{template "icon" "src"}}</span><span><b>Watch</b><small>Where events come from</small></span></div>
+<label class="f">Source<select name="f.source">{{range .SourceOpts}}<option value="{{.Name}}"{{if eq .Name $s.Value}} selected{{end}}>{{.Name}} · {{.Type}}</option>{{end}}</select></label></li>
+<li class="fs"><div class="fs-head"><span class="fs-ico when">{{template "icon" "when"}}</span><span><b>When</b><small>The condition that has to be true</small></span></div>
+<label class="f"><span class="sr-only">Condition</span><input class="mono" name="f.when" value="{{(index .F "when").Value}}" placeholder='event.status == "failed"' spellcheck="false"><span class="hint">An <a href="https://expr-lang.org" rel="noopener">expr</a> expression on <code>event</code>, <code>item</code> and <code>headers</code>.</span></label>
+<fieldset class="f"><legend>Fires</legend><span class="seg">
+<label><input type="radio" name="f.on" value="edge"{{if ne $on.Value "each"}} checked{{end}}><span>{{template "icon" "edge"}}On change</span></label>
+<label><input type="radio" name="f.on" value="each"{{if eq $on.Value "each"}} checked{{end}}><span>{{template "icon" "each"}}Every event</span></label></span>
+<span class="hint">On change fires when the condition turns true; every event fires once per event id.</span></fieldset>
+<label class="f"><span class="lbl">{{template "icon" "timer"}} Cooldown</span><input name="f.cooldown" value="{{(index .F "cooldown").Value}}" placeholder="10m"><span class="hint">Minimum time between runs (needed for agents).</span></label>
+<details class="more"><summary>More options</summary>
+<div class="grid g2e"><label class="f">Event id<input class="mono" name="f.id" value="{{(index .F "id").Value}}" placeholder="event.id"></label><label class="f">For each<input class="mono" name="f.for_each" value="{{(index .F "for_each").Value}}" placeholder="event.items"></label></div>
+<label class="f">Repeat<input name="f.repeat" value="{{(index .F "repeat").Value}}" placeholder="6h"><span class="hint">Fire again while it stays true.</span></label>
+</details></li>
+<li class="fs"><div class="fs-head"><span class="fs-ico then">{{template "icon" "bolt"}}</span><span><b>Then</b><small>What Siphon jets out</small></span></div>
+<fieldset class="f"><legend class="sr-only">Action</legend><span class="seg seg-icons">
+<label><input type="radio" name="action_kind" value="agent"{{if eq $k "agent"}} checked{{end}}><span>{{template "icon" "agent"}}Agent</span></label>
+<label><input type="radio" name="action_kind" value="cmd"{{if eq $k "cmd"}} checked{{end}}><span>{{template "icon" "term"}}Command</span></label>
+<label><input type="radio" name="action_kind" value="unit"{{if eq $k "unit"}} checked{{end}}><span>{{template "icon" "unit"}}Unit</span></label>
+<label><input type="radio" name="action_kind" value="routine"{{if eq $k "routine"}} checked{{end}}><span>{{template "icon" "routine"}}Routine</span></label></span></fieldset>
+{{$ag := (index .F "action.agent").Value}}<label class="f act act-agent">Agent<select name="f.action.agent"><option value="">Choose an agent…</option>{{range .AgentOpts}}<option{{if eq . $ag}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+<label class="f act act-cmd">Command, one argument per line<textarea class="mono" name="f.action.cmd" rows="4" spellcheck="false" placeholder="e.g. notify-send">{{(index .F "action.cmd").Value}}</textarea><span class="hint">Runs sandboxed; never through a shell.</span></label>
+{{$u := (index .F "action.unit").Value}}<label class="f act act-unit">Unit<select name="f.action.unit"><option value="">Choose an allowlisted unit…</option>{{range .UnitOpts}}<option{{if eq . $u}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+{{$ro := (index .F "action.routine").Value}}<label class="f act act-routine">Routine<select name="f.action.routine"><option value="">Choose a routine…</option>{{range .RoutineOpt}}<option{{if eq . $ro}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+<label class="check">{{template "icon" "hand"}}<input type="checkbox" name="f.approve" value="on"{{if (index .F "approve").Checked}} checked{{end}}> Always wait for a person to approve<span class="hint">Agents ask by default.</span></label></li>
+</ol>
+{{end}}
+
+{{define "tester"}}<div class="test">
+{{if .Err}}<div class="err">{{.Err}}</div>{{end}}
+{{if .NoEvent}}<p class="muted">No event yet: paste one.</p>{{else if .Event}}<pre>{{.Event}}</pre>
+{{range .Fires}}<div class="match"><span class="y">✓</span> Matches · <code>{{.Key}}</code></div>
+{{if .Err}}<div class="err">{{.Err}}</div>{{end}}
+{{if .Prompt}}<div class="muted small">Rendered prompt</div><div class="mono">{{.Prompt}}</div>{{end}}
+{{if .Argv}}<div class="muted small">Rendered command</div><div class="mono">{{range .Argv}}{{.}} {{end}}</div>{{end}}
+<div class="muted small">Will run</div><div>{{.Kind}} <b>{{.Target}}</b>{{if .Info}} · {{.Info}}{{end}}{{if $.Approval}} · waits for approval{{end}}</div>
+{{else}}<div class="match"><span class="n">–</span> No match</div>{{end}}{{end}}
+</div>{{end}}
+
+{{define "egresspreview"}}{{if .Err}}<div class="err">{{.Err}}</div>{{else if .On}}<ul class="small">{{range .Hosts}}<li class="mono">{{.Host}}:{{.Port}}</li>{{else}}<li class="muted">No hosts allowed.</li>{{end}}</ul>{{else}}<p class="muted">Restriction is off for this agent.</p>{{end}}{{end}}
+
+{{define "history"}}{{with .Hist}}<div class="top"><div><h1>History</h1><div class="muted">Every portal change is a revision. Restoring one is a new revision.</div></div>
+<a class="btn" href="/history/export">Export YAML</a></div>
+<section class="card"><table class="cards"><thead><tr><th>#</th><th>When</th><th>Who</th><th>What</th><th></th></tr></thead><tbody>
+{{range .Revs}}<tr><td data-label="#"><a href="/history/{{.ID}}">{{.ID}}</a></td><td data-label="When" title="{{tm .At}}">{{ago .At}}</td><td data-label="Who">{{.Actor}}</td><td data-label="What">{{.Summary}}</td>
+<td><a class="btn sm" href="/history/{{.ID}}">Review</a></td></tr>
+{{else}}<tr><td colspan="5"><div class="empty">No portal changes yet.</div></td></tr>{{end}}
+</tbody></table></section>{{end}}{{end}}
+
+{{define "historyitem"}}{{with .Hist}}{{with .Rev}}<div class="top"><div><h1>Revision {{.ID}}</h1><div class="muted">{{.Summary}} · {{.Actor}} · {{tm .At}}</div></div></div>
+<nav class="small mb"><a href="/history">← History</a></nav>
+<section class="card"><div class="diff"><pre>{{diffhtml .Diff}}</pre></div>
+<form method="post" action="/history/{{.ID}}/restore"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{$.Hist.Latest}}"><button class="btn primary">Restore this revision</button></form></section>{{end}}{{end}}{{end}}

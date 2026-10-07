@@ -14,7 +14,7 @@ import (
 // pendingJob fires an approve:true rule and returns the job id and the link.
 func pendingJob(t *testing.T, p *Pipeline) (int64, string) {
 	t.Helper()
-	p.Cfg.Rules = []config.Rule{{Name: "r", Source: "s", When: "true", On: "each", ID: "event.id", Approve: true,
+	p.Config().Rules = []config.Rule{{Name: "r", Source: "s", When: "true", On: "each", ID: "event.id", Approve: true,
 		Action: config.Action{Cmd: []string{"true"}}}}
 	_, ids, err := p.HandleEvent(context.Background(), rule.Event{Source: "s", Data: map[string]any{"id": time.Now().UnixNano()}}, false)
 	if err != nil || len(ids) != 1 {
@@ -98,7 +98,7 @@ func TestExpiry(t *testing.T) {
 
 func TestDecideWithToken(t *testing.T) {
 	p := newPipeline(t, 1)
-	p.Cfg.Rules = []config.Rule{{Name: "r", Source: "s", When: "true", Approve: true, Action: config.Action{Cmd: []string{"true"}}}}
+	p.Config().Rules = []config.Rule{{Name: "r", Source: "s", When: "true", Approve: true, Action: config.Action{Cmd: []string{"true"}}}}
 	// Capture the link by running newApproval directly, as enqueue does.
 	tx, _ := p.Store.DB.Begin()
 	jid, _ := store.InsertJob(tx, store.Job{Rule: "r", ActionJSON: "{}", State: "pending_approval"}, p.Now())

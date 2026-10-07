@@ -250,7 +250,7 @@ func TestPortalShowsOverridden(t *testing.T) {
 	c, csrf := e.login()
 	e.do("POST", "/rules/disk-full/disable", url.Values{"csrf": {csrf}}, func(r *http.Request) { r.AddCookie(c) })
 	body := e.do("GET", "/rules", nil, func(r *http.Request) { r.AddCookie(c) }).Body.String()
-	if !strings.Contains(body, "overridden") || !strings.Contains(body, "Enable") {
+	if !strings.Contains(body, "turned off in the portal") || !strings.Contains(body, "Enable disk-full") {
 		t.Fatal(body)
 	}
 }
@@ -344,7 +344,12 @@ func TestAPIAuthFailuresRateLimited(t *testing.T) {
 func TestHooksUnauthenticated(t *testing.T) {
 	hit := ""
 	e := newEnv(t, func(o *Options) {
-		o.Hooks = map[string]http.Handler{"gh": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hit = r.PathValue("source"); w.WriteHeader(202) })}
+		o.Hooks = func(n string) http.Handler {
+			if n != "gh" {
+				return nil
+			}
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hit = r.PathValue("source"); w.WriteHeader(202) })
+		}
 	})
 	if w := e.do("POST", "/hook/gh", nil, nil); w.Code != 202 || hit != "gh" {
 		t.Fatal(w.Code, hit)

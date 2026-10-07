@@ -1,0 +1,50 @@
+{{define "logins"}}<div class="top"><div><h1>Logins</h1><div class="muted">The accounts your agents run as. Secrets are stored write-only and never shown again.</div></div><span class="sp"></span><a class="btn primary" href="#add">{{template "icon" "plus"}}Add a login</a></div>
+{{with .LoginForm}}{{if .Notice}}<div class="banner ok" role="status">{{template "icon" "check"}} {{.Notice}}</div>{{end}}{{end}}
+
+<div class="grid g3 mb">
+{{range .Logins}}<article class="card acct s-{{.Status}}" aria-label="Login {{.Name}}">
+  <div class="acct-head">{{template "provider" .Key}}<span class="sp"></span>
+    {{if eq .Status "connected"}}<span class="pill done">{{template "icon" "check"}} Connected</span>
+    {{else if eq .Status "expiring"}}<span class="pill pending_approval">Expires {{.Expiry}}</span>
+    {{else if eq .Status "expired"}}<span class="pill failed">{{template "icon" "x"}} Expired</span>
+    {{else if eq .Status "apikey"}}<span class="pill tag">{{template "icon" "key"}} API key</span>
+    {{else}}<span class="pill cancelled">Not connected</span>{{end}}
+  </div>
+  <h2 class="acct-name">{{.Name}}</h2>
+  <p class="muted small">{{.Type}}{{if eq .Status "connected" "expiring"}} · expires {{.Expiry}} · refreshed {{.Written}}{{end}}{{if eq .Status "missing"}} · agents using it can't run yet{{end}}</p>
+  <div class="row-actions">
+    {{if eq .Status "missing" "expired"}}<a class="btn sm primary" href="/logins?connect={{pe .Name}}#add">Connect</a>{{else if ne .Status "apikey"}}<a class="btn sm" href="/logins?connect={{pe .Name}}#add">Replace</a>{{end}}
+    <form method="post" action="/logins/{{pe .Name}}/delete" data-confirm="Delete the login {{.Name}}? Agents using it will stop until you connect it again."><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm no">Delete</button></form>
+  </div>
+</article>
+{{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>No logins yet. Add one below so your agents can run.</section>{{end}}
+</div>
+
+{{with .LoginForm}}
+<section class="card login-add-card" id="add" aria-labelledby="add-h">
+<h2 id="add-h">{{if .Name}}Connect <b>{{.Name}}</b>{{else}}Add a login{{end}}</h2>
+{{if .Err}}<div class="banner" role="alert">{{.Err}}</div>{{end}}
+<form method="post" action="/logins" class="login-add">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+  <fieldset class="tiles"><legend>Provider</legend>
+    <label class="tile"><input type="radio" name="provider" value="claude"{{if eq .Provider "claude"}} checked{{end}}><span>{{template "provider" "claude"}}<small>Claude Code</small></span></label>
+    <label class="tile"><input type="radio" name="provider" value="codex"{{if eq .Provider "codex"}} checked{{end}}><span>{{template "provider" "codex"}}<small>OpenAI Codex</small></span></label>
+    <label class="tile"><input type="radio" name="provider" value="agy"{{if eq .Provider "agy"}} checked{{end}}><span>{{template "provider" "agy"}}<small>Antigravity</small></span></label>
+  </fieldset>
+  <label class="f">Name<input name="name" value="{{.Name}}" placeholder="e.g. claude-max" required pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}" autocomplete="off"><span class="hint">The name agents use in <code>credential:</code>.</span></label>
+  <fieldset class="f kinds"><legend>How to connect</legend><span class="seg">
+    <label class="k-token"><input type="radio" name="kind" value="token"{{if eq .Kind "token"}} checked{{end}}><span>Setup token</span></label>
+    <label class="k-login"><input type="radio" name="kind" value="login"{{if eq .Kind "login"}} checked{{end}}><span>Login file</span></label>
+    <label class="k-apikey"><input type="radio" name="kind" value="apikey"{{if eq .Kind "apikey"}} checked{{end}}><span>API key</span></label>
+  </span></fieldset>
+  <div class="howto" aria-live="polite">
+    <p class="h-claude-token">{{template "icon" "term"}}<span>Run <code>claude setup-token</code> in a terminal and paste the token it prints. <b>Recommended:</b> it is separate from your own Claude session.</span></p>
+    <p class="h-claude-login">{{template "icon" "term"}}<span>Paste the contents of <code>~/.claude/.credentials.json</code>. Siphon refreshes this login, which can sign out your own <code>claude</code> CLI.</span></p>
+    <p class="h-codex-login">{{template "icon" "term"}}<span>Run <code>codex login</code>, then paste the contents of <code>~/.codex/auth.json</code>.</span></p>
+    <p class="h-agy-login">{{template "icon" "term"}}<span>Sign in with <code>agy</code>, then paste <code>~/.gemini/antigravity-cli/antigravity-oauth-token</code>.</span></p>
+    <p class="h-apikey">{{template "icon" "key"}}<span>Paste the API key. It is billed per use, unlike a subscription login.</span></p>
+  </div>
+  <label class="f">Paste it here<textarea name="value" rows="4" autocomplete="off" spellcheck="false" required></textarea><span class="hint">Stored in a 0600 file under Siphon's state and never shown again.</span></label>
+  <div class="row-actions"><button class="btn primary">{{template "icon" "check"}}Connect</button></div>
+</form>
+</section>{{end}}{{end}}

@@ -1,8 +1,48 @@
 {{define "layout"}}<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>siphon · {{.Title}}</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · Siphon</title>
+<link rel="icon" href="/static/mark.svg" type="image/svg+xml">
 <meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false}'>
-<link rel="stylesheet" href="/static/style.css"><script src="/static/htmx.min.js" defer></script></head>
-<body><header><strong>siphon</strong>
-<nav><a href="/jobs">Jobs</a> <a href="/approvals">Approvals</a> <a href="/rules">Rules</a> <a href="/sources">Sources</a> <a href="/audit">Audit</a></nav>
-<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Log out</button></form></header>
-<main id="main" hx-get="{{.Path}}" hx-trigger="every 5s" hx-swap="innerHTML">{{.Body}}</main></body></html>{{end}}
+<link rel="stylesheet" href="/static/style.css"><script src="/static/app.js"></script><script src="/static/htmx.min.js" defer></script></head>
+<body>{{template "sprite"}}<div class="app">
+<aside class="side" id="sidenav" aria-label="Navigation">
+  <a class="brand" href="/"><img src="/static/mark-bare.svg" alt="">siphon</a>
+  <nav class="nav">
+    <a href="/"{{if eq .Active "dash"}} aria-current="page"{{end}}>{{template "icon" "home"}}Dashboard</a>
+    <a href="/jobs"{{if eq .Active "jobs"}} aria-current="page"{{end}}>{{template "icon" "jobs"}}Jobs</a>
+    <a href="/approvals"{{if eq .Active "approvals"}} aria-current="page"{{end}}>{{template "icon" "hand"}}Approvals{{if .Pending}}<span class="count" aria-label="{{.Pending}} waiting">{{.Pending}}</span>{{end}}</a>
+    <div class="sep">Configure</div>
+    <a href="/rules"{{if eq .Active "rules"}} aria-current="page"{{end}}>{{template "icon" "flow"}}Rules</a>
+    <a href="/sources"{{if eq .Active "sources"}} aria-current="page"{{end}}>{{template "icon" "src"}}Sources</a>
+    <a href="/config/agents"{{if eq .Active "agents"}} aria-current="page"{{end}}>{{template "icon" "agent"}}Agents</a>
+    <a href="/config/routines"{{if eq .Active "routines"}} aria-current="page"{{end}}>{{template "icon" "routine"}}Routines</a>
+    <a href="/logins"{{if eq .Active "logins"}} aria-current="page"{{end}}>{{template "icon" "key"}}Logins</a>
+    <a href="/egress"{{if eq .Active "egress"}} aria-current="page"{{end}}>{{template "icon" "shield"}}Egress</a>
+    <div class="sep">Records</div>
+    <a href="/audit"{{if eq .Active "audit"}} aria-current="page"{{end}}>{{template "icon" "audit"}}Audit</a>
+    <a href="/history"{{if eq .Active "history"}} aria-current="page"{{end}}>{{template "icon" "hist"}}History</a>
+  </nav>
+  <div class="foot">
+    <button type="button" class="btn sm" data-action="theme">{{template "icon" "moon"}}Theme</button>
+    <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="btn sm">{{template "icon" "out"}}Sign out</button></form>
+  </div>
+</aside>
+<div>
+  <div class="topbar"><img src="/static/mark-bare.svg" alt="">siphon<span class="sp"></span>{{if .Pending}}<a class="pill pending_approval" href="/approvals">✋ {{.Pending}}</a>{{end}}<button type="button" data-action="menu" aria-label="Menu" aria-expanded="false" aria-controls="sidenav">{{template "icon" "menu"}}</button></div>
+  <main class="main" id="main"{{if .Poll}} hx-get="{{.Path}}" hx-trigger="every 5s" hx-swap="innerHTML"{{end}}>{{if .Banner}}<div class="banner" role="alert">{{.Banner}}</div>{{end}}{{.Body}}</main>
+</div>
+</div>
+<div id="live" class="sr-only" aria-live="polite"></div>
+</body></html>{{end}}
+
+{{define "icon"}}<svg class="ico" aria-hidden="true"><use href="#i-{{.}}"/></svg>{{end}}
+
+{{define "pill"}}{{if eq . "queued"}}<span class="pill queued">◷ Queued</span>{{else if eq . "running"}}<span class="pill running"><span class="i">⟳</span> Running</span>{{else if eq . "pending_approval"}}<span class="pill pending_approval">✋ Waiting for you</span>{{else if eq . "done"}}<span class="pill done">✓ Done</span>{{else if eq . "failed"}}<span class="pill failed">✕ Failed</span>{{else if eq . "cancelled"}}<span class="pill cancelled">⊘ Cancelled</span>{{else}}<span class="pill tag">{{.}}</span>{{end}}{{end}}
+
+{{define "kindicon"}}{{if eq . "agent"}}{{template "icon" "agent"}}{{else if eq . "cmd"}}{{template "icon" "term"}}{{else if eq . "unit"}}{{template "icon" "unit"}}{{else if eq . "routine"}}{{template "icon" "routine"}}{{else}}{{template "icon" "bolt"}}{{end}}{{end}}
+
+{{define "provider"}}{{if eq . "claude"}}<span class="prov claude" title="Claude Code"><i aria-hidden="true">C</i>Claude</span>{{else if eq . "codex"}}<span class="prov codex" title="OpenAI Codex"><i aria-hidden="true">&gt;_</i>Codex</span>{{else if eq . "agy"}}<span class="prov agy" title="Antigravity"><i aria-hidden="true">A</i>agy</span>{{else if .}}<span class="prov">{{.}}</span>{{end}}{{end}}
+
+{{define "srcicon"}}{{if eq . "webhook"}}{{template "icon" "webhook"}}{{else if eq . "http"}}{{template "icon" "http"}}{{else if eq . "mcp"}}{{template "icon" "mcp"}}{{else}}{{template "icon" "src"}}{{end}}{{end}}
+
+{{define "run"}}<span class="run"><span class="run-ico k-{{.Kind}}" title="{{.Kind}}">{{template "kindicon" .Kind}}</span><span class="run-what"><b>{{.Target}}</b>{{if .Provider}} {{template "provider" .Provider}}{{end}}</span></span>{{end}}

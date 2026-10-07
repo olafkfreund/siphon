@@ -22,7 +22,7 @@ func TestOpenTwiceIdempotent(t *testing.T) {
 		}
 		var m int
 		s.DB.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&m)
-		if m != 1 {
+		if m != 2 {
 			t.Fatalf("migrations recorded: %d", m)
 		}
 		var fk int
@@ -207,4 +207,94 @@ func TestLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	un2()
+}
+
+func TestConfigOverlay(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Now()
+	tx, _ := s.DB.Begin()
+	if err := PutConfigItem(tx, "rules", "a", "name: a", false, now); err != nil {
+		t.Fatal(err)
+	}
+	PutConfigItem(tx, "sources", "s", "", true, now)
+	PutConfigItem(tx, "rules", "a", "name: a2", false, now) // upsert
+	id1, err := AddRevision(tx, now, "me", "one", `[]`, "d1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id2, _ := AddRevision(tx, now, "me", "two", `[]`, "d2")
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	items, _ := ConfigItems(s.DB)
+	if len(items) != 2 || items[0].YAML != "name: a2" || !items[1].Deleted {
+		t.Fatalf("items %+v", items)
+	}
+	tx, _ = s.DB.Begin()
+	DeleteConfigItem(tx, "rules", "a")
+	tx.Commit()
+	if items, _ = ConfigItems(s.DB); len(items) != 1 {
+		t.Fatalf("after delete %+v", items)
+	}
+	revs, _ := Revisions(s.DB, 10)
+	if len(revs) != 2 || revs[0].ID != id2 || id2 <= id1 {
+		t.Fatalf("revs %+v", revs)
+	}
+	if r, err := Revision(s.DB, id1); err != nil || r.Summary != "one" || r.Diff != "d1" {
+		t.Fatalf("rev %+v %v", r, err)
+	}
+	if r, ok, _ := LatestRevision(s.DB); !ok || r.ID != id2 {
+		t.Fatalf("latest %+v", r)
+	}
+	s2, _ := Open(":memory:")
+	defer s2.Close()
+	if _, ok, err := LatestRevision(s2.DB); ok || err != nil {
+		t.Fatalf("empty latest %v %v", ok, err)
+	}
+}
+
+func TestSetSourceEvent(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	get := func() (j string) {
+		s.DB.QueryRow(`SELECT json FROM source_state WHERE source='x'`).Scan(&j)
+		return
+	}
+	ev := map[string]any{"n": 1, "Api_Key": "k", "a": []any{map[string]any{"PASSWORD": "p", "ok": "v"}}}
+	if err := SetSourceEvent(s.DB, "x", ev); err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"Api_Key":"[redacted]","a":[{"PASSWORD":"[redacted]","ok":"v"}],"n":1}`; get() != want {
+		t.Fatalf("got %s", get())
+	}
+	// poll state survives an event write, and vice versa
+	PutSourceState(s.DB, "x", time.Now(), "boom")
+	if get() == "" {
+		t.Fatal("PutSourceState clobbered json")
+	}
+	SetSourceEvent(s.DB, "x", map[string]string{"big": strings.Repeat("a", 70<<10)})
+	if get() != `{"_truncated":true}` {
+		t.Fatalf("cap: %.40s", get())
+	}
+}
+
+func TestMigrationOnExistingDB(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "s.db")
+	s, _ := Open(p)
+	s.DB.Exec(`DELETE FROM schema_migrations WHERE version LIKE '0002%'`)
+	s.DB.Exec(`DROP TABLE config_item`)
+	s.DB.Exec(`DROP TABLE config_revision`)
+	s.Close()
+	s, err := Open(p) // 0001 already applied; 0002 applies on top
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := ConfigItems(s.DB); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Siphon portal mockups</title>
+<link rel="icon" href="../brand/mark.svg">
+<style>
+/* ---------- Deep Current tokens (become internal/web/static/style.css) ---------- */
+:root{
+  --abyss:#06111F;--deep:#0E2A47;--ink:#7C5CFF;--current:#3B82F6;--biolume:#2EE6D6;
+  --kelp:#34D399;--amber:#FFB547;--coral:#FF5D73;--shallows:#F3F8FB;
+  --grad:linear-gradient(135deg,var(--ink),var(--current) 55%,var(--biolume));
+  --bg:var(--shallows);--surface:#fff;--surface-2:#EAF2F7;--line:#D8E4EC;--text:#0B1B2E;--muted:#5B6F84;
+  --shadow:0 1px 2px rgba(6,17,31,.06),0 8px 24px rgba(6,17,31,.06);
+  --r:14px;--font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+}
+[data-theme=dark]{
+  --bg:var(--abyss);--surface:#0B1D33;--surface-2:#0E2A47;--line:#163A5C;--text:#E6F1FA;--muted:#8AA4BD;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 var(--font);background:var(--bg);color:var(--text)}
+a{color:var(--current);text-decoration:none}a:hover{text-decoration:underline}
+h1{font-size:1.6rem;margin:0;letter-spacing:-.02em}h2{font-size:1.05rem;margin:0 0 .8rem}
+.muted{color:var(--muted)}.mono{font-family:var(--mono);font-size:.85rem}
+code,pre,.mono,textarea,input.mono{font-variant-ligatures:none}
+/* mockup chrome */
+.mock-bar{position:sticky;top:0;z-index:50;display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;padding:.5rem .8rem;background:#0B1B2E;color:#cfe;font-size:.8rem}
+.mock-bar button{background:#163A5C;color:#e6f1fa;border:0;border-radius:999px;padding:.3rem .7rem;cursor:pointer;font:inherit}
+.mock-bar button.on{background:var(--biolume);color:var(--abyss)}
+.mock-bar .sp{flex:1}
+.frame.phone{max-width:390px;margin:1rem auto;border:8px solid #0B1B2E;border-radius:28px;overflow:hidden;min-height:760px}
+.screen{display:none}.screen.on{display:block}
+/* app shell */
+.app{display:grid;grid-template-columns:232px 1fr;min-height:calc(100vh - 40px)}
+.side{background:var(--surface);border-right:1px solid var(--line);padding:1rem .8rem;display:flex;flex-direction:column;gap:.2rem}
+.brand{display:flex;align-items:center;gap:.55rem;padding:.2rem .5rem 1rem;font-weight:650;font-size:1.3rem;letter-spacing:-.02em}
+.brand img{width:30px;height:30px}
+.nav a{display:flex;align-items:center;gap:.6rem;padding:.5rem .7rem;border-radius:10px;color:var(--text);font-weight:500}
+.nav a:hover{background:var(--surface-2);text-decoration:none}
+.nav a.on{background:var(--surface-2);box-shadow:inset 3px 0 0 var(--current)}
+.nav .count{margin-left:auto;background:var(--amber);color:#3a2500;border-radius:999px;font-size:.72rem;padding:0 .45rem;font-weight:700}
+.nav .sep{margin:.7rem .7rem .3rem;font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.ico{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.side .foot{margin-top:auto;display:flex;gap:.4rem;padding:.5rem}
+.main{padding:1.6rem 2rem;max-width:1180px;width:100%}
+.top{display:flex;align-items:center;flex-wrap:wrap;gap:1rem;margin-bottom:1.4rem}.top .sp{flex:1}
+.topbar{display:none}
+/* components */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:1.1rem 1.2rem}
+.grid{display:grid;gap:1rem}.g4{grid-template-columns:repeat(4,1fr)}.g2{grid-template-columns:1.4fr 1fr}.g2e{grid-template-columns:1fr 1fr}
+.btn{white-space:nowrap;display:inline-flex;align-items:center;gap:.45rem;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:999px;padding:.5rem 1rem;font:600 .9rem var(--font);cursor:pointer}
+.btn:hover{border-color:var(--current)}
+.btn.primary{background:var(--grad);border:0;color:#fff;box-shadow:var(--shadow)}
+.btn.ok{background:var(--kelp);border:0;color:#04281c}.btn.no{color:var(--coral);border-color:color-mix(in srgb,var(--coral) 40%,transparent)}
+.btn.sm{padding:.3rem .75rem;font-size:.8rem}
+.btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid color-mix(in srgb,var(--ink) 55%,transparent);outline-offset:2px}
+.pill{display:inline-flex;align-items:center;gap:.35rem;border-radius:999px;padding:.15rem .6rem;font-size:.78rem;font-weight:650;white-space:nowrap}
+.pill.queued{background:color-mix(in srgb,var(--muted) 16%,transparent);color:var(--muted)}
+.pill.running{background:color-mix(in srgb,var(--current) 16%,transparent);color:var(--current)}
+.pill.waiting{background:color-mix(in srgb,var(--amber) 22%,transparent);color:#9a5b00}
+[data-theme=dark] .pill.waiting{color:var(--amber)}
+.pill.done{background:color-mix(in srgb,var(--kelp) 18%,transparent);color:#0b7a55}
+[data-theme=dark] .pill.done{color:var(--kelp)}
+.pill.failed{background:color-mix(in srgb,var(--coral) 16%,transparent);color:#c22a43}
+[data-theme=dark] .pill.failed{color:var(--coral)}
+.pill.denied{background:var(--surface-2);color:var(--muted)}
+.pill.src{background:var(--surface-2);color:var(--text);font-weight:600}
+.spin{animation:spin 1.2s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+.stat{display:flex;flex-direction:column;gap:.2rem}.stat b{font-size:2rem;letter-spacing:-.03em;line-height:1.1}
+.stat b.g{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.bar{height:6px;background:var(--surface-2);border-radius:999px;overflow:hidden;margin-top:.4rem}.bar i{display:block;height:100%;background:var(--grad);border-radius:999px}
+table{width:100%;border-collapse:collapse}th{font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:left;font-weight:600;padding:.4rem .6rem}
+td{padding:.65rem .6rem;border-top:1px solid var(--line)}tr.fresh td{animation:fresh 2s ease-out}@keyframes fresh{from{background:color-mix(in srgb,var(--biolume) 18%,transparent)}}
+.chips{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1rem}.chip{border:1px solid var(--line);border-radius:999px;padding:.25rem .75rem;font-size:.82rem;background:var(--surface);cursor:pointer}.chip.on{background:var(--text);color:var(--surface);border-color:var(--text)}.chip em{font-style:normal;color:var(--muted);margin-left:.25rem}.chip.on em{color:inherit;opacity:.7}
+.need{display:flex;align-items:center;gap:.8rem;padding:.75rem 0;border-top:1px solid var(--line)}.need:first-of-type{border-top:0}.need .sp{flex:1}
+.health{display:flex;gap:1rem;flex-wrap:wrap}.dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:.35rem}.dot.ok{background:var(--kelp);box-shadow:0 0 0 4px color-mix(in srgb,var(--kelp) 20%,transparent)}.dot.stale{background:var(--amber)}.dot.err{background:var(--coral)}
+/* flow view */
+.flow{display:flex;align-items:center;gap:0;margin:.6rem 0}
+.node{flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:.55rem .7rem;font-size:.84rem}
+.node small{display:block;font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.node code{font-family:var(--mono);font-size:.8rem;display:block;overflow-wrap:anywhere}
+.node.cond{flex:1.5}
+.pipe{width:46px;height:14px;flex:none}
+.pipe line{stroke:var(--current);stroke-width:3;stroke-dasharray:4 6;stroke-linecap:round;animation:flow 1.2s linear infinite}
+.pipe.off line{stroke:var(--line);animation:none}
+@keyframes flow{to{stroke-dashoffset:-20}}
+.rule-card{display:flex;flex-direction:column;gap:.3rem}.rule-head{display:flex;align-items:center;gap:.6rem}.rule-head .sp{flex:1}
+.badge{font-size:.7rem;font-weight:700;border-radius:6px;padding:.1rem .4rem;background:var(--surface-2);color:var(--muted)}.badge.portal{color:var(--ink);background:color-mix(in srgb,var(--ink) 12%,transparent)}.badge.ovr{color:#9a5b00;background:color-mix(in srgb,var(--amber) 20%,transparent)}
+.switch{width:38px;height:22px;border-radius:999px;background:var(--line);position:relative;flex:none}.switch::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.2s}.switch.on{background:var(--grad)}.switch.on::after{left:19px}
+/* forms */
+label.f{display:flex;flex-direction:column;gap:.3rem;font-size:.82rem;font-weight:600;margin-bottom:.9rem}
+input,select,textarea{font:inherit;font-weight:400;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:.55rem .7rem}
+textarea{font-family:var(--mono);font-size:.85rem;min-height:4.2rem}
+.hint{font-weight:400;color:var(--muted);font-size:.78rem}.err-t{color:var(--coral);font-weight:500;font-size:.78rem}
+.seg{display:inline-flex;background:var(--surface-2);border-radius:999px;padding:3px}.seg span{padding:.3rem .8rem;border-radius:999px;font-size:.82rem;font-weight:600;cursor:pointer}.seg span.on{background:var(--surface);box-shadow:var(--shadow)}
+.tabs{display:flex;gap:1rem;border-bottom:1px solid var(--line);margin-bottom:1rem}.tabs span{padding:.4rem 0;font-weight:600;color:var(--muted)}.tabs span.on{color:var(--text);box-shadow:inset 0 -2px 0 var(--current)}
+.test{background:var(--surface-2);border-radius:12px;padding:.8rem;font-size:.85rem}
+.match{display:flex;gap:.5rem;align-items:center;padding:.35rem 0}.match .y{color:var(--kelp);font-weight:800}.match .n{color:var(--muted);font-weight:800}
+pre{margin:0;background:#06111F;color:#cfe3f5;border-radius:12px;padding:1rem;font:13px/1.55 var(--mono);overflow:auto;max-height:320px}
+pre .add{color:#5ef0b4}pre .del{color:#ff8fa0}pre .eg{color:var(--amber)}
+.diff{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+dl.kv{display:grid;grid-template-columns:max-content 1fr;gap:.35rem 1.2rem;margin:0;font-size:.9rem}dl.kv dt{color:var(--muted)}dl.kv dd{margin:0}
+.timeline{list-style:none;margin:0;padding:0}.timeline li{display:flex;gap:.7rem;padding:.4rem 0;position:relative}.timeline li::before{content:"";position:absolute;left:8px;top:1.6rem;bottom:-.4rem;width:2px;background:var(--line)}.timeline li:last-child::before{display:none}
+.blocked{display:flex;align-items:center;gap:.6rem;padding:.5rem .7rem;border-radius:10px;background:color-mix(in srgb,var(--coral) 9%,transparent);margin-bottom:.4rem}.blocked .sp{flex:1}
+/* login */
+.login{min-height:calc(100vh - 40px);display:grid;place-items:center;background:
+  radial-gradient(900px 500px at 15% 110%,color-mix(in srgb,var(--ink) 22%,transparent),transparent 60%),
+  radial-gradient(800px 500px at 90% -10%,color-mix(in srgb,var(--biolume) 22%,transparent),transparent 60%),var(--bg)}
+.login .card{width:min(400px,92vw);padding:2rem;text-align:center}
+.login img{width:64px;height:64px}
+.login .word{font-size:2rem;font-weight:650;letter-spacing:-.03em;margin:.6rem 0 .1rem}
+.login form{display:flex;flex-direction:column;gap:.8rem;text-align:left;margin-top:1.4rem}
+.bubbles span{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--biolume);margin:0 2px;animation:rise 2.4s ease-in-out infinite}.bubbles span:nth-child(2){animation-delay:.4s;opacity:.7}.bubbles span:nth-child(3){animation-delay:.8s;opacity:.5}
+@keyframes rise{50%{transform:translateY(-6px)}}
+.empty{text-align:center;padding:2.4rem 1rem}.empty .bubbles{margin-bottom:.8rem}
+.toast{position:fixed;right:1.2rem;bottom:1.2rem;background:var(--text);color:var(--surface);border-radius:12px;padding:.7rem 1rem;box-shadow:var(--shadow);display:flex;gap:.6rem;align-items:center;font-size:.9rem}
+.toast i{width:8px;height:8px;border-radius:50%;background:var(--kelp)}
+@media (prefers-reduced-motion:reduce){*,*::after{animation:none!important;transition:none!important}}
+/* phone */
+.phone .app{grid-template-columns:1fr}.phone .side{display:none}.phone .topbar{display:flex;align-items:center;gap:.6rem;padding:.7rem 1rem;background:var(--surface);border-bottom:1px solid var(--line);font-weight:650}
+.phone .topbar img{width:26px}.phone .topbar .sp{flex:1}
+.phone .main{padding:1rem}.phone .g4{grid-template-columns:1fr 1fr}.phone .g2,.phone .g2e{grid-template-columns:1fr}
+.phone .need{flex-wrap:wrap}.phone .need .acts{width:100%;display:flex;gap:.5rem}.phone .need .acts .btn{flex:1;justify-content:center}
+.phone .hide-sm{display:none}.phone .flow{flex-direction:column;align-items:stretch}.phone .pipe{transform:rotate(90deg);margin:.2rem auto}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-jobs" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></symbol>
+  <symbol id="i-hand" viewBox="0 0 24 24"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12m0-6.5a1.5 1.5 0 0 1 3 0V12m0-5a1.5 1.5 0 0 1 3 0v7a7 7 0 0 1-7 7h-.5A6.5 6.5 0 0 1 4 15.5V13a1.5 1.5 0 0 1 3 0"/></symbol>
+  <symbol id="i-flow" viewBox="0 0 24 24"><circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="12" r="2.5"/><path d="M7.5 12h9M14 9l3 3-3 3"/></symbol>
+  <symbol id="i-src" viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 16 0M8 12a4 4 0 0 1 8 0"/><circle cx="12" cy="12" r="1.5"/><path d="M12 14v7"/></symbol>
+  <symbol id="i-agent" viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="4"/><path d="M12 7V4M9 13h.01M15 13h.01"/></symbol>
+  <symbol id="i-routine" viewBox="0 0 24 24"><path d="M6 4v16M6 8h8a3 3 0 0 1 0 6H6"/><circle cx="18" cy="18" r="2"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></symbol>
+  <symbol id="i-audit" viewBox="0 0 24 24"><path d="M9 4h6l4 4v12H5V4z"/><path d="M9 12h6M9 16h4"/></symbol>
+  <symbol id="i-hist" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></symbol>
+  <symbol id="i-out" viewBox="0 0 24 24"><path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></symbol>
+</svg>
+
+<div class="mock-bar">
+  <strong style="color:#2EE6D6">Siphon mockups</strong>
+  <button data-s="login">Login</button><button data-s="dash" class="on">Dashboard</button><button data-s="rules">Rules</button><button data-s="edit">Rule editor</button><button data-s="job">Job · approval</button><button data-s="logins">Logins</button><button data-s="empty">Empty state</button>
+  <span class="sp"></span>
+  <button id="theme">◐ Dark</button><button id="phone">▯ Phone</button>
+</div>
+
+<div class="frame" id="frame">
+
+<!-- ====================== LOGIN ====================== -->
+<section class="screen" id="s-login"><div class="login"><div class="card">
+  <img src="../brand/mark.svg" alt="">
+  <div class="word">siphon</div>
+  <div class="muted">Draws events in. Jets agents out.</div>
+  <form><label class="f">Access token<input type="password" value="••••••••••••••••••••••••" autocomplete="current-password"><span class="hint">From <code class="mono">server.token</code>. Your session lasts 12 h.</span></label>
+  <button class="btn primary" type="button" style="justify-content:center">Sign in</button></form>
+</div></div></section>
+
+<!-- shared shell template is repeated per screen for a static mockup -->
+<template id="shell"><div class="app">
+  <aside class="side">
+    <div class="brand"><img src="../brand/mark-bare.svg" alt="">siphon</div>
+    <nav class="nav">
+      <a data-n="dash"><svg class="ico"><use href="#i-home"/></svg>Dashboard</a>
+      <a data-n="job"><svg class="ico"><use href="#i-jobs"/></svg>Jobs</a>
+      <a data-n="appr"><svg class="ico"><use href="#i-hand"/></svg>Approvals<span class="count">2</span></a>
+      <div class="sep">Configure</div>
+      <a data-n="rules"><svg class="ico"><use href="#i-flow"/></svg>Rules</a>
+      <a><svg class="ico"><use href="#i-src"/></svg>Sources</a>
+      <a><svg class="ico"><use href="#i-agent"/></svg>Agents</a>
+      <a><svg class="ico"><use href="#i-routine"/></svg>Routines</a>
+      <a data-n="logins"><svg class="ico"><use href="#i-key"/></svg>Logins</a>
+      <a><svg class="ico"><use href="#i-shield"/></svg>Egress</a>
+      <div class="sep">Records</div>
+      <a><svg class="ico"><use href="#i-audit"/></svg>Audit</a>
+      <a><svg class="ico"><use href="#i-hist"/></svg>History</a>
+    </nav>
+    <div class="foot"><button class="btn sm" data-theme-btn><svg class="ico"><use href="#i-moon"/></svg>Theme</button><button class="btn sm"><svg class="ico"><use href="#i-out"/></svg>Sign out</button></div>
+  </aside>
+  <div><div class="topbar"><img src="../brand/mark-bare.svg" alt="">siphon<span class="sp"></span><span class="pill waiting">✋ 2</span><svg class="ico"><use href="#i-menu"/></svg></div>
+  <main class="main"></main></div>
+</div></template>
+
+<!-- ====================== DASHBOARD ====================== -->
+<section class="screen on" id="s-dash" data-nav="dash"><div class="body">
+  <div class="top"><div><h1>Good evening</h1><div class="muted">2 runs need you · 4 sources flowing</div></div><span class="sp"></span><a class="btn primary"><svg class="ico"><use href="#i-plus"/></svg>New rule</a></div>
+  <div class="grid g4" style="margin-bottom:1rem">
+    <div class="card stat"><span class="muted">Runs · 24 h</span><b class="g">128</b><span class="muted">↑ 12% vs yesterday</span></div>
+    <div class="card stat"><span class="muted">Success rate</span><b>96.1%</b><span class="muted">5 failed</span></div>
+    <div class="card stat"><span class="muted">Agent runs today</span><b>17<span class="muted" style="font-size:1rem"> / 50</span></b><div class="bar"><i style="width:34%"></i></div></div>
+    <div class="card stat"><span class="muted">Sources</span><b>4</b><span class="muted"><span class="dot ok"></span>3 ok <span class="dot err" style="margin-left:.4rem"></span>1 error</span></div>
+  </div>
+  <div class="grid g2">
+    <div class="card"><h2>Needs you</h2>
+      <div class="need"><span class="pill waiting">✋ Approval</span><div><b>ask-claude</b> · <span class="muted">agent <b>helper</b> (claude, subscription)</span><div class="muted mono">“Answer briefly: What is 2+2?”</div></div><span class="sp"></span><div class="acts"><button class="btn sm ok">Approve</button> <button class="btn sm no">Deny</button></div></div>
+      <div class="need"><span class="pill waiting">✋ Approval</span><div><b>task-failed</b> · <span class="muted">agent <b>triage</b> · task 4812</span><div class="muted mono">“Task 4812 failed: build timeout…”</div></div><span class="sp"></span><div class="acts"><button class="btn sm ok">Approve</button> <button class="btn sm no">Deny</button></div></div>
+      <div class="need"><span class="pill failed">✕ Failed</span><div><b>disk-full</b> · <span class="muted">unit nix-gc.service exited 1 · 14 min ago</span></div><span class="sp"></span><a class="btn sm">Open</a></div>
+    </div>
+    <div class="card"><h2>Sources</h2>
+      <div style="display:flex;flex-direction:column;gap:.7rem">
+        <div><span class="dot ok"></span><b>factory</b> <span class="pill src">MCP</span><div class="muted" style="font-size:.82rem;margin-left:1.1rem">polled 38 s ago · every 2 m</div></div>
+        <div><span class="dot ok"></span><b>github</b> <span class="pill src">Webhook</span><div class="muted" style="font-size:.82rem;margin-left:1.1rem">last delivery 6 min ago</div></div>
+        <div><span class="dot ok"></span><b>test</b> <span class="pill src">Webhook</span><div class="muted" style="font-size:.82rem;margin-left:1.1rem">last delivery 2 min ago</div></div>
+        <div><span class="dot err"></span><b>disk</b> <span class="pill src">HTTP</span><div class="err-t" style="margin-left:1.1rem">GET metrics.lan: connection refused · 3 tries</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:1rem"><h2>Recent runs</h2>
+    <table><tr><th>#</th><th>Rule</th><th>State</th><th class="hide-sm">Action</th><th class="hide-sm">Started</th><th>Duration</th></tr>
+    <tr class="fresh"><td>131</td><td>pr-opened</td><td><span class="pill running"><span class="spin">⟳</span> Running</span></td><td class="hide-sm">routine review-pr · step 2/3</td><td class="hide-sm">just now</td><td>0:41</td></tr>
+    <tr><td>130</td><td>ask-claude</td><td><span class="pill waiting">✋ Waiting</span></td><td class="hide-sm">agent helper</td><td class="hide-sm">2 min ago</td><td>—</td></tr>
+    <tr><td>129</td><td>echo</td><td><span class="pill done">✓ Done</span></td><td class="hide-sm">cmd echo</td><td class="hide-sm">2 min ago</td><td>0:00.2</td></tr>
+    <tr><td>128</td><td>disk-full</td><td><span class="pill failed">✕ Failed</span></td><td class="hide-sm">unit nix-gc.service</td><td class="hide-sm">14 min ago</td><td>1:12</td></tr>
+    <tr><td>127</td><td>partner-event</td><td><span class="pill denied">⊘ Denied</span></td><td class="hide-sm">cmd echo</td><td class="hide-sm">1 h ago</td><td>—</td></tr></table>
+  </div>
+</div></section>
+
+<!-- ====================== RULES ====================== -->
+<section class="screen" id="s-rules" data-nav="rules"><div class="body">
+  <div class="top"><div><h1>Rules</h1><div class="muted">What Siphon watches for, and what it jets out.</div></div><span class="sp"></span><a class="btn primary"><svg class="ico"><use href="#i-plus"/></svg>New rule</a></div>
+  <div class="grid g2e">
+    <div class="card rule-card"><div class="rule-head"><b>task-failed</b><span class="badge">from file</span><span class="sp"></span><span class="muted" style="font-size:.8rem">fired 3 min ago</span><span class="switch on" title="Enabled"></span></div>
+      <div class="flow"><div class="node"><small>Source · MCP</small><code>factory</code></div><svg class="pipe" viewBox="0 0 46 14"><line x1="3" y1="7" x2="43" y2="7"/></svg><div class="node cond"><small>When · each item</small><code>item.status == "failed"</code></div><svg class="pipe" viewBox="0 0 46 14"><line x1="3" y1="7" x2="43" y2="7"/></svg><div class="node"><small>Agent · claude</small><code>triage</code></div></div>
+      <div class="muted" style="font-size:.8rem">cooldown 10 m · approval required</div></div>
+    <div class="card rule-card"><div class="rule-head"><b>ask-claude</b><span class="badge portal">portal</span><span class="sp"></span><span class="muted" style="font-size:.8rem">fired 2 min ago</span><span class="switch on"></span></div>
+      <div class="flow"><div class="node"><small>Source · webhook</small><code>test</code></div><svg class="pipe" viewBox="0 0 46 14"><line x1="3" y1="7" x2="43" y2="7"/></svg><div class="node cond"><small>When</small><code>event.kind == "ask"</code></div><svg class="pipe" viewBox="0 0 46 14"><line x1="3" y1="7" x2="43" y2="7"/></svg><div class="node"><small>Agent · claude</small><code>helper</code></div></div>
+      <div class="muted" style="font-size:.8rem">cooldown 10 s · approval required</div></div>
+    <div class="card rule-card"><div class="rule-head"><b>disk-full</b><span class="badge ovr">overrides file</span><span class="sp"></span><span class="muted" style="font-size:.8rem">fired 14 min ago</span><span class="switch on"></span></div>
+      <div class="flow"><div class="node"><small>Source · HTTP</small><code>disk</code></div><svg class="pipe" viewBox="0 0 46 14"><line x1="3" y1="7" x2="43" y2="7"/></svg><div class="node cond"><small>When · on edge</small><code>event.used_pct &gt; 85</code></div><svg class="pipe" viewBox="0 0 46 14"><line x1="3" y1="7" x2="43" y2="7"/></svg><div class="node"><small>Unit</small><code>nix-gc.service</code></div></div>
+      <div class="muted" style="font-size:.8rem">repeat 6 h · <a>reset to file</a></div></div>
+    <div class="card rule-card"><div class="rule-head"><b>pr-opened</b><span class="badge">from file</span><span class="sp"></span><span class="muted" style="font-size:.8rem">disabled</span><span class="switch"></span></div>
+      <div class="flow"><div class="node"><small>Source · webhook</small><code>github</code></div><svg class="pipe off" viewBox="0 0 46 14"><line x1="3" y1="7" x2="43" y2="7"/></svg><div class="node cond"><small>When</small><code>event.action == "opened"</code></div><svg class="pipe off" viewBox="0 0 46 14"><line x1="3" y1="7" x2="43" y2="7"/></svg><div class="node"><small>Routine · 3 steps</small><code>review-pr</code></div></div>
+      <div class="muted" style="font-size:.8rem">cooldown 1 m</div></div>
+  </div>
+</div></section>
+
+<!-- ====================== RULE EDITOR ====================== -->
+<section class="screen" id="s-edit" data-nav="rules"><div class="body">
+  <div class="top"><div><div class="muted" style="font-size:.85rem"><a>Rules</a> / ask-claude</div><h1>Edit rule</h1></div><span class="sp"></span><span class="badge portal">portal · revision 14</span></div>
+  <div class="grid g2">
+    <div class="card">
+      <div class="tabs"><span class="on">Form</span><span>YAML</span></div>
+      <div class="grid g2e" style="gap:.8rem"><label class="f">Name<input value="ask-claude"></label><label class="f">Source<select><option>test · webhook</option><option>factory · MCP</option><option>github · webhook</option></select></label></div>
+      <label class="f">When <span class="hint">An expression on <code class="mono">event</code>, <code class="mono">item</code>, <code class="mono">headers</code>.</span><input class="mono" value='event.kind == "ask"'></label>
+      <label class="f">Fires<span class="seg"><span>on edge</span><span class="on">each event</span></span><span class="hint">Each event fires once (de-duplicated by its id).</span></label>
+      <div class="grid g2e" style="gap:.8rem"><label class="f">Cooldown<input value="10s"></label><label class="f">Approval<select><option>Agent default (required)</option><option>Always</option></select></label></div>
+      <label class="f">Then<span class="seg"><span class="on">Agent</span><span>Command</span><span>Unit</span><span>Routine</span></span></label>
+      <label class="f">Agent<select><option>helper · claude (subscription: claude-max)</option><option>triage · claude</option></select><span class="hint">Egress: api.anthropic.com, platform.claude.com</span></label>
+      <div class="diff"><pre><span class="del">-    cooldown: 30s</span>
+<span class="add">+    cooldown: 10s</span>
+     action: { agent: helper }</pre></div>
+      <div style="display:flex;gap:.6rem;margin-top:1rem;justify-content:flex-end"><button class="btn">Cancel</button><button class="btn primary">Save &amp; apply</button></div>
+    </div>
+    <div class="card"><h2>Test it</h2>
+      <div class="seg" style="margin-bottom:.7rem"><span class="on">Last event (2 min ago)</span><span>Paste JSON</span></div>
+      <pre>{
+  "kind": "ask",
+  "q": "What is 2+2?"
+}</pre>
+      <div class="test" style="margin-top:.8rem">
+        <div class="match"><span class="y">✓</span> Matches · fires 1 run</div>
+        <div class="muted" style="font-size:.78rem;margin:.4rem 0 .2rem">Rendered prompt</div>
+        <div class="mono">Answer briefly: What is 2+2?</div>
+        <div class="muted" style="font-size:.78rem;margin:.6rem 0 .2rem">Will run</div>
+        <div>agent <b>helper</b> · claude · max 2 turns · $0.20 · waits for approval</div>
+      </div>
+      <div class="muted" style="font-size:.78rem;margin-top:.7rem">Live as you type · nothing runs</div>
+    </div>
+  </div>
+</div></section>
+
+<!-- ====================== JOB / APPROVAL ====================== -->
+<section class="screen" id="s-job" data-nav="job"><div class="body">
+  <div class="top"><div><div class="muted" style="font-size:.85rem"><a>Jobs</a> / 130</div><h1 style="display:flex;gap:.7rem;align-items:center">Job 130 <span class="pill waiting">✋ Waiting for you</span></h1></div><span class="sp"></span><button class="btn no">Deny</button><button class="btn ok">Approve &amp; run</button></div>
+  <div class="grid g2">
+    <div style="display:flex;flex-direction:column;gap:1rem">
+      <div class="card"><h2>What will run</h2>
+        <dl class="kv"><dt>Agent</dt><dd><b>helper</b> · claude · login <b>claude-max</b> (subscription)</dd><dt>Limits</dt><dd>2 turns · $0.20 · 3 m</dd><dt>Can reach</dt><dd class="mono">api.anthropic.com · platform.claude.com</dd></dl>
+        <div class="muted" style="font-size:.78rem;margin:.9rem 0 .3rem">Prompt</div>
+        <pre>Answer briefly: What is 2+2?</pre></div>
+      <div class="card"><h2>Output <span class="muted" style="font-weight:400">· from job 118, a finished run of this rule</span><button class="btn sm" style="float:right"><svg class="ico"><use href="#i-copy"/></svg>Copy</button></h2>
+<pre>{"type":"result","result":"4","num_turns":1,"total_cost_usd":0.03}
+<span class="eg">egress: blocked http-intake.logs.us5.datadoghq.com:443 (2)</span></pre>
+        <h2 style="margin-top:1rem">Blocked hosts</h2>
+        <div class="blocked"><span class="mono">http-intake.logs.us5.datadoghq.com:443</span><span class="muted">2×</span><span class="sp"></span><button class="btn sm">Allow for helper</button></div>
+        <div class="muted" style="font-size:.8rem">Telemetry; safe to leave blocked.</div></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:1rem">
+      <div class="card"><h2>Details</h2><dl class="kv"><dt>Rule</dt><dd><a>ask-claude</a></dd><dt>Created</dt><dd>22:30:57 · 2 min ago</dd><dt>Approval expires</dt><dd>in 23 h 58 m</dd><dt>Attempt</dt><dd>0</dd></dl></div>
+      <div class="card"><h2>Triggering event</h2><pre>{
+  "kind": "ask",
+  "q": "What is 2+2?"
+}</pre></div>
+      <div class="card"><h2>Routine steps <span class="muted" style="font-weight:400">(example, job 131)</span></h2>
+        <ol class="timeline"><li><span class="pill done">✓</span><div><b>fetch</b><div class="muted" style="font-size:.8rem">gh pr view 42 · 1.2 s</div></div></li><li><span class="pill running"><span class="spin">⟳</span></span><div><b>review</b><div class="muted" style="font-size:.8rem">agent triage · 41 s</div></div></li><li><span class="pill queued">◷</span><div><b>notify</b><div class="muted" style="font-size:.8rem">waiting</div></div></li></ol></div>
+    </div>
+  </div>
+</div></section>
+
+<!-- ====================== LOGINS ====================== -->
+<section class="screen" id="s-logins" data-nav="logins"><div class="body">
+  <div class="top"><div><h1>Logins</h1><div class="muted">Accounts Siphon's agents run as. Secrets are stored, never shown.</div></div><span class="sp"></span><a class="btn primary"><svg class="ico"><use href="#i-plus"/></svg>Add login</a></div>
+  <div class="grid g2">
+    <div class="card"><table><tr><th>Name</th><th>Provider</th><th>Type</th><th>Expires</th><th class="hide-sm">Last refresh</th></tr>
+      <tr><td><b>claude-max</b></td><td>Claude</td><td>Subscription</td><td><span class="pill done">in 7 h</span></td><td class="hide-sm">22:31</td></tr>
+      <tr><td><b>chatgpt</b></td><td>Codex</td><td>Subscription</td><td><span class="pill done">in 9 d</span></td><td class="hide-sm">yesterday</td></tr>
+      <tr><td><b>google</b></td><td>Antigravity</td><td>Subscription</td><td><span class="pill failed">expired</span></td><td class="hide-sm">3 d ago</td></tr>
+      <tr><td><b>ci-key</b></td><td>Claude</td><td>API key</td><td><span class="pill denied">no expiry</span></td><td class="hide-sm">—</td></tr></table></div>
+    <div class="card"><h2>Add login</h2>
+      <label class="f">Name<input value="claude-max"></label>
+      <label class="f">Provider<span class="seg"><span class="on">Claude</span><span>Codex</span><span>Antigravity</span></span></label>
+      <label class="f">Login<textarea placeholder="Paste the output of `claude setup-token`, or the login file contents"></textarea><span class="hint">Stored encrypted-at-rest in Siphon's state (0600). You won't see it again.</span></label>
+      <button class="btn primary">Save login</button></div>
+  </div>
+</div></section>
+
+<!-- ====================== EMPTY ====================== -->
+<section class="screen" id="s-empty" data-nav="rules"><div class="body">
+  <div class="top"><div><h1>Rules</h1></div></div>
+  <div class="card empty"><div class="bubbles"><span></span><span></span><span></span></div>
+    <h2 style="font-size:1.3rem">Nothing in the current yet</h2>
+    <p class="muted" style="max-width:420px;margin:0 auto 1.2rem">A rule watches a source and, when something matches, jets out an agent, a command or a routine.</p>
+    <a class="btn primary"><svg class="ico"><use href="#i-plus"/></svg>Add your first source</a> <a class="btn">Import YAML</a></div>
+</div></section>
+
+</div>
+
+<div class="toast"><i></i>Rule <b>ask-claude</b> saved · revision 14 applied</div>
+
+<script>
+// Mockup-only glue: wrap screens in the shell, switch screens, theme and phone toggles.
+const shell=document.getElementById('shell');
+document.querySelectorAll('.screen[data-nav]').forEach(s=>{
+  const app=shell.content.cloneNode(true), body=s.querySelector('.body');
+  app.querySelector('.main').appendChild(body);
+  app.querySelectorAll('.nav a').forEach(a=>{if(a.dataset.n===s.dataset.nav)a.classList.add('on')});
+  s.appendChild(app);
+});
+const show=id=>{document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.id==='s-'+id));
+  document.querySelectorAll('.mock-bar [data-s]').forEach(b=>b.classList.toggle('on',b.dataset.s===id))};
+document.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>show(b.dataset.s));
+document.querySelectorAll('.nav a[data-n]').forEach(a=>a.onclick=()=>show(a.dataset.n==='appr'?'job':a.dataset.n));
+const flip=()=>{const r=document.documentElement;r.dataset.theme=r.dataset.theme==='dark'?'light':'dark';document.getElementById('theme').textContent=r.dataset.theme==='dark'?'◐ Light':'◐ Dark'};
+document.getElementById('theme').onclick=flip;document.querySelectorAll('[data-theme-btn]').forEach(b=>b.onclick=flip);
+document.getElementById('phone').onclick=e=>{const f=document.getElementById('frame');f.classList.toggle('phone');e.target.classList.toggle('on')};
+// Deep links: #dash, #rules-dark, #job-phone, #edit-dark-phone
+const [h,...mods]=(location.hash.slice(1)||'dash').split('-');show(h);
+if(mods.includes('dark'))flip();if(mods.includes('phone'))document.getElementById('phone').click();
+</script>
+</body>
+</html>

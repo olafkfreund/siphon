@@ -132,16 +132,10 @@ func buildRun(o AgentOptions, home string) (argv []string, stdin []byte, env map
 		err = errors.New("runner name must not contain a template action")
 		return
 	}
-	t, e := template.New("prompt").Option("missingkey=error").Parse(o.Prompt)
-	if e != nil {
-		err = e
+	prompt, err := RenderPrompt(o.Prompt, o.Env)
+	if err != nil {
 		return
 	}
-	var rendered bytes.Buffer
-	if err = t.Execute(&rendered, o.Env); err != nil {
-		return
-	}
-	prompt := rendered.String()
 	if o.WorkDir == "" {
 		err = errors.New("empty agent work directory")
 		return
@@ -313,4 +307,19 @@ func mcpConfig(mcp map[string]MCPServer, agy bool) ([]byte, error) {
 		}
 	}
 	return json.Marshal(map[string]any{"mcpServers": servers})
+}
+
+// RenderPrompt renders an agent prompt template against a job's env, the
+// same way a run does (missing keys are an error). The portal uses it to show
+// what an agent will be asked.
+func RenderPrompt(prompt string, env any) (string, error) {
+	t, err := template.New("prompt").Option("missingkey=error").Parse(prompt)
+	if err != nil {
+		return "", err
+	}
+	var b bytes.Buffer
+	if err := t.Execute(&b, env); err != nil {
+		return "", err
+	}
+	return b.String(), nil
 }

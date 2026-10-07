@@ -13,6 +13,8 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -30,7 +32,7 @@ import (
 const cmdTimeout = 10 * time.Minute
 
 type Pipeline struct {
-	Cfg   *config.Config
+	cfg   atomic.Pointer[config.Config] // read via Config(); swapped by Apply
 	Store *store.Store
 	Now   func() time.Time
 	nudge chan struct{} // set by Serve; wakes idle workers after enqueues
@@ -41,6 +43,28 @@ type Pipeline struct {
 	rnd   func() float64                                               // retry jitter source; tests inject
 
 	egress *egress.Proxy // set by startEgress when any run has an allowlist
+
+	applyMu     sync.Mutex // serialises Apply and Serve's poller start
+	serveCtx    context.Context
+	stopPollers func() // nil unless Serve is running
+}
+
+// Config is the current config. Each poll, event and job takes one snapshot
+// for its whole run; Apply swaps it for the next one.
+func (p *Pipeline) Config() *config.Config { return p.cfg.Load() }
+
+// Apply makes cfg the live config: the pointer is swapped, then (under Serve)
+// the pollers restart on the new sources. Queued jobs keep their payload
+// snapshots; the worker count and egress listener are fixed at startup.
+func (p *Pipeline) Apply(cfg *config.Config) error {
+	p.applyMu.Lock()
+	defer p.applyMu.Unlock()
+	p.cfg.Store(cfg)
+	if p.stopPollers != nil {
+		p.stopPollers()
+		p.stopPollers = p.startPollers(p.serveCtx, cfg)
+	}
+	return nil
 }
 
 // runUnit starts a unit and waits for it; tests stub it. The step/action
@@ -50,15 +74,16 @@ var runUnit = func(ctx context.Context, p *Pipeline, unit string) (int, string) 
 	if d, ok := ctx.Deadline(); ok {
 		timeout = time.Until(d)
 	}
-	exit, out, err := action.RunUnit(ctx, unit, p.Cfg.Units, timeout, p.Cfg.Secrets())
+	cfg := p.Config()
+	exit, out, err := action.RunUnit(ctx, unit, cfg.Units, timeout, cfg.Secrets())
 	if err != nil {
 		return exit, string(out) + err.Error()
 	}
 	return exit, string(out)
 }
 
-func (p *Pipeline) routineSteps(a config.Action) []config.Step {
-	if rt := p.Cfg.Routines[a.Routine]; a.Routine != "" && rt != nil {
+func routineSteps(cfg *config.Config, a config.Action) []config.Step {
+	if rt := cfg.Routines[a.Routine]; a.Routine != "" && rt != nil {
 		return slices.Clone(rt.Steps)
 	}
 	return nil
@@ -67,7 +92,9 @@ func (p *Pipeline) routineSteps(a config.Action) []config.Step {
 // New returns a Pipeline ready for Serve. The worker nudge channel is made
 // here, before any HTTP handler can call deliver (no race with Serve).
 func New(cfg *config.Config, st *store.Store, now func() time.Time) *Pipeline {
-	return &Pipeline{Cfg: cfg, Store: st, Now: now, nudge: make(chan struct{}, 64)}
+	p := &Pipeline{Store: st, Now: now, nudge: make(chan struct{}, 64)}
+	p.cfg.Store(cfg)
+	return p
 }
 
 // Payload is what a job row carries: the action and the env it renders with.
@@ -88,22 +115,22 @@ type Payload struct {
 
 // agentDef returns the snapshotted agent definition, falling back to the
 // live config for payloads written before snapshots existed.
-func (p *Pipeline) agentDef(name string, snap map[string]config.Agent) *config.Agent {
+func agentDef(cfg *config.Config, name string, snap map[string]config.Agent) *config.Agent {
 	if a, ok := snap[name]; ok {
 		return &a
 	}
-	return p.Cfg.Agents[name]
+	return cfg.Agents[name]
 }
 
 // agentSnapshot collects the definitions of every agent an action can run.
-func (p *Pipeline) agentSnapshot(a config.Action) map[string]config.Agent {
+func agentSnapshot(cfg *config.Config, a config.Action) map[string]config.Agent {
 	names := []string{a.Agent}
-	for _, st := range p.routineSteps(a) {
+	for _, st := range routineSteps(cfg, a) {
 		names = append(names, st.Agent)
 	}
 	out := map[string]config.Agent{}
 	for _, n := range names {
-		if def := p.Cfg.Agents[n]; n != "" && def != nil {
+		if def := cfg.Agents[n]; n != "" && def != nil {
 			out[n] = *def
 		}
 	}
@@ -115,7 +142,11 @@ func (p *Pipeline) agentSnapshot(a config.Action) map[string]config.Agent {
 
 // Poll fetches one event from a polled source.
 func (p *Pipeline) Poll(ctx context.Context, name string) (rule.Event, error) {
-	s := p.Cfg.Sources[name]
+	return p.poll(ctx, p.Config(), name)
+}
+
+func (p *Pipeline) poll(ctx context.Context, cfg *config.Config, name string) (rule.Event, error) {
+	s := cfg.Sources[name]
 	if s == nil {
 		return rule.Event{}, fmt.Errorf("unknown source %q", name)
 	}
@@ -125,10 +156,10 @@ func (p *Pipeline) Poll(ctx context.Context, name string) (rule.Event, error) {
 	case "http":
 		ev, err = source.HTTP{Options: source.HTTPOptions{
 			Name: name, URL: s.URL, Method: s.Method, Headers: headerValues(s.Headers), Body: []byte(s.Body),
-			AllowPrivate: s.AllowPrivate, MaxBody: int64(p.Cfg.Limits.HTTPMaxBody), Timeout: time.Duration(p.Cfg.Limits.HTTPTimeout),
+			AllowPrivate: s.AllowPrivate, MaxBody: int64(cfg.Limits.HTTPMaxBody), Timeout: time.Duration(cfg.Limits.HTTPTimeout),
 		}}.Poll(ctx)
 	case "mcp":
-		o := p.mcpOptions(name)
+		o := mcpOptions(cfg, name)
 		m := source.MCP{Options: o}
 		if p.MCPTransport != nil {
 			m.Transport = p.MCPTransport(name)
@@ -145,10 +176,14 @@ func (p *Pipeline) Poll(ctx context.Context, name string) (rule.Event, error) {
 
 // Tick polls one source and enqueues jobs for every rule that fires.
 func (p *Pipeline) Tick(ctx context.Context, name string) ([]int64, error) {
-	ev, err := p.Poll(ctx, name)
+	return p.tick(ctx, p.Config(), name)
+}
+
+func (p *Pipeline) tick(ctx context.Context, cfg *config.Config, name string) ([]int64, error) {
+	ev, err := p.poll(ctx, cfg, name)
 	msg := ""
 	if err != nil {
-		msg = string(action.Mask([]byte(err.Error()), p.Cfg.Secrets()))
+		msg = string(action.Mask([]byte(err.Error()), cfg.Secrets()))
 	}
 	if serr := store.PutSourceState(p.Store.DB, name, p.Now(), msg); serr != nil {
 		return nil, serr
@@ -156,14 +191,17 @@ func (p *Pipeline) Tick(ctx context.Context, name string) ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, ids, err := p.HandleEvent(ctx, ev, false)
-	return ids, err
+	if serr := store.SetSourceEvent(p.Store.DB, name, ev.Data); serr != nil {
+		slog.Warn("store last event", "source", name, "err", serr)
+	}
+	_, ids, _, ruleErr, err := p.handleEvent(ctx, cfg, ev, false, "", "")
+	return ids, errors.Join(err, ruleErr)
 }
 
 // HandleEvent evaluates every rule against ev in one transaction and, unless
 // dryRun, enqueues a job per fire. Rule state and job inserts commit together.
 func (p *Pipeline) HandleEvent(ctx context.Context, ev rule.Event, dryRun bool) ([]rule.Fire, []int64, error) {
-	fires, ids, _, ruleErr, err := p.handleEvent(ctx, ev, dryRun, "", "")
+	fires, ids, _, ruleErr, err := p.handleEvent(ctx, p.Config(), ev, dryRun, "", "")
 	return fires, ids, errors.Join(err, ruleErr)
 }
 
@@ -172,7 +210,7 @@ func (p *Pipeline) HandleEvent(ctx context.Context, ev rule.Event, dryRun bool) 
 // dup=true is returned without evaluating anything if it was already seen.
 // ruleErr holds per-rule evaluation errors from a transaction that still
 // committed; err means nothing was committed.
-func (p *Pipeline) handleEvent(ctx context.Context, ev rule.Event, dryRun bool, seenScope, seenID string) (fires []rule.Fire, ids []int64, dup bool, ruleErr, err error) {
+func (p *Pipeline) handleEvent(ctx context.Context, cfg *config.Config, ev rule.Event, dryRun bool, seenScope, seenID string) (fires []rule.Fire, ids []int64, dup bool, ruleErr, err error) {
 	tx, err := p.Store.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, nil, false, nil, err
@@ -187,7 +225,7 @@ func (p *Pipeline) handleEvent(ctx context.Context, ev rule.Event, dryRun bool, 
 	}
 	var approvalIDs []int64
 	var errs []error
-	for _, r := range p.Cfg.Rules {
+	for _, r := range cfg.Rules {
 		if on, _, err := store.RuleEnabled(tx, r.Name); err != nil {
 			return nil, nil, false, nil, err
 		} else if !on {
@@ -202,7 +240,7 @@ func (p *Pipeline) handleEvent(ctx context.Context, ev rule.Event, dryRun bool, 
 			continue
 		}
 		for _, f := range fs {
-			id, link, err := p.enqueue(tx, r, f, ev, now)
+			id, link, err := p.enqueue(tx, cfg, r, f, ev, now)
 			if err != nil {
 				return nil, nil, false, nil, err
 			}
@@ -230,27 +268,27 @@ func (p *Pipeline) handleEvent(ctx context.Context, ev rule.Event, dryRun bool, 
 
 // enqueue inserts the job; for pending_approval it also creates the approval
 // in the same tx and returns its link path.
-func (p *Pipeline) enqueue(tx *sql.Tx, r config.Rule, f rule.Fire, ev rule.Event, now time.Time) (id int64, link string, err error) {
+func (p *Pipeline) enqueue(tx *sql.Tx, cfg *config.Config, r config.Rule, f rule.Fire, ev rule.Event, now time.Time) (id int64, link string, err error) {
 	depth := ev.Depth
 	if depth > config.MaxDepth {
 		return 0, "", store.Audit(tx, now, "rule:"+r.Name, "skip_depth", 0, fmt.Sprintf("depth %d > %d", depth, config.MaxDepth))
 	}
-	hasAgent := r.Action.Agent != "" || p.Cfg.RoutineHasAgent(r.Action.Routine)
+	hasAgent := r.Action.Agent != "" || cfg.RoutineHasAgent(r.Action.Routine)
 	if hasAgent {
 		n, err := store.CountAgentJobsSince(tx, now.Add(-24*time.Hour))
 		if err != nil {
 			return 0, "", err
 		}
-		if n >= p.Cfg.Limits.AgentRunsPerDay {
+		if n >= cfg.Limits.AgentRunsPerDay {
 			return 0, "", store.Audit(tx, now, "rule:"+r.Name, "skip_agent_cap", 0, fmt.Sprintf("%d agent runs in 24h", n))
 		}
 	}
-	b, err := json.Marshal(Payload{Action: r.Action, Env: f.Env, Agent: hasAgent, Steps: p.routineSteps(r.Action), Agents: p.agentSnapshot(r.Action)})
+	b, err := json.Marshal(Payload{Action: r.Action, Env: f.Env, Agent: hasAgent, Steps: routineSteps(cfg, r.Action), Agents: agentSnapshot(cfg, r.Action)})
 	if err != nil {
 		return 0, "", err
 	}
 	state := "queued"
-	if p.needsApproval(r) {
+	if needsApproval(cfg, r) {
 		state = "pending_approval"
 	}
 	id, err = store.InsertJob(tx, store.Job{Rule: r.Name, ActionJSON: string(b), State: state, RunAfter: now, Depth: depth, ParentID: ev.ParentID}, now)
@@ -266,15 +304,7 @@ func (p *Pipeline) enqueue(tx *sql.Tx, r config.Rule, f rule.Fire, ev rule.Event
 	return id, link, err
 }
 
-func (p *Pipeline) needsApproval(r config.Rule) bool {
-	if r.Approve {
-		return true
-	}
-	if a := p.Cfg.Agents[r.Action.Agent]; a != nil && a.Approve != nil {
-		return *a.Approve
-	}
-	return false
-}
+func needsApproval(cfg *config.Config, r config.Rule) bool { return cfg.NeedsApproval(r) }
 
 // RunQueued runs runnable jobs one by one until none are left; returns how many ran.
 func (p *Pipeline) RunQueued(ctx context.Context) (int, error) {
@@ -318,6 +348,7 @@ func (p *Pipeline) runOne(ctx context.Context) (ran bool, err error) {
 }
 
 func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, exit int, output string) {
+	cfg := p.Config()
 	pl, err := decodePayload(j.ActionJSON)
 	if err != nil {
 		return "failed", -1, "bad payload: " + err.Error()
@@ -328,13 +359,13 @@ func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, ex
 		if err != nil {
 			return "failed", -1, err.Error()
 		}
-		opts := p.sandbox(cmdTimeout)
-		allow, on := p.ruleEgress(j.Rule)
+		opts := sandbox(cfg, cmdTimeout)
+		allow, on := ruleEgress(cfg, j.Rule)
 		var finish func() string
-		if opts.Egress, finish, err = p.egressFor(j.ID, allow, on); err != nil {
+		if opts.Egress, finish, err = p.egressFor(cfg, j.ID, allow, on); err != nil {
 			return "failed", -1, err.Error()
 		}
-		code, out, err := action.RunCmd(ctx, argv, opts, p.Cfg.Secrets())
+		code, out, err := action.RunCmd(ctx, argv, opts, cfg.Secrets())
 		tail := finish()
 		if err != nil {
 			return "failed", code, string(out) + err.Error() + tail
@@ -344,7 +375,7 @@ func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, ex
 		}
 		return "done", 0, string(out) + tail
 	case pl.Action.Agent != "":
-		return p.runAgent(ctx, j, pl)
+		return p.runAgent(ctx, cfg, j, pl)
 	case pl.Action.Unit != "":
 		uctx, cancel := context.WithTimeout(ctx, cmdTimeout)
 		defer cancel()
@@ -354,7 +385,7 @@ func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, ex
 			return "done", 0, out
 		}
 	case pl.Action.Routine != "":
-		return p.runRoutine(ctx, j, pl)
+		return p.runRoutine(ctx, cfg, j, pl)
 	default:
 		return "failed", -1, "job has no action"
 	}
@@ -362,22 +393,22 @@ func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, ex
 
 // runAgent runs the agent and feeds its JSON result back as an agent-result
 // event one level deeper; rules see it only with allow_agent_events (loop guard).
-func (p *Pipeline) runAgent(ctx context.Context, j store.QueuedJob, pl Payload) (string, int, string) {
-	state, exit, out, _ := p.agentExec(ctx, j, pl, false)
+func (p *Pipeline) runAgent(ctx context.Context, cfg *config.Config, j store.QueuedJob, pl Payload) (string, int, string) {
+	state, exit, out, _ := p.agentExec(ctx, cfg, j, pl, false)
 	return state, exit, out
 }
 
 // agentExec is runAgent that also returns the agent's stdout (routine steps parse it).
 // wait=false (plain agent jobs) puts the job back in the queue when its login
 // is busy instead of tying up a worker; routine steps (wait=true) block.
-func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload, wait bool) (string, int, string, []byte) {
-	a := p.agentDef(pl.Action.Agent, pl.Agents)
+func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.QueuedJob, pl Payload, wait bool) (string, int, string, []byte) {
+	a := agentDef(cfg, pl.Action.Agent, pl.Agents)
 	if a == nil {
 		return "failed", -1, "unknown agent " + pl.Action.Agent, nil
 	}
 	servers := map[string]action.MCPServer{}
 	for _, name := range a.MCP {
-		s := p.Cfg.Sources[name]
+		s := cfg.Sources[name]
 		h := headerValues(s.Headers)
 		if s.Auth != nil && s.Auth.Bearer.Value != "" {
 			h["Authorization"] = "Bearer " + s.Auth.Bearer.Value
@@ -388,13 +419,13 @@ func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload,
 		Kind: a.Kind, Command: a.Command, Runner: a.Runner,
 		Prompt: a.Prompt, Env: pl.Env, MCP: servers,
 		AllowedTools: a.AllowedTools, MaxTurns: a.MaxTurns, MaxBudgetUSD: a.MaxBudgetUSD,
-		Timeout: time.Duration(a.Timeout), Sandbox: p.sandbox(0),
-		Secrets: p.Cfg.Secrets(), WorkDir: filepath.Join(filepath.Dir(p.Cfg.Server.DB), "jobs", strconv.FormatInt(j.ID, 10)),
+		Timeout: time.Duration(a.Timeout), Sandbox: sandbox(cfg, 0),
+		Secrets: cfg.Secrets(), WorkDir: filepath.Join(filepath.Dir(cfg.Server.DB), "jobs", strconv.FormatInt(j.ID, 10)),
 	}
 	// Credential: an API key, or a subscription login from the store. No
 	// credential at all is the legacy path (the runner's own environment).
-	credName, c := a.Credential, p.Cfg.Credentials[a.Credential]
-	st := cred.StoreFor(p.Cfg)
+	credName, c := a.Credential, cfg.Credentials[a.Credential]
+	st := cred.StoreFor(cfg)
 	var start map[string][]byte
 	switch {
 	case c == nil:
@@ -426,8 +457,8 @@ func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload,
 		}
 		opts.CredFiles, start = files, files
 	}
-	allow, on := p.Cfg.AgentEgress(a)
-	egEnv, finish, eerr := p.egressFor(j.ID, allow, on)
+	allow, on := cfg.AgentEgress(a)
+	egEnv, finish, eerr := p.egressFor(cfg, j.ID, allow, on)
 	if eerr != nil {
 		return "failed", -1, eerr.Error(), nil
 	}
@@ -435,7 +466,7 @@ func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload,
 	res, err := action.RunAgent(ctx, opts)
 	egressTail := finish()
 	if c != nil {
-		p.saveWriteback(j, credName, c.Provider, start, res.Writeback)
+		p.saveWriteback(cfg, j, credName, c.Provider, start, res.Writeback)
 	}
 	out := string(res.Output) + egressTail
 	if err != nil {
@@ -463,7 +494,7 @@ func (p *Pipeline) agentExec(ctx context.Context, j store.QueuedJob, pl Payload,
 	}
 	data["kind"], data["result"], data["raw"] = a.Kind, res.Result, res.Raw
 	ev := rule.Event{Source: config.AgentResultSource, Depth: j.Depth + 1, ParentID: j.ID, Data: data}
-	_, _, _, ruleErr, err := p.handleEvent(ctx, ev, false, "", "")
+	_, _, _, ruleErr, err := p.handleEvent(ctx, cfg, ev, false, "", "")
 	if err != nil {
 		// Nothing committed: failing beats a "done" job whose result vanished.
 		return "failed", 1, "agent result not recorded: " + err.Error() + "\n" + out, res.Stdout
@@ -480,8 +511,8 @@ const credBusyRetry = 5 * time.Second
 
 // saveWriteback stores refreshed login files: shape-checked, then
 // compare-and-swap against what this run started with.
-func (p *Pipeline) saveWriteback(j store.QueuedJob, credName, provider string, start, wb map[string][]byte) {
-	st := cred.StoreFor(p.Cfg)
+func (p *Pipeline) saveWriteback(cfg *config.Config, j store.QueuedJob, credName, provider string, start, wb map[string][]byte) {
+	st := cred.StoreFor(cfg)
 	for file, b := range wb {
 		_, norm, err := cred.ValidateFor(provider, true, b)
 		if err != nil {
@@ -530,18 +561,19 @@ func (p *Pipeline) RunOnce(ctx context.Context) error {
 	}
 	ectx, stopEgress := context.WithCancel(ctx)
 	defer stopEgress()
-	if err := p.startEgress(ectx); err != nil {
+	if err := p.startEgress(ectx, p.Config()); err != nil {
 		return err
 	}
 	if err := p.ExpireApprovals(); err != nil {
 		return err
 	}
 	var errs []error
-	for _, name := range sortedSources(p.Cfg) {
-		if p.Cfg.Sources[name].Type == "webhook" {
+	cfg := p.Config()
+	for _, name := range sortedSources(cfg) {
+		if cfg.Sources[name].Type == "webhook" {
 			continue
 		}
-		if _, err := p.Tick(ctx, name); err != nil {
+		if _, err := p.tick(ctx, cfg, name); err != nil {
 			errs = append(errs, fmt.Errorf("source %s: %w", name, err))
 		}
 	}
@@ -593,11 +625,11 @@ func decodePayload(s string) (Payload, error) {
 	return Payload{Action: raw.Action, Env: m, Agent: raw.Agent, Steps: raw.Steps, Agents: raw.Agents}, nil
 }
 
-func (p *Pipeline) mcpOptions(name string) source.MCPOptions {
-	s := p.Cfg.Sources[name]
+func mcpOptions(cfg *config.Config, name string) source.MCPOptions {
+	s := cfg.Sources[name]
 	o := source.MCPOptions{
 		Name: name, Command: s.Command, URL: s.URL, AllowPrivate: s.AllowPrivate,
-		MaxBody: int64(p.Cfg.Limits.HTTPMaxBody), Timeout: time.Duration(p.Cfg.Limits.HTTPTimeout),
+		MaxBody: int64(cfg.Limits.HTTPMaxBody), Timeout: time.Duration(cfg.Limits.HTTPTimeout),
 	}
 	if s.Read != nil {
 		o.Resource, o.Tool, o.ToolArgs = s.Read.Resource, s.Read.Tool, s.Read.Args
@@ -618,10 +650,10 @@ func (p *Pipeline) nudgeWorkers() {
 
 // sandbox is the action sandbox for this pipeline; template-unit runs keep
 // their per-run directories in server.actions_dir (default: next to the DB).
-func (p *Pipeline) sandbox(timeout time.Duration) action.SandboxOptions {
-	dir := p.Cfg.Server.ActionsDir
+func sandbox(cfg *config.Config, timeout time.Duration) action.SandboxOptions {
+	dir := cfg.Server.ActionsDir
 	if dir == "" {
-		dir = filepath.Join(filepath.Dir(p.Cfg.Server.DB), "actions")
+		dir = filepath.Join(filepath.Dir(cfg.Server.DB), "actions")
 	}
-	return action.SandboxOptions{Mode: p.Cfg.Server.Sandbox, Timeout: timeout, Dir: dir}
+	return action.SandboxOptions{Mode: cfg.Server.Sandbox, Timeout: timeout, Dir: dir}
 }

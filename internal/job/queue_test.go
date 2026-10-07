@@ -16,10 +16,7 @@ func newPipeline(t *testing.T, workers int) *Pipeline {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	return &Pipeline{
-		Cfg:   &config.Config{Server: config.Server{Workers: workers, Sandbox: "none"}},
-		Store: st, Now: time.Now,
-	}
+	return New(&config.Config{Server: config.Server{Workers: workers, Sandbox: "none"}}, st, time.Now)
 }
 
 func insertJobs(t *testing.T, p *Pipeline, n int, state, payload string) {

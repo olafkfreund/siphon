@@ -17,14 +17,14 @@ import (
 
 // needsEgress reports whether any agent or rule runs with an allowlist, so
 // the proxy must be up before any job runs.
-func (p *Pipeline) needsEgress() bool {
-	for name := range p.Cfg.Agents {
-		if _, on := p.Cfg.AgentEgress(p.Cfg.Agents[name]); on {
+func needsEgress(cfg *config.Config) bool {
+	for name := range cfg.Agents {
+		if _, on := cfg.AgentEgress(cfg.Agents[name]); on {
 			return true
 		}
 	}
-	for _, r := range p.Cfg.Rules {
-		if _, on := p.Cfg.RuleEgress(r); on {
+	for _, r := range cfg.Rules {
+		if _, on := cfg.RuleEgress(r); on {
 			return true
 		}
 	}
@@ -41,13 +41,13 @@ var egressMu sync.Mutex
 // startEgress starts the egress proxy when needed and waits until it is
 // listening. serve/run-once call it up front so a proxy that can't start
 // stops siphon; egressFor calls it lazily for pipelines used directly.
-func (p *Pipeline) startEgress(ctx context.Context) error {
+func (p *Pipeline) startEgress(ctx context.Context, cfg *config.Config) error {
 	egressMu.Lock()
 	defer egressMu.Unlock()
-	if p.egress != nil || !p.needsEgress() {
+	if p.egress != nil || !needsEgress(cfg) {
 		return nil
 	}
-	listen := p.Cfg.Server.Egress.Listen
+	listen := cfg.Server.Egress.Listen
 	if egressListenOverride != "" {
 		listen = egressListenOverride
 	}
@@ -64,7 +64,7 @@ func (p *Pipeline) startEgress(ctx context.Context) error {
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	if sock := p.Cfg.Server.Egress.Socket; sock != "" {
+	if sock := cfg.Server.Egress.Socket; sock != "" {
 		os.Remove(sock) // a stale socket must not pass for a live one below
 		go func() { errc <- px.ServeUnix(ctx, sock) }()
 		for {
@@ -87,13 +87,13 @@ func (p *Pipeline) startEgress(ctx context.Context) error {
 // egressFor registers a run's allowlist with the proxy. env is nil when
 // egress is off (the run uses the open template). finish releases the
 // registration and returns a summary of blocked hosts for the job output.
-func (p *Pipeline) egressFor(jobID int64, allow []config.HostPort, on bool) (env *action.EgressEnv, finish func() string, err error) {
+func (p *Pipeline) egressFor(cfg *config.Config, jobID int64, allow []config.HostPort, on bool) (env *action.EgressEnv, finish func() string, err error) {
 	if !on {
 		return nil, func() string { return "" }, nil
 	}
 	// Start on first use (no-op once running); if it can't start, fail
 	// closed: never fall back to the open template.
-	if err := p.startEgress(context.Background()); err != nil {
+	if err := p.startEgress(context.Background(), cfg); err != nil {
 		return nil, nil, fmt.Errorf("egress is enabled for this run but the egress proxy is not running: %v", err)
 	}
 	egressMu.Lock()
@@ -107,7 +107,7 @@ func (p *Pipeline) egressFor(jobID int64, allow []config.HostPort, on bool) (env
 		entries[i] = egress.Entry{Host: hp.Host, Port: hp.Port, AllowPrivate: hp.AllowPrivate}
 	}
 	url, blocked, release := px.Register(entries)
-	return &action.EgressEnv{ProxyURL: url, Socket: p.Cfg.Server.Egress.Socket}, func() string {
+	return &action.EgressEnv{ProxyURL: url, Socket: cfg.Server.Egress.Socket}, func() string {
 		b := blocked()
 		release()
 		if len(b) == 0 {
@@ -128,13 +128,13 @@ func (p *Pipeline) egressFor(jobID int64, allow []config.HostPort, on bool) (env
 }
 
 // ruleEgress is the cmd-action allowlist of the job's rule.
-func (p *Pipeline) ruleEgress(rule string) ([]config.HostPort, bool) {
-	for _, r := range p.Cfg.Rules {
+func ruleEgress(cfg *config.Config, rule string) ([]config.HostPort, bool) {
+	for _, r := range cfg.Rules {
 		if r.Name == rule {
-			return p.Cfg.RuleEgress(r)
+			return cfg.RuleEgress(r)
 		}
 	}
 	// Rule renamed or removed since the job was queued: no rule opt-in, but
 	// server.egress.cmd_default still applies.
-	return p.Cfg.RuleEgress(config.Rule{})
+	return cfg.RuleEgress(config.Rule{})
 }

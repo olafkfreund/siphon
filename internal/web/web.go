@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/olafkfreund/siphon/internal/config"
@@ -31,11 +32,17 @@ var assets embed.FS
 type Options struct {
 	Token string // bearer token and portal login; empty locks everyone out
 	Store *store.Store
-	Cfg   *config.Config
+	Cfg   *config.Config // fixed config; used only when Config is nil (tests)
+	// Config returns the live config (Pipeline.Config); Apply makes a new one live (Pipeline.Apply).
+	Config func() *config.Config
+	Apply  func(*config.Config) error
+	// ConfigPath is the config file the portal edits are layered on; empty disables editing.
+	ConfigPath string
+	Banner     string // shown in red on every page (startup fallback notice)
 	// Decide approves or denies a pending job (Pipeline.Decide). Nil uses the store directly.
 	Decide func(jobID int64, approve bool, by string) error
 	// Hooks are mounted at POST /hook/{source}, unauthenticated: HMAC is their auth.
-	Hooks map[string]http.Handler
+	Hooks func(source string) http.Handler // nil result = not a webhook source
 	Now   func() time.Time
 }
 
@@ -45,6 +52,8 @@ type server struct {
 	tokHash [32]byte
 	lim     *limiter
 	tpl     *template.Template
+	editMu  sync.Mutex             // serialises config saves
+	notice  atomic.Pointer[string] // set when a save could not be applied live
 }
 
 const (
@@ -60,6 +69,10 @@ func New(o Options) http.Handler {
 	s := &server{Options: o, key: make([]byte, 32), tokHash: sha256.Sum256([]byte(o.Token)), lim: &limiter{now: o.Now, m: map[string]*bucket{}}}
 	if _, err := rand.Read(s.key); err != nil {
 		panic(err)
+	}
+	if s.Config == nil {
+		cfg := o.Cfg
+		s.Config = func() *config.Config { return cfg }
 	}
 	if s.Decide == nil {
 		s.Decide = func(id int64, approve bool, by string) error {
@@ -80,7 +93,24 @@ func New(o Options) http.Handler {
 			}
 			return itoa(*e)
 		},
-		"pe": url.PathEscape,
+		"pe":        url.PathEscape,
+		"kindtitle": func(k string) string { return kindTitle[k] },
+		"kindone":   func(k string) string { return kindOne[k] },
+		"prov":      func(p string) string { return provLabel[p] },
+		"diffhtml":  diffHTML,
+		"dur": func(d config.Duration) string {
+			if d == 0 {
+				return "no timeout"
+			}
+			return time.Duration(d).String() + " timeout"
+		},
+		"ago": func(t time.Time) string { return ago(o.Now(), t) },
+		"agop": func(t *time.Time) string {
+			if t == nil {
+				return "never"
+			}
+			return ago(o.Now(), *t)
+		},
 	}).ParseFS(assets, "templates/*.html"))
 
 	static, _ := fs.Sub(assets, "static")
@@ -88,7 +118,7 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	mux.HandleFunc("POST /hook/{source}", func(w http.ResponseWriter, r *http.Request) {
-		if h := s.Hooks[r.PathValue("source")]; h != nil {
+		if h := s.hook(r.PathValue("source")); h != nil {
 			h.ServeHTTP(w, r)
 			return
 		}
@@ -96,6 +126,7 @@ func New(o Options) http.Handler {
 	})
 	s.apiRoutes(mux)
 	s.portalRoutes(mux)
+	s.configRoutes(mux)
 	return secure(mux)
 }
 
@@ -225,4 +256,11 @@ func (s *server) render(w http.ResponseWriter, name string, data any) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(buf.Bytes())
+}
+
+func (s *server) hook(name string) http.Handler {
+	if s.Hooks == nil {
+		return nil
+	}
+	return s.Hooks(name)
 }

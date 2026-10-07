@@ -234,6 +234,18 @@ type Retry struct {
 
 const MaxRetryAttempts = 10
 
+// NeedsApproval reports whether a job from r waits for a person: the rule says
+// so, or its agent does.
+func (c *Config) NeedsApproval(r Rule) bool {
+	if r.Approve {
+		return true
+	}
+	if a := c.Agents[r.Action.Agent]; a != nil && a.Approve != nil {
+		return *a.Approve
+	}
+	return false
+}
+
 // Load reads path, applies defaults and resolves secret refs. Unresolvable
 // refs are reported by Validate, so `validate` lists every problem at once.
 func Load(path string) (*Config, error) {
@@ -245,6 +257,13 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	c.resolveDB(path)
+	return c, nil
+}
+
+// resolveDB points a relative db at the config file's directory and applies
+// the legacy-name fallback.
+func (c *Config) resolveDB(path string) {
 	// A relative db lives next to the config file, wherever the daemon is started.
 	if d := c.Server.DB; d != "" && d != ":memory:" && !filepath.IsAbs(d) {
 		c.Server.DB = filepath.Join(filepath.Dir(path), d)
@@ -258,10 +277,13 @@ func Load(path string) (*Config, error) {
 			}
 		}
 	}
-	return c, nil
 }
 
-func Parse(b []byte) (*Config, error) {
+func Parse(b []byte) (*Config, error) { return parse(b, nil) }
+
+// parse is Parse; stub maps a secret ref to a stand-in value, so a candidate
+// whose secret files are not written yet can still be validated.
+func parse(b []byte, stub map[string]string) (*Config, error) {
 	c := &Config{
 		Server: Server{Listen: ":8080", DB: "siphon.db", Workers: 4, Sandbox: "systemd", Egress: EgressServer{Listen: "127.77.0.1:3128"}},
 		Limits: Limits{AgentRunsPerDay: 50, HTTPMaxBody: 1 << 20, HTTPTimeout: Duration(30 * time.Second)},
@@ -334,7 +356,7 @@ func Parse(b []byte) (*Config, error) {
 		}
 	}
 	for _, s := range c.secretPtrs() {
-		if err := s.resolve(); err != nil {
+		if err := s.resolve(stub); err != nil {
 			c.resolveErrs = append(c.resolveErrs, err)
 		}
 	}
@@ -342,7 +364,7 @@ func Parse(b []byte) (*Config, error) {
 		if src := c.Sources[name]; src != nil {
 			for _, h := range sortedKeys(src.Headers) {
 				v := src.Headers[h]
-				if err := v.resolve(); err != nil {
+				if err := v.resolve(stub); err != nil {
 					c.resolveErrs = append(c.resolveErrs, err)
 				}
 				src.Headers[h] = v
@@ -372,7 +394,11 @@ func (c *Config) secretPtrs() []*Secret {
 	return out
 }
 
-func (s *Secret) resolve() error {
+func (s *Secret) resolve(stub map[string]string) error {
+	if v, ok := stub[s.Ref]; ok && s.Ref != "" {
+		s.Value = v
+		return nil
+	}
 	switch {
 	case strings.HasPrefix(s.Ref, "env:"):
 		name := s.Ref[4:]
@@ -383,8 +409,8 @@ func (s *Secret) resolve() error {
 		s.Value = v
 	case strings.HasPrefix(s.Ref, "file:"):
 		b, err := os.ReadFile(s.Ref[5:])
-		if err != nil {
-			return fmt.Errorf("secret %s: %w", s.Ref, err)
+		if err != nil { // no OS error text: it would tell a probing editor whether a path exists
+			return fmt.Errorf("secret %s: the file cannot be read", s.Ref)
 		}
 		s.Value = strings.TrimSpace(string(b))
 		if s.Value == "" {

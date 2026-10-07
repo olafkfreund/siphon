@@ -57,14 +57,14 @@ func TestRunOnceEdgeEndToEnd(t *testing.T) {
 	defer st.Close()
 
 	now := time.Unix(1_700_000_000, 0)
-	p := &Pipeline{Cfg: cfg, Store: st, Now: func() time.Time { return now },
-		MCPTransport: func(string) mcp.Transport {
-			serverSide, clientSide := mcp.NewInMemoryTransports()
-			if _, err := server.Connect(ctx, serverSide, nil); err != nil {
-				t.Fatal(err)
-			}
-			return clientSide
-		}}
+	p := New(cfg, st, func() time.Time { return now })
+	p.MCPTransport = func(string) mcp.Transport {
+		serverSide, clientSide := mcp.NewInMemoryTransports()
+		if _, err := server.Connect(ctx, serverSide, nil); err != nil {
+			t.Fatal(err)
+		}
+		return clientSide
+	}
 
 	// value → expected total jobs after RunOnce
 	steps := []struct{ value, jobs int64 }{

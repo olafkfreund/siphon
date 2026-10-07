@@ -1,5 +1,14 @@
-{{define "jobs"}}<h1>Jobs{{if .State}} ({{.State}}){{end}}</h1>
-<p><a href="/jobs">all</a> · <a href="/jobs?state=pending_approval">pending</a> · <a href="/jobs?state=queued">queued</a> · <a href="/jobs?state=running">running</a> · <a href="/jobs?state=done">done</a> · <a href="/jobs?state=failed">failed</a></p>
-<table><tr><th>ID</th><th>Rule</th><th>State</th><th>Attempt</th><th>Created</th><th>Exit</th></tr>
-{{range .Jobs}}<tr><td><a href="/jobs/{{.ID}}">{{.ID}}</a></td><td>{{.Rule}}</td><td>{{.State}}</td><td>{{.Attempt}}</td><td>{{tm .CreatedAt}}</td><td>{{exit .ExitCode}}</td></tr>
-{{else}}<tr><td colspan="6">none</td></tr>{{end}}</table>{{end}}
+{{define "jobs"}}<div class="top"><div><h1>Jobs</h1><div class="muted">Every run Siphon has jetted out, newest first.</div></div></div>
+<nav class="chips" aria-label="Filter by state">
+  <a class="chip" href="/jobs"{{if not .State}} aria-current="page"{{end}}>All</a>
+  <a class="chip" href="/jobs?state=pending_approval"{{if eq .State "pending_approval"}} aria-current="page"{{end}}>✋ Waiting <span class="muted">{{index .Counts "pending_approval"}}</span></a>
+  <a class="chip" href="/jobs?state=running"{{if eq .State "running"}} aria-current="page"{{end}}>⟳ Running <span class="muted">{{index .Counts "running"}}</span></a>
+  <a class="chip" href="/jobs?state=queued"{{if eq .State "queued"}} aria-current="page"{{end}}>◷ Queued <span class="muted">{{index .Counts "queued"}}</span></a>
+  <a class="chip" href="/jobs?state=done"{{if eq .State "done"}} aria-current="page"{{end}}>✓ Done <span class="muted">{{index .Counts "done"}}</span></a>
+  <a class="chip" href="/jobs?state=failed"{{if eq .State "failed"}} aria-current="page"{{end}}>✕ Failed <span class="muted">{{index .Counts "failed"}}</span></a>
+  <a class="chip" href="/jobs?state=cancelled"{{if eq .State "cancelled"}} aria-current="page"{{end}}>⊘ Cancelled <span class="muted">{{index .Counts "cancelled"}}</span></a>
+</nav>
+<section class="card"><table class="cards"><thead><tr><th>#</th><th>Rule</th><th>Runs</th><th>State</th><th class="hide-sm">Attempt</th><th class="hide-sm">Created</th><th>Exit</th></tr></thead><tbody>
+{{range .Jobs}}<tr><td data-label="#"><a href="/jobs/{{.ID}}">{{.ID}}</a></td><td data-label="Rule">{{.Rule}}</td><td data-label="Runs">{{template "run" .}}</td><td data-label="State">{{template "pill" .State}}</td><td class="hide-sm" data-label="Attempt">{{.Attempt}}</td><td class="hide-sm muted" title="{{tm .CreatedAt}}" data-label="Created">{{ago .CreatedAt}}</td><td data-label="Exit">{{exit .ExitCode}}</td></tr>
+{{else}}<tr><td colspan="7"><div class="empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>{{if .State}}No jobs in this state.{{else}}Nothing in the current yet. Runs appear here when a rule fires.{{end}}</div></td></tr>{{end}}
+</tbody></table></section>{{end}}

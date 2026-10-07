@@ -44,8 +44,8 @@ rules:
 		t.Fatal(err)
 	}
 	defer st.Close()
-	p := &Pipeline{Cfg: cfg, Store: st, Now: time.Now}
-	h := web.New(web.Options{Token: "tok", Store: st, Cfg: cfg, Decide: p.Decide, Hooks: p.Webhooks(), Now: time.Now})
+	p := New(cfg, st, time.Now)
+	h := web.New(web.Options{Token: "tok", Store: st, Config: p.Config, Decide: p.Decide, Hooks: p.Webhooks(), Now: time.Now})
 
 	body := `{"action":"opened","number":1700000001}`
 	mac := hmac.New(sha256.New, []byte("s3cret"))
@@ -109,7 +109,7 @@ rules:
 		t.Fatal(err)
 	}
 	p := New(cfg, st, time.Now)
-	h := p.Webhooks()["gh"]
+	h := p.Webhooks()("gh")
 
 	body := `{"n":1,"title":"not-a-number"}`
 	mac := hmac.New(sha256.New, []byte("s3cret"))

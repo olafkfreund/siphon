@@ -1,0 +1,350 @@
+package config
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"reflect"
+	"slices"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Item is one portal edit layered over the config file. YAML is the item body
+// (the value under its name); Deleted is a tombstone that removes it.
+// Callers map store.ConfigItem to Item (config does not import store).
+type Item struct {
+	Kind, Name, YAML string
+	Deleted          bool
+}
+
+type Key struct{ Kind, Name string }
+
+type Provenance string
+
+const (
+	FromFile     Provenance = "file"     // only in the file
+	FromPortal   Provenance = "portal"   // only in the overlay
+	FromOverride Provenance = "override" // in the file, replaced by the overlay
+)
+
+// Kinds are the editable top-level sections; server, limits and units never are.
+// "rules" is a list keyed by name, the rest are maps.
+var Kinds = map[string]bool{"sources": true, "agents": true, "routines": true, "credentials": true, "rules": true}
+
+// Effective applies items to the file's YAML node tree (keeping key order and
+// comments) and returns the merged YAML plus the provenance of every item.
+// Items that tombstone a file item drop out of the map.
+func Effective(file []byte, items []Item) ([]byte, map[Key]Provenance, error) {
+	root := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	dec := yaml.NewDecoder(bytes.NewReader(file))
+	var doc yaml.Node
+	if err := dec.Decode(&doc); err == nil {
+		if doc.Kind != yaml.DocumentNode || doc.Content[0].Kind != yaml.MappingNode {
+			return nil, nil, errors.New("config: top level must be a mapping")
+		}
+		root = doc.Content[0]
+		if err := dec.Decode(new(yaml.Node)); !errors.Is(err, io.EOF) {
+			return nil, nil, errors.New("parse config: multiple YAML documents are not supported")
+		}
+	} else if !errors.Is(err, io.EOF) {
+		return nil, nil, fmt.Errorf("parse config: %w", err)
+	}
+
+	prov := map[Key]Provenance{}
+	for kind := range Kinds {
+		if sec := mapGet(root, kind); sec != nil {
+			for _, n := range itemNames(kind, sec) {
+				prov[Key{kind, n}] = FromFile
+			}
+		}
+	}
+	for _, it := range items {
+		if !Kinds[it.Kind] {
+			return nil, nil, fmt.Errorf("overlay: kind %q is not editable", it.Kind)
+		}
+		k := Key{it.Kind, it.Name}
+		var body *yaml.Node
+		if !it.Deleted {
+			var d yaml.Node
+			if err := yaml.Unmarshal([]byte(it.YAML), &d); err != nil || d.Kind != yaml.DocumentNode {
+				return nil, nil, fmt.Errorf("overlay: %s %q: invalid YAML %v", it.Kind, it.Name, err)
+			}
+			body = d.Content[0]
+			if hasAnchorOrAlias(body) {
+				// An anchor in an item could rebind one the file defines and
+				// change server, limits or units when the tree is written out.
+				return nil, nil, fmt.Errorf("overlay: %s %q: YAML anchors and aliases are not allowed in portal edits", it.Kind, it.Name)
+			}
+			if n := mapGet(body, "name"); it.Kind == "rules" && n != nil && n.Value != it.Name {
+				return nil, nil, fmt.Errorf("overlay: rule name %q does not match item %q", n.Value, it.Name)
+			}
+		}
+		sec := mapGet(root, it.Kind)
+		if sec == nil || sec.Kind == yaml.ScalarNode { // absent or `kind:` (null)
+			kind := yaml.MappingNode
+			tag := "!!map"
+			if it.Kind == "rules" {
+				kind, tag = yaml.SequenceNode, "!!seq"
+			}
+			sec = &yaml.Node{Kind: kind, Tag: tag}
+			mapSet(root, it.Kind, sec)
+		}
+		_, known := prov[k]
+		if it.Kind == "rules" {
+			setRule(sec, it.Name, body)
+		} else {
+			mapSetOrDel(sec, it.Name, body)
+		}
+		switch {
+		case body == nil:
+			delete(prov, k)
+		case known && prov[k] != FromPortal:
+			prov[k] = FromOverride
+		default:
+			prov[k] = FromPortal
+		}
+	}
+	var out bytes.Buffer
+	enc := yaml.NewEncoder(&out)
+	enc.SetIndent(2)
+	if err := enc.Encode(root); err != nil {
+		return nil, nil, err
+	}
+	return out.Bytes(), prov, enc.Close()
+}
+
+// LoadWithOverlay is Load with items applied to the file first. Items may only
+// change what the sandbox already bounds (see checkOverlay).
+func LoadWithOverlay(path string, items []Item) (*Config, map[Key]Provenance, error) {
+	return LoadWithOverlayStub(path, items, nil)
+}
+
+// LoadWithOverlayStub is LoadWithOverlay where stub maps secret refs to
+// stand-in values, for validating items whose secret files are not written yet.
+func LoadWithOverlayStub(path string, items []Item, stub map[string]string) (*Config, map[Key]Provenance, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	eff, prov, err := Effective(b, items)
+	if err != nil {
+		return nil, nil, err
+	}
+	fileCfg, err := Parse(b)
+	if err != nil {
+		return nil, nil, err
+	}
+	fileCfg.resolveDB(path)
+	if err := checkOverlay(fileCfg, items, filepath.Join(filepath.Dir(fileCfg.Server.DB), "secrets")); err != nil {
+		return nil, nil, err
+	}
+	c, err := parse(eff, stub)
+	if err != nil {
+		return nil, nil, err
+	}
+	c.resolveDB(path)
+	if err := sameFixedSections(fileCfg, c); err != nil {
+		return nil, nil, err
+	}
+	return c, prov, nil
+}
+
+// sameFixedSections is the backstop behind the item checks: server, limits and
+// units can never differ from the file, whatever the overlay did to the YAML.
+func sameFixedSections(file, eff *Config) error {
+	if !reflect.DeepEqual(file.Server, eff.Server) || !reflect.DeepEqual(file.Limits, eff.Limits) || !reflect.DeepEqual(file.Units, eff.Units) {
+		return errors.New("overlay: server, limits and units can only be changed in siphon.yaml")
+	}
+	return nil
+}
+
+func hasAnchorOrAlias(n *yaml.Node) bool {
+	if n.Anchor != "" || n.Kind == yaml.AliasNode {
+		return true
+	}
+	for _, c := range n.Content {
+		if hasAnchorOrAlias(c) {
+			return true
+		}
+	}
+	return false
+}
+
+// A portal or API token holder must not widen the host's privileges, so an
+// overlay item may not do what siphon.yaml alone is trusted to do:
+// set a stdio MCP command, allow private addresses, turn agent egress
+// restriction off, or point a secret at anything but its own stored secret.
+// Each is allowed only if the file's same item already has the same value.
+func checkOverlay(file *Config, items []Item, secretsDir string) error {
+	dir := filepath.Clean(secretsDir)
+	for _, it := range items {
+		if it.Deleted {
+			continue
+		}
+		var refs, fileRefs map[string]string
+		switch it.Kind {
+		case "sources":
+			var s Source
+			if yaml.Unmarshal([]byte(it.YAML), &s) != nil {
+				continue // Parse reports it
+			}
+			fs := file.Sources[it.Name]
+			if fs == nil {
+				fs = &Source{}
+			}
+			if len(s.Command) > 0 && !slices.Equal(s.Command, fs.Command) {
+				return errors.New("command (stdio MCP) can only be set in siphon.yaml")
+			}
+			if s.AllowPrivate && !fs.AllowPrivate {
+				return errors.New("allow_private can only be set in siphon.yaml")
+			}
+			refs, fileRefs = sourceRefs(&s), sourceRefs(fs)
+		case "credentials":
+			var c Credential
+			if yaml.Unmarshal([]byte(it.YAML), &c) != nil {
+				continue
+			}
+			fc := file.Credentials[it.Name]
+			if fc == nil {
+				fc = &Credential{}
+			}
+			refs, fileRefs = map[string]string{"api_key": c.APIKey.Ref}, map[string]string{"api_key": fc.APIKey.Ref}
+		case "agents":
+			var a Agent
+			if yaml.Unmarshal([]byte(it.YAML), &a) != nil {
+				continue
+			}
+			fa := file.Agents[it.Name]
+			if fa == nil {
+				fa = &Agent{}
+			}
+			if a.Egress.Enabled != nil && !*a.Egress.Enabled && (fa.Egress.Enabled == nil || *fa.Egress.Enabled) {
+				return errors.New("egress.enabled: false can only be set in siphon.yaml")
+			}
+			// api_key_file is a path the runner reads: treat it as a file ref.
+			refs, fileRefs = map[string]string{"api_key_file": fileRef(a.APIKeyFile)}, map[string]string{"api_key_file": fileRef(fa.APIKeyFile)}
+		default:
+			continue
+		}
+		for path, ref := range refs {
+			if !refAllowed(ref, fileRefs[path], it.Kind, it.Name, dir) {
+				return errors.New("secret refs can only point at this item's stored secrets or keep the value from siphon.yaml")
+			}
+		}
+	}
+	return nil
+}
+
+func fileRef(path string) string {
+	if path == "" {
+		return ""
+	}
+	return "file:" + path
+}
+
+func sourceRefs(s *Source) map[string]string {
+	m := map[string]string{"secret": s.Secret.Ref}
+	if s.Auth != nil {
+		m["auth.bearer"] = s.Auth.Bearer.Ref
+	}
+	for k, v := range s.Headers {
+		m["headers."+k] = v.Ref
+	}
+	return m
+}
+
+// refAllowed: not a ref at all (Validate rejects inline values), the same ref
+// the file has at this path, or a file in dir named <kind>-<name>-*.
+func refAllowed(ref, fileRef, kind, name, dir string) bool {
+	if !strings.HasPrefix(ref, "env:") && !strings.HasPrefix(ref, "file:") {
+		return true
+	}
+	if ref == fileRef {
+		return true
+	}
+	p, ok := strings.CutPrefix(ref, "file:")
+	return ok && p == filepath.Clean(p) && filepath.Dir(p) == dir && strings.HasPrefix(filepath.Base(p), kind+"-"+name+"-")
+}
+
+func mapGet(m *yaml.Node, key string) *yaml.Node {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return m.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func mapSet(m *yaml.Node, key string, v *yaml.Node) {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			m.Content[i+1] = v
+			return
+		}
+	}
+	m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, v)
+}
+
+// mapSetOrDel sets key to v, or removes it when v is nil.
+func mapSetOrDel(m *yaml.Node, key string, v *yaml.Node) {
+	if v != nil {
+		mapSet(m, key, v)
+		return
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			m.Content = append(m.Content[:i], m.Content[i+2:]...)
+			return
+		}
+	}
+}
+
+func ruleName(n *yaml.Node) string {
+	if n.Kind != yaml.MappingNode {
+		return ""
+	}
+	if v := mapGet(n, "name"); v != nil {
+		return v.Value
+	}
+	return ""
+}
+
+// setRule replaces (in place), appends, or (body nil) removes the rule called name.
+func setRule(seq *yaml.Node, name string, body *yaml.Node) {
+	if body != nil && mapGet(body, "name") == nil {
+		mapSet(body, "name", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: name})
+	}
+	for i, r := range seq.Content {
+		if ruleName(r) == name {
+			if body == nil {
+				seq.Content = append(seq.Content[:i], seq.Content[i+1:]...)
+			} else {
+				seq.Content[i] = body
+			}
+			return
+		}
+	}
+	if body != nil {
+		seq.Content = append(seq.Content, body)
+	}
+}
+
+func itemNames(kind string, sec *yaml.Node) (names []string) {
+	if kind == "rules" {
+		for _, r := range sec.Content {
+			if n := ruleName(r); n != "" {
+				names = append(names, n)
+			}
+		}
+	} else if sec.Kind == yaml.MappingNode {
+		for i := 0; i < len(sec.Content); i += 2 {
+			names = append(names, sec.Content[i].Value)
+		}
+	}
+	return names
+}

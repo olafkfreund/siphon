@@ -127,6 +127,16 @@ type agyToken struct {
 	AuthMethod string `json:"auth_method,omitempty"`
 }
 
+// ValidateImport is the one import check behind `siphon credentials import`
+// and the portal: a bare token (claude setup-token) or a subscription login
+// file. It returns the store file name and the bytes to keep.
+func ValidateImport(provider string, token bool, raw []byte) (file string, b []byte, err error) {
+	if token {
+		return Validate(provider, ImportToken, raw)
+	}
+	return ValidateFor(provider, true, raw)
+}
+
 // ValidateFor is Validate for a login file; for a subscription codex
 // credential it also rejects an API-key-only auth.json.
 func ValidateFor(provider string, subscription bool, raw []byte) (name string, normalized []byte, err error) {
@@ -233,6 +243,15 @@ func (s Store) Load(name string) (map[string][]byte, error) {
 		return nil, fmt.Errorf("credential %q has no imported login (siphon credentials import)", name)
 	}
 	return out, nil
+}
+
+// Delete removes every stored login file of credential name.
+func (s Store) Delete(name string) error {
+	d, err := s.dir(name)
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(d)
 }
 
 // lock runs fn holding the credential's flock, creating its 0700 dir.
