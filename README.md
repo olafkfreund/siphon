@@ -411,9 +411,9 @@ agents:
   - Models that can't use tools still answer: the loop falls back to a
     plain completion and notes it.
 
-## Services: GitHub and GitLab
+## Services: GitHub, GitLab and AWS
 
-The **Services** page connects GitHub and GitLab in a few fields. It creates
+The **Services** page connects GitHub, GitLab and AWS in a few fields. It creates
 ordinary sources (editable afterwards), stores tokens write-only, and shows
 a generated webhook secret **once**, with the exact payload URL and the
 provider's setup steps. Set `server.public_url` so it can show the full URL.
@@ -468,6 +468,89 @@ sources:
 ```
 
 **Token:** a **project access token** with `read_api`.
+
+### AWS
+
+Agents get AWS tools through two pinned MCP servers: **CloudWatch** (logs,
+metrics, alarms) and **AWS documentation**. They never get a long-lived key.
+For each run, Siphon fetches **temporary credentials** and hands them only to
+the CloudWatch server's own sandboxed unit (the agent talks to it with a
+per-run token).
+
+```nix
+services.siphon = {
+  aws.enable = true;                        # adds the aws-cloudwatch and aws-docs servers (~1 GB closure)
+  aws.configFile = "/etc/siphon/aws-config"; # only for profile/SSO credentials
+};
+```
+
+```yaml
+credentials:
+  aws-ro:
+    provider: aws
+    region: eu-west-1
+    profile: siphon-readonly                 # recommended: SSO, credential_process, or role_arn + source_profile
+    # or assume a role from a base key Siphon holds (or the host's own role):
+    # role_arn: arn:aws:iam::123456789012:role/siphon-readonly
+    # external_id: file:/run/credentials/siphon.service/aws-external-id
+    # access_key_id: file:/run/credentials/siphon.service/aws-id
+    # secret_access_key: file:/run/credentials/siphon.service/aws-secret
+sources:
+  cloudwatch: { type: mcp, package: aws-cloudwatch, aws: aws-ro }
+  aws-docs:   { type: mcp, package: aws-docs }   # public docs, no credentials
+agents:
+  oncall:
+    mcp: [cloudwatch, aws-docs]
+    timeout: 30m                             # 55m at most with an AWS source
+    allowed_tools: [mcp__cloudwatch__get_active_alarms, mcp__cloudwatch__execute_log_insights_query]
+```
+
+- **Read-only role.** Create a dedicated role from
+  [`examples/aws/siphon-readonly-policy.json`](examples/aws/siphon-readonly-policy.json)
+  (CloudWatch logs and metrics, read only). For `role_arn` use the trust
+  policy in [`examples/aws/siphon-trust-policy.json`](examples/aws/siphon-trust-policy.json)
+  with a random external ID. Try it in a non-production account first.
+  Logs Insights queries are read-only but **billed per GB scanned**. Siphon
+  never creates or changes IAM resources.
+- **SSO profile.** Put the profile in `aws.configFile` and log in as the
+  siphon user: `sudo -u siphon aws sso login --profile siphon-readonly`.
+  SSO sessions expire (typically 8–12 h); runs then fail with a clear
+  message until you log in again. A profile that yields long-lived keys is
+  refused.
+- **Session length.** Each run gets one session lasting its timeout plus 5
+  minutes, between 15 minutes and 1 hour, with no renewal. That is why an
+  agent with an AWS source may run 55 minutes at most.
+- **Network.** The CloudWatch server reaches only `logs.<region>` and
+  `monitoring.<region>.amazonaws.com`; the docs server only
+  `docs.aws.amazon.com` and AWS's docs search hosts.
+- **Agent tools only.** AWS sources are not polled (yet).
+- **Versions.** The servers are pinned to the last releases built on `mcp`
+  1.x (CloudWatch 0.1.8, documentation 1.1.30), because nixpkgs ships `mcp`
+  1.29. They move up when nixpkgs has `mcp` 2.x.
+
+**EventBridge events in.** Point an EventBridge **API destination** at a
+webhook source with `token` authentication:
+
+```yaml
+sources:
+  aws-events:
+    type: webhook
+    signature: token
+    token_header: X-Siphon-Key
+    secret: file:/run/credentials/siphon.service/aws-eventbridge-key
+rules:
+  - name: alarm
+    source: aws-events
+    when: 'event["detail-type"] == "CloudWatch Alarm State Change" && event.detail.state.value == "ALARM"'
+    on: each
+    id: event.id
+    action: { agent: oncall }
+```
+
+In the EventBridge console, create a **connection** with API key
+authorization (key name `X-Siphon-Key`, value the secret), then an **API
+destination** (`POST` to `https://<siphon>/hook/aws-events`) and a rule that
+targets it. The Services page's AWS tile generates the key and shows the URL.
 
 ## Webhook authentication
 
