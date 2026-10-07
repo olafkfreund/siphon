@@ -218,3 +218,8 @@ Revert the merge. Existing webhook presets, sources and agents are
 unchanged, and only the new fields and the page disappear.
 
 ## Deviations log
+- **Step 1 (coder; one test added by Opus):**
+  - The `token` mode strips its header from the event headers, so rules never see the secret.
+  - The replay key stays the body hash for `token`, like the existing presets.
+  - The `token` warning fires for every `token` source.
+  - Opus added the **published Standard Webhooks reference vector** (`msg_p5jXN8AQM9LWM0D4loKWxJek` / `v1,g0hM9SsE…`) as a test, plus a tampered-signature check. Changing only the final base64 character before `=` is not a forgery: those are padding bits, and the bytes decode the same.

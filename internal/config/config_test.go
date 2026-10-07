@@ -44,7 +44,7 @@ func TestBadListsAll(t *testing.T) {
 		"inline secret", "unknown source \"nope\"", "bad expression", "cooldown is mandatory",
 		"not in the units allowlist", "unknown routine", "mcp references unknown source",
 		"units: \"{{.x}}.service\" must not be templated", "on: each requires id",
-		"type must be mcp, http or webhook", "signature must be github or sha256",
+		"type must be mcp, http or webhook", "signature must be github, sha256",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("missing %q in:\n%s", want, msg)
@@ -285,6 +285,22 @@ func TestWebhookIDAndTimestamp(t *testing.T) {
 	c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, signature: sha256, signature_header: X-S, timestamp_header: X-T}}"))
 	if err := c.Validate(); err != nil {
 		t.Fatalf("sha256 preset may use a timestamp: %v", err)
+	}
+	for _, tc := range []struct{ extra, want string }{
+		{"signature: token, token_header: X-Gitlab-Token", ""},
+		{"signature: token", "needs token_header"},
+		{"signature: standard-webhooks", ""},
+		{"signature: standard-webhooks, signature_header: X-S", "not allowed with signature standard-webhooks"},
+		{"signature: standard-webhooks, timestamp_header: X-T", "not allowed with signature standard-webhooks"},
+	} {
+		c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, " + tc.extra + "}}"))
+		err := c.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%q: %v", tc.extra, err)
+		}
+		if got := hasWarning(c, "weaker than an HMAC"); got != strings.HasPrefix(tc.extra, "signature: token") {
+			t.Errorf("%q: token warning = %v", tc.extra, got)
+		}
 	}
 }
 

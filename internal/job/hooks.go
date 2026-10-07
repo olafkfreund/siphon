@@ -28,7 +28,7 @@ func (p *Pipeline) Webhooks() func(source string) http.Handler {
 			return nil
 		}
 		return source.NewWebhook(source.WebhookOptions{
-			Name: name, Secret: s.Secret.Value, Signature: s.Signature, SigHeader: s.SigHeader,
+			Name: name, Secret: s.Secret.Value, Signature: s.Signature, SigHeader: s.SigHeader, TokenHeader: s.TokenHeader,
 			TimestampHeader: s.TimestampHdr, IDHeader: strings.TrimPrefix(s.ID, "header."),
 			MaxBody: int64(cfg.Limits.HTTPMaxBody), Now: p.Now,
 		}, p.deliver)

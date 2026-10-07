@@ -146,8 +146,9 @@ type Source struct {
 	Headers      map[string]Secret `yaml:"headers"` // values may be env:/file: refs or plain literals
 	Body         string            `yaml:"body"`
 	Secret       Secret            `yaml:"secret"`           // webhook HMAC key
-	Signature    string            `yaml:"signature"`        // github|sha256
+	Signature    string            `yaml:"signature"`        // github|sha256|token|standard-webhooks
 	SigHeader    string            `yaml:"signature_header"` // sha256 preset
+	TokenHeader  string            `yaml:"token_header"`     // token preset
 	TimestampHdr string            `yaml:"timestamp_header"`
 	ID           string            `yaml:"id"` // delivery id, e.g. header.X-GitHub-Delivery
 }
@@ -477,6 +478,9 @@ func (c *Config) Warnings() []string {
 	for _, name := range sortedKeys(c.Sources) {
 		if s := c.Sources[name]; s != nil && s.AllowPrivate {
 			w = append(w, fmt.Sprintf("source %s: allow_private disables the private-address guard", name))
+		}
+		if s := c.Sources[name]; s != nil && s.Type == "webhook" && s.Signature == "token" {
+			w = append(w, fmt.Sprintf("source %s: signature token sends the secret in a header: weaker than an HMAC, and a captured delivery can be replayed", name))
 		}
 		if s := c.Sources[name]; s != nil && s.Auth != nil && s.Auth.Bearer.isSet() && cleartextRemote(s.URL) {
 			w = append(w, fmt.Sprintf("source %s: bearer token sent over plain http to a non-loopback host", name))
@@ -855,8 +859,16 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 			} else if strings.EqualFold(s.SigHeader, s.TimestampHdr) {
 				add("%s: signature_header and timestamp_header must differ", p)
 			}
+		case "token":
+			if s.TokenHeader == "" {
+				add("%s: signature token needs token_header", p)
+			}
+		case "standard-webhooks":
+			if s.SigHeader != "" || s.TimestampHdr != "" {
+				add("%s: signature_header and timestamp_header are not allowed with signature standard-webhooks", p)
+			}
 		default:
-			add("%s: signature must be github or sha256, got %q", p, s.Signature)
+			add("%s: signature must be github, sha256, token or standard-webhooks, got %q", p, s.Signature)
 		}
 	default:
 		add("%s: type must be mcp, http or webhook, got %q", p, s.Type)

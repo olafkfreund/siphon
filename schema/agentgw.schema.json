@@ -392,6 +392,9 @@
           "timestamp_header": {
             "type": "string"
           },
+          "token_header": {
+            "type": "string"
+          },
           "type": {
             "type": "string"
           },
