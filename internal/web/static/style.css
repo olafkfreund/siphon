@@ -134,13 +134,25 @@ dt { color: var(--muted) } dd { margin: 0 }
 .node.cond { flex: 1.5 }
 .node small { display: block; font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted) }
 .node code { display: block; overflow-wrap: anywhere; font-size: .8rem }
-.pipe { width: clamp(18px, 2vw, 40px); height: 14px; flex: none }
-.rule-card { container-type: inline-size }
-@container (max-width: 560px) { .flow { flex-direction: column; align-items: stretch } .pipe { transform: rotate(90deg); margin: .1rem auto } }
-.pipe line { stroke: var(--current); stroke-width: 3; stroke-dasharray: 4 6; stroke-linecap: round; animation: flow 1.2s linear infinite }
-.flow.off .pipe line { stroke: var(--line); animation: none }
+/* the current between nodes: flowing dashes with an arrowhead, CSS only.
+   Side by side it points right; stacked (narrow card) it points down. */
+.pipe { position: relative; flex: none; align-self: center; width: 30px; height: 3px; margin: 0 10px 0 4px; border-radius: 2px;
+  background: repeating-linear-gradient(90deg, var(--current) 0 6px, transparent 6px 11px); background-size: 22px 3px; animation: flowx 1.4s linear infinite }
+.pipe::after { content: ""; position: absolute; right: -8px; top: 50%; transform: translateY(-50%);
+  border-style: solid; border-width: 5px 0 5px 8px; border-color: transparent transparent transparent var(--current) }
+.flow.off .pipe { background-image: repeating-linear-gradient(90deg, var(--line) 0 6px, transparent 6px 11px); animation: none }
+.flow.off .pipe::after { border-left-color: var(--line) }
 .flow.off .node { opacity: .65 }
-@keyframes flow { to { stroke-dashoffset: -20 } }
+@keyframes flowx { to { background-position: 22px 0 } }
+@keyframes flowy { to { background-position: 0 22px } }
+.rule-card { container-type: inline-size }
+@container (max-width: 470px) {
+  .flow { flex-direction: column; align-items: stretch }
+  .pipe { width: 3px; height: 20px; margin: 4px auto 12px; background-image: repeating-linear-gradient(180deg, var(--current) 0 6px, transparent 6px 11px); background-size: 3px 22px; animation-name: flowy }
+  .pipe::after { right: auto; left: 50%; top: auto; bottom: -8px; transform: translateX(-50%); border-width: 8px 5px 0 5px; border-color: var(--current) transparent transparent transparent }
+  .flow.off .pipe { background-image: repeating-linear-gradient(180deg, var(--line) 0 6px, transparent 6px 11px) }
+  .flow.off .pipe::after { border-color: var(--line) transparent transparent transparent }
+}
 .badge { font-size: .7rem; font-weight: 700; border-radius: 6px; padding: .1rem .4rem; background: var(--surface-2); color: var(--muted) }
 .badge.ovr { color: var(--wait-text); background: color-mix(in srgb, var(--amber) 20%, transparent) }
 button.switch { width: 40px; height: 22px; padding: 0; border: 0; border-radius: 999px; background: var(--line); position: relative; flex: none }
@@ -284,7 +296,6 @@ form:has(input[name="event_src"][value="last"]:checked) .paste { display: none }
   .topbar button { padding: .35rem; border: 0 }
   .main { padding: 1rem }
   .g4 { grid-template-columns: 1fr 1fr } .g2, .g2e { grid-template-columns: 1fr }
-  .flow { flex-direction: column; align-items: stretch } .pipe { transform: rotate(90deg); margin: .1rem auto }
   .need { flex-wrap: wrap } .need .acts { width: 100% } .need .acts form, .need .acts .btn { flex: 1 } .need .acts button { width: 100%; justify-content: center }
   .hide-sm { display: none }
   .main > .top:first-child { margin: -1rem -1rem 1rem; padding: 1rem }
