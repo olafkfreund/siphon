@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 24
 spec: spec/2026-10-07-24-aws-integration.md
 ---
