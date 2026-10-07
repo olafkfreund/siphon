@@ -117,17 +117,18 @@ needs more than a token:
 
 ## Open questions
 
-1. **Which AWS MCP server first?** The general `aws-api-mcp-server`
-   (calls any AWS CLI command, so its scope depends entirely on IAM), or
-   narrow ones (CloudWatch logs and metrics, cost explorer, documentation)
-   that are safer by design? Proposal: one narrow server (CloudWatch)
-   plus the AWS documentation server, packaged in the flake; the
-   general one later if wanted.
-2. **Credential source for the first release:** role assumption from a
-   base credential that Siphon holds, or only profiles/SSO already on the
-   host? Proposal: both, with SSO/profile recommended.
-3. **Session length:** default 15 minutes (STS minimum), renewed while a
-   run lasts longer, or a fixed run-length session up to 1 hour?
-4. **Polling sources:** should an AWS MCP server also be usable as a
-   *polling* source (for example, alarms in ALARM state), or only as agent
-   tools for now?
+All resolved by the owner on 2026-10-07 ("use your recommendations"):
+
+1. **First servers:** the narrow CloudWatch MCP server (logs, metrics,
+   alarms) and the AWS documentation server, both packaged and pinned in
+   the flake. The general `aws-api-mcp-server` is deferred.
+2. **Credential source:** both. Recommend a profile or SSO login already
+   set up for Siphon; a base credential that Siphon holds is also allowed,
+   to assume a role from.
+3. **Session length** (proposed at approval, since the draft offered no
+   recommendation): one session per run, lasting the run's timeout plus 5
+   minutes, at least 15 minutes and at most 1 hour, with no renewal. An
+   agent with an AWS source and a timeout over 55 minutes is a `validate`
+   error.
+4. **Polling** (likewise proposed at approval): agent tools only for now.
+   Using an AWS MCP server as a polling source comes later.
