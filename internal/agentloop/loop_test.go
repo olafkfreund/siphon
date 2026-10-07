@@ -25,13 +25,22 @@ type echoIn struct {
 }
 
 func mcpServer(t *testing.T) *httptest.Server {
+	return mcpServerWith(t, "echo", "secret", "big")
+}
+
+// mcpServerWith serves the named tools (echo, secret, big are special; others echo).
+func mcpServerWith(t *testing.T, names ...string) *httptest.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "ext", Version: "1"}, nil)
-	mcp.AddTool(s, &mcp.Tool{Name: "echo", Description: "echo"}, func(_ context.Context, _ *mcp.CallToolRequest, in echoIn) (*mcp.CallToolResult, any, error) {
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "echo:" + in.Text}}}, nil, nil
-	})
-	mcp.AddTool(s, &mcp.Tool{Name: "secret", Description: "not allowed"}, func(_ context.Context, _ *mcp.CallToolRequest, in echoIn) (*mcp.CallToolResult, any, error) {
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "x"}}}, nil, nil
-	})
+	for _, n := range names {
+		n := n
+		mcp.AddTool(s, &mcp.Tool{Name: n, Description: n}, func(_ context.Context, _ *mcp.CallToolRequest, in echoIn) (*mcp.CallToolResult, any, error) {
+			txt := "echo:" + in.Text
+			if n == "big" {
+				txt = strings.Repeat("x", 100<<10)
+			}
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: txt}}}, nil, nil
+		})
+	}
 	srv := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s }, nil))
 	t.Cleanup(srv.Close)
 	return srv
@@ -239,5 +248,58 @@ func TestConnectDialerThroughProxy(t *testing.T) {
 	}
 	if len(blocked()) != 1 {
 		t.Fatalf("blocked: %v", blocked())
+	}
+}
+
+func manyCalls(n int, name string) string {
+	var calls []string
+	for i := 0; i < n; i++ {
+		calls = append(calls, fmt.Sprintf(`{"id":"c%d","type":"function","function":{"name":"%s","arguments":"{}"}}`, i, name))
+	}
+	return `{"choices":[{"message":{"content":"","tool_calls":[` + strings.Join(calls, ",") + `]}}]}`
+}
+
+func TestToolCallsPerTurnCap(t *testing.T) {
+	mc := mcpServer(t)
+	st := &stub{reply: func(int, map[string]any) (int, string) { return 200, manyCalls(17, "mcp__ext__echo") }}
+	llm := httptest.NewServer(st)
+	defer llm.Close()
+	m, code, _ := runSpec(t, Spec{BaseURL: llm.URL, Model: "m", Prompt: "go",
+		MCP: map[string]MCPServer{"ext": {URL: mc.URL}}, Allowed: []string{"mcp__ext__echo"}})
+	if code != 1 || len(st.reqs) != 1 || !strings.Contains(m["result"].(string), "17 tool calls") {
+		t.Fatalf("code %d reqs %d: %v", code, len(st.reqs), m)
+	}
+}
+
+func TestTrimAfterEachResult(t *testing.T) {
+	mc := mcpServer(t)
+	st := &stub{reply: func(n int, _ map[string]any) (int, string) {
+		if n == 0 {
+			return 200, manyCalls(16, "mcp__ext__big") // 16 x 64 KiB (capped) = 1 MiB
+		}
+		return 200, finalReply
+	}}
+	llm := httptest.NewServer(st)
+	defer llm.Close()
+	if _, code, raw := runSpec(t, Spec{BaseURL: llm.URL, Model: "m", Prompt: "go",
+		MCP: map[string]MCPServer{"ext": {URL: mc.URL}}, Allowed: []string{"mcp__ext__big"}}); code != 0 {
+		t.Fatalf("%d %s", code, raw)
+	}
+	b, _ := json.Marshal(st.reqs[1]["messages"])
+	if len(b) > maxTranscript+16<<10 {
+		t.Fatalf("transcript %d bytes", len(b))
+	}
+}
+
+func TestToolNameCollision(t *testing.T) {
+	a := mcpServerWith(t, "b__c") // server a, tool b__c
+	b := mcpServerWith(t, "c")    // server a__b, tool c
+	st := &stub{reply: func(int, map[string]any) (int, string) { return 200, finalReply }}
+	llm := httptest.NewServer(st)
+	defer llm.Close()
+	m, code, _ := runSpec(t, Spec{BaseURL: llm.URL, Model: "m", Prompt: "go",
+		MCP: map[string]MCPServer{"a": {URL: a.URL}, "a__b": {URL: b.URL}}, Allowed: []string{"mcp__a", "mcp__a__b"}})
+	if code != 1 || !strings.Contains(m["result"].(string), "two MCP servers") || len(st.reqs) != 0 {
+		t.Fatalf("code %d: %v", code, m)
 	}
 }

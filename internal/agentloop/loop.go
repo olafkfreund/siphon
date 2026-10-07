@@ -23,6 +23,7 @@ const (
 	maxToolResult = 64 << 10
 	maxTranscript = 512 << 10
 	defaultTurns  = 20
+	maxCalls      = 16 // tool calls the model may make in one turn
 )
 
 type MCPServer struct {
@@ -152,6 +153,9 @@ func (l *loop) do(ctx context.Context) (string, int, error) {
 		if len(m.ToolCalls) == 0 {
 			return m.Content, turn, nil
 		}
+		if len(m.ToolCalls) > maxCalls {
+			return "", turn, fmt.Errorf("the model made %d tool calls in one turn (max %d)", len(m.ToolCalls), maxCalls)
+		}
 		l.msgs = append(l.msgs, m)
 		for _, c := range m.ToolCalls {
 			t := tools[c.Function.Name]
@@ -160,9 +164,9 @@ func (l *loop) do(ctx context.Context) (string, int, error) {
 				return "", turn, fmt.Errorf("malformed tool call %q", c.Function.Name)
 			}
 			l.msgs = append(l.msgs, message{Role: "tool", ToolCallID: c.ID, Content: callTool(ctx, t, args)})
-		}
-		if err := l.trim(); err != nil {
-			return "", turn, err
+			if err := l.trim(); err != nil {
+				return "", turn, err
+			}
 		}
 	}
 	return "", maxTurns, fmt.Errorf("max_turns (%d) reached without a final answer", maxTurns)
@@ -387,6 +391,9 @@ func (l *loop) connect(ctx context.Context) (map[string]*tool, func(), error) {
 				continue
 			}
 			full := "mcp__" + n + "__" + t.Name
+			if tools[full] != nil {
+				return nil, closeAll, fmt.Errorf("two MCP servers expose the tool name %q", full)
+			}
 			params := t.InputSchema
 			if params == nil {
 				params = map[string]any{"type": "object"}

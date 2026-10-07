@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -75,5 +76,60 @@ func TestModelConnections(t *testing.T) {
 	}
 	if w := ce.do("POST", "/connections/ollama-local/test", url.Values{}, nil); w.Code != 401 {
 		t.Fatalf("unauthenticated test: %d", w.Code)
+	}
+}
+
+// The credentials form can create and edit a model connection (provider and
+// url fields), and rotating its key works; saving drops the cached model list.
+func TestModelConnectionForm(t *testing.T) {
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"data":[{"id":"m1"}]}`))
+	}))
+	defer stub.Close()
+	u, _ := url.Parse(stub.URL)
+	ce := newCfgEnvFile(t, strings.Replace(cfgFile, "server: { sandbox: none, db: DIR/s.db }",
+		`server: { sandbox: none, db: DIR/s.db, models: { private_endpoints: ["`+u.Host+`"] } }`, 1))
+	form := func(key string) url.Values {
+		v := url.Values{"mode": {"form"}, "name": {"fm"}, "f.provider": {"openai"}, "f.url": {stub.URL + "/v1"}, "f.concurrency": {"1"},
+			"rev": {strconv.FormatInt(ce.latest(), 10)}}
+		if key != "" {
+			v.Set("f.api_key", key)
+		}
+		return v
+	}
+	if w := ce.post("/config/credentials/new/save", form("sk-one")); w.Code != 303 {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	c := ce.cur.Load().Credentials["fm"]
+	if c == nil || c.Provider != "openai" || c.URL != stub.URL+"/v1" || c.APIKey.Value != "sk-one" {
+		t.Fatalf("saved: %+v", c)
+	}
+	if !strings.Contains(ce.post("/connections/fm/test", nil).Body.String(), "1 models") {
+		t.Fatal("test failed")
+	}
+	if _, ok := modelCache.get("fm", ce.now); !ok {
+		t.Fatal("list not cached")
+	}
+	if w := ce.post("/config/credentials/fm/save", form("sk-two")); w.Code != 303 {
+		t.Fatalf("edit: %d %s", w.Code, w.Body.String())
+	}
+	if ce.cur.Load().Credentials["fm"].APIKey.Value != "sk-two" {
+		t.Fatal("key not rotated")
+	}
+	if _, ok := modelCache.get("fm", ce.now); ok {
+		t.Fatal("cache survived a credentials commit")
+	}
+	// unknown names are never cached
+	ce.post("/connections/nosuch/test", nil)
+	if _, ok := modelCache.get("nosuch", ce.now); ok {
+		t.Fatal("cached an unknown connection")
+	}
+	// a path-smuggling URL is refused
+	bad := form("")
+	bad.Set("name", "evil")
+	bad.Set("f.provider", "ollama")
+	bad.Set("f.url", stub.URL+"/api/pull#")
+	if w := ce.post("/config/credentials/new/save", bad); w.Code != 422 {
+		t.Fatalf("smuggle: %d", w.Code)
 	}
 }

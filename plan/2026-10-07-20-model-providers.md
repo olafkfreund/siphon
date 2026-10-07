@@ -234,3 +234,12 @@ the new providers and `kind: model` disappear.
   - The subtest passed the first time: the model asks for the tool, the loop calls it through the proxy, and the final answer is checked; the stub records the call.
   - Live on p620 (`sandbox: none` dev instance): a `kind: model` agent on the local Ollama `qwen3.8:27b` answered "The capital of Norway is Oslo." (1 turn, 64 s).
   - Also fixed: `validate` no longer warns "max_turns not enforced" for model agents.
+- **Step 6, security review fixes** (fresh Opus reviewer; fixed by the coder; verified by Opus with the race tests and all 13 VM subtests):
+  - **High:** a secret ref kept from the file can't move to another provider or URL. The same rule covers source secrets and headers.
+  - **Medium:** model URLs refuse `?`, `#` and dot segments. An openai path must be empty or end in `/v1`, and an ollama path must be empty.
+  - **Medium:** the private-endpoint DNS check runs only at commit, for changed credentials. Load, `validate` and startup do no DNS. Restored revisions skip it, since every item passed it when first saved, and the runtime guard still applies.
+  - **Tool calls:** at most 16 per turn, with trimming after each result.
+  - **Name collisions:** a duplicate full tool name fails the run, and `__` is refused in the names of MCP sources used by model agents.
+  - **Guard:** `PrivateNoLinkLocal` also refuses NAT64-embedded link-local or metadata addresses, unspecified addresses and multicast.
+  - **Form:** the credentials form has `ollama`/`openai` and `url`, so Edit and key rotation work.
+  - **Cache:** model-list caching is bounded to real connections and cleared on credentials commits.

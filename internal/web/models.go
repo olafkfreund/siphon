@@ -107,6 +107,8 @@ func (c *mcache) get(name string, now time.Time) (connTest, bool) {
 
 func (c *mcache) put(t connTest) { c.mu.Lock(); c.m[t.Name] = t; c.mu.Unlock() }
 
+func (c *mcache) clear() { c.mu.Lock(); c.m = map[string]connTest{}; c.mu.Unlock() }
+
 func (c *mcache) forget(name string) { c.mu.Lock(); delete(c.m, name); c.mu.Unlock() }
 
 // listModels asks a connection for its models. It runs in the daemon, so it
@@ -122,13 +124,13 @@ func (s *server) listModels(ctx context.Context, name string, fresh bool) connTe
 		}
 	}
 	t := connTest{Name: name, At: now}
-	defer func() { modelCache.put(t) }()
 	cfg := s.Config()
 	c := cfg.Credentials[name]
 	if c == nil || (c.Provider != "ollama" && c.Provider != "openai") {
-		t.Err = "not a model connection"
+		t.Err = "not a model connection" // not cached: names are caller-chosen
 		return t
 	}
+	defer func() { modelCache.put(t) }()
 	host, port, err := config.ModelURL(c.URL)
 	if err != nil {
 		t.Err = "bad URL"

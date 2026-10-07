@@ -598,6 +598,14 @@ func TestModelValidation(t *testing.T) {
 		"no cred":        {"agents: {m: {kind: model, model: q}}\n", "credential is required"},
 		"bad endpoint":   {"server: {models: {private_endpoints: ['h']}}\n", "private_endpoints"},
 		"wild endpoint":  {"server: {models: {private_endpoints: ['*.x:1']}}\n", "private_endpoints"},
+		"query":          {"credentials: {o: {provider: ollama, url: 'http://h:11434/?x'}}\n", "must not contain ?"},
+		"fragment":       {"credentials: {o: {provider: ollama, url: 'http://h:11434/api/pull#'}}\n", "must not contain ?"},
+		"dotdot":         {"credentials: {o: {provider: openai, url: 'http://h/v1/../api'}}\n", "path segments"},
+		"ollama path":    {"credentials: {o: {provider: ollama, url: 'http://h:11434/api/pull'}}\n", "ollama takes no path"},
+		"openai path":    {"credentials: {o: {provider: openai, url: 'http://h/api/pull'}}\n", "end in /v1"},
+		"openai V1":      {"credentials: {o: {provider: openai, url: 'http://h/V1'}}\n", "end in /v1"},
+		"openai /v1/":    {"credentials: {o: {provider: openai, url: 'http://h/openai/v1/'}}\n", ""},
+		"dunder mcp":     {"sources: {a__b: {type: mcp, url: 'http://m/x', read: {tool: t}}}\ncredentials: {o: {provider: ollama, url: 'http://h:11434'}}\nagents: {m: {kind: model, model: q, credential: o, mcp: [a__b]}}\n", "must not contain __"},
 		"good endpoints": {"server: {models: {private_endpoints: ['127.0.0.1:11434', '[::1]:80']}}\n", ""},
 	} {
 		c, err := Parse([]byte(tc.y))

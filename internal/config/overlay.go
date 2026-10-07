@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -191,6 +192,7 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			continue
 		}
 		var refs, fileRefs map[string]string
+		moved := false // the item now talks to a different provider or URL than the file's
 		switch it.Kind {
 		case "sources":
 			var s Source
@@ -207,6 +209,7 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			if s.AllowPrivate && !fs.AllowPrivate {
 				return errors.New("allow_private can only be set in siphon.yaml")
 			}
+			moved = !sameEndpoint(s.URL, fs.URL)
 			refs, fileRefs = sourceRefs(&s), sourceRefs(fs)
 		case "credentials":
 			var c Credential
@@ -217,9 +220,7 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			if fc == nil {
 				fc = &Credential{}
 			}
-			if err := checkModelEndpoint(file, &c); err != nil {
-				return err
-			}
+			moved = c.Provider != fc.Provider || !sameEndpoint(c.URL, fc.URL)
 			refs, fileRefs = map[string]string{"api_key": c.APIKey.Ref}, map[string]string{"api_key": fc.APIKey.Ref}
 		case "agents":
 			var a Agent
@@ -239,6 +240,10 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			continue
 		}
 		for path, ref := range refs {
+			if moved && ref != "" && ref == fileRefs[path] {
+				// Keeping the file's secret is fine, sending it somewhere new is not.
+				return errors.New("this key comes from siphon.yaml and can't be moved to another provider or URL")
+			}
 			if !refAllowed(ref, fileRefs[path], it.Kind, it.Name, dir) {
 				return errors.New("secret refs can only point at this item's stored secrets or keep the value from siphon.yaml")
 			}
@@ -252,12 +257,25 @@ var lookupHost = func(ctx context.Context, host string) ([]string, error) {
 	return net.DefaultResolver.LookupHost(ctx, host)
 }
 
-// checkModelEndpoint refuses a portal ollama/openai credential whose host is
-// (or does not provably stop being) private, loopback or link-local, unless
-// siphon.yaml lists its host:port. Unresolvable names fail closed.
-func checkModelEndpoint(file *Config, c *Credential) error {
-	if !slices.Contains(modelProviders, c.Provider) {
-		return nil
+// sameEndpoint compares two URLs by scheme, host:port and path.
+func sameEndpoint(a, b string) bool {
+	ua, ea := url.Parse(a)
+	ub, eb := url.Parse(b)
+	if ea != nil || eb != nil {
+		return a == b
+	}
+	return ua.Scheme == ub.Scheme && strings.EqualFold(ua.Host, ub.Host) && ua.Path == ub.Path && ua.RawQuery == ub.RawQuery
+}
+
+// CheckModelEndpoint is run when a portal save changes a credentials item
+// (never at load, so startup and validate do no DNS). It refuses an
+// ollama/openai item whose host is (or does not provably stop being) private,
+// loopback or link-local, unless this config lists its host:port. Unresolvable
+// names fail closed. The runtime guard is the real control.
+func (file *Config) CheckModelEndpoint(itemYAML string) error {
+	var c Credential
+	if yaml.Unmarshal([]byte(itemYAML), &c) != nil || !slices.Contains(modelProviders, c.Provider) {
+		return nil // Parse reports it
 	}
 	host, port, err := ModelURL(c.URL)
 	if err != nil {

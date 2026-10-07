@@ -171,6 +171,29 @@ func (s *server) commit(actor, summary string, rev *int64, mutate func(map[itemK
 	if e, err = s.prepare(cur, mutate, pending); err != nil {
 		return 0, nil, nil, err
 	}
+	// Items this save changes are checked for private model endpoints (DNS);
+	// loading never does, so a name that later turns private can't break startup.
+	credsChanged := false
+	for _, c := range e.items {
+		if c.Kind != "credentials" {
+			continue
+		}
+		var prev *store.ConfigItem
+		for i := range cur {
+			if cur[i].Kind == c.Kind && cur[i].Name == c.Name {
+				prev = &cur[i]
+			}
+		}
+		if prev != nil && prev.YAML == c.YAML && prev.Deleted == c.Deleted {
+			continue
+		}
+		credsChanged = true
+		if !c.Deleted {
+			if cerr := s.Config().CheckModelEndpoint(c.YAML); cerr != nil {
+				return 0, nil, nil, errInvalid{cerr.Error()}
+			}
+		}
+	}
 	// Only now, with the revision current and the candidate valid, touch disk.
 	if len(pending) > 0 {
 		dir := secretsDir(s.Config().Server.DB)
@@ -226,6 +249,9 @@ func (s *server) commit(actor, summary string, rev *int64, mutate func(map[itemK
 	}
 	if err = tx.Commit(); err != nil {
 		return 0, nil, nil, err
+	}
+	if credsChanged || len(pending) > 0 { // a rotated key keeps its ref
+		modelCache.clear()
 	}
 	if s.Apply != nil {
 		if applyErr = s.Apply(e.cfg); applyErr != nil {

@@ -698,6 +698,10 @@ func (c *Config) Validate() error {
 		if cr != nil && slices.Contains(modelProviders, cr.Provider) {
 			if _, _, err := ModelURL(cr.URL); err != nil {
 				add("%s: url: %v", p, err)
+			} else if u, _ := url.Parse(cr.URL); cr.Provider == "ollama" && strings.Trim(u.Path, "/") != "" {
+				add("%s: url: ollama takes no path (the loop adds /v1)", p)
+			} else if p2 := strings.TrimRight(u.Path, "/"); cr.Provider == "openai" && p2 != "" && !strings.HasSuffix(p2, "/v1") {
+				add("%s: url: path must be empty or end in /v1", p)
 			}
 			if cr.Provider == "ollama" && cr.APIKey.isSet() {
 				add("%s: api_key is not allowed for ollama", p)
@@ -736,6 +740,11 @@ func (c *Config) Validate() error {
 		if a.Kind == "model" {
 			if a.Model == "" {
 				add("%s: model is required for kind model", p)
+			}
+			for _, m := range a.MCP {
+				if strings.Contains(m, "__") { // tool names are mcp__<server>__<tool>
+					add("%s: mcp source %q: names used by a model agent must not contain __", p, m)
+				}
 			}
 			if cr := c.Credentials[a.Credential]; a.Credential != "" && cr != nil && !slices.Contains(modelProviders, cr.Provider) {
 				add("%s: kind model needs an ollama or openai credential, %q is %s", p, a.Credential, cr.Provider)
@@ -1076,6 +1085,14 @@ func ModelURL(raw string) (host string, port int, err error) {
 	u, e := url.Parse(raw)
 	if e != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
 		return "", 0, errors.New("must be http(s)://host[:port][/path]")
+	}
+	if strings.ContainsAny(raw, "?#") { // would smuggle a query or fragment onto the paths we append
+		return "", 0, errors.New("must not contain ? or #")
+	}
+	for _, seg := range strings.Split(u.Path, "/") {
+		if seg == ".." || seg == "." {
+			return "", 0, errors.New("must not contain . or .. path segments")
+		}
 	}
 	port = 443
 	if u.Scheme == "http" {

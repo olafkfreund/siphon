@@ -55,7 +55,8 @@ var kindFields = map[string][]field{
 		{"egress.enabled", "Egress restriction", "tri", nil}, {"egress.allow", "Egress allow (comma separated)", "csv", nil},
 	},
 	"credentials": {
-		{"provider", "Provider", "select", []string{"claude", "codex", "agy"}},
+		{"provider", "Provider", "select", []string{"claude", "codex", "agy", "ollama", "openai"}},
+		{"url", "URL (ollama, openai)", "text", nil},
 		{"concurrency", "Concurrency", "int", nil}, {"api_key", "API key", "secret", nil},
 	},
 	"routines": nil,

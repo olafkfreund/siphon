@@ -101,10 +101,32 @@ func ResolveAllowedMode(ctx context.Context, host string, mode Mode) ([]netip.Ad
 
 func blockedMode(addr netip.Addr, mode Mode) bool {
 	if mode == PrivateNoLinkLocal {
-		addr = addr.Unmap()
-		return addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || slices.Contains(metadataAddrs, addr)
+		return blockedNoLinkLocal(addr.Unmap(), true)
 	}
 	return blockedIP(addr, mode == Private)
+}
+
+var (
+	nat64WellKnown = netip.MustParsePrefix("64:ff9b::/96")
+	nat64Local     = netip.MustParsePrefix("64:ff9b:1::/48")
+)
+
+// blockedNoLinkLocal refuses link-local, metadata, unspecified and multicast
+// addresses, and NAT64 forms that embed one (a NAT64 gateway would reach it).
+func blockedNoLinkLocal(addr netip.Addr, nat bool) bool {
+	if addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || addr.IsMulticast() || addr.IsUnspecified() || slices.Contains(metadataAddrs, addr) {
+		return true
+	}
+	if nat && addr.Is6() {
+		b := addr.As16()
+		switch {
+		case nat64WellKnown.Contains(addr): // RFC 6052: v4 in the last 32 bits
+			return blockedNoLinkLocal(netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}), false)
+		case nat64Local.Contains(addr): // RFC 6052 /48: v4 in bytes 6,7,9,10
+			return blockedNoLinkLocal(netip.AddrFrom4([4]byte{b[6], b[7], b[9], b[10]}), false)
+		}
+	}
+	return false
 }
 
 func blockedIP(addr netip.Addr, allowPrivate bool) bool {
