@@ -50,15 +50,17 @@ type serviceDone struct {
 
 type serviceForm struct {
 	Service, Name, Err string
-	AWSCloudWatch      bool // server.mcp_packages has aws-cloudwatch
-	AWSDocs            bool // ... aws-docs
+	AWSCloudWatch      bool     // server.mcp_packages has aws-cloudwatch
+	AWSDocs            bool     // ... aws-docs
+	Profiles, RoleARNs []string // server.aws allowlists: what a portal credential may use without its own keys
 }
 
 func (s *server) serviceForm() *serviceForm {
 	pk := s.Config().Server.MCPPackages
 	_, cw := pk["aws-cloudwatch"]
 	_, docs := pk["aws-docs"]
-	return &serviceForm{AWSCloudWatch: cw, AWSDocs: docs}
+	aws := s.Config().Server.AWS
+	return &serviceForm{AWSCloudWatch: cw, AWSDocs: docs, Profiles: aws.Profiles, RoleARNs: aws.RoleARNs}
 }
 
 func (s *server) serviceRows() []serviceRow {

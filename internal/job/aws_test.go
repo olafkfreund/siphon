@@ -8,10 +8,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/cred"
 	"github.com/olafkfreund/siphon/internal/store"
 )
 
@@ -26,7 +28,12 @@ agents:
   ops: { kind: codex, command: /bin/true, mcp: [cw], prompt: x }
 `
 
-func awsPipeline(t *testing.T, sts int) *Pipeline {
+// stsAssumes counts AssumeRole requests to the fake STS.
+var stsAssumes atomic.Int32
+
+func awsPipeline(t *testing.T, sts int) *Pipeline { return awsPipelineCfg(t, sts, awsJobCfg) }
+
+func awsPipelineCfg(t *testing.T, sts int, cfgYAML string) *Pipeline {
 	t.Setenv("AGW_AK", "AKIABASEFAKE")
 	t.Setenv("AGW_SK", "baseSecretFake")
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
@@ -42,11 +49,13 @@ func awsPipeline(t *testing.T, sts int) *Pipeline {
 			w.Write([]byte(`<GetCallerIdentityResponse><GetCallerIdentityResult><Arn>arn:aws:sts::123456789012:assumed-role/r/siphon-test</Arn></GetCallerIdentityResult></GetCallerIdentityResponse>`))
 			return
 		}
+		stsAssumes.Add(1)
 		w.Write([]byte(`<AssumeRoleResponse><AssumeRoleResult><Credentials><AccessKeyId>ASIATEMPFAKE</AccessKeyId><SecretAccessKey>tempSecretFake</SecretAccessKey><SessionToken>tempTokenFake</SessionToken><Expiration>2030-01-01T00:00:00Z</Expiration></Credentials></AssumeRoleResult></AssumeRoleResponse>`))
 	}))
 	t.Cleanup(srv.Close)
 	t.Setenv("AWS_ENDPOINT_URL_STS", srv.URL)
-	return applyPipeline(t, awsJobCfg)
+	stsAssumes.Store(0)
+	return applyPipeline(t, cfgYAML)
 }
 
 func runOps(p *Pipeline) (string, string) {
@@ -82,6 +91,10 @@ func TestAWSBridgeEnv(t *testing.T) {
 		if strings.Contains(out, leak) {
 			t.Errorf("leaked %s", leak)
 		}
+	}
+	// The bridge's error hides the keys but keeps region and paths readable.
+	if !strings.Contains(out, `"AWS_REGION":"eu-west-1"`) || !strings.Contains(out, `"AWS_ACCESS_KEY_ID":"***"`) || !strings.Contains(out, `"AWS_CONFIG_FILE":"/dev/null"`) {
+		t.Errorf("mask too wide or too narrow: %q", out)
 	}
 }
 
@@ -133,5 +146,41 @@ func TestTestAWS(t *testing.T) {
 	p = awsPipeline(t, 403)
 	if _, _, _, err := p.TestAWS(context.Background(), "cw"); err == nil || strings.Contains(err.Error(), "baseSecretFake") {
 		t.Errorf("sts failure: %v", err)
+	}
+}
+
+// A busy login re-queues before any STS call, and the Test fetches keys once.
+func TestAWSBusyLoginMakesNoSTSCall(t *testing.T) {
+	t.Setenv("AGW_AK", "AKIABASEFAKE")
+	t.Setenv("AGW_SK", "baseSecretFake")
+	p := awsPipelineCfg(t, 200, strings.Replace(strings.Replace(awsJobCfg, "credentials:\n", "credentials:\n  cx: { provider: codex }\n", 1),
+		"kind: codex, command: /bin/true,", "kind: codex, credential: cx, command: /bin/true,", 1))
+	release, err := cred.Acquire(context.Background(), "cx", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	tx, _ := p.Store.DB.Begin()
+	jid, _ := store.InsertJob(tx, store.Job{Rule: "start", ActionJSON: "{}"}, time.Now())
+	tx.Commit()
+	p.Store.DB.Exec(`UPDATE jobs SET state='running' WHERE id=?`, jid)
+	state, _, _, _ := p.agentExec(context.Background(), p.Config(), store.QueuedJob{ID: jid}, Payload{Action: config.Action{Agent: "ops"}}, false)
+	if state != stateRequeued || stsAssumes.Load() != 0 {
+		t.Fatalf("state %q, %d AssumeRole calls", state, stsAssumes.Load())
+	}
+}
+
+func TestTestAWSOneFetchAndOneAtATime(t *testing.T) {
+	p := awsPipeline(t, 200)
+	if _, _, _, err := p.TestAWS(context.Background(), "cw"); err == nil {
+		t.Fatal("test bridge should fail")
+	}
+	if n := stsAssumes.Load(); n != 1 {
+		t.Errorf("%d AssumeRole calls, want 1", n)
+	}
+	awsTesting.Store("cw", true)
+	defer awsTesting.Delete("cw")
+	if _, _, _, err := p.TestAWS(context.Background(), "cw"); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Errorf("second test: %v", err)
 	}
 }

@@ -25,6 +25,9 @@ type MCPServer struct {
 	// unit and the agent gets a loopback URL instead. Egress is that unit's allowlist.
 	Env    map[string]string
 	Egress *EgressEnv
+	// Mask, when set, is the only part of Env masked in bridge errors (the secrets);
+	// nil masks every Env value.
+	Mask []string
 }
 
 type AgentOptions struct {

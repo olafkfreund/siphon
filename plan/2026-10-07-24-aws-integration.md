@@ -298,3 +298,15 @@ revert.
   - **L5:** `aws.configFile` is inaccessible to run units, and documented as 0640 `root:siphon`.
   - **L6:** `pythonRelaxDeps` is removed; no dependency conflicted, so the runtime dependency check now enforces upstream's bounds.
   - **M1 (owner decision, 2026-10-07):** portal-made aws credentials are limited to the file-only allowlist `server.aws.profiles` / `server.aws.role_arns`, except a role ARN used with the credential's own access keys. Documented in the README; the code is in the coder's review-fix batch.
+- **Review fixes (coder, Go):**
+  - **M2:** bridged servers are built after the login is acquired, so a busy login re-queues with no AssumeRole and a routine wait doesn't eat the key lifetime.
+  - **M3:** keys expiring before `now + d − 5 min` are refused.
+  - **L1:** one AssumeRole per Test.
+  - **L2:** one in-flight Test per source.
+  - **L3:** `MCPServer.Mask`, so AWS bridges mask only secret values and the region and `/dev/null` stay readable (#23 behaviour unchanged).
+  - **L4:** a package whose `env` takes `AWS_ACCESS_KEY_ID` requires `aws:`.
+  - **L7:** AWS credentials are not listed as subscriptions, and a rule on a tools-only source warns.
+- **M1 (coder, owner decision):**
+  - `server.aws.profiles` / `role_arns` (file-only) are enforced in `checkOverlay` for portal aws credentials. A portal edit keeping a file credential's own value is allowed, and an off-list role ARN needs the item's own stored keys.
+  - The tile: a profile `<select>`, and a role `<input>` with a `<datalist>`.
+  - `TestOverlayAWS` gained a `server.aws` list.

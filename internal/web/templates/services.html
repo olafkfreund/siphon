@@ -41,11 +41,11 @@
     <label class="f">Name<input name="name" value="aws" required pattern="[a-z0-9][a-z0-9_\-]{0,40}" autocomplete="off"><span class="hint">Sources are named <code>&lt;name&gt;-cloudwatch</code> and <code>&lt;name&gt;-docs</code>.</span></label>
     <label class="f">Region<input name="region" value="eu-west-1" required pattern="[a-z]{2}(-[a-z]+)+-[0-9]" autocomplete="off" spellcheck="false"></label>
     <fieldset class="f"><legend>Credentials</legend><span class="seg">
-      <label><input type="radio" name="mode" value="profile" checked><span>Profile / SSO (recommended)</span></label>
-      <label><input type="radio" name="mode" value="role"><span>Assume role</span></label></span>
+      <label><input type="radio" name="mode" value="profile"{{if .Profiles}} checked{{else}} disabled{{end}}><span>Profile / SSO (recommended)</span></label>
+      <label><input type="radio" name="mode" value="role"{{if not .Profiles}} checked{{end}}><span>Assume role</span></label></span>
       <span class="hint">Profile: a named profile of the siphon user (SSO, a role or credential_process). Role: a read-only role, see <code>examples/aws</code>.</span></fieldset>
-    <label class="f">Profile<input name="profile" autocomplete="off" spellcheck="false"><span class="hint">Profile mode: the profile name.</span></label>
-    <label class="f">Role ARN<input name="role_arn" placeholder="arn:aws:iam::123456789012:role/siphon-readonly" autocomplete="off" spellcheck="false"></label>
+    <label class="f">Profile<select name="profile"{{if not .Profiles}} disabled{{end}}>{{range .Profiles}}<option>{{.}}</option>{{end}}</select><span class="hint">{{if .Profiles}}Profile mode: one of <code>server.aws.profiles</code>.{{else}}List profiles in <code>server.aws.profiles</code> in siphon.yaml.{{end}}</span></label>
+    <label class="f">Role ARN<input name="role_arn" list="aws-roles" placeholder="arn:aws:iam::123456789012:role/siphon-readonly" autocomplete="off" spellcheck="false"><datalist id="aws-roles">{{range .RoleARNs}}<option value="{{.}}">{{end}}</datalist><span class="hint">Other ARNs need this credential's own access keys.</span></label>
     <label class="f">External ID<input name="external_id" autocomplete="off" spellcheck="false"><span class="hint">Optional, role mode.</span></label>
     <label class="f">Base access key ID<input name="access_key_id" autocomplete="off" spellcheck="false"><span class="hint">Optional, role mode: otherwise the siphon user's own login assumes the role. Stored write-only.</span></label>
     <label class="f">Base secret access key<input type="password" name="secret_access_key" autocomplete="off" spellcheck="false"></label>

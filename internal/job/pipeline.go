@@ -422,17 +422,11 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 	}
 	defer finishBridges()
 	secrets := cfg.Secrets()
+	var bridged []string
 	for _, name := range a.MCP {
 		s := cfg.Sources[name]
 		if len(s.Env) > 0 || s.AWS != "" {
-			// Stdio server with secret env: it runs in its own bridge unit with the
-			// package's hosts as its allowlist; the agent only gets a loopback URL.
-			srv, fin, err := p.bridgeServer(ctx, cfg, j.ID, name, s, time.Duration(a.Timeout), &secrets)
-			if err != nil {
-				return "failed", -1, err.Error(), nil
-			}
-			bridgeFinish = append(bridgeFinish, fin)
-			servers[name] = srv
+			bridged = append(bridged, name) // built after the login is acquired, see below
 			continue
 		}
 		h := headerValues(s.Headers)
@@ -485,6 +479,18 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 		}
 		opts.CredFiles, start = files, files
 	}
+	// Bridged stdio servers (secret env, AWS keys) run in their own unit with the
+	// package's hosts as allowlist; the agent only gets a loopback URL. Built only
+	// now so a busy login re-queues without an STS call and the keys are fresh.
+	for _, name := range bridged {
+		srv, fin, err := p.bridgeServer(ctx, cfg, j.ID, name, cfg.Sources[name], time.Duration(a.Timeout), nil, &secrets)
+		if err != nil {
+			return "failed", -1, err.Error(), nil
+		}
+		bridgeFinish = append(bridgeFinish, fin)
+		servers[name] = srv
+	}
+	opts.Secrets = secrets
 	allow, on := cfg.AgentEgress(a)
 	egEnv, finish, eerr := p.egressFor(cfg, j.ID, allow, on)
 	if eerr != nil {
@@ -695,27 +701,29 @@ func sandbox(cfg *config.Config, timeout time.Duration) action.SandboxOptions {
 	return action.SandboxOptions{Mode: cfg.Server.Sandbox, Timeout: timeout, Dir: dir}
 }
 
-// awsEnv fetches short-lived keys for the AWS credential and returns the
-// environment a bridged package gets: no IMDS, no config files, only these keys.
-func awsEnv(ctx context.Context, cfg *config.Config, name string, timeout time.Duration, jobID int64) (map[string]string, error) {
-	c := cfg.Credentials[name]
-	spec := awscred.Spec{Region: c.Region, Profile: c.Profile, RoleARN: c.RoleARN, ExternalID: c.ExternalID,
+// awsKeys fetches short-lived keys for the AWS credential.
+func awsKeys(ctx context.Context, cfg *config.Config, name string, timeout time.Duration, jobID int64) (awscred.Creds, error) {
+	return awscred.Get(ctx, awsSpec(cfg.Credentials[name]), awscred.Duration(timeout), fmt.Sprintf("siphon-%d", jobID))
+}
+
+func awsSpec(c *config.Credential) awscred.Spec {
+	return awscred.Spec{Region: c.Region, Profile: c.Profile, RoleARN: c.RoleARN, ExternalID: c.ExternalID,
 		AccessKeyID: c.AccessKeyID.Value, SecretAccessKey: c.SecretAccessKey.Value}
-	k, err := awscred.Get(ctx, spec, awscred.Duration(timeout), fmt.Sprintf("siphon-%d", jobID))
-	if err != nil {
-		return nil, err
-	}
+}
+
+// awsEnv is the environment a bridged package gets: no IMDS, no config files, only these keys.
+func awsEnv(region string, k awscred.Creds) map[string]string {
 	return map[string]string{
 		"AWS_ACCESS_KEY_ID": k.AccessKeyID, "AWS_SECRET_ACCESS_KEY": k.SecretAccessKey, "AWS_SESSION_TOKEN": k.SessionToken,
-		"AWS_REGION": c.Region, "AWS_DEFAULT_REGION": c.Region, "AWS_EC2_METADATA_DISABLED": "true",
+		"AWS_REGION": region, "AWS_DEFAULT_REGION": region, "AWS_EC2_METADATA_DISABLED": "true",
 		"AWS_CONFIG_FILE": os.DevNull, "AWS_SHARED_CREDENTIALS_FILE": os.DevNull,
-	}, nil
+	}
 }
 
 // bridgeServer is the bridge description of a stdio source with env or an AWS
 // credential: its egress allowlist and env (plus fresh AWS keys). Their values
 // are added to *secrets. fin releases the egress registration.
-func (p *Pipeline) bridgeServer(ctx context.Context, cfg *config.Config, jobID int64, name string, s *config.Source, timeout time.Duration, secrets *[]string) (action.MCPServer, func() string, error) {
+func (p *Pipeline) bridgeServer(ctx context.Context, cfg *config.Config, jobID int64, name string, s *config.Source, timeout time.Duration, keys *awscred.Creds, secrets *[]string) (action.MCPServer, func() string, error) {
 	eg, fin, err := p.egressFor(cfg, jobID, cfg.BridgeEgress(s), true)
 	if err != nil {
 		return action.MCPServer{}, nil, err
@@ -724,17 +732,29 @@ func (p *Pipeline) bridgeServer(ctx context.Context, cfg *config.Config, jobID i
 	for k, v := range s.Env {
 		env[k] = v.Value
 	}
+	var mask []string // set only for AWS: its env also holds plain values (region, paths)
 	if s.AWS != "" {
-		extra, err := awsEnv(ctx, cfg, s.AWS, timeout, jobID)
-		if err != nil {
-			fin()
-			return action.MCPServer{}, nil, errors.New("aws credentials for " + name + ": " + string(action.Mask([]byte(err.Error()), *secrets)))
+		if keys == nil {
+			k, err := awsKeys(ctx, cfg, s.AWS, timeout, jobID)
+			if err != nil {
+				fin()
+				return action.MCPServer{}, nil, errors.New("aws credentials for " + name + ": " + string(action.Mask([]byte(err.Error()), *secrets)))
+			}
+			keys = &k
 		}
-		maps.Copy(env, extra)
-		*secrets = append(*secrets, extra["AWS_ACCESS_KEY_ID"], extra["AWS_SECRET_ACCESS_KEY"], extra["AWS_SESSION_TOKEN"])
+		maps.Copy(env, awsEnv(cfg.Credentials[s.AWS].Region, *keys))
+		keySecrets := []string{keys.AccessKeyID, keys.SecretAccessKey, keys.SessionToken}
+		*secrets = append(*secrets, keySecrets...)
+		mask = keySecrets
+		for _, v := range s.Env {
+			mask = append(mask, v.Value)
+		}
 	}
-	return action.MCPServer{Command: s.Command, Env: env, Egress: eg}, fin, nil
+	return action.MCPServer{Command: s.Command, Env: env, Egress: eg, Mask: mask}, fin, nil
 }
+
+// awsTesting holds the sources with a Test in flight (one at a time each).
+var awsTesting sync.Map
 
 // TestAWS checks an AWS source the way a run would use it: short-lived keys,
 // the caller identity, then the package's bridge started and its tools listed.
@@ -747,9 +767,11 @@ func (p *Pipeline) TestAWS(ctx context.Context, source string) (arn string, expi
 	}
 	secrets := cfg.Secrets()
 	mask := func(e error) error { return errors.New(string(action.Mask([]byte(e.Error()), secrets))) }
-	c := cfg.Credentials[s.AWS]
-	spec := awscred.Spec{Region: c.Region, Profile: c.Profile, RoleARN: c.RoleARN, ExternalID: c.ExternalID,
-		AccessKeyID: c.AccessKeyID.Value, SecretAccessKey: c.SecretAccessKey.Value}
+	if _, busy := awsTesting.LoadOrStore(source, true); busy {
+		return "", time.Time{}, nil, errors.New("a test is already running for this source")
+	}
+	defer awsTesting.Delete(source)
+	spec := awsSpec(cfg.Credentials[s.AWS])
 	k, err := awscred.Get(ctx, spec, awscred.Duration(0), "siphon-test")
 	if err != nil {
 		return "", time.Time{}, nil, mask(err)
@@ -758,7 +780,7 @@ func (p *Pipeline) TestAWS(ctx context.Context, source string) (arn string, expi
 	if arn, err = awscred.Identity(ctx, spec, k); err != nil {
 		return "", k.Expires, nil, mask(err)
 	}
-	srv, fin, err := p.bridgeServer(ctx, cfg, 0, source, s, 0, &secrets)
+	srv, fin, err := p.bridgeServer(ctx, cfg, 0, source, s, 0, &k, &secrets)
 	if err != nil {
 		return arn, k.Expires, nil, mask(err)
 	}

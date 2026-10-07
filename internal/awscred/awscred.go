@@ -4,6 +4,7 @@ package awscred
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -25,6 +26,8 @@ type Creds struct {
 	AccessKeyID, SecretAccessKey, SessionToken string
 	Expires                                    time.Time
 }
+
+var now = time.Now // tests replace it
 
 // Duration is the session length for an agent timeout: +5 min, 15 min..1 h.
 func Duration(timeout time.Duration) time.Duration {
@@ -75,6 +78,10 @@ func get(ctx context.Context, s Spec, d time.Duration, session string) (Creds, e
 	}
 	if s.RoleARN == "" && !v.CanExpire {
 		return Creds{}, errors.New("profile gives long-lived keys; use SSO, a role, or credential_process")
+	}
+	// The run needs d minus the 5 min margin Duration added.
+	if v.CanExpire && v.Expires.Before(now().Add(d-5*time.Minute)) {
+		return Creds{}, fmt.Errorf("credentials expire at %s, before this run could finish; refresh the SSO login or credential_process", v.Expires.UTC().Format(time.RFC3339))
 	}
 	return Creds{v.AccessKeyID, v.SecretAccessKey, v.SessionToken, v.Expires}, nil
 }

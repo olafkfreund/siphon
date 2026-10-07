@@ -18,6 +18,7 @@ func TestMain(m *testing.M) {
 			}
 			json.Unmarshal(b, &spec)
 			sec, _ := os.ReadFile(spec.SecretsFile)
+			os.Stderr.Write(sec)                                  // a real bridge may echo its env in an error
 			os.WriteFile(bridgeEnvDump(os.Getppid()), sec, 0o600) // the test reads it back
 		}
 		os.Exit(3)

@@ -162,8 +162,8 @@ func (s *server) logins() []loginView {
 	st := cred.StoreFor(s.Config())
 	out := []loginView{}
 	for name, c := range s.Config().Credentials {
-		if c.Provider == "ollama" || c.Provider == "openai" {
-			continue // listed under Models
+		if c.Provider == "ollama" || c.Provider == "openai" || c.Provider == "aws" {
+			continue // listed under Models, or managed on Services
 		}
 		v := loginView{Name: name, Provider: providerName[c.Provider], Key: c.Provider, Type: "Subscription", Expiry: "not connected", ExpiryClass: "cancelled", Written: "—", Status: "missing"}
 		if c.APIKey.Ref != "" {

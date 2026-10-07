@@ -291,6 +291,24 @@
         "actions_dir": {
           "type": "string"
         },
+        "aws": {
+          "additionalProperties": false,
+          "properties": {
+            "profiles": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "role_arns": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
         "db": {
           "type": "string"
         },

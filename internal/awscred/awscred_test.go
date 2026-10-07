@@ -112,3 +112,18 @@ func TestErrorsHideSecret(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+func TestRefusesKeysThatExpireTooSoon(t *testing.T) {
+	fakeSTS(t, 200) // keys expire 2030-01-01T00:00:00Z
+	old := now
+	t.Cleanup(func() { now = old })
+	exp := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	now = func() time.Time { return exp.Add(-20 * time.Minute) } // 30 min run needs 25 min
+	if _, err := Get(context.Background(), role, 30*time.Minute, "s"); err == nil || !strings.Contains(err.Error(), "before this run could finish") {
+		t.Fatalf("err = %v", err)
+	}
+	now = func() time.Time { return exp.Add(-26 * time.Minute) }
+	if _, err := Get(context.Background(), role, 30*time.Minute, "s"); err != nil {
+		t.Fatal(err)
+	}
+}

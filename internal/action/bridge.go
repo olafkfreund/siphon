@@ -223,7 +223,7 @@ func bridgeUnit(ctx context.Context, o *AgentOptions, s MCPServer, token string,
 	stop := func() { cancel(); <-done; os.Remove(secrets); os.RemoveAll(runDir) }
 	if err := waitSocket(sock, done); err != nil {
 		stop()
-		return "", nil, fmt.Errorf("%w: %s", err, Mask(stderr, append(slices.Collect(maps.Values(s.Env)), o.Secrets...)))
+		return "", nil, fmt.Errorf("%w: %s", err, Mask(stderr, bridgeMask(s, o)))
 	}
 	return sock, stop, nil
 }
@@ -291,7 +291,7 @@ func bridgeProcess(ctx context.Context, o *AgentOptions, s MCPServer, token stri
 	}
 	if err := waitSocket(sock, done); err != nil {
 		stop()
-		return "", nil, fmt.Errorf("%w: %s", err, Mask(out.Bytes(), append(slices.Collect(maps.Values(s.Env)), o.Secrets...)))
+		return "", nil, fmt.Errorf("%w: %s", err, Mask(out.Bytes(), bridgeMask(s, o)))
 	}
 	return sock, stop, nil
 }
@@ -315,7 +315,7 @@ func ProbeBridge(ctx context.Context, o AgentOptions, name string) ([]string, er
 	} else {
 		defer stop()
 	}
-	secrets := append(slices.Collect(maps.Values(s.Env)), o.Secrets...)
+	secrets := bridgeMask(s, &o)
 	tools, err := listTools(ctx, o.bridgeSocks[name], o.MCP[name].Headers["Authorization"])
 	if err != nil {
 		return nil, fmt.Errorf("mcp server %q: %s", name, Mask([]byte(err.Error()), secrets))
@@ -355,4 +355,12 @@ func (t bearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	r = r.Clone(r.Context())
 	r.Header.Set("Authorization", t.auth)
 	return t.rt.RoundTrip(r)
+}
+
+// bridgeMask is what bridge errors must hide: the server's secrets and the run's.
+func bridgeMask(s MCPServer, o *AgentOptions) []string {
+	if s.Mask != nil {
+		return append(slices.Clone(s.Mask), o.Secrets...)
+	}
+	return append(slices.Collect(maps.Values(s.Env)), o.Secrets...)
 }

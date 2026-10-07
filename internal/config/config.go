@@ -108,6 +108,7 @@ type Server struct {
 	// PublicURL is how the outside world reaches this server (shown as webhook URLs).
 	PublicURL string         `yaml:"public_url"`
 	Services  ServicesServer `yaml:"services"`
+	AWS       AWSServer      `yaml:"aws"`
 	// MCPPackages are the stdio MCP servers a source may name with package:.
 	// Only siphon.yaml can list them; the portal picks from the list.
 	MCPPackages map[string]MCPPackage `yaml:"mcp_packages"`
@@ -122,6 +123,15 @@ type MCPPackage struct {
 }
 
 // ModelsServer holds model-endpoint settings that only siphon.yaml may set.
+// AWSServer lists what a portal-made aws credential may use of the daemon's own
+// AWS login: profiles and role ARNs (a role with its own access keys is free).
+type AWSServer struct {
+	Profiles []string `yaml:"profiles"`
+	RoleARNs []string `yaml:"role_arns"`
+}
+
+var awsProfile = regexp.MustCompile(`^[\w.@+-]+$`)
+
 // ServicesServer holds service-integration settings that only siphon.yaml may set.
 type ServicesServer struct {
 	// PrivateEndpoints are LAN/self-hosted service host:ports (e.g. a GitLab on
@@ -617,6 +627,11 @@ func (c *Config) Warnings() []string {
 			}
 		}
 	}
+	for _, r := range c.Rules {
+		if s := c.Sources[r.Source]; s != nil && s.Type == "mcp" && !s.Polled() {
+			w = append(w, fmt.Sprintf("rule %s: source %s is agent tools only and never produces events", r.Name, r.Source))
+		}
+	}
 	for _, name := range sortedKeys(c.Agents) {
 		a := c.Agents[name]
 		if a == nil {
@@ -787,6 +802,16 @@ func (c *Config) Validate() error {
 	for _, e := range c.Server.Models.PrivateEndpoints {
 		if _, _, ok := endpointKey(e); !ok {
 			add("server.models.private_endpoints: %q: want host:port", e)
+		}
+	}
+	for _, p := range c.Server.AWS.Profiles {
+		if !awsProfile.MatchString(p) {
+			add("server.aws.profiles: %q: want letters, digits and . @ + - _", p)
+		}
+	}
+	for _, a := range c.Server.AWS.RoleARNs {
+		if !awsRoleARN.MatchString(a) {
+			add("server.aws.role_arns: %q: want arn:aws:iam::123456789012:role/name", a)
 		}
 	}
 	for _, e := range c.Server.Services.PrivateEndpoints {
@@ -1128,6 +1153,9 @@ func validateAWSCredential(p string, cr *Credential, add func(string, ...any)) {
 func (c *Config) validateAWSSource(p string, s *Source, add func(string, ...any)) {
 	pkg := c.Server.MCPPackages[s.Package]
 	if s.AWS == "" {
+		if s.Package != "" && slices.Contains(pkg.Env, "AWS_ACCESS_KEY_ID") {
+			add("%s: package %q takes AWS keys: use aws: <credential>, not env", p, s.Package)
+		}
 		if slices.ContainsFunc(pkg.Hosts, func(h string) bool { return strings.Contains(h, "{region}") }) {
 			add("%s: package %q has {region} hosts and needs aws: <credential>", p, s.Package)
 		}

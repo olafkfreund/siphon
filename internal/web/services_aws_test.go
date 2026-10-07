@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const awsWebCfg = `server: { sandbox: none, db: DIR/s.db, public_url: "https://siphon.example", mcp_packages: {
+const awsWebCfg = `server: { sandbox: none, db: DIR/s.db, public_url: "https://siphon.example", aws: {profiles: [p, sso-prod], role_arns: ['arn:aws:iam::123456789012:role/listed']}, mcp_packages: {
   aws-cloudwatch: {command: [cw], hosts: ['logs.{region}.amazonaws.com'], env: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, AWS_REGION, AWS_DEFAULT_REGION, AWS_EC2_METADATA_DISABLED, AWS_CONFIG_FILE, AWS_SHARED_CREDENTIALS_FILE]},
   aws-docs: {command: [docs], hosts: [docs.aws.amazon.com]}} }
 sources:
@@ -115,5 +115,59 @@ func TestServicesAWSTest(t *testing.T) {
 	}
 	if got := ce.post("/services/aws-docs/test", nil).Body.String(); !strings.Contains(got, "nothing to test") || len(calls) != 2 {
 		t.Fatalf("docs: %s", got)
+	}
+}
+
+func TestAWSCredentialNotOnConnectionsPage(t *testing.T) {
+	ce := newCfgEnvFile(t, awsWebCfg)
+	ce.post("/services/aws", url.Values{"name": {"awsprod"}, "region": {"eu-west-1"}, "mode": {"profile"}, "profile": {"p"}, "servers": {"cloudwatch"}})
+	if ce.cur.Load().Credentials["awsprod"] == nil {
+		t.Fatal("not created")
+	}
+	if b := ce.get("/connections").Body.String(); strings.Contains(b, "awsprod") {
+		t.Errorf("aws credential listed as a subscription")
+	}
+}
+
+func TestServicesAWSAllowlist(t *testing.T) {
+	ce := newCfgEnvFile(t, awsWebCfg)
+	page := ce.get("/services").Body.String()
+	if !strings.Contains(page, "<option>sso-prod</option>") || !strings.Contains(page, `<option value="arn:aws:iam::123456789012:role/listed">`) || strings.Contains(page, `value="profile" disabled`) {
+		t.Errorf("tile does not offer the lists")
+	}
+	form := func(extra url.Values) url.Values {
+		v := url.Values{"name": {"al"}, "region": {"eu-west-1"}, "servers": {"cloudwatch"}}
+		for k, x := range extra {
+			v[k] = x
+		}
+		return v
+	}
+	for name, tc := range map[string]struct {
+		v    url.Values
+		want string
+	}{
+		"profile off list": {url.Values{"mode": {"profile"}, "profile": {"admin"}}, "not in server.aws.profiles"},
+		"role off list":    {url.Values{"mode": {"role"}, "role_arn": {"arn:aws:iam::999999999999:role/evil"}}, "not in server.aws.role_arns"},
+	} {
+		if w := ce.post("/services/aws", form(tc.v)); w.Code != 422 || !strings.Contains(w.Body.String(), tc.want) {
+			t.Errorf("%s: %d", name, w.Code)
+		}
+	}
+	// Own keys free the role from the list.
+	w := ce.post("/services/aws", form(url.Values{"mode": {"role"}, "role_arn": {"arn:aws:iam::999999999999:role/evil"}, "access_key_id": {"AKIAFAKE"}, "secret_access_key": {"fakeSecret"}}))
+	if w.Code != 200 {
+		t.Errorf("own keys: %d %s", w.Code, w.Body.String())
+	}
+	// On the list, no keys.
+	if w := ce.post("/services/aws", form(url.Values{"name": {"al2"}, "mode": {"role"}, "role_arn": {"arn:aws:iam::123456789012:role/listed"}})); w.Code != 200 {
+		t.Errorf("listed role: %d", w.Code)
+	}
+}
+
+func TestServicesAWSEmptyProfileList(t *testing.T) {
+	ce := newCfgEnvFile(t, strings.Replace(awsWebCfg, "profiles: [p, sso-prod]", "profiles: []", 1))
+	page := ce.get("/services").Body.String()
+	if !strings.Contains(page, `value="profile" disabled`) || !strings.Contains(page, "server.aws.profiles</code> in siphon.yaml") {
+		t.Errorf("profile mode should be disabled with a hint")
 	}
 }
