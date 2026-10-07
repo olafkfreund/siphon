@@ -302,3 +302,112 @@ func TestOverlayKeptSecretCannotMove(t *testing.T) {
 		}
 	}
 }
+
+func TestOverlayEnvKeysFileOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	os.WriteFile(path, []byte("server: { db: "+dir+"/s.db }\nsources:\n  m: { type: mcp, command: [srv], read: {tool: t}, env: {A_KEY: 'env:HOME', B_KEY: 'env:HOME'} }\n"), 0o600)
+	sec := dir + "/secrets"
+	item := func(env string) Item {
+		return Item{Kind: "sources", Name: "m", YAML: "{type: mcp, command: [srv], read: {tool: t}, env: {" + env + "}}"}
+	}
+	for name, env := range map[string]string{
+		"add":     "A_KEY: 'env:HOME', B_KEY: 'env:HOME', C_KEY: 'env:HOME'",
+		"remove":  "A_KEY: 'env:HOME'",
+		"rename":  "A_KEY: 'env:HOME', C_KEY: 'env:HOME'",
+		"foreign": "A_KEY: 'file:/etc/passwd', B_KEY: 'env:HOME'",
+	} {
+		if _, _, err := LoadWithOverlay(path, []Item{item(env)}); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	os.MkdirAll(sec, 0o700)
+	os.WriteFile(sec+"/sources-m-env.A_KEY", []byte("v"), 0o600)
+	if _, _, err := LoadWithOverlay(path, []Item{item("A_KEY: 'file:" + sec + "/sources-m-env.A_KEY', B_KEY: 'env:HOME'")}); err != nil {
+		t.Errorf("rotate: %v", err)
+	}
+	if _, _, err := LoadWithOverlay(path, []Item{{Kind: "sources", Name: "n", YAML: "{type: mcp, command: [srv], read: {tool: t}, env: {A_KEY: x}}"}}); err == nil {
+		t.Error("new portal stdio source accepted")
+	}
+}
+
+func TestOverlayPackages(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	os.WriteFile(path, []byte("server: { db: "+dir+"/s.db, mcp_packages: {github: {command: [gh], env: [GH_TOKEN, GH_HOST]}} }\n"), 0o600)
+	sec := dir + "/secrets"
+	os.MkdirAll(sec, 0o700)
+	os.WriteFile(sec+"/sources-n-env.GH_TOKEN", []byte("v"), 0o600)
+	src := func(extra string) Item {
+		return Item{Kind: "sources", Name: "n", YAML: "{type: mcp, read: {tool: t}, " + extra + "}"}
+	}
+	for name, it := range map[string]Item{
+		"unlisted":      src("package: other"),
+		"with command":  src("package: github, command: [gh]"),
+		"extra key":     src("package: github, env: {GH_TOKEN: x, EXTRA: x}"),
+		"foreign ref":   src("package: github, env: {GH_TOKEN: 'file:/etc/passwd'}"),
+		"server change": {Kind: "sources", Name: "n", YAML: "{type: mcp, command: [gh], read: {tool: t}}"},
+	} {
+		if _, _, err := LoadWithOverlay(path, []Item{it}); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	for name, it := range map[string]Item{
+		"package":        src("package: github"),
+		"package + env":  src("package: github, env: {GH_TOKEN: 'file:" + sec + "/sources-n-env.GH_TOKEN'}"),
+		"package + keys": src("package: github, env: {GH_TOKEN: 'file:" + sec + "/sources-n-env.GH_TOKEN', GH_HOST: x}"),
+	} {
+		c, _, err := LoadWithOverlay(path, []Item{it})
+		if err != nil || len(c.Sources["n"].Command) != 1 || c.Sources["n"].Command[0] != "gh" {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// The overlay cannot alter the package list (server stays file-only).
+	b, _ := os.ReadFile(path)
+	file, _ := Parse(b)
+	if err := sameFixedSections(file, &Config{Server: Server{MCPPackages: map[string]MCPPackage{"github": {Command: []string{"evil"}}}}}); err == nil {
+		t.Error("mcp_packages change accepted by sameFixedSections")
+	}
+}
+
+// A portal-made source may use allow_private only for a listed service endpoint.
+func TestOverlayServicePrivateEndpoint(t *testing.T) {
+	file := []byte("server: { services: { private_endpoints: [\"gitlab.lan:443\"] } }\nsources:\n  s: { type: webhook, secret: env:X }\n")
+	ok := []Item{{Kind: "sources", Name: "gl", YAML: "type: http\nurl: https://gitlab.lan/api/v4/user\nallow_private: true\n"}}
+	f, err := Parse(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkOverlay(f, ok, t.TempDir()); err != nil {
+		t.Fatalf("listed: %v", err)
+	}
+	bad := []Item{{Kind: "sources", Name: "gl", YAML: "type: http\nurl: https://other.lan/api\nallow_private: true\n"}}
+	if err := checkOverlay(f, bad, t.TempDir()); err == nil || !strings.Contains(err.Error(), "services.private_endpoints") {
+		t.Fatalf("unlisted: %v", err)
+	}
+}
+
+// A file secret kept on an item can't ride along when its package changes, or
+// when a file `command` source becomes a `package` source.
+func TestOverlayKeptSecretCannotMoveToPackage(t *testing.T) {
+	file := []byte("server: { mcp_packages: { p: { command: [/bin/p], env: [FOO] }, q: { command: [/bin/q], env: [FOO] } } }\n" +
+		"sources:\n" +
+		"  cmd: { type: mcp, command: [/bin/c], env: { FOO: 'env:HOME' }, read: { tool: t } }\n" +
+		"  pkg: { type: mcp, package: p, env: { FOO: 'env:HOME' }, read: { tool: t } }\n")
+	f, err := Parse(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, it := range map[string]Item{
+		"command to package": {Kind: "sources", Name: "cmd", YAML: "{type: mcp, package: p, env: {FOO: 'env:HOME'}, read: {tool: t}}"},
+		"package to package": {Kind: "sources", Name: "pkg", YAML: "{type: mcp, package: q, env: {FOO: 'env:HOME'}, read: {tool: t}}"},
+	} {
+		if err := checkOverlay(f, []Item{it}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "can't be moved") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	same := Item{Kind: "sources", Name: "pkg", YAML: "{type: mcp, package: p, env: {FOO: 'env:HOME'}, read: {tool: t}, poll: 2m}"}
+	if err := checkOverlay(f, []Item{same}, t.TempDir()); err != nil {
+		t.Errorf("same package: %v", err)
+	}
+}

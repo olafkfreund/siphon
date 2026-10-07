@@ -1,6 +1,9 @@
 { self, pkgs }:
 
 let
+  # A stdio MCP server that needs a secret: run through the MCP bridge.
+  stubMcp = pkgs.writeShellScriptBin "stub-mcp" "exec ${pkgs.python3}/bin/python3 ${./stub-mcp-stdio.py}";
+  stubToken = "tok-123-SECRET-bridge";
   # The real agent CLIs (claude-code is unfree), run in the restricted
   # template to prove they start without nscd and reach the network only
   # through the forwarder.
@@ -47,8 +50,17 @@ pkgs.testers.runNixOSTest {
       environment.etc."siphon/token".text = "test-token-0123456789abcdef0123456789";
       environment.etc."siphon/hook".text = "hook-secret";
 
+      environment.etc."siphon/stub-token".text = stubToken;
+      environment.etc."siphon/gl-token".text = "gl-hook-token-123";
+      # Standard Webhooks secret: whsec_ + base64 of the key bytes.
+      environment.etc."siphon/std-secret".text = "whsec_c2lwaG9uLXN0YW5kYXJkLXdlYmhvb2tzLWtleQ==";
       services.siphon = {
         enable = true;
+        mcpPackages.stub = {
+          package = stubMcp;
+          args = [ ];
+          env = [ "STUB_TOKEN" ];
+        };
         credentials = {
           token = "/etc/siphon/token";
           hook = "/etc/siphon/hook";
@@ -98,6 +110,36 @@ pkgs.testers.runNixOSTest {
             poll = "1h";
             allow_private = true;
           };
+          # Webhook auth modes: a GitLab-style header token and Standard Webhooks.
+          sources.glhook = {
+            type = "webhook";
+            signature = "token";
+            token_header = "X-Gitlab-Token";
+            secret = "file:/etc/siphon/gl-token";
+          };
+          sources.stdhook = {
+            type = "webhook";
+            signature = "standard-webhooks";
+            secret = "file:/etc/siphon/std-secret";
+          };
+          # A stdio MCP server with a secret env: agents reach it via the bridge.
+          sources.stubsrc = {
+            type = "mcp";
+            package = "stub";
+            env.STUB_TOKEN = "file:/etc/siphon/stub-token";
+            read.tool = "whoami";
+            poll = "1h";
+          };
+          agents.bridged = {
+            kind = "model";
+            credential = "stubm";
+            model = "stub-model";
+            prompt = "Use the tool, then answer.";
+            mcp = [ "stubsrc" ];
+            allowed_tools = [ "mcp__stubsrc__whoami" ];
+            max_turns = 3;
+            approve = false;
+          };
           # The built-in loop on a model connection, with one allowed MCP tool.
           agents.local = {
             kind = "model";
@@ -120,7 +162,10 @@ pkgs.testers.runNixOSTest {
             command = "egress-probe";
             prompt = "p";
             approve = false;
-            mcp = [ "ext" ];
+            mcp = [
+              "ext"
+              "stubsrc"
+            ];
           };
           agents.ac = {
             kind = "claude";
@@ -218,6 +263,31 @@ pkgs.testers.runNixOSTest {
               action.agent = "probe";
             }
             {
+              name = "gl-event";
+              source = "glhook";
+              when = ''event.object_kind == "merge_request"'';
+              on = "each";
+              id = "event.n";
+              action.cmd = [ "echo" "gitlab mr {{.event.n}}" ];
+            }
+            {
+              name = "std-event";
+              source = "stdhook";
+              when = ''event.type == "ping"'';
+              on = "each";
+              id = "event.n";
+              action.cmd = [ "echo" "standard {{.event.n}}" ];
+            }
+            {
+              name = "bridge-agent";
+              source = "gh";
+              when = ''event.kind == "bridge"'';
+              on = "each";
+              id = "event.n";
+              cooldown = "1s";
+              action.agent = "bridged";
+            }
+            {
               name = "model-agent";
               source = "gh";
               when = ''event.kind == "model"'';
@@ -273,6 +343,7 @@ pkgs.testers.runNixOSTest {
         (pkgs.writeShellScriptBin "egress-probe" ''
           ip=$(awk '$2 == "external" || $3 == "external" {print $1; exit}' /etc/hosts)
           [ -e /run/nscd/socket ] && echo NSCD-VISIBLE
+          grep -rqs '${stubToken}' "$HOME" /tmp /proc/*/environ 2>/dev/null && echo SECRET-LEAK
           [ -e /nix/var/nix/daemon-socket/socket ] && echo NIX-DAEMON-VISIBLE
           ls /run/systemd/units >/dev/null 2>&1 && echo UNIT-IDS-VISIBLE
           find /sys/fs/cgroup -name 'siphon-action*' 2>/dev/null | grep -q . && echo CGROUP-IDS-VISIBLE
@@ -480,6 +551,7 @@ pkgs.testers.runNixOSTest {
         assert "DBUS-VISIBLE" not in out, f"system bus reachable from the sandbox: {out}"
         assert "API-REACHED-77" not in out, f"wildcard-bound API reachable via the proxy address: {out}"
         assert "NSCD-VISIBLE" not in out, f"nscd (host name resolution) reachable from the sandbox: {out}"
+        assert "SECRET-LEAK" not in out, f"a bridged MCP secret is visible to the agent: {out}"
         for leak in ("NIX-DAEMON-VISIBLE", "UNIT-IDS-VISIBLE", "CGROUP-IDS-VISIBLE"):
             assert leak not in out, f"{leak}: {out}"
         entries = set(out.split("slash-run=")[1].split("\n")[0].split())
@@ -523,6 +595,49 @@ pkgs.testers.runNixOSTest {
         out = machine.succeed("sqlite3 /var/lib/siphon/state.db \"select output from jobs where rule='model-agent'\"")
         assert "final: echo: hi from the model" in out, out
         external.succeed("grep -q 'hi from the model' /tmp/mcp-calls")
+
+    with subtest("webhook auth: GitLab token header and Standard Webhooks"):
+        import base64, hashlib, hmac, json, time
+        def post(path, body, headers):
+            h = " ".join(f"-H '{k}: {v}'" for k, v in headers.items())
+            return machine.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' -X POST {h} -d '{body}' http://127.0.0.1:8080/hook/{path}").strip()
+        gl = '{"object_kind":"merge_request","n":801}'
+        assert post("glhook", gl, {"X-Gitlab-Token": "wrong"}) == "401"
+        assert post("glhook", gl, {}) == "401"
+        assert post("glhook", gl, {"X-Gitlab-Token": "gl-hook-token-123"}) == "202"
+        key = base64.b64decode("c2lwaG9uLXN0YW5kYXJkLXdlYmhvb2tzLWtleQ==")
+        body, mid, ts = '{"type":"ping","n":802}', "msg_vm_1", str(int(time.time()))
+        sig = "v1," + base64.b64encode(hmac.new(key, f"{mid}.{ts}.{body}".encode(), hashlib.sha256).digest()).decode()
+        hdr = {"webhook-id": mid, "webhook-timestamp": ts, "webhook-signature": sig}
+        assert post("stdhook", body, {**hdr, "webhook-signature": "v1,AAAA"}) == "401"
+        assert post("stdhook", body, {**hdr, "webhook-timestamp": str(int(time.time()) - 900)}) == "401"
+        assert post("stdhook", body, hdr) == "202"
+        assert post("stdhook", body, hdr) != "202", "replayed delivery accepted"
+        for rule, text in [("gl-event", "gitlab mr 801"), ("std-event", "standard 802")]:
+            machine.wait_until_succeeds(
+                f"sqlite3 /var/lib/siphon/state.db \"select output from jobs where rule='{rule}' and state='done'\" | grep -q '{text}'",
+                timeout=60,
+            )
+        logs = machine.succeed("journalctl -u siphon --no-pager")
+        assert "gl-hook-token-123" not in logs, "webhook token in the logs"
+
+    with subtest("MCP bridge: a stdio server's secret reaches the server, never the agent"):
+        assert hook('{"kind":"bridge","n":700}') == "202"
+        try:
+            machine.wait_until_succeeds(
+                "sqlite3 /var/lib/siphon/state.db \"select state from jobs where rule='bridge-agent'\" | grep -qx done",
+                timeout=120,
+            )
+        except Exception:
+            dump()
+            print(machine.execute("sqlite3 /var/lib/siphon/state.db \"select output from jobs where rule='bridge-agent'\"")[1])
+            raise
+        out = machine.succeed("sqlite3 /var/lib/siphon/state.db \"select output from jobs where rule='bridge-agent'\"")
+        import hashlib
+        want = hashlib.sha256(b"${stubToken}").hexdigest()[:16]
+        assert f"token-sha={want}" in out, f"the bridged server didn't get its secret: {out}"
+        assert "${stubToken}" not in out, f"the secret leaked into the job output: {out}"
+        machine.fail("systemctl list-units --no-legend --plain 'siphon-mcp@*' | grep -q running")
 
     with subtest("a rule created over the config API fires without a restart"):
         import json

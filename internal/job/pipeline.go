@@ -44,6 +44,8 @@ type Pipeline struct {
 
 	egress *egress.Proxy // set by startEgress when any run has an allowlist
 
+	hookLimits sync.Map // source name -> *hookLimit; webhook rate limits survive requests and Apply
+
 	applyMu     sync.Mutex // serialises Apply and Serve's poller start
 	serveCtx    context.Context
 	stopPollers func() // nil unless Serve is running
@@ -407,8 +409,32 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 		return "failed", -1, "unknown agent " + pl.Action.Agent, nil
 	}
 	servers := map[string]action.MCPServer{}
+	var bridgeFinish []func() string
+	finishBridges := func() (tail string) {
+		for _, f := range bridgeFinish {
+			tail += f()
+		}
+		bridgeFinish = nil
+		return
+	}
+	defer finishBridges()
 	for _, name := range a.MCP {
 		s := cfg.Sources[name]
+		if len(s.Env) > 0 {
+			// Stdio server with secret env: it runs in its own bridge unit with the
+			// package's hosts as its allowlist; the agent only gets a loopback URL.
+			eg, fin, eerr := p.egressFor(cfg, j.ID, cfg.BridgeEgress(s), true)
+			if eerr != nil {
+				return "failed", -1, eerr.Error(), nil
+			}
+			bridgeFinish = append(bridgeFinish, fin)
+			env := make(map[string]string, len(s.Env))
+			for k, v := range s.Env {
+				env[k] = v.Value
+			}
+			servers[name] = action.MCPServer{Command: s.Command, Env: env, Egress: eg}
+			continue
+		}
 		h := headerValues(s.Headers)
 		if s.Auth != nil && s.Auth.Bearer.Value != "" {
 			h["Authorization"] = "Bearer " + s.Auth.Bearer.Value
@@ -420,7 +446,7 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 		Prompt: a.Prompt, Env: pl.Env, MCP: servers,
 		AllowedTools: a.AllowedTools, MaxTurns: a.MaxTurns, MaxBudgetUSD: a.MaxBudgetUSD,
 		Timeout: time.Duration(a.Timeout), Sandbox: sandbox(cfg, 0),
-		Secrets: cfg.Secrets(), WorkDir: filepath.Join(filepath.Dir(cfg.Server.DB), "jobs", strconv.FormatInt(j.ID, 10)),
+		Secrets: cfg.Secrets(), StateDir: filepath.Dir(cfg.Server.DB), WorkDir: filepath.Join(filepath.Dir(cfg.Server.DB), "jobs", strconv.FormatInt(j.ID, 10)),
 	}
 	// Credential: an API key, or a subscription login from the store. No
 	// credential at all is the legacy path (the runner's own environment).
@@ -466,7 +492,7 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 	}
 	opts.Sandbox.Egress = egEnv
 	res, err := action.RunAgent(ctx, opts)
-	egressTail := finish()
+	egressTail := finish() + finishBridges()
 	if c != nil {
 		p.saveWriteback(cfg, j, credName, c.Provider, start, res.Writeback)
 	}
@@ -641,6 +667,12 @@ func mcpOptions(cfg *config.Config, name string) source.MCPOptions {
 	}
 	if s.Auth != nil {
 		o.Bearer = s.Auth.Bearer.Value
+	}
+	if len(s.Env) > 0 {
+		o.Env = make(map[string]string, len(s.Env))
+		for k, v := range s.Env {
+			o.Env[k] = v.Value
+		}
 	}
 	return o
 }

@@ -21,6 +21,10 @@ type MCPServer struct {
 	URL     string
 	Command []string
 	Headers map[string]string
+	// Env (stdio only) holds secret values: the server runs in its own bridge
+	// unit and the agent gets a loopback URL instead. Egress is that unit's allowlist.
+	Env    map[string]string
+	Egress *EgressEnv
 }
 
 type AgentOptions struct {
@@ -41,6 +45,7 @@ type AgentOptions struct {
 	Sandbox      SandboxOptions
 	Secrets      []string
 	WorkDir      string
+	StateDir     string // directory of server.db: bridge secrets go in <StateDir>/bridge-secrets
 }
 
 type AgentResult struct {
@@ -57,6 +62,11 @@ func RunAgent(ctx context.Context, o AgentOptions) (AgentResult, error) {
 	if o.WorkDir != "" {
 		defer os.RemoveAll(o.WorkDir)
 	}
+	forwards, direct, stopBridges, err := startBridges(ctx, &o)
+	if err != nil {
+		return AgentResult{Exit: -1}, err
+	}
+	defer stopBridges()
 	home := jobFilesDir
 	if o.Sandbox.Mode == "none" {
 		home = o.WorkDir
@@ -89,6 +99,7 @@ func RunAgent(ctx context.Context, o AgentOptions) (AgentResult, error) {
 	for k, v := range files {
 		sb.Files[k] = v
 	}
+	sb.Forwards, sb.Direct = forwards, direct
 	sb.Writeback = append(append([]string(nil), o.Sandbox.Writeback...), writeback...)
 	secrets := append([]string(nil), o.Secrets...)
 	secrets = append(secrets, o.APIKey)

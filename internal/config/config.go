@@ -28,6 +28,11 @@ const AgentResultSource = "agent-result"
 // MaxDepth caps agent-result chains (loop guard): an event at a deeper depth never enqueues.
 const MaxDepth = 2
 
+var (
+	envName   = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+	envDenied = regexp.MustCompile(`^(LD_.*|DYLD_.*|PATH|HOME|NODE_OPTIONS|PYTHON.*|BASH_ENV|ENV|PERL5.*|RUBY.*|JAVA_TOOL_OPTIONS|SSL_CERT_.*|GIT_.*|.*_PROXY)$`)
+)
+
 var safePath = regexp.MustCompile(`^/[A-Za-z0-9/._-]+$`)
 
 // Duration unmarshals from strings like "5m".
@@ -99,9 +104,54 @@ type Server struct {
 	ActionsDir string       `yaml:"actions_dir"`
 	Egress     EgressServer `yaml:"egress"`
 	Models     ModelsServer `yaml:"models"`
+	// PublicURL is how the outside world reaches this server (shown as webhook URLs).
+	PublicURL string         `yaml:"public_url"`
+	Services  ServicesServer `yaml:"services"`
+	// MCPPackages are the stdio MCP servers a source may name with package:.
+	// Only siphon.yaml can list them; the portal picks from the list.
+	MCPPackages map[string]MCPPackage `yaml:"mcp_packages"`
+}
+
+// MCPPackage is a vetted stdio MCP server: its command, the env names it may
+// receive, and the extra hosts (host or host:port, default 443) agents using it may reach.
+type MCPPackage struct {
+	Command []string `yaml:"command"`
+	Env     []string `yaml:"env"`
+	Hosts   []string `yaml:"hosts"`
 }
 
 // ModelsServer holds model-endpoint settings that only siphon.yaml may set.
+// ServicesServer holds service-integration settings that only siphon.yaml may set.
+type ServicesServer struct {
+	// PrivateEndpoints are LAN/self-hosted service host:ports (e.g. a GitLab on
+	// the LAN) that portal-made sources may reach with allow_private.
+	PrivateEndpoints []string `yaml:"private_endpoints"`
+}
+
+// ServiceEndpoint reports whether a source URL's host:port is listed in
+// server.services.private_endpoints.
+func (c *Config) ServiceEndpoint(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
+		return false
+	}
+	host, port := u.Hostname(), 443
+	if u.Scheme == "http" {
+		port = 80
+	}
+	if p := u.Port(); p != "" {
+		if port, err = strconv.Atoi(p); err != nil {
+			return false
+		}
+	}
+	for _, e := range c.Server.Services.PrivateEndpoints {
+		if h, p, ok := endpointKey(e); ok && h == strings.ToLower(host) && p == port {
+			return true
+		}
+	}
+	return false
+}
+
 type ModelsServer struct {
 	// PrivateEndpoints are the host:port model endpoints allowed to be on a
 	// private, loopback or LAN address (never link-local or metadata).
@@ -146,10 +196,15 @@ type Source struct {
 	Headers      map[string]Secret `yaml:"headers"` // values may be env:/file: refs or plain literals
 	Body         string            `yaml:"body"`
 	Secret       Secret            `yaml:"secret"`           // webhook HMAC key
-	Signature    string            `yaml:"signature"`        // github|sha256
+	Signature    string            `yaml:"signature"`        // github|sha256|token|standard-webhooks
 	SigHeader    string            `yaml:"signature_header"` // sha256 preset
+	TokenHeader  string            `yaml:"token_header"`     // token preset
 	TimestampHdr string            `yaml:"timestamp_header"`
-	ID           string            `yaml:"id"` // delivery id, e.g. header.X-GitHub-Delivery
+	ID           string            `yaml:"id"`      // delivery id, e.g. header.X-GitHub-Delivery
+	Env          map[string]Secret `yaml:"env"`     // stdio MCP child env; values are env:/file: refs
+	Package      string            `yaml:"package"` // name in server.mcp_packages; fills Command
+
+	cmdFromPkg bool // Command was filled from Package, not written in the item
 }
 
 type Read struct {
@@ -314,6 +369,11 @@ func parse(b []byte, stub map[string]string) (*Config, error) {
 		if s != nil && s.Poll == 0 && s.Type != "webhook" {
 			s.Poll = Duration(time.Minute)
 		}
+		if s != nil && s.Package != "" && len(s.Command) == 0 {
+			if pkg, ok := c.Server.MCPPackages[s.Package]; ok {
+				s.Command, s.cmdFromPkg = slices.Clone(pkg.Command), true
+			}
+		}
 	}
 	for _, a := range c.Agents {
 		if a == nil {
@@ -383,6 +443,13 @@ func parse(b []byte, stub map[string]string) (*Config, error) {
 				}
 				src.Headers[h] = v
 			}
+			for _, k := range sortedKeys(src.Env) {
+				v := src.Env[k]
+				if err := v.resolve(stub); err != nil {
+					c.resolveErrs = append(c.resolveErrs, err)
+				}
+				src.Env[k] = v
+			}
 		}
 	}
 	return c, nil
@@ -449,6 +516,11 @@ func (c *Config) Secrets() []string {
 					out = append(out, v)
 				}
 			}
+			for _, k := range sortedKeys(src.Env) {
+				if v := src.Env[k].Value; v != "" {
+					out = append(out, v)
+				}
+			}
 		}
 	}
 	return out
@@ -478,8 +550,23 @@ func (c *Config) Warnings() []string {
 		if s := c.Sources[name]; s != nil && s.AllowPrivate {
 			w = append(w, fmt.Sprintf("source %s: allow_private disables the private-address guard", name))
 		}
+		if s := c.Sources[name]; s != nil && s.Type == "webhook" && s.Signature == "token" {
+			w = append(w, fmt.Sprintf("source %s: signature token sends the secret in a header: weaker than an HMAC, and a captured delivery can be replayed", name))
+		}
 		if s := c.Sources[name]; s != nil && s.Auth != nil && s.Auth.Bearer.isSet() && cleartextRemote(s.URL) {
 			w = append(w, fmt.Sprintf("source %s: bearer token sent over plain http to a non-loopback host", name))
+		}
+		if s := c.Sources[name]; s != nil && cleartextRemote(s.URL) {
+			for _, k := range sortedKeys(s.Headers) {
+				if s.Headers[k].isSet() {
+					w = append(w, fmt.Sprintf("source %s: header %s (a secret) sent over plain http to a non-loopback host", name, k))
+				}
+			}
+			for _, k := range sortedKeys(s.Env) {
+				if s.Env[k].isSet() {
+					w = append(w, fmt.Sprintf("source %s: env %s (a secret) goes to a server at a plain http URL on a non-loopback host", name, k))
+				}
+			}
 		}
 	}
 	for _, name := range sortedKeys(c.Agents) {
@@ -602,8 +689,34 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	for _, name := range sortedKeys(c.Sources) {
+		if src := c.Sources[name]; src != nil {
+			for _, k := range sortedKeys(src.Env) {
+				if ref := src.Env[k].Ref; !strings.HasPrefix(ref, "env:") && !strings.HasPrefix(ref, "file:") {
+					add("sources.%s.env.%s: inline secret: values must be env:NAME or file:/path", name, k)
+				}
+			}
+		}
+	}
+
 	if t := c.Server.Token; t.isSet() && t.Value != "" && len(t.Value) < 32 {
 		add("server.token: must be at least 32 characters")
+	}
+	for _, name := range sortedKeys(c.Server.MCPPackages) {
+		pkg := c.Server.MCPPackages[name]
+		if len(pkg.Command) == 0 {
+			add("server.mcp_packages.%s: command is required", name)
+		}
+		for _, k := range pkg.Env {
+			if !envName.MatchString(k) || envDenied.MatchString(k) {
+				add("server.mcp_packages.%s: env name %q is not allowed", name, k)
+			}
+		}
+		for _, h := range pkg.Hosts {
+			if _, err := parseHostPort(h); err != nil {
+				add("server.mcp_packages.%s: hosts: %v", name, err)
+			}
+		}
 	}
 	// IPv4 only: the NixOS module derives the sandbox's IPAddressAllow=<ip>/32 from it.
 	if h, _, err := net.SplitHostPort(c.Server.Egress.Listen); err != nil || net.ParseIP(h).To4() == nil || !net.ParseIP(h).IsLoopback() {
@@ -623,6 +736,16 @@ func (c *Config) Validate() error {
 	for _, e := range c.Server.Models.PrivateEndpoints {
 		if _, _, ok := endpointKey(e); !ok {
 			add("server.models.private_endpoints: %q: want host:port", e)
+		}
+	}
+	for _, e := range c.Server.Services.PrivateEndpoints {
+		if _, _, ok := endpointKey(e); !ok {
+			add("server.services.private_endpoints: %q: want host:port", e)
+		}
+	}
+	if u := c.Server.PublicURL; u != "" {
+		if pu, err := url.Parse(u); err != nil || (pu.Scheme != "http" && pu.Scheme != "https") || pu.Host == "" || pu.User != nil {
+			add("server.public_url: want http(s)://host[:port][/path]")
 		}
 	}
 	if c.Limits.HTTPTimeout < 0 {
@@ -827,6 +950,21 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 		if (s.URL == "") == (len(s.Command) == 0) {
 			add("%s: set exactly one of url or command", p)
 		}
+		if s.Package != "" {
+			pkg, ok := c.Server.MCPPackages[s.Package]
+			switch {
+			case !ok:
+				add("%s: package %q is not in server.mcp_packages", p, s.Package)
+			case s.URL != "" || (len(s.Command) > 0 && !s.cmdFromPkg):
+				add("%s: package excludes url and command", p)
+			default:
+				for _, k := range sortedKeys(s.Env) {
+					if !slices.Contains(pkg.Env, k) {
+						add("%s: env name %q is not one of package %q's env (%s)", p, k, s.Package, strings.Join(pkg.Env, ", "))
+					}
+				}
+			}
+		}
 		if s.Read == nil || (s.Read.Resource == "") == (s.Read.Tool == "") {
 			add("%s: read needs exactly one of resource or tool", p)
 		}
@@ -855,11 +993,32 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 			} else if strings.EqualFold(s.SigHeader, s.TimestampHdr) {
 				add("%s: signature_header and timestamp_header must differ", p)
 			}
+		case "token":
+			if s.TokenHeader == "" {
+				add("%s: signature token needs token_header", p)
+			}
+		case "standard-webhooks":
+			if s.SigHeader != "" || s.TimestampHdr != "" {
+				add("%s: signature_header and timestamp_header are not allowed with signature standard-webhooks", p)
+			}
 		default:
-			add("%s: signature must be github or sha256, got %q", p, s.Signature)
+			add("%s: signature must be github, sha256, token or standard-webhooks, got %q", p, s.Signature)
 		}
 	default:
 		add("%s: type must be mcp, http or webhook, got %q", p, s.Type)
+	}
+	if s.Package != "" && s.Type != "mcp" {
+		add("%s: package is only for type mcp", p)
+	}
+	if len(s.Env) > 0 && (s.Type != "mcp" || len(s.Command) == 0) {
+		add("%s: env needs a stdio MCP source (type mcp with command)", p)
+	}
+	for _, k := range sortedKeys(s.Env) {
+		if !envName.MatchString(k) {
+			add("%s: env name %q must match ^[A-Z_][A-Z0-9_]*$", p, k)
+		} else if envDenied.MatchString(k) {
+			add("%s: env name %q is not allowed (it changes how the child loads code or connects)", p, k)
+		}
 	}
 	if name == AgentResultSource {
 		add("%s: name is reserved", p)
@@ -1039,6 +1198,9 @@ func (c *Config) AgentEgress(a *Agent) (allow []HostPort, enabled bool) {
 	}
 	for _, m := range a.MCP {
 		src := c.Sources[m]
+		if src != nil && len(src.Env) == 0 { // with env the package runs in its own bridge unit, see BridgeEgress
+			allow = append(allow, c.packageHosts(src)...)
+		}
 		if src == nil || src.URL == "" {
 			continue
 		}
@@ -1053,11 +1215,26 @@ func (c *Config) AgentEgress(a *Agent) (allow []HostPort, enabled bool) {
 		if p, err := strconv.Atoi(u.Port()); err == nil {
 			port = p
 		}
-		allow = append(allow, HostPort{Host: strings.ToLower(u.Hostname()), Port: port, AllowPrivate: src.AllowPrivate})
+		allow = append(allow, HostPort{Host: strings.ToLower(u.Hostname()), Port: port, AllowPrivate: src.AllowPrivate, NoLinkLocal: src.AllowPrivate})
 	}
 	allow = append(allow, c.userAllow(a.Egress.Allow, c.Server.Egress.Allow)...)
 	return dedupe(allow), true
 }
+
+func (c *Config) packageHosts(src *Source) (out []HostPort) {
+	if src.Package != "" {
+		for _, h := range c.Server.MCPPackages[src.Package].Hosts {
+			if hp, err := parseHostPort(h); err == nil {
+				out = append(out, hp)
+			}
+		}
+	}
+	return
+}
+
+// BridgeEgress is the allowlist of the MCP bridge unit that runs a stdio
+// source with env: the package's hosts and nothing else.
+func (c *Config) BridgeEgress(src *Source) []HostPort { return dedupe(c.packageHosts(src)) }
 
 // RuleEgress returns the allowlist for a rule's cmd actions and whether they are restricted.
 func (c *Config) RuleEgress(r Rule) (allow []HostPort, enabled bool) {

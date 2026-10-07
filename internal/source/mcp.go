@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
+	"slices"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -16,6 +18,7 @@ import (
 type MCPOptions struct {
 	Name         string
 	Command      []string
+	Env          map[string]string // added to the stdio child's minimal env, never argv
 	URL          string
 	Bearer       string
 	Resource     string
@@ -180,6 +183,9 @@ func (s MCP) transport(ctx context.Context, stream bool) mcp.Transport {
 			if value, ok := os.LookupEnv(name); ok {
 				cmd.Env = append(cmd.Env, name+"="+value)
 			}
+		}
+		for _, k := range slices.Sorted(maps.Keys(o.Env)) {
+			cmd.Env = append(cmd.Env, k+"="+o.Env[k])
 		}
 		transport = &mcp.CommandTransport{Command: cmd}
 	}

@@ -22,9 +22,18 @@ let
       server.actions_dir = actionsDir;
     }
     (lib.recursiveUpdate (lib.optionalAttrs cfg.egress.enable { server.egress.socket = "${egressDir}/egress.sock"; })
-      (lib.optionalAttrs (cfg.models.privateEndpoints != [ ]) {
-        server.models.private_endpoints = cfg.models.privateEndpoints;
-      })
+      (lib.recursiveUpdate
+        (lib.optionalAttrs (cfg.models.privateEndpoints != [ ]) {
+          server.models.private_endpoints = cfg.models.privateEndpoints;
+        })
+        (lib.optionalAttrs (cfg.mcpPackages != { }) {
+          # Nix-pinned MCP servers the portal may enable by name (never a free command).
+          server.mcp_packages = lib.mapAttrs (_: p: {
+            command = [ (lib.getExe p.package) ] ++ p.args;
+            inherit (p) env hosts;
+          }) cfg.mcpPackages;
+        })
+      )
     )
   ) cfg.settings;
   configFile = yaml.generate "siphon.yaml" settings;
@@ -50,8 +59,11 @@ let
     # config, rather than an unreadable one); others are made inaccessible.
     TemporaryFileSystem = map (d: "/etc/${d}:ro") (lib.filter etcManaged agentEtcDirs);
     InaccessiblePaths = map (d: "-/etc/${d}") (lib.filter (d: !etcManaged d) agentEtcDirs) ++ [
-      # Unit names there reveal other runs' ids (and so their run dirs).
-      "-/run/systemd/units"
+      # Unit names (and so other runs' ids and run dirs) are visible in
+      # /run/systemd and over the system bus; neither is needed by a run.
+      # stdout/stderr reach the journal through fds set up before this.
+      "-/run/systemd"
+      "-/run/dbus"
       # The daemon fetches URLs for any client: network outside the sandbox.
       "-/nix/var/nix/daemon-socket"
     ];
@@ -82,6 +94,27 @@ let
     SystemCallArchitectures = "native";
     SystemCallFilter = [ "@system-service" ];
   };
+  # Network settings of the restricted templates (siphon-action@, siphon-mcp@).
+  restrictedNet =
+      if cfg.egress.enable then
+        {
+          # Own network namespace: only its lo, where exec-job forwards
+          # 127.0.0.1:3128 to the proxy's unix socket. No host port is
+          # reachable; the IP filter is a second layer.
+          PrivateNetwork = true;
+          IPAddressDeny = [ "any" ];
+          IPAddressAllow = [ "127.0.0.1/32" ];
+          # An empty /run: no host daemon socket (nscd, D-Bus, resolved,
+          # avahi, tailscale, databases...) is reachable, only the proxy's.
+          # connect() works on a read-only bind.
+          TemporaryFileSystem = [ "/run:ro" ];
+          BindReadOnlyPaths = [
+            egressDir
+            "/run/current-system" # PATH: /run/current-system/sw
+          ];
+        }
+      else
+        { IPAddressDeny = metadataDeny; };
   # The sandboxed action unit. network is the only difference between the
   # restricted and the open template.
   actionUnit = network: {
@@ -164,6 +197,46 @@ in
       type = lib.types.str;
       default = "2h";
       description = "Hard ceiling (RuntimeMaxSec) for any sandboxed action; per-action timeouts apply below it.";
+    };
+
+    mcpPackages = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            package = lib.mkOption {
+              type = lib.types.package;
+              description = "The MCP server package (its mainProgram is run).";
+            };
+            args = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ "stdio" ];
+              description = "Arguments after the program.";
+            };
+            env = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              description = "Environment variable names a source may set (values are secret refs).";
+            };
+            hosts = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              description = "Hosts agents using this server may reach (port 443).";
+            };
+          };
+        }
+      );
+      default = {
+        github = {
+          package = pkgs.github-mcp-server;
+          env = [ "GITHUB_PERSONAL_ACCESS_TOKEN" ];
+          hosts = [ "api.github.com" ];
+        };
+      };
+      description = ''
+        MCP servers sources may run by name (`package: <name>`), pinned by
+        Nix. The portal can enable only these; any other command stays
+        file-only.
+      '';
     };
 
     models.privateEndpoints = lib.mkOption {
@@ -284,27 +357,23 @@ in
     # exec-job, as the DynamicUser, reads job.json and creates stdout/stderr.
     # Restricted: the only reachable address is siphon's egress proxy, so an
     # agent that ignores HTTPS_PROXY gets no network at all.
-    systemd.services."siphon-action@" = actionUnit (
-      if cfg.egress.enable then
-        {
-          # Own network namespace: only its lo, where exec-job forwards
-          # 127.0.0.1:3128 to the proxy's unix socket. No host port is
-          # reachable; the IP filter is a second layer.
-          PrivateNetwork = true;
-          IPAddressDeny = [ "any" ];
-          IPAddressAllow = [ "127.0.0.1/32" ];
-          # An empty /run: no host daemon socket (nscd, D-Bus, resolved,
-          # avahi, tailscale, databases...) is reachable, only the proxy's.
-          # connect() works on a read-only bind.
-          TemporaryFileSystem = [ "/run:ro" ];
-          BindReadOnlyPaths = [
-            egressDir
-            "/run/current-system" # PATH: /run/current-system/sw
-          ];
+    systemd.services."siphon-action@" = actionUnit restrictedNet;
+    # MCP bridge: a stdio MCP server that holds secrets runs here, under its
+    # own DynamicUser, never in the agent's unit. Always the restricted
+    # network; it reaches only its package's hosts through the egress proxy.
+    systemd.services."siphon-mcp@" =
+      actionUnit (
+        restrictedNet
+        // {
+          # The MCP server's secrets: written 0600 by siphon into its 0700
+          # state dir (never in the group-shared run dir), read by PID 1 and
+          # handed only to this instance as $CREDENTIALS_DIRECTORY/bridge.
+          LoadCredential = [ "bridge:${stateDir}/bridge-secrets/%i" ];
         }
-      else
-        { IPAddressDeny = metadataDeny; }
-    );
+      )
+      // {
+        description = "siphon MCP bridge %i";
+      };
     # Open: for runs with egress off (cmd actions by default).
     systemd.services."siphon-action-open@" = actionUnit { IPAddressDeny = metadataDeny; };
 
@@ -321,7 +390,7 @@ in
           var unit = action.lookup("unit") || "";
           var verb = action.lookup("verb") || "";
           var allowed = ${builtins.toJSON units};
-          if (/^siphon-action(-open)?@[0-9a-f]{16}\.service$/.test(unit) &&
+          if (/^siphon-(action(-open)?|mcp)@[0-9a-f]{16}\.service$/.test(unit) &&
               (verb == "start" || verb == "stop" || verb == "reset-failed")) {
             return polkit.Result.YES;
           }

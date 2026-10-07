@@ -206,10 +206,22 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			if len(s.Command) > 0 && !slices.Equal(s.Command, fs.Command) {
 				return errors.New("command (stdio MCP) can only be set in siphon.yaml")
 			}
-			if s.AllowPrivate && !fs.AllowPrivate {
-				return errors.New("allow_private can only be set in siphon.yaml")
+			if _, ok := file.Server.MCPPackages[s.Package]; s.Package != "" && !ok {
+				return errors.New("package must be one listed in server.mcp_packages in siphon.yaml")
 			}
-			moved = !sameEndpoint(s.URL, fs.URL)
+			// A package source's keys are bounded by the package; others must match the file's.
+			for _, k := range sortedKeys(s.Env) {
+				if s.Package != "" && !slices.Contains(file.Server.MCPPackages[s.Package].Env, k) {
+					return fmt.Errorf("env name %q is not one of package %q's env", k, s.Package)
+				}
+			}
+			if s.Package == "" && !slices.Equal(sortedKeys(s.Env), sortedKeys(fs.Env)) {
+				return errors.New("env names (stdio MCP) can only be set in siphon.yaml; the portal may change their values")
+			}
+			if s.AllowPrivate && !fs.AllowPrivate && !file.ServiceEndpoint(s.URL) {
+				return errors.New("allow_private can only be set in siphon.yaml, or for a host:port listed in server.services.private_endpoints")
+			}
+			moved = !sameEndpoint(s.URL, fs.URL) || s.Package != fs.Package || (len(fs.Command) > 0 && !fs.cmdFromPkg && s.Package != "")
 			refs, fileRefs = sourceRefs(&s), sourceRefs(fs)
 		case "credentials":
 			var c Credential
@@ -318,6 +330,9 @@ func sourceRefs(s *Source) map[string]string {
 	}
 	for k, v := range s.Headers {
 		m["headers."+k] = v.Ref
+	}
+	for k, v := range s.Env {
+		m["env."+k] = v.Ref
 	}
 	return m
 }

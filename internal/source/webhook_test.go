@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"net/http"
@@ -145,4 +146,117 @@ func TestWebhookBadSignaturesDoNotExhaustBucket(t *testing.T) {
 func bodyKey(body string) string {
 	sum := sha256.Sum256([]byte(body))
 	return hex.EncodeToString(sum[:])
+}
+
+func TestWebhookToken(t *testing.T) {
+	calls := 0
+	h := NewWebhook(WebhookOptions{Name: "gl", Secret: "s3cret", Signature: "token", TokenHeader: "X-Gitlab-Token"}, func(_ context.Context, ev Event, id string) (bool, error) {
+		calls++
+		if ev.Headers["x-gitlab-token"] != "" || id != bodyKey(`{"n":1}`) {
+			t.Errorf("token leaked or bad key: %+v %q", ev.Headers, id)
+		}
+		return calls > 1, nil
+	})
+	do := func(token string, set bool) int {
+		r := httptest.NewRequest(http.MethodPost, "/hook/gl", strings.NewReader(`{"n":1}`))
+		if set {
+			r.Header.Set("X-Gitlab-Token", token)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	for _, tc := range []struct {
+		token string
+		set   bool
+		want  int
+	}{{"s3cret", true, 202}, {"s3cret", true, 409}, {"wrong", true, 401}, {"", true, 401}, {"", false, 401}, {"s3cret ", true, 401}} {
+		if got := do(tc.token, tc.set); got != tc.want {
+			t.Errorf("token %q set=%v: %d, want %d", tc.token, tc.set, got, tc.want)
+		}
+	}
+}
+
+func TestWebhookStandard(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	// Vector shape from standardwebhooks.com: whsec_ + base64 key, msg id.ts.body.
+	raw := []byte("0123456789abcdef0123456789abcdef")
+	secret := "whsec_" + base64.StdEncoding.EncodeToString(raw)
+	sign := func(key []byte, id, ts, body string) string {
+		mac := hmac.New(sha256.New, key)
+		mac.Write([]byte(id + "." + ts + "." + body))
+		return "v1," + base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	}
+	body := `{"n":1}`
+	calls := 0
+	h := NewWebhook(WebhookOptions{Name: "w", Secret: secret, Signature: "standard-webhooks", Now: func() time.Time { return now }}, func(_ context.Context, ev Event, id string) (bool, error) {
+		calls++
+		if id != "msg_1" || ev.Headers["webhook-signature"] != "" || ev.Headers["webhook-id"] != "msg_1" {
+			t.Errorf("bad delivery: %q %+v", id, ev.Headers)
+		}
+		return calls > 1, nil
+	})
+	do := func(id, ts, sig string) int {
+		r := httptest.NewRequest(http.MethodPost, "/hook/w", strings.NewReader(body))
+		if id != "" {
+			r.Header.Set("Webhook-Id", id)
+		}
+		if ts != "" {
+			r.Header.Set("Webhook-Timestamp", ts)
+		}
+		if sig != "" {
+			r.Header.Set("Webhook-Signature", sig)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	ts := "1700000000"
+	good := sign(raw, "msg_1", ts, body)
+	other := sign([]byte("another-key"), "msg_1", ts, body)
+	for _, tc := range []struct {
+		name, id, ts, sig string
+		want              int
+	}{
+		{"valid", "msg_1", ts, good, 202},
+		{"replay", "msg_1", ts, good, 409},
+		{"multiple, one valid", "msg_1", ts, other + " v2,xxx " + good, 409}, // valid, so a replay
+		{"wrong key", "msg_1", ts, other, 401},
+		{"tampered id", "msg_2", ts, good, 401},
+		{"tampered ts", "msg_1", "1700000001", good, 401},
+		{"missing sig", "msg_1", ts, "", 401},
+		{"missing id", "", ts, good, 401},
+		{"missing ts", "msg_1", "", good, 401},
+		{"malformed", "msg_1", ts, "v1,!!!", 401},
+		{"no version", "msg_1", ts, strings.TrimPrefix(good, "v1,"), 401},
+		{"v2 only", "msg_1", ts, "v2," + strings.TrimPrefix(good, "v1,"), 401},
+		{"skew past", "msg_1", "1699999699", sign(raw, "msg_1", "1699999699", body), 401},
+		{"skew future", "msg_1", "1700000301", sign(raw, "msg_1", "1700000301", body), 401},
+		{"edge past", "msg_1", "1699999700", sign(raw, "msg_1", "1699999700", body), 409},
+	} {
+		if got := do(tc.id, tc.ts, tc.sig); got != tc.want {
+			t.Errorf("%s: %d, want %d", tc.name, got, tc.want)
+		}
+	}
+	// "multiple, one valid" must be verified, not just replayed: use a fresh handler.
+	calls = 0
+	if got := do("msg_1", ts, other+" v2,xxx "+good); got != 202 {
+		t.Errorf("multiple signatures, one valid: %d, want 202", got)
+	}
+}
+
+// The reference vector published with the Standard Webhooks libraries.
+func TestStandardWebhooksReferenceVector(t *testing.T) {
+	body := []byte(`{"test": 2432232314}`)
+	r := httptest.NewRequest("POST", "/hook/x", nil)
+	r.Header.Set("Webhook-Id", "msg_p5jXN8AQM9LWM0D4loKWxJek")
+	r.Header.Set("Webhook-Timestamp", "1614265330")
+	r.Header.Set("Webhook-Signature", "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=")
+	if _, ok := verifyStandard("whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw", r, body, time.Unix(1614265330, 0)); !ok {
+		t.Fatal("reference vector rejected")
+	}
+	r.Header.Set("Webhook-Signature", "v1,g0hM9SsF+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=")
+	if _, ok := verifyStandard("whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw", r, body, time.Unix(1614265330, 0)); ok {
+		t.Fatal("tampered signature accepted")
+	}
 }

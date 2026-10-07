@@ -45,7 +45,7 @@ class H(BaseHTTPRequestHandler):
             elif req.get("tools"):
                 msg = {"role": "assistant", "content": None, "tool_calls": [{
                     "id": "call1", "type": "function",
-                    "function": {"name": "mcp__extm__echo", "arguments": json.dumps({"text": "hi from the model"})}}]}
+                    "function": {"name": req["tools"][0]["function"]["name"], "arguments": json.dumps({"text": "hi from the model"})}}]}
             else:
                 msg = {"role": "assistant", "content": "plain answer"}
             return self.reply(200, {"id": "x", "object": "chat.completion", "model": req.get("model"),

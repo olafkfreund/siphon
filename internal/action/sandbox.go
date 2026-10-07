@@ -12,6 +12,8 @@ type SandboxOptions struct {
 	Egress    *EgressEnv
 	Files     map[string][]byte // systemd: private files, at FilePath(name) inside the unit
 	Writeback []string
+	Forwards  map[int]string // systemd: local port -> unix socket, served by exec-job
+	Direct    []string       // host:port the run reaches without the egress proxy (bridge forwarders)
 	home      string
 	stderr    *[]byte
 }

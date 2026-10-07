@@ -90,6 +90,7 @@ func (s *server) configRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /agents/egress-preview", s.portal(s.egressPreview))
 	mux.HandleFunc("POST /logins", s.portal(s.loginAdd))
 	s.modelRoutes(mux)
+	s.serviceRoutes(mux)
 	mux.HandleFunc("POST /logins/{name}/delete", s.portal(s.loginDelete))
 	s.configAPI(mux)
 }

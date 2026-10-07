@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -44,7 +45,7 @@ func TestBadListsAll(t *testing.T) {
 		"inline secret", "unknown source \"nope\"", "bad expression", "cooldown is mandatory",
 		"not in the units allowlist", "unknown routine", "mcp references unknown source",
 		"units: \"{{.x}}.service\" must not be templated", "on: each requires id",
-		"type must be mcp, http or webhook", "signature must be github or sha256",
+		"type must be mcp, http or webhook", "signature must be github, sha256",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("missing %q in:\n%s", want, msg)
@@ -185,6 +186,21 @@ func TestBearerCleartextWarning(t *testing.T) {
 	}
 }
 
+func TestHeaderAndEnvCleartextWarning(t *testing.T) {
+	t.Setenv("AGW_B", "b")
+	for url, want := range map[string]bool{"http://gitlab.lan/api": true, "http://localhost:1/api": false, "https://gitlab.lan/api": false} {
+		c, _ := Parse([]byte("sources: {s: {type: http, url: \"" + url + "\", poll: 1m, headers: {PRIVATE-TOKEN: env:AGW_B}}}"))
+		if got := hasWarning(c, "header PRIVATE-TOKEN"); got != want {
+			t.Errorf("%s: header warning=%v want %v", url, got, want)
+		}
+	}
+	c, _ := Parse([]byte("server: {mcp_packages: {p: {command: [/bin/p], env: [K]}}}\nsources: {s: {type: mcp, package: p, url: \"\", env: {K: env:AGW_B}, read: {tool: t}}}"))
+	c.Sources["s"].URL = "http://mcp.lan/x" // env on a plain http URL, non-loopback
+	if !hasWarning(c, "env K") {
+		t.Errorf("no env warning: %v", c.Warnings())
+	}
+}
+
 func TestDurationsAndAgentMCP(t *testing.T) {
 	t.Setenv("AGW_X", "x")
 	c, _ := Parse([]byte(`
@@ -285,6 +301,22 @@ func TestWebhookIDAndTimestamp(t *testing.T) {
 	c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, signature: sha256, signature_header: X-S, timestamp_header: X-T}}"))
 	if err := c.Validate(); err != nil {
 		t.Fatalf("sha256 preset may use a timestamp: %v", err)
+	}
+	for _, tc := range []struct{ extra, want string }{
+		{"signature: token, token_header: X-Gitlab-Token", ""},
+		{"signature: token", "needs token_header"},
+		{"signature: standard-webhooks", ""},
+		{"signature: standard-webhooks, signature_header: X-S", "not allowed with signature standard-webhooks"},
+		{"signature: standard-webhooks, timestamp_header: X-T", "not allowed with signature standard-webhooks"},
+	} {
+		c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, " + tc.extra + "}}"))
+		err := c.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%q: %v", tc.extra, err)
+		}
+		if got := hasWarning(c, "weaker than an HMAC"); got != strings.HasPrefix(tc.extra, "signature: token") {
+			t.Errorf("%q: token warning = %v", tc.extra, got)
+		}
 	}
 }
 
@@ -475,7 +507,7 @@ agents:
 		t.Fatal(err)
 	}
 	got, on := c.AgentEgress(c.Agents["sub"])
-	want := "chatgpt.com:443,auth.openai.com:443,mcp.example.com:443,10.0.0.5:9000 (allow_private),api.github.com:443,*.corp.example:8443,global.example.com:443"
+	want := "chatgpt.com:443,auth.openai.com:443,mcp.example.com:443,10.0.0.5:9000 (allow_private) (no_link_local),api.github.com:443,*.corp.example:8443,global.example.com:443"
 	if !on || hostsOf(got) != want {
 		t.Fatalf("sub: %v\n%s", on, hostsOf(got))
 	}
@@ -641,5 +673,101 @@ agents:
 		if got, _ := c.AgentEgress(c.Agents[a]); hostsOf(got) != want {
 			t.Errorf("%s: %s, want %s", a, hostsOf(got), want)
 		}
+	}
+}
+
+func TestSourceEnvValidation(t *testing.T) {
+	t.Setenv("AGW_E", "secret-value")
+	for env, want := range map[string]string{
+		"{type: mcp, command: [s], read: {tool: t}, env: {GITHUB_TOKEN: 'env:AGW_E'}}":      "",
+		"{type: mcp, command: [s], read: {tool: t}, env: {_X1: 'env:AGW_E'}}":               "",
+		"{type: mcp, command: [s], read: {tool: t}, env: {lower: 'env:AGW_E'}}":             "must match",
+		"{type: mcp, command: [s], read: {tool: t}, env: {'1A': 'env:AGW_E'}}":              "must match",
+		"{type: mcp, command: [s], read: {tool: t}, env: {A: literal}}":                     "inline secret",
+		"{type: mcp, url: 'https://e.example/mcp', read: {tool: t}, env: {A: 'env:AGW_E'}}": "env needs a stdio",
+		"{type: http, url: 'https://e.example', env: {A: 'env:AGW_E'}}":                     "env needs a stdio",
+	} {
+		c, err := Parse([]byte("sources: {s: " + env + "}"))
+		if err == nil {
+			err = c.Validate()
+		}
+		if (want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), want)) {
+			t.Errorf("%s: %v", env, err)
+		}
+	}
+	for _, name := range []string{"LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "PATH", "HOME", "NODE_OPTIONS", "PYTHONPATH", "PYTHONSTARTUP", "BASH_ENV", "ENV", "PERL5LIB", "RUBYOPT", "JAVA_TOOL_OPTIONS", "SSL_CERT_FILE", "GIT_SSH_COMMAND", "HTTPS_PROXY", "ALL_PROXY"} {
+		c, _ := Parse([]byte("sources: {s: {type: mcp, command: [s], read: {tool: t}, env: {" + name + ": 'env:AGW_E'}}}"))
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "not allowed") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// Masking: the resolved value is in Secrets().
+	c, _ := Parse([]byte("sources: {s: {type: mcp, command: [s], read: {tool: t}, env: {GITHUB_TOKEN: 'env:AGW_E'}}}"))
+	if !slices.Contains(c.Secrets(), "secret-value") {
+		t.Errorf("env value not masked: %v", c.Secrets())
+	}
+}
+
+const pkgServer = "server: {mcp_packages: {github: {command: [github-mcp-server, stdio], env: [GITHUB_PERSONAL_ACCESS_TOKEN], hosts: [api.github.com, ghe.example:8443]}}}\n"
+
+func TestSourcePackage(t *testing.T) {
+	t.Setenv("AGW_E", "v")
+	for src, want := range map[string]string{
+		"{type: mcp, package: github, read: {tool: t}}":                                                   "",
+		"{type: mcp, package: github, read: {tool: t}, env: {GITHUB_PERSONAL_ACCESS_TOKEN: 'env:AGW_E'}}": "",
+		"{type: mcp, package: github, read: {tool: t}, env: {OTHER: 'env:AGW_E'}}":                        "not one of package",
+		"{type: mcp, package: nope, read: {tool: t}}":                                                     "not in server.mcp_packages",
+		"{type: mcp, package: github, command: [sh], read: {tool: t}}":                                    "package excludes",
+		"{type: mcp, package: github, command: [github-mcp-server, stdio], read: {tool: t}}":              "package excludes",
+		"{type: mcp, package: github, url: 'https://e.example/mcp', read: {tool: t}}":                     "set exactly one",
+		"{type: http, package: github, url: 'https://e.example'}":                                         "only for type mcp",
+	} {
+		c, err := Parse([]byte(pkgServer + "sources: {s: " + src + "}"))
+		if err == nil {
+			err = c.Validate()
+		}
+		if (want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), want)) {
+			t.Errorf("%s: %v", src, err)
+		}
+	}
+	c, _ := Parse([]byte(pkgServer + "sources: {s: {type: mcp, package: github, read: {tool: t}}}"))
+	if got := c.Sources["s"].Command; len(got) != 2 || got[0] != "github-mcp-server" {
+		t.Errorf("command not resolved: %v", got)
+	}
+	c, _ = Parse([]byte("server: {mcp_packages: {bad: {env: [PATH], hosts: ['a b']}}}"))
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "command is required") || !strings.Contains(err.Error(), "not allowed") {
+		t.Errorf("package validation: %v", err)
+	}
+}
+
+func TestPackageEgressHosts(t *testing.T) {
+	c, _ := Parse([]byte(pkgServer + "sources: {s: {type: mcp, package: github, read: {tool: t}}, o: {type: mcp, command: [x], read: {tool: t}}}\n" +
+		"agents: {with: {kind: claude, mcp: [s]}, without: {kind: claude, mcp: [o]}}"))
+	has := func(a string) (api, ghe bool) {
+		hosts, _ := c.AgentEgress(c.Agents[a])
+		for _, h := range hosts {
+			api = api || (h.Host == "api.github.com" && h.Port == 443)
+			ghe = ghe || (h.Host == "ghe.example" && h.Port == 8443)
+		}
+		return
+	}
+	if api, ghe := has("with"); !api || !ghe {
+		t.Error("package hosts missing")
+	}
+	if api, ghe := has("without"); api || ghe {
+		t.Error("package hosts leaked to another agent")
+	}
+}
+
+func TestBridgeEgressHosts(t *testing.T) {
+	t.Setenv("AGW_E", "v")
+	c, _ := Parse([]byte(pkgServer + "sources: {s: {type: mcp, package: github, read: {tool: t}, env: {GITHUB_PERSONAL_ACCESS_TOKEN: 'env:AGW_E'}}}\n" +
+		"agents: {a: {kind: claude, mcp: [s]}}"))
+	if hosts, _ := c.AgentEgress(c.Agents["a"]); slices.ContainsFunc(hosts, func(h HostPort) bool { return h.Host == "api.github.com" }) {
+		t.Error("the agent must not reach the package's hosts: its bridge does")
+	}
+	hosts := c.BridgeEgress(c.Sources["s"])
+	if len(hosts) != 2 || hosts[0].Host != "api.github.com" || hosts[0].Port != 443 {
+		t.Errorf("bridge hosts %v", hosts)
 	}
 }
