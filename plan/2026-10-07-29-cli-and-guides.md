@@ -358,3 +358,8 @@ Revert the merge.
   - In a batch, every item's `rev` must equal the latest revision (mixed revs give 409).
   - Errors that name an item get the `<kind>/<name>:` prefix. `checkOverlay` messages don't name one yet; that's fixed in step 3.
   - The revision summary is `apply: N items, M deleted`.
+- **Step 3 (coder):**
+  - Every `checkOverlay` message now starts with `<kind>/<name>: ` (wording otherwise unchanged).
+  - Endpoints are in `internal/web/connapi.go`.
+  - `GET /api/connections` strips userinfo from model URLs.
+  - All these routes send `Cache-Control: no-store`.

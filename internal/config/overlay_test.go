@@ -426,7 +426,7 @@ func TestCheckOverlayCollectsAll(t *testing.T) {
 	if err == nil {
 		t.Fatal("no error")
 	}
-	for _, want := range []string{"command (stdio MCP) can only be set in siphon.yaml", "allow_private can only be set", "egress.enabled: false can only be set in siphon.yaml"} {
+	for _, want := range []string{"sources/a: command (stdio MCP) can only be set in siphon.yaml", "sources/a: allow_private can only be set", "agents/b: egress.enabled: false can only be set in siphon.yaml"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("missing %q in %v", want, err)
 		}

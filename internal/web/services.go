@@ -43,9 +43,15 @@ type serviceRow struct {
 
 // serviceDone is shown once after setup: the webhook secret never again.
 type serviceDone struct {
-	Service, Name, Hook, HookURL, HookSecret, HookHeader string
-	ReadTools, WriteTools                                string
-	ApplyErr                                             string // the save worked but applying it live failed
+	Service    string `json:"service"`
+	Name       string `json:"name"`
+	Hook       string `json:"hook,omitempty"`
+	HookURL    string `json:"hook_url,omitempty"`
+	HookSecret string `json:"hook_secret,omitempty"`
+	HookHeader string `json:"hook_header,omitempty"`
+	ReadTools  string `json:"read_tools,omitempty"`
+	WriteTools string `json:"write_tools,omitempty"`
+	ApplyErr   string `json:"apply_error,omitempty"` // the save worked but applying it live failed
 }
 
 type serviceForm struct {
@@ -334,9 +340,13 @@ func toolList(src string, tools []string) string {
 
 // svcTest is the result of a service Test: who the token belongs to.
 type svcTest struct {
-	Name, User, Latency, Err string
-	ARN, Expires             string // AWS: caller identity and when the test keys lapse
-	Tools                    int    // AWS: tools the bridged server lists
+	Name    string `json:"name"`
+	User    string `json:"user,omitempty"`
+	Latency string `json:"latency,omitempty"`
+	Err     string `json:"error,omitempty"`
+	ARN     string `json:"arn,omitempty"`     // AWS: caller identity
+	Expires string `json:"expires,omitempty"` // AWS: when the test keys lapse
+	Tools   int    `json:"tools,omitempty"`   // AWS: tools the bridged server lists
 }
 
 // testService checks a service source's token against the provider's "who

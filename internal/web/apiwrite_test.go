@@ -212,3 +212,12 @@ func TestAPIListSortedWithTombstones(t *testing.T) {
 		t.Fatalf("%+v", list)
 	}
 }
+
+// storeRevs is the newest revision's actor.
+func storeRevs(ce *cfgEnv) (string, error) {
+	r, err := store.Revisions(ce.st.DB, 1)
+	if err != nil || len(r) == 0 {
+		return "", err
+	}
+	return r[0].Actor, nil
+}

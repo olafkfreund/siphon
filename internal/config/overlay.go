@@ -188,11 +188,13 @@ func hasAnchorOrAlias(n *yaml.Node) bool {
 func checkOverlay(file *Config, items []Item, secretsDir string) error {
 	dir := filepath.Clean(secretsDir)
 	var errs []error // every problem, not just the first
-	add := func(e error) { errs = append(errs, e) }
+	var at string    // the item being checked: each message names it
+	add := func(e error) { errs = append(errs, fmt.Errorf("%s: %w", at, e)) }
 	for _, it := range items {
 		if it.Deleted {
 			continue
 		}
+		at = it.Kind + "/" + it.Name
 		var refs, fileRefs map[string]string
 		moved := false // the item now talks to a different provider or URL than the file's
 		switch it.Kind {
