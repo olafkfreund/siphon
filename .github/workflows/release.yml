@@ -1,0 +1,52 @@
+name: release
+
+# On a version tag, build the OCI image natively for x86_64 and aarch64,
+# push both to ghcr.io and publish a multi-arch manifest (:vX.Y.Z, :latest).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, arch: amd64 }
+          - { runner: ubuntu-24.04-arm, arch: arm64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - name: Build and push ${{ matrix.arch }}
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          out=$(nix build --print-out-paths .#image)
+          nix shell nixpkgs#skopeo -c bash -c '
+            "$0" | skopeo copy --dest-creds "${{ github.actor }}:$TOKEN" \
+              docker-archive:/dev/stdin \
+              "docker://ghcr.io/${{ github.repository_owner }}/siphon:${{ github.ref_name }}-${{ matrix.arch }}"
+          ' "$out"
+
+  manifest:
+    needs: image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: cachix/install-nix-action@v31
+      - name: Multi-arch manifest
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          repo=ghcr.io/${{ github.repository_owner }}/siphon
+          tag=${{ github.ref_name }}
+          nix shell nixpkgs#manifest-tool -c bash -c '
+            for t in "$1" latest; do
+              manifest-tool --username "${{ github.actor }}" --password "$TOKEN" push from-args \
+                --platforms linux/amd64,linux/arm64 \
+                --template "$0:$1-ARCH" --target "$0:$t"
+            done
+          ' "$repo" "$tag"

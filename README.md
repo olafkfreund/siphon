@@ -47,6 +47,40 @@ devenv test         # what CI runs: vet + tests; fails on any failing test
 
 `nix develop` still works for anyone without devenv.
 
+## Ways to run Siphon
+
+| | How | Isolation | For |
+|---|---|---|---|
+| **NixOS module** | `services.siphon.enable = true` | **Full**: template units, DynamicUser, a private network per run, egress allowlists, polkit | real deployments on NixOS |
+| **microVM** | `nix run github:olafkfreund/siphon#microvm` | **Full** (the same module, in a small NixOS VM); the host stays untouched | trying the real thing, any Linux with KVM |
+| **Container image** | `podman run … ghcr.io/olafkfreund/siphon` | **None**: `sandbox: none`, egress not enforced; Siphon says so at start and in the portal | portal, rules, sources and commands on any container host |
+
+**microVM.**
+- The first run creates `~/.config/siphon-vm/config/` with a starter
+  `siphon.yaml`, a portal token and a webhook secret. Change the location
+  with `SIPHON_VM_DIR`.
+- The portal opens at **http://127.0.0.1:8090**.
+- State (the DB, logins, portal edits) lives in `~/.config/siphon-vm/state.img`
+  and survives restarts.
+- Edit the config, then restart the VM (Ctrl-C, then run it again).
+- From inside the VM your host is `10.0.2.2`, so a host Ollama is
+  `10.0.2.2:11434` (add it to `server.models.private_endpoints`).
+- `#microvm-unfree` also installs claude-code (a local build only).
+- KVM is required.
+
+**Container image.**
+```sh
+mkdir -p ~/siphon && cd ~/siphon        # siphon.yaml, token, secrets: world-readable (read by uid 65532)
+podman run -d --name siphon --cap-drop=all --read-only --tmpfs /tmp \
+  -p 127.0.0.1:8090:8080 -v "$PWD":/etc/siphon:ro,Z -v siphon-state:/var/lib/siphon \
+  ghcr.io/olafkfreund/siphon:latest
+```
+- Set `server.db: /var/lib/siphon/state.db` in the config (the volume).
+- `server.sandbox: systemd` is refused inside a container.
+- The image has no shell and no agent CLIs. Build your own with
+  `nix build --impure --expr '(builtins.getFlake "github:olafkfreund/siphon").lib.x86_64-linux.mkImage { agentPackages = [ … ]; }'`.
+- Images for x86_64 and aarch64 are published on version tags.
+
 ## Quick start
 
 Needs Nix with flakes. The example config needs these in the environment
