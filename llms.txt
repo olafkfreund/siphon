@@ -29,6 +29,7 @@ Key facts for an assistant:
 - [Watch an MCP server](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/mcp-watch.md): read a resource or tool, for_each over lists.
 - [Routines](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/routine.md): ordered steps, retries, steps.<id>.output, schedules via a timer.
 - [Approvals](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/approvals.md): approve or deny from CLI or portal.
+- [Drafting tasks in plain language](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/drafting.md): `siphon draft` — a model connection writes the task, Siphon validates and repairs it, you review and apply.
 
 ## Connections
 
