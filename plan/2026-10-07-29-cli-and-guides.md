@@ -447,3 +447,10 @@ self-approved; the PR lists it.
   - **`history <rev>`** shows that revision's diff; `edit` on a missing item starts a new one.
   - The eval-error mask from step 4 is done.
   - **Opus fix:** `TestWebhookRateLimitPerSource` was timing-flaky under load (the limiter refills on the real clock). It now uses a frozen clock.
+- **Step 6 (coder):**
+  - `connect` and `new` use `--url` for their own purpose, so the server URL there comes from `SIPHON_URL` or `client.yaml` (the table's `ownURL` field).
+  - `new task` refuses an existing rule, source or agent name (exit 2): applying would silently replace it, and a webhook's secret with it.
+  - New webhook sources use `signature: token` with `X-Siphon-Key`; the secret is generated client-side and shown once.
+  - The wizard's mcp source asks for URL and tool only, with no auth.
+  - `apply -o json` returns one shape for every outcome: `{dry_run, changed, applied, rev, diff, errors, warnings, apply_error}`.
+  - `test service|model <x>` are always connection tests.

@@ -34,7 +34,10 @@ type cliEnv struct {
 	edit  func(path string) error
 }
 
-func newCLIEnv(t *testing.T) *cliEnv {
+func newCLIEnv(t *testing.T) *cliEnv { return newCLIEnvCfg(t, "", "") }
+
+// newCLIEnvCfg adds settings to the server section and lines to the file's top level.
+func newCLIEnvCfg(t *testing.T, serverExtra, top string) *cliEnv {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("AGW_HOOK", "s3cret")
@@ -43,7 +46,7 @@ func newCLIEnv(t *testing.T) *cliEnv {
 		t.Setenv(k, "")
 	}
 	cfgp := filepath.Join(dir, "siphon.yaml")
-	os.WriteFile(cfgp, []byte("server: { sandbox: none, db: "+dir+"/s.db }\nsources:\n  gh: { type: webhook, secret: env:AGW_HOOK, signature: github }\nrules:\n  - { name: r1, source: gh, when: \"true\", action: { cmd: [echo, one] } }\n"), 0o600)
+	os.WriteFile(cfgp, []byte("server: { sandbox: none, db: "+dir+"/s.db"+serverExtra+" }\n"+top+"sources:\n  gh: { type: webhook, secret: env:AGW_HOOK, signature: github }\nrules:\n  - { name: r1, source: gh, when: \"true\", action: { cmd: [echo, one] } }\n"), 0o600)
 	cfg, err := config.Load(cfgp)
 	if err != nil {
 		t.Fatal(err)
@@ -199,6 +202,10 @@ func TestCLISecretsAndExitCodes(t *testing.T) {
 	}
 	if items, _ := store.ConfigItems(e.st.DB); len(items) != 0 {
 		t.Fatal("stored despite refusal")
+	}
+	// the flag is checked before the file is read
+	if code, _, er := e.do("apply", "-f", filepath.Join(e.dir, "missing.yaml"), "--secret", "sources/hk.secret=plain"); code != 2 || !strings.Contains(er, "refusing a secret") {
+		t.Fatalf("flag before file: %d %s", code, er)
 	}
 	if code, _, _ := e.do("apply", "-f", f, "--secret", "nonsense=@x"); code != 2 {
 		t.Fatalf("bad key: %d", code)

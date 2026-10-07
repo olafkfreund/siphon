@@ -448,6 +448,23 @@ type multi []string
 func (m *multi) String() string     { return strings.Join(*m, ",") }
 func (m *multi) Set(s string) error { *m = append(*m, s); return nil }
 
+// checkSecretSpecs refuses bad --secret flags before any file or stdin is read.
+func checkSecretSpecs(specs []string, stdinUsed bool) error {
+	for _, s := range specs {
+		k, v, ok := strings.Cut(s, "=")
+		switch {
+		case !ok || k == "" || !strings.Contains(k, "/") || !strings.Contains(k, "."):
+			return usageErr("bad --secret "+strconv.Quote(k)+": want <kind>/<name>.<field>=@file or =-", "for example --secret sources/hook.secret=@hook.key")
+		case v == "-" && stdinUsed:
+			return usageErr("stdin is already used for the file", "give the secret as @file instead")
+		case v != "-" && !strings.HasPrefix(v, "@"):
+			return usageErr("refusing a secret value on the command line: it would end up in your shell history and the process list",
+				"use --secret "+k+"=@file, or --secret "+k+"=- to read it from stdin")
+		}
+	}
+	return nil
+}
+
 // readSecrets resolves --secret key=@file|key=- ; a plain value is refused.
 func (c *cli) readSecrets(specs []string, stdinUsed bool) (map[string]string, error) {
 	out := map[string]string{}
@@ -496,6 +513,9 @@ func buildApply(fs *flag.FlagSet) func(*cli, []string) error {
 		if *file == "" || len(args) > 0 {
 			return usageErr("usage: siphon apply -f <file|-> [--dry-run] [--secret k=@file|k=-] [--yes]", "write items in siphon.yaml shape: `siphon help apply`")
 		}
+		if err := checkSecretSpecs(secrets, *file == "-"); err != nil { // before anything is read
+			return err
+		}
 		var b []byte
 		var err error
 		if *file == "-" {
@@ -514,62 +534,82 @@ func buildApply(fs *flag.FlagSet) func(*cli, []string) error {
 		if err != nil {
 			return err
 		}
-		body := map[string]any{"items": items}
-		if len(sec) > 0 {
-			body["secrets"] = sec
-		}
-		var check struct {
-			Diff     string   `json:"diff"`
-			Warnings []string `json:"warnings"`
-		}
-		if err := c.call("POST", "/api/config/apply?dry_run=1", body, &check); err != nil {
-			return err
-		}
-		if *dry {
-			if c.json() {
-				return c.jsonOut(map[string]any{"dry_run": true, "diff": check.Diff, "errors": []string{}, "warnings": nonNil(check.Warnings)})
-			}
-			c.showDiff(check.Diff)
-			return nil
-		}
-		if check.Diff == "" || check.Diff == "(no change)" {
-			if c.json() {
-				return c.jsonOut(map[string]any{"changed": false})
-			}
-			c.say("no change\n")
-			return nil
-		}
-		if !*yes && !c.json() {
-			if *file == "-" && !c.isTTY {
-				return usageErr("the file came from stdin, so there is nowhere to ask", "pass --yes, or --dry-run to only look")
-			}
-			c.showDiff(check.Diff)
-			ok, err := c.confirm("Apply?")
-			if err != nil {
-				return err
-			}
-			if !ok {
-				c.say("not applied\n")
-				return nil
-			}
-		}
-		var res struct {
-			Rev        int64  `json:"rev"`
-			Applied    bool   `json:"applied"`
-			ApplyError string `json:"apply_error"`
-		}
-		if err := c.call("POST", "/api/config/apply", body, &res); err != nil {
+		out, err := c.runApply(items, sec, *dry, *yes, *file == "-")
+		if err != nil {
 			return err
 		}
 		if c.json() {
-			return c.jsonOut(res)
+			return c.jsonOut(out)
 		}
-		if !res.Applied {
-			return &client.Error{Msg: fmt.Sprintf("saved as revision %d but could not be applied live: %s", res.Rev, res.ApplyError), Hint: "restart siphon to apply it, or `siphon restore` an earlier revision"}
-		}
-		c.say("applied revision %d (%d items)\n", res.Rev, len(items))
 		return nil
 	}
+}
+
+// applyOutcome is what an apply did (or, for a dry run, would do).
+type applyOutcome struct {
+	DryRun     bool     `json:"dry_run"`
+	Changed    bool     `json:"changed"`
+	Applied    bool     `json:"applied"`
+	Rev        int64    `json:"rev,omitempty"`
+	Diff       string   `json:"diff"`
+	Errors     []string `json:"errors"`
+	Warnings   []string `json:"warnings"`
+	ApplyError string   `json:"apply_error,omitempty"`
+}
+
+// runApply is dry-run, diff, confirmation, apply: the one path under
+// `apply` and `new task`. Text output is printed here; -o json is the caller's.
+func (c *cli) runApply(items []applyItem, sec map[string]string, dry, yes, stdinUsed bool) (*applyOutcome, error) {
+	body := map[string]any{"items": items}
+	if len(sec) > 0 {
+		body["secrets"] = sec
+	}
+	var check struct {
+		Diff     string   `json:"diff"`
+		Warnings []string `json:"warnings"`
+	}
+	if err := c.call("POST", "/api/config/apply?dry_run=1", body, &check); err != nil {
+		return nil, err
+	}
+	out := &applyOutcome{DryRun: dry, Diff: check.Diff, Errors: []string{}, Warnings: nonNil(check.Warnings)}
+	out.Changed = check.Diff != "" && check.Diff != "(no change)"
+	if dry {
+		c.showDiff(check.Diff)
+		return out, nil
+	}
+	if !out.Changed {
+		c.say("no change\n")
+		return out, nil
+	}
+	if !yes && !c.json() {
+		if stdinUsed && !c.isTTY {
+			return nil, usageErr("the file came from stdin, so there is nowhere to ask", "pass --yes, or --dry-run to only look")
+		}
+		c.showDiff(check.Diff)
+		ok, err := c.confirm("Apply?")
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			c.say("not applied\n")
+			out.Changed = false
+			return out, nil
+		}
+	}
+	var res struct {
+		Rev        int64  `json:"rev"`
+		Applied    bool   `json:"applied"`
+		ApplyError string `json:"apply_error"`
+	}
+	if err := c.call("POST", "/api/config/apply", body, &res); err != nil {
+		return nil, err
+	}
+	out.Rev, out.Applied, out.ApplyError = res.Rev, res.Applied, res.ApplyError
+	if !res.Applied {
+		return nil, &client.Error{Msg: fmt.Sprintf("saved as revision %d but could not be applied live: %s", res.Rev, res.ApplyError), Hint: "restart siphon to apply it, or `siphon restore` an earlier revision"}
+	}
+	c.say("applied revision %d (%d items)\n", res.Rev, len(items))
+	return out, nil
 }
 
 func (c *cli) showDiff(d string) {

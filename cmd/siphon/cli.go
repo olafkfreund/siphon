@@ -43,8 +43,12 @@ type globals struct {
 	quiet                  bool
 }
 
-func (g *globals) register(fs *flag.FlagSet) {
-	fs.StringVar(&g.url, "url", "", "siphon URL (default: SIPHON_URL, then client.yaml)")
+// register adds the shared flags; a command that uses -url for its own
+// purpose (connect, new) leaves the server URL to SIPHON_URL / client.yaml.
+func (g *globals) register(fs *flag.FlagSet, ownURL bool) {
+	if !ownURL {
+		fs.StringVar(&g.url, "url", "", "siphon URL (default: SIPHON_URL, then client.yaml)")
+	}
 	fs.StringVar(&g.tokenFile, "token-file", "", "file holding the API token (default: SIPHON_TOKEN_FILE, SIPHON_TOKEN, then client.yaml)")
 	fs.StringVar(&g.output, "o", "text", "output format: text or json")
 	fs.BoolVar(&g.quiet, "quiet", false, "print only data and errors, no progress messages")
@@ -64,6 +68,7 @@ type command struct {
 	Name, Summary, Usage, Example, Mode string
 	build                               func(fs *flag.FlagSet) func(c *cli, args []string) error
 	extra                               []flagDoc
+	ownURL                              bool // -url means something else here
 }
 
 func cfgFlag() flagDoc {
@@ -87,6 +92,10 @@ func commands() []command {
 		{Name: "jobs", Usage: "jobs [ls|show <id>] [-state s]", Mode: "client", build: buildJobs, Summary: "list jobs, or show one (with -config: the local `jobs ls`)", Example: "siphon jobs ls -state pending_approval"},
 		{Name: "approve", Usage: "approve <job id>", Mode: "client", build: buildDecide("approve"), Summary: "approve a pending job (with -config: local)", Example: "siphon approve 42"},
 		{Name: "deny", Usage: "deny <job id>", Mode: "client", build: buildDecide("deny"), Summary: "deny a pending job (with -config: local)", Example: "siphon deny 42"},
+		{Name: "connect", Usage: "connect github|gitlab|aws|model|login [flags]", Mode: "client", build: buildConnect, ownURL: true, Summary: "connect a service or model: flags for the fields, prompts for the rest, secrets only via - or @file", Example: "siphon connect github --name gh --token @token.txt --webhook"},
+		{Name: "test", Usage: "test <rule> [event.json|-] [--last] | test service|model <name>", Mode: "client", build: buildTest, Summary: "dry-run a rule on an event or the last stored one; or check a service or model connection", Example: "siphon test disk-full --last"},
+		{Name: "why", Usage: "why <rule>", Mode: "client", build: buildWhy, Summary: "why a rule did or didn't fire: a checklist, the likely reason and what to run next", Example: "siphon why disk-full"},
+		{Name: "new", Usage: "new task [--name n --source s|--webhook w|--poll p --url u ...] [--print]", Mode: "client", build: buildNew, ownURL: true, Summary: "build a rule (and its source) with a wizard or flags, then dry-run, confirm and apply", Example: "siphon new task --name alert --webhook alerts --when 'event.sev == \"high\"' --cmd '[\"notify\"]' --print"},
 		{Name: "help", Usage: "help [command] [--json]", Mode: "client", build: buildHelp, Summary: "usage; --json is the machine-readable command list", Example: "siphon help --json"},
 
 		{Name: "validate", Usage: "validate [-config f] [-v] [-file-only]", Mode: "local", Summary: "check the config (file + portal edits; -file-only: file alone; -v: print egress allowlists)", Example: "siphon validate -config siphon.yaml",
@@ -140,7 +149,7 @@ func flagDocs(fs *flag.FlagSet, skip map[string]bool) []flagDoc {
 
 func globalFlagDocs() []flagDoc {
 	fs := flag.NewFlagSet("", flag.ContinueOnError)
-	(&globals{}).register(fs)
+	(&globals{}).register(fs, false)
 	return flagDocs(fs, nil)
 }
 
@@ -190,6 +199,7 @@ type cli struct {
 	out, errw  io.Writer
 	isTTY      bool // stdin is a terminal: prompts allowed
 	rd         *bufio.Reader
+	stdinUsed  bool
 	cl         *client.Client
 	runEditor  func(path string) error // tests replace it
 	secretRead func() (string, error)  // no-echo prompt; tests replace it
@@ -304,7 +314,7 @@ func (c *cli) run(args []string) int {
 	}
 	fs := flag.NewFlagSet(cmd.Name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	c.g.register(fs)
+	c.g.register(fs, cmd.ownURL)
 	run := cmd.build(fs)
 	pos, err := parseArgs(fs, args[1:])
 	if errors.Is(err, flag.ErrHelp) {
