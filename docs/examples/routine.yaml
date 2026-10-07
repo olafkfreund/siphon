@@ -1,0 +1,23 @@
+# example: routine - several steps in order, with retries and conditions.
+# needs:   agents/summarise (siphon example agent)
+# secrets: sources/report-hook.secret
+# apply:   siphon apply -f routine.yaml --secret sources/report-hook.secret=-
+sources:
+  report-hook:
+    type: webhook
+    signature: sha256
+    signature_header: X-Signature
+routines:
+  report:
+    steps:
+      - { id: fetch, cmd: [curl, -fsS, https://metrics.example.com/api/summary], retry: { attempts: 3, base: 5s, factor: 2 } }
+      - { id: summarise, agent: summarise, if: 'steps.fetch.exit == 0', timeout: 5m }
+      - { id: done, cmd: [echo, "report finished"], continue_on_error: true }
+rules:
+  - name: report-requested
+    source: report-hook
+    when: 'event.kind == "report"'
+    on: each
+    id: event.id
+    cooldown: 1m                    # the routine contains an agent step
+    action: { routine: report }

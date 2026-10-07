@@ -1,0 +1,22 @@
+# example: github-pr-agent - an agent reviews each new pull request.
+# needs:   sources/github and sources/github-hooks (siphon connect github --webhook)
+#          credentials/claude-max (siphon connect login claude)
+# apply:   siphon apply -f github-pr-agent.yaml
+agents:
+  pr-reviewer:
+    kind: claude
+    credential: claude-max
+    prompt: "Review pull request #{{.event.number}} in {{.event.repository.full_name}}. Reply with a short list of findings. Never push or merge."
+    mcp: [github]                   # the only tools it sees
+    allowed_tools: [mcp__github__get_pull_request, mcp__github__get_pull_request_diff]
+    max_turns: 15
+    max_budget_usd: 1
+    timeout: 15m
+rules:
+  - name: review-new-prs
+    source: github-hooks
+    when: 'headers["x-github-event"] == "pull_request" && event.action == "opened"'
+    on: each
+    id: event.pull_request.id
+    cooldown: 1m                    # mandatory for agent actions
+    action: { agent: pr-reviewer }

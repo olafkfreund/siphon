@@ -1,0 +1,12 @@
+# example: agent - an agent on a model connection (no subscription needed).
+# needs:   credentials/ollama-local (siphon connect model ollama)
+# apply:   siphon apply -f agent.yaml
+agents:
+  summarise:
+    kind: model                     # siphon's built-in loop; or claude | codex | agy
+    credential: ollama-local
+    model: llama3.2
+    prompt: "Summarise this event in one sentence: {{.event}}"
+    max_turns: 3
+    timeout: 5m
+    # approve defaults to true: a human approves each run (siphon approve <job>)

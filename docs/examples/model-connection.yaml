@@ -1,0 +1,8 @@
+# example: model-connection - a model endpoint agents can run on.
+# Prefer `siphon connect model ollama`, which also tests it and lists models.
+# A LAN or loopback URL must be listed in server.models.private_endpoints in siphon.yaml.
+# apply:   siphon apply -f model-connection.yaml
+credentials:
+  ollama-local:
+    provider: ollama
+    url: http://127.0.0.1:11434
