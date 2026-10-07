@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 20
 author: olafkfreund
 ---
@@ -113,3 +113,13 @@ the only choices. This leaves out the people the owner wants to reach:
    "Test connection"? Proposal: live in the editor, cached for a minute.
 5. **Naming on the page:** keep "Logins", or rename it "Connections" now
    that it covers model endpoints too? Proposal: "Connections".
+
+## Decisions at approval (2026-10-07)
+
+The owner approved the proposals:
+1. (b) a built-in agent loop.
+2. Anthropic-compatible endpoints come later.
+3. Presets: Ollama, LM Studio, OpenRouter, Groq and Mistral, plus a generic
+   OpenAI-compatible entry.
+4. Live model discovery in the editor, cached for a minute.
+5. The page is renamed "Connections".
