@@ -39,6 +39,14 @@ jobs:
           extra_nix_config: system-features = nixos-test benchmark big-parallel kvm
       - run: nix build -L .#checks.x86_64-linux.vm
 
+  container:
+    name: OCI image (podman, rootless, read-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - run: ci/container-test.sh
+
   devenv:
     name: devenv test
     runs-on: ubuntu-latest

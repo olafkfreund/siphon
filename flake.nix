@@ -31,7 +31,22 @@
           meta.mainProgram = "siphon";
         };
         default = siphon;
+        # OCI image (stream: `nix build .#image && ./result | podman load`).
+        image = import ./nix/image.nix { inherit pkgs siphon; };
         agentgw = siphon; # legacy-name
+      });
+
+      # Build your own image with agent CLIs: lib.<system>.mkImage { agentPackages = [ ... ]; }
+      lib = forAll (pkgs: {
+        mkImage =
+          args:
+          import ./nix/image.nix (
+            {
+              inherit pkgs;
+              siphon = self.packages.${pkgs.stdenv.hostPlatform.system}.siphon;
+            }
+            // args
+          );
       });
 
       nixosModules.default = import ./nix/module.nix self;
