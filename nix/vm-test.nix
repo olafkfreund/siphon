@@ -51,6 +51,9 @@ pkgs.testers.runNixOSTest {
       environment.etc."siphon/hook".text = "hook-secret";
 
       environment.etc."siphon/stub-token".text = stubToken;
+      environment.etc."siphon/gl-token".text = "gl-hook-token-123";
+      # Standard Webhooks secret: whsec_ + base64 of the key bytes.
+      environment.etc."siphon/std-secret".text = "whsec_c2lwaG9uLXN0YW5kYXJkLXdlYmhvb2tzLWtleQ==";
       services.siphon = {
         enable = true;
         mcpPackages.stub = {
@@ -106,6 +109,18 @@ pkgs.testers.runNixOSTest {
             };
             poll = "1h";
             allow_private = true;
+          };
+          # Webhook auth modes: a GitLab-style header token and Standard Webhooks.
+          sources.glhook = {
+            type = "webhook";
+            signature = "token";
+            token_header = "X-Gitlab-Token";
+            secret = "file:/etc/siphon/gl-token";
+          };
+          sources.stdhook = {
+            type = "webhook";
+            signature = "standard-webhooks";
+            secret = "file:/etc/siphon/std-secret";
           };
           # A stdio MCP server with a secret env: agents reach it via the bridge.
           sources.stubsrc = {
@@ -246,6 +261,22 @@ pkgs.testers.runNixOSTest {
               id = "event.n";
               cooldown = "1s";
               action.agent = "probe";
+            }
+            {
+              name = "gl-event";
+              source = "glhook";
+              when = ''event.object_kind == "merge_request"'';
+              on = "each";
+              id = "event.n";
+              action.cmd = [ "echo" "gitlab mr {{.event.n}}" ];
+            }
+            {
+              name = "std-event";
+              source = "stdhook";
+              when = ''event.type == "ping"'';
+              on = "each";
+              id = "event.n";
+              action.cmd = [ "echo" "standard {{.event.n}}" ];
             }
             {
               name = "bridge-agent";
@@ -564,6 +595,31 @@ pkgs.testers.runNixOSTest {
         out = machine.succeed("sqlite3 /var/lib/siphon/state.db \"select output from jobs where rule='model-agent'\"")
         assert "final: echo: hi from the model" in out, out
         external.succeed("grep -q 'hi from the model' /tmp/mcp-calls")
+
+    with subtest("webhook auth: GitLab token header and Standard Webhooks"):
+        import base64, hashlib, hmac, json, time
+        def post(path, body, headers):
+            h = " ".join(f"-H '{k}: {v}'" for k, v in headers.items())
+            return machine.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' -X POST {h} -d '{body}' http://127.0.0.1:8080/hook/{path}").strip()
+        gl = '{"object_kind":"merge_request","n":801}'
+        assert post("glhook", gl, {"X-Gitlab-Token": "wrong"}) == "401"
+        assert post("glhook", gl, {}) == "401"
+        assert post("glhook", gl, {"X-Gitlab-Token": "gl-hook-token-123"}) == "202"
+        key = base64.b64decode("c2lwaG9uLXN0YW5kYXJkLXdlYmhvb2tzLWtleQ==")
+        body, mid, ts = '{"type":"ping","n":802}', "msg_vm_1", str(int(time.time()))
+        sig = "v1," + base64.b64encode(hmac.new(key, f"{mid}.{ts}.{body}".encode(), hashlib.sha256).digest()).decode()
+        hdr = {"webhook-id": mid, "webhook-timestamp": ts, "webhook-signature": sig}
+        assert post("stdhook", body, {**hdr, "webhook-signature": "v1,AAAA"}) == "401"
+        assert post("stdhook", body, {**hdr, "webhook-timestamp": str(int(time.time()) - 900)}) == "401"
+        assert post("stdhook", body, hdr) == "202"
+        assert post("stdhook", body, hdr) != "202", "replayed delivery accepted"
+        for rule, text in [("gl-event", "gitlab mr 801"), ("std-event", "standard 802")]:
+            machine.wait_until_succeeds(
+                f"sqlite3 /var/lib/siphon/state.db \"select output from jobs where rule='{rule}' and state='done'\" | grep -q '{text}'",
+                timeout=60,
+            )
+        logs = machine.succeed("journalctl -u siphon --no-pager")
+        assert "gl-hook-token-123" not in logs, "webhook token in the logs"
 
     with subtest("MCP bridge: a stdio server's secret reaches the server, never the agent"):
         assert hook('{"kind":"bridge","n":700}') == "202"
