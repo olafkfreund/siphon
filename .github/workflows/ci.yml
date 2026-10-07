@@ -38,6 +38,7 @@ jobs:
         with:
           extra_nix_config: system-features = nixos-test benchmark big-parallel kvm
       - run: nix build -L .#checks.x86_64-linux.vm
+      - run: ci/microvm-test.sh
 
   container:
     name: OCI image (podman, rootless, read-only)

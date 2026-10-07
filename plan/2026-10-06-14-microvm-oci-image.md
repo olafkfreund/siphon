@@ -160,3 +160,14 @@ Revert the merge. The NixOS module behaviour without `configFile` is
 unchanged. Remove the microvm flake input with the revert.
 
 ## Deviations log
+- **Step 2 (Opus):** with `configFile` set, `settings` is ignored (with a warning), and the file must set `server.db`, `actions_dir` and `egress.socket` itself (documented on the option). Eval check `checks.<sys>.config-file`.
+- **Step 3 (Opus):**
+  - The image is ~23 MB.
+  - Env includes `container=oci` and a `PATH` for any added agent packages.
+  - **Mounted config files must be world-readable** (uid 65532 inside; with rootless podman the host owner maps to the container's root). The README says so.
+  - The CI check is `ci/container-test.sh`, which passed locally and also exercises step 1's validate error.
+- **Step 4 (Opus):**
+  - **`qemu.machine = "q35"`,** not microvm.nix's default `microvm` machine: that hung in early kernel boot (decompression, 100% CPU) on the owner's AMD Threadripper 3995WX. q35 boots in about 8 s.
+  - **The port is fixed at 127.0.0.1:8090**, since microvm.nix bakes `forwardPorts` at build time. `SIPHON_VM_PORT` was dropped, and so was `SIPHON_VM_NOKVM`: the runner always passes `-enable-kvm`, and the wrapper refuses to start without `/dev/kvm`.
+  - The shared `config/` dir is 0755 inside a 0700 `$SIPHON_VM_DIR`, so the guest's siphon user can read it over 9p and other host users can't. An earlier 0700 made the config unreadable in the guest.
+  - Verified locally: boot, portal 200, a webhook job is done, a restart keeps the job (the `state.img` volume). The CI check is `ci/microvm-test.sh` in the `vm` job.

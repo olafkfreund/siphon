@@ -2,14 +2,23 @@
   description = "Siphon: draws events in from MCP servers and APIs, jets agents out (sources -> rules -> actions)";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.microvm = {
+    url = "github:microvm-nix/microvm.nix";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      microvm,
+    }:
     let
       systems = [
         "x86_64-linux"
         "aarch64-linux"
       ];
+      microvmFor = import ./nix/microvm.nix { inherit self microvm nixpkgs; };
       forAll = f: nixpkgs.lib.genAttrs systems (s: f nixpkgs.legacyPackages.${s});
     in
     {
@@ -31,6 +40,13 @@
           meta.mainProgram = "siphon";
         };
         default = siphon;
+        # Siphon in a microVM (full sandbox, host untouched): nix run .#microvm
+        microvm = (microvmFor { system = pkgs.stdenv.hostPlatform.system; }).run;
+        microvm-unfree =
+          (microvmFor {
+            system = pkgs.stdenv.hostPlatform.system;
+            allowUnfreeAgents = true;
+          }).run;
         # OCI image (stream: `nix build .#image && ./result | podman load`).
         image = import ./nix/image.nix { inherit pkgs siphon; };
         agentgw = siphon; # legacy-name
