@@ -32,12 +32,25 @@
         };
         default = siphon;
         agentgw = siphon; # legacy-name
+        # AWS MCP servers for services.siphon.aws (pinned; see nix/pkgs).
+        aws-cloudwatch-mcp-server = pkgs.callPackage ./nix/pkgs/aws-cloudwatch-mcp-server.nix { };
+        aws-documentation-mcp-server = pkgs.callPackage ./nix/pkgs/aws-documentation-mcp-server.nix { };
       });
 
       nixosModules.default = import ./nix/module.nix self;
 
       checks = forAll (pkgs: {
         vm = import ./nix/vm-test.nix { inherit self pkgs; };
+        # Both pinned AWS MCP servers start over stdio and list tools, offline.
+        aws-mcp-smoke = pkgs.runCommand "aws-mcp-smoke" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+          export HOME=$TMPDIR AWS_ACCESS_KEY_ID=AKIAFAKE AWS_SECRET_ACCESS_KEY=fake AWS_SESSION_TOKEN=fake
+          export AWS_REGION=eu-west-1 AWS_EC2_METADATA_DISABLED=true FASTMCP_LOG_LEVEL=ERROR
+          for bin in ${pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.aws-cloudwatch-mcp-server} \
+                     ${pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.aws-documentation-mcp-server}; do
+            python3 ${./nix/aws-mcp-smoke.py} "$bin"
+          done
+          touch $out
+        '';
         # The old services.agentgw option path still evaluates to siphon. # legacy-name
         legacy-option =
           let
