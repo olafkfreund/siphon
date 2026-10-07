@@ -1,0 +1,68 @@
+{{define "services"}}<div class="top"><div><h1>Services</h1><div class="muted">Connect GitHub and GitLab: Siphon draws their events in and gives your agents their tools. Tokens are stored write-only.</div></div></div>
+{{with .ServiceForm}}{{if .Err}}<div class="banner" role="alert">{{.Err}}</div>{{end}}{{end}}
+
+<div class="grid g2e mb">
+<section class="card svc" aria-labelledby="gh-h">
+  <div class="acct-head"><span class="svc-mark gh" aria-hidden="true">{{template "icon" "src"}}</span><h2 id="gh-h">GitHub</h2></div>
+  <p class="muted small">Agent tools through GitHub's MCP server, and pull request or issue events by webhook.</p>
+  <form method="post" action="/services/github" class="login-add">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <label class="f">Name<input name="name" value="github" required pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}" autocomplete="off"><span class="hint">Agents list it in <code>mcp:</code>; tools are named <code>mcp__&lt;name&gt;__…</code>.</span></label>
+    <label class="f">Token<input type="password" name="token" required autocomplete="off" spellcheck="false"><span class="hint">A <b>fine-grained</b> token for only the repos agents need: Contents, Pull requests, Issues: read (write only if agents should comment). Metadata: read.</span></label>
+    <fieldset class="f"><legend>MCP server</legend><span class="seg">
+      <label><input type="radio" name="mode" value="remote" checked><span>Remote (GitHub-hosted)</span></label>
+      <label><input type="radio" name="mode" value="local"><span>Local (Nix-pinned)</span></label></span>
+      <span class="hint">Local runs <code>github-mcp-server</code> in its own sandbox; needed for GitHub Enterprise.</span></fieldset>
+    <label class="check"><input type="checkbox" name="webhook" value="on" checked> Also receive webhooks (pull requests, issues, pushes)</label>
+    <div class="row-actions"><button class="btn primary">{{template "icon" "check"}}Connect GitHub</button></div>
+  </form>
+</section>
+
+<section class="card svc" aria-labelledby="gl-h">
+  <div class="acct-head"><span class="svc-mark gl" aria-hidden="true">{{template "icon" "src"}}</span><h2 id="gl-h">GitLab</h2></div>
+  <p class="muted small">Open merge requests polled from a project, and events by webhook. gitlab.com or self-hosted.</p>
+  <form method="post" action="/services/gitlab" class="login-add">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <label class="f">Name<input name="name" value="gitlab" required pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}" autocomplete="off"></label>
+    <label class="f">GitLab URL<input name="base" placeholder="https://gitlab.com" spellcheck="false" autocomplete="off"><span class="hint">Self-hosted on your LAN? List its <code>host:port</code> once in <code>server.services.private_endpoints</code>.</span></label>
+    <label class="f">Project<input name="project" required placeholder="group/project" spellcheck="false" autocomplete="off"></label>
+    <label class="f">Token<input type="password" name="token" required autocomplete="off" spellcheck="false"><span class="hint">A <b>project access token</b> with <code>read_api</code>.</span></label>
+    <label class="check"><input type="checkbox" name="webhook" value="on" checked> Also receive webhooks (merge requests, pipelines)</label>
+    <div class="row-actions"><button class="btn primary">{{template "icon" "check"}}Connect GitLab</button></div>
+  </form>
+</section>
+</div>
+
+<h2 class="section-h">{{template "icon" "webhook"}} Connected</h2>
+<div class="grid g3">
+{{range .Services}}<article class="card acct" aria-label="{{.Service}} source {{.Name}}">
+  <div class="acct-head"><span class="pill tag">{{if eq .Service "github"}}GitHub{{else}}GitLab{{end}}</span><span class="sp"></span><span class="muted small">{{.Detail}}</span></div>
+  <h2 class="acct-name">{{.Name}}</h2>
+  <div id="svc-{{.Name}}"></div>
+  <div class="row-actions">
+    {{if ne .Kind "webhook"}}<form method="post" action="/services/{{pe .Name}}/test" hx-post="/services/{{pe .Name}}/test" hx-target="#svc-{{.Name}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{template "icon" "play"}}Test</button></form>{{end}}
+    <a class="btn sm" href="/config/sources/{{pe .Name}}">Edit</a>
+  </div>
+</article>
+{{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>Nothing connected yet.</section>{{end}}
+</div>{{end}}
+
+{{define "servicedone"}}{{with .ServiceDone}}<div class="top"><div><h1>{{.Service}} connected</h1><div class="muted">Source <b>{{.Name}}</b> is saved and live. This page is shown <b>once</b>.</div></div></div>
+{{if .Hook}}<section class="card mb" aria-labelledby="hook-h"><h2 id="hook-h">{{template "icon" "webhook"}} Finish the webhook in {{.Service}}</h2>
+  <div class="banner" role="alert"><b>Copy the secret now.</b> It is stored write-only and won't be shown again.</div>
+  <dl>
+    <dt>Payload URL</dt><dd><code id="hook-url" class="wrap">{{.HookURL}}</code> <button type="button" class="btn sm" data-action="copy" data-target="hook-url">{{template "icon" "copy"}}Copy</button></dd>
+    <dt>{{if .HookHeader}}Secret token{{else}}Secret{{end}}</dt><dd><code id="hook-secret" class="wrap">{{.HookSecret}}</code> <button type="button" class="btn sm" data-action="copy" data-target="hook-secret">{{template "icon" "copy"}}Copy</button></dd>
+  </dl>
+  {{if eq .Service "GitHub"}}<ol class="small"><li>Repository → <b>Settings → Webhooks → Add webhook</b>.</li><li>Payload URL as above, content type <code>application/json</code>, Secret as above.</li><li>Choose the events (e.g. Pull requests, Issues) and save.</li></ol>
+  {{else}}<ol class="small"><li>Project → <b>Settings → Webhooks → Add new webhook</b>.</li><li>URL as above, <b>Secret token</b> as above.</li><li>Choose triggers (e.g. Merge request events, Pipeline events) and save.</li></ol>{{end}}
+  {{if not (hasprefix .HookURL "http")}}<p class="muted small">Set <code>server.public_url</code> in <code>siphon.yaml</code> to show the full address. The provider must reach Siphon over HTTPS, usually through a reverse proxy; for local testing use <code>gh webhook forward</code>.</p>{{end}}
+</section>{{end}}
+{{if .ReadTools}}<section class="card mb" aria-labelledby="tools-h"><h2 id="tools-h">{{template "icon" "agent"}} Give agents these tools</h2>
+  <p class="small">Add <code>mcp: [{{.Name}}]</code> to an agent and one of these as its <code>allowed_tools</code>:</p>
+  <div class="muted small">Read-only (recommended)</div><pre id="tools-ro">{{.ReadTools}}</pre>
+  <div class="muted small mt">Read-write (comments, reviews, issues)</div><pre id="tools-rw">{{.WriteTools}}</pre>
+</section>{{end}}
+<a class="btn" href="/services">Back to Services</a>{{end}}{{end}}
+
+{{define "svctest"}}{{if .Err}}<p class="err small">{{template "icon" "x"}} {{.Err}}</p>{{else}}<p class="small ok-text">{{template "icon" "check"}} Token works · {{.User}}{{if .Latency}} · {{.Latency}}{{end}}</p>{{end}}{{end}}
