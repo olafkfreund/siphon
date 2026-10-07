@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"time"
 )
 
@@ -50,8 +51,32 @@ func guardedClient(allowPrivate bool, timeout time.Duration, maxBody int64, stre
 	return &http.Client{Transport: limitedTransport{base: transport, limit: maxBody}, Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
+// Mode is how much of the private range a guarded dial may reach.
+type Mode int
+
+const (
+	Public             Mode = iota // global unicast only
+	Private                        // anything (allow_private)
+	PrivateNoLinkLocal             // private, loopback and LAN, but never link-local or metadata
+)
+
+// metadataAddrs are cloud metadata endpoints outside the link-local ranges.
+var metadataAddrs = []netip.Addr{
+	netip.MustParseAddr("fd00:ec2::254"),
+	netip.MustParseAddr("168.63.129.16"),
+	netip.MustParseAddr("100.100.100.200"),
+}
+
 // ResolveAllowed resolves host and rejects it if any returned address is blocked.
 func ResolveAllowed(ctx context.Context, host string, allowPrivate bool) ([]netip.Addr, error) {
+	if allowPrivate {
+		return ResolveAllowedMode(ctx, host, Private)
+	}
+	return ResolveAllowedMode(ctx, host, Public)
+}
+
+// ResolveAllowedMode is ResolveAllowed with a Mode.
+func ResolveAllowedMode(ctx context.Context, host string, mode Mode) ([]netip.Addr, error) {
 	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		return nil, err
@@ -66,12 +91,20 @@ func ResolveAllowed(ctx context.Context, host string, allowPrivate bool) ([]neti
 			return nil, errors.New("invalid resolved IP")
 		}
 		addr = addr.Unmap()
-		if blockedIP(addr, allowPrivate) {
+		if blockedMode(addr, mode) {
 			return nil, fmt.Errorf("blocked address: %s", addr)
 		}
 		addrs = append(addrs, addr)
 	}
 	return addrs, nil
+}
+
+func blockedMode(addr netip.Addr, mode Mode) bool {
+	if mode == PrivateNoLinkLocal {
+		addr = addr.Unmap()
+		return addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || slices.Contains(metadataAddrs, addr)
+	}
+	return blockedIP(addr, mode == Private)
 }
 
 func blockedIP(addr netip.Addr, allowPrivate bool) bool {

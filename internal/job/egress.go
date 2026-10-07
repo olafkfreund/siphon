@@ -104,7 +104,7 @@ func (p *Pipeline) egressFor(cfg *config.Config, jobID int64, allow []config.Hos
 	}
 	entries := make([]egress.Entry, len(allow))
 	for i, hp := range allow {
-		entries[i] = egress.Entry{Host: hp.Host, Port: hp.Port, AllowPrivate: hp.AllowPrivate}
+		entries[i] = egress.Entry{Host: hp.Host, Port: hp.Port, AllowPrivate: hp.AllowPrivate, NoLinkLocal: hp.NoLinkLocal}
 	}
 	url, blocked, release := px.Register(entries)
 	return &action.EgressEnv{ProxyURL: url, Socket: cfg.Server.Egress.Socket}, func() string {

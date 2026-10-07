@@ -217,3 +217,7 @@ the new providers and `kind: model` disappear.
     - a 60 s cache.
   - The agent editor's `model` field suggests models from the chosen connection (`GET /connections/models-for`, htmx datalist). The `kind` select gains `model`.
   - `app.js` sets the URL placeholder from the selected tile (progressive). An empty URL uses the preset's default on the server.
+- **Step 2 (coder):**
+  - Modes are `source.Public`, `Private` and `PrivateNoLinkLocal`. The last also refuses multicast link-local and the metadata addresses `fd00:ec2::254`, `168.63.129.16` (Azure) and `100.100.100.200` (Alibaba).
+  - The proxy's pass case is tested with loopback, since a `10.x` address would hang on dial.
+  - The web test and model-list code switched to `PrivateNoLinkLocal` (Opus).

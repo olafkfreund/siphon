@@ -96,3 +96,29 @@ func TestGuardedClientDoesNotRedirect(t *testing.T) {
 		t.Fatalf("status=%d redirected=%v", resp.StatusCode, redirected)
 	}
 }
+
+func TestResolveAllowedMode(t *testing.T) {
+	ctx := context.Background()
+	for _, tt := range []struct {
+		host string
+		mode Mode
+		ok   bool
+	}{
+		{"1.1.1.1", Public, true},
+		{"10.0.0.5", Public, false},
+		{"10.0.0.5", PrivateNoLinkLocal, true},
+		{"127.0.0.1", PrivateNoLinkLocal, true},
+		{"192.168.1.1", PrivateNoLinkLocal, true},
+		{"169.254.169.254", PrivateNoLinkLocal, false},
+		{"169.254.0.1", PrivateNoLinkLocal, false},
+		{"::ffff:169.254.169.254", PrivateNoLinkLocal, false},
+		{"fe80::1", PrivateNoLinkLocal, false},
+		{"fd00:ec2::254", PrivateNoLinkLocal, false},
+		{"168.63.129.16", PrivateNoLinkLocal, false},
+		{"169.254.169.254", Private, true},
+	} {
+		if _, err := ResolveAllowedMode(ctx, tt.host, tt.mode); (err == nil) != tt.ok {
+			t.Errorf("%s mode %d: err %v, want ok=%v", tt.host, tt.mode, err, tt.ok)
+		}
+	}
+}

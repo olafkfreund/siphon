@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
@@ -138,14 +137,11 @@ func (s *server) listModels(ctx context.Context, name string, fresh bool) connTe
 	private := cfg.PrivateEndpoint(host, port)
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	addrs, err := source.ResolveAllowed(ctx, host, private)
-	if err == nil && private {
-		for _, a := range addrs {
-			if a.IsLinkLocalUnicast() || a == netip.MustParseAddr("fd00:ec2::254") {
-				err = errors.New("link-local")
-			}
-		}
+	mode := source.Public
+	if private {
+		mode = source.PrivateNoLinkLocal // listed endpoint: private yes, link-local/metadata never
 	}
+	addrs, err := source.ResolveAllowedMode(ctx, host, mode)
 	if err != nil {
 		t.Err = "this endpoint isn't reachable from Siphon: public addresses only, unless listed in server.models.private_endpoints"
 		return t
