@@ -38,7 +38,7 @@ rules:
 	if err != nil {
 		t.Fatal(err)
 	}
-	todo := strings.Join(Todo(items, inv), "\n")
+	todo := strings.Join(Todo(items, inv, nil), "\n")
 	for _, want := range []string{"secret sources/hook.secret", "connection missing does not exist", "source nope", "siphon approve"} {
 		if !strings.Contains(todo, want) {
 			t.Errorf("todo lacks %q:\n%s", want, todo)
@@ -52,7 +52,7 @@ rules:
 	if !slices.Equal(WebhookNeedsSecret(items), []string{"sources/hook"}) {
 		t.Errorf("%v", WebhookNeedsSecret(items))
 	}
-	if len(Todo(nil, nil)) != 0 {
+	if len(Todo(nil, nil, nil)) != 0 {
 		t.Error("an empty file has a to-do")
 	}
 }

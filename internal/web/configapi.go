@@ -203,7 +203,7 @@ func (s *server) write(r *http.Request, actor, summary string, rev *int64, mutat
 		if err != nil {
 			return nil, 0, err
 		}
-		return map[string]any{"diff": e.diff, "errors": []string{}, "warnings": []string{}}, 200, nil
+		return map[string]any{"diff": e.diff, "errors": []string{}, "warnings": newWarnings(s.Config(), e.cfg)}, 200, nil
 	}
 	id, _, applyErr, err := s.commit(actor, summary, rev, mutate, pending)
 	if err != nil {
@@ -401,4 +401,20 @@ func tagItem(line string, items []applyItem) string {
 		}
 	}
 	return line
+}
+
+// newWarnings are the warnings the change adds: those of next that the live
+// config does not already have.
+func newWarnings(live, next *config.Config) []string {
+	have := map[string]bool{}
+	for _, w := range live.Warnings() {
+		have[w] = true
+	}
+	out := []string{}
+	for _, w := range next.Warnings() {
+		if !have[w] {
+			out = append(out, w)
+		}
+	}
+	return out
 }

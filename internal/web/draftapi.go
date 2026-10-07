@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -101,15 +102,37 @@ func firstNonEmpty(a, b string) string {
 }
 
 // draftCheck is apply's dry-run over a drafted file. Webhook sources get a
-// stand-in secret, since the real one is generated when the file is applied.
-func (s *server) draftCheck(_ context.Context, y string) (string, []string, []string) {
+// stand-in secret, since the real one is generated when the file is applied;
+// service sources the file uses but that don't exist (github-hooks, ...) get a
+// stand-in too, and are reported as placeholders.
+func (s *server) draftCheck(_ context.Context, y string) draft.Checked {
 	items, err := applyfile.Parse([]byte(y))
 	if err != nil {
-		return "", []string{err.Error()}, nil
+		return draft.Checked{Errors: []string{err.Error()}}
 	}
+	cfg := s.Config()
+	type stand struct {
+		kind, name, yaml string
+		secrets          map[string]string
+	}
+	var stands []stand
 	needs := map[string]bool{}
 	for _, n := range draft.WebhookNeedsSecret(items) {
 		needs[n] = true
+	}
+	for _, it := range items {
+		if needs[it.Kind+"/"+it.Name] {
+			stands = append(stands, stand{it.Kind, it.Name, it.YAML, map[string]string{"secret": "placeholder"}})
+		} else {
+			stands = append(stands, stand{it.Kind, it.Name, it.YAML, nil})
+		}
+	}
+	var out draft.Checked
+	for _, name := range missingServiceSources(items, cfg) {
+		for _, p := range servicePlaceholders(name, cfg) {
+			stands = append(stands, stand{p.kind, p.name, p.yaml, p.secrets})
+		}
+		out.Placeholders = append(out.Placeholders, "sources/"+name)
 	}
 	var muts []func(map[itemKey]store.ConfigItem)
 	var pending []pendingSecret
@@ -120,19 +143,22 @@ func (s *server) draftCheck(_ context.Context, y string) (string, []string, []st
 			continue
 		}
 		bad = append(bad, itemShape(it)...)
-		text := it.YAML
-		if needs[it.Kind+"/"+it.Name] {
+	}
+	for _, st := range stands {
+		text := st.yaml
+		if st.secrets != nil {
 			var ps []pendingSecret
-			if text, ps, err = withSecrets(it.Kind, it.Name, text, map[string]string{"secret": "placeholder"}, s.Config().Server.DB); err != nil {
-				bad = append(bad, it.Kind+"/"+it.Name+": "+err.Error())
+			if text, ps, err = withSecrets(st.kind, st.name, text, st.secrets, cfg.Server.DB); err != nil {
+				bad = append(bad, st.kind+"/"+st.name+": "+err.Error())
 				continue
 			}
 			pending = append(pending, ps...)
 		}
-		muts = append(muts, putItem(it.Kind, it.Name, text))
+		muts = append(muts, putItem(st.kind, st.name, text))
 	}
 	if len(bad) > 0 {
-		return "", bad, nil
+		out.Errors = bad
+		return out
 	}
 	e, err := s.dryRun(nil, func(m map[itemKey]store.ConfigItem) {
 		for _, f := range muts {
@@ -145,11 +171,87 @@ func (s *server) draftCheck(_ context.Context, y string) (string, []string, []st
 			for i, l := range lines {
 				lines[i] = tagItem(l, toApplyItems(items))
 			}
-			return "", lines, nil
+			out.Errors = lines
+			return out
 		}
-		return "", []string{"internal error"}, nil
+		out.Errors = []string{"internal error"}
+		return out
 	}
-	return e.diff, nil, nil
+	out.Diff, out.Warnings = e.diff, newWarnings(cfg, e.cfg)
+	return out
+}
+
+type placeholder struct {
+	kind, name, yaml string
+	secrets          map[string]string
+}
+
+// serviceLike: the names `siphon connect` gives its sources.
+func serviceLike(name string) bool {
+	return name == "github" || name == "gitlab" || strings.HasSuffix(name, "-hooks") || strings.HasSuffix(name, "-cloudwatch")
+}
+
+// missingServiceSources are service-named sources the file uses (a rule's
+// source, an agent's mcp list) that neither exist nor are defined in the file.
+func missingServiceSources(items []applyfile.Item, cfg *config.Config) []string {
+	defined := map[string]bool{}
+	for _, it := range items {
+		if it.Kind == "sources" {
+			defined[it.Name] = true
+		}
+	}
+	var used []string
+	for _, it := range items {
+		var m struct {
+			Source string   `yaml:"source"`
+			MCP    []string `yaml:"mcp"`
+		}
+		if yaml.Unmarshal([]byte(it.YAML), &m) != nil {
+			continue
+		}
+		if it.Kind == "rules" {
+			used = append(used, m.Source)
+		}
+		if it.Kind == "agents" {
+			used = append(used, m.MCP...)
+		}
+	}
+	var out []string
+	for _, n := range used {
+		if n != "" && serviceLike(n) && !defined[n] && cfg.Sources[n] == nil && !slices.Contains(out, n) {
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// servicePlaceholders are stand-ins of the right shape for a missing service
+// source, so the file validates; they are never written.
+func servicePlaceholders(name string, cfg *config.Config) []placeholder {
+	switch {
+	case strings.HasSuffix(name, "-hooks"):
+		y := "type: webhook\nsignature: token\ntoken_header: X-Siphon-Key\n"
+		switch base := strings.TrimSuffix(name, "-hooks"); {
+		case strings.HasPrefix(base, "github"):
+			y = "type: webhook\nsignature: github\n"
+		case strings.HasPrefix(base, "gitlab"):
+			y = "type: webhook\nsignature: token\ntoken_header: X-Gitlab-Token\n"
+		}
+		return []placeholder{{"sources", name, y, map[string]string{"secret": "placeholder"}}}
+	case name == "github":
+		return []placeholder{{"sources", name, "type: mcp\nurl: " + githubMCP + "\nread: { tool: get_me }\npoll: 24h\n", map[string]string{"auth.bearer": "placeholder"}}}
+	case name == "gitlab":
+		return []placeholder{{"sources", name, "type: http\nurl: https://gitlab.com/api/v4/user\npoll: 1h\n", map[string]string{"headers.PRIVATE-TOKEN": "placeholder"}}}
+	case strings.HasSuffix(name, "-cloudwatch"):
+		base := strings.TrimSuffix(name, "-cloudwatch")
+		out := []placeholder{{"sources", name, "type: mcp\npackage: aws-cloudwatch\naws: " + base + "\n", nil}}
+		if cfg.Credentials[base] == nil && len(cfg.Server.AWS.Profiles) > 0 {
+			out = append(out, placeholder{"credentials", base, "provider: aws\nregion: us-east-1\nprofile: " + cfg.Server.AWS.Profiles[0] + "\n", nil})
+		}
+		return out
+	}
+	return nil
 }
 
 func toApplyItems(items []applyfile.Item) []applyItem {

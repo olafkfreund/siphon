@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/olafkfreund/siphon/internal/draft"
 	"github.com/olafkfreund/siphon/internal/store"
 )
 
@@ -66,7 +67,7 @@ func draftEnv(t *testing.T, f *fakeModel, listed bool) *cliEnv {
 	if listed {
 		server = `, models: { private_endpoints: ["` + f.host() + `"] }`
 	}
-	return newCLIEnvFile(t, "server: { sandbox: none, db: DIR/s.db"+server+" }\ncredentials:\n  llm: { provider: openai, url: \""+f.srv.URL+"/v1\", api_key: env:AGW_KEY }\nsources:\n  gh: { type: webhook, secret: env:AGW_HOOKVAL, signature: github }\nrules:\n  - { name: r1, source: gh, when: \"true\", action: { cmd: [echo, one] } }\n")
+	return newCLIEnvFile(t, "server: { sandbox: none, db: DIR/s.db"+server+" }\ncredentials:\n  llm: { provider: openai, url: \""+f.srv.URL+"/v1\", api_key: env:AGW_KEY }\nsources:\n  gh: { type: webhook, secret: env:AGW_HOOKVAL, signature: github }\n  hello-hook: { type: webhook, secret: env:AGW_HOOKVAL, signature: token, token_header: X-Key }\nrules:\n  - { name: r1, source: gh, when: \"true\", action: { cmd: [echo, one] } }\n")
 }
 
 const askText = "tell me on my phone when a deploy webhook says failed"
@@ -261,5 +262,110 @@ func TestMCPDraftNeverApplies(t *testing.T) {
 	}
 	if out, isErr = m.call(t, "draft", map[string]any{"request": "x", "connection": "nope"}); !isErr || !strings.Contains(out, `"hint"`) {
 		t.Fatalf("refusal: %s", out)
+	}
+}
+
+const (
+	ghAsk       = "when a GitHub pull request is opened, run a command that prints its title"
+	wrongSource = "```yaml\nrules:\n  - name: pr-open\n    source: hello-hook\n    when: 'headers[\"x-github-event\"] == \"pull_request\"'\n    action: { cmd: [echo, opened] }\n```\n"
+	rightSource = "```yaml\nrules:\n  - name: pr-open\n    source: github-hooks\n    when: 'headers[\"x-github-event\"] == \"pull_request\"'\n    action: { cmd: [echo, opened] }\n```\n"
+)
+
+// The model picks an unrelated webhook for GitHub events: the warning becomes a
+// repair, the fixed draft uses github-hooks (not connected yet), and --apply
+// refuses until it is.
+func TestDraftWrongProviderSourceIsRepaired(t *testing.T) {
+	f := newFakeModel(t, wrongSource, rightSource)
+	e := draftEnv(t, f, true)
+	var res struct {
+		YAML         string   `json:"yaml"`
+		Errors       []string `json:"errors"`
+		Warnings     []string `json:"warnings"`
+		Todo         []string `json:"todo"`
+		Placeholders []string `json:"placeholders"`
+		Rounds       int      `json:"rounds"`
+	}
+	if json.Unmarshal([]byte(e.ok("draft", ghAsk, "-o", "json")), &res) != nil {
+		t.Fatal("json")
+	}
+	if res.Rounds != 2 || len(res.Errors) != 0 || !strings.Contains(res.YAML, "source: github-hooks") || strings.Contains(res.YAML, "hello-hook") {
+		t.Fatalf("%+v", res)
+	}
+	// round 2 was told why
+	var second struct {
+		Messages []struct{ Role, Content string }
+	}
+	json.Unmarshal([]byte(f.bodies[1]), &second)
+	if m := second.Messages[len(second.Messages)-1].Content; !strings.Contains(m, "rules/pr-open: reads GitHub's X-GitHub-Event header but source hello-hook is not a GitHub webhook") || !strings.Contains(m, "github-hooks") {
+		t.Fatalf("repair message: %s", m)
+	}
+	// the prompt names the convention and shows each source's type and signature
+	var first struct {
+		Messages []struct{ Role, Content string }
+	}
+	json.Unmarshal([]byte(f.bodies[0]), &first)
+	all := first.Messages[0].Content + first.Messages[1].Content
+	for _, want := range []string{"github-hooks", "Never reuse an unrelated existing source", `"signature":"token"`, `"signature":"github"`} {
+		if !strings.Contains(all, want) {
+			t.Errorf("prompt lacks %q", want)
+		}
+	}
+	// the placeholder is reported, with the connect command, and never written into the draft
+	if len(res.Placeholders) != 1 || res.Placeholders[0] != "sources/github-hooks" || !strings.Contains(strings.Join(res.Todo, "\n"), "`siphon connect github --webhook` (creates github and github-hooks)") {
+		t.Fatalf("placeholders %v todo %v", res.Placeholders, res.Todo)
+	}
+	// --apply refuses while it is unresolved
+	code, _, er := e.do("draft", ghAsk, "--apply", "--yes")
+	if code != 3 || !strings.Contains(er, "sources/github-hooks") || !strings.Contains(er, "connect them first") {
+		t.Fatalf("apply before connecting: %d %s", code, er)
+	}
+	if items, _ := store.ConfigItems(e.st.DB); len(items) != 0 {
+		t.Fatal("applied with an unresolved placeholder")
+	}
+	// connect GitHub, then it applies
+	e.stdin = "ghp_X\n"
+	e.ok("connect", "github", "--token", "-", "--webhook", "--no-test")
+	out := e.ok("draft", ghAsk, "--apply", "--yes")
+	if !strings.Contains(out, "applied revision") {
+		t.Fatalf("after connecting:\n%s", out)
+	}
+	if y := e.ok("get", "rules", "pr-open"); !strings.Contains(y, "source: github-hooks") {
+		t.Fatalf("not applied: %s", y)
+	}
+}
+
+func TestApplyDryRunWarnsAboutProviderMismatch(t *testing.T) {
+	e := draftEnv(t, newFakeModel(t, goodDraft), true)
+	f := e.write("w.yaml", "rules:\n  - { name: bad, source: hello-hook, when: 'headers[\"x-github-event\"] == \"push\"', action: { cmd: [echo] } }\n")
+	code, _, er := e.do("apply", "-f", f, "--dry-run")
+	if code != 0 || !strings.Contains(er, "warning: rules/bad: reads GitHub's X-GitHub-Event header but source hello-hook is not a GitHub webhook") {
+		t.Fatalf("%d %s", code, er)
+	}
+	var j struct{ Warnings []string }
+	_, out, _ := e.do("apply", "-f", f, "--dry-run", "-o", "json")
+	if json.Unmarshal([]byte(out), &j) != nil || len(j.Warnings) != 1 || !strings.Contains(j.Warnings[0], "github-hooks") {
+		t.Fatalf("json warnings: %s", out)
+	}
+	// a rule on the right source has none, and old warnings are not repeated
+	g := e.write("g.yaml", "rules:\n  - { name: good, source: gh, when: 'headers[\"x-github-event\"] == \"push\"', action: { cmd: [echo] } }\n")
+	if _, _, er = e.do("apply", "-f", g, "--dry-run"); strings.Contains(er, "warning") {
+		t.Fatalf("unexpected warning: %s", er)
+	}
+}
+
+func TestConnectHints(t *testing.T) {
+	for in, want := range map[string]string{
+		"github-hooks":    "`siphon connect github --webhook` (creates github and github-hooks)",
+		"github":          "`siphon connect github`",
+		"corp-gh-hooks":   "`siphon connect aws --name corp-gh --webhook`",
+		"gitlab-hooks":    "`siphon connect gitlab --webhook` (creates gitlab and gitlab-hooks)",
+		"aws-hooks":       "`siphon connect aws --webhook`",
+		"aws-cloudwatch":  "`siphon connect aws --servers cloudwatch`",
+		"prod-cloudwatch": "`siphon connect aws --name prod --servers cloudwatch`",
+		"github-ci-hooks": "`siphon connect github --name github-ci --webhook`",
+	} {
+		if got := draft.ConnectHint(in); got != want {
+			t.Errorf("%s: %s, want %s", in, got, want)
+		}
 	}
 }

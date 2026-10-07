@@ -31,9 +31,16 @@ type Conn struct {
 	Name, BaseURL, APIKey, Model string
 }
 
-// Check validates an apply file the way apply's dry-run does: the diff, every
-// error, and any warnings. It changes nothing.
-type Check func(ctx context.Context, yamlText string) (diff string, errs, warns []string)
+// Checked is what validating a drafted file found. Placeholders are service
+// sources the file uses that do not exist yet ("sources/github-hooks"): they
+// were stood in for during validation, and must be connected before applying.
+type Checked struct {
+	Diff                           string
+	Errors, Warnings, Placeholders []string
+}
+
+// Check validates an apply file the way apply's dry-run does. It changes nothing.
+type Check func(ctx context.Context, yamlText string) Checked
 
 type Params struct {
 	Request   string
@@ -45,14 +52,17 @@ type Params struct {
 }
 
 type Result struct {
-	YAML       string   `json:"yaml"`
-	Diff       string   `json:"diff"`
-	Errors     []string `json:"errors"`
-	Warnings   []string `json:"warnings"`
-	Todo       []string `json:"todo"`
-	Rounds     int      `json:"rounds"`
-	Model      string   `json:"model"`
-	Connection string   `json:"connection"`
+	YAML     string   `json:"yaml"`
+	Diff     string   `json:"diff"`
+	Errors   []string `json:"errors"`
+	Warnings []string `json:"warnings"`
+	Todo     []string `json:"todo"`
+	// Placeholders are service sources the draft uses that don't exist yet; the
+	// draft can't be applied until they are connected.
+	Placeholders []string `json:"placeholders"`
+	Rounds       int      `json:"rounds"`
+	Model        string   `json:"model"`
+	Connection   string   `json:"connection"`
 }
 
 type Message struct {
@@ -68,16 +78,24 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 		p.MaxRounds = 3
 	}
 	msgs := Prompt(p.Request, p.Inventory)
-	res := &Result{Model: p.Conn.Model, Connection: p.Conn.Name, Errors: []string{}, Warnings: []string{}, Todo: []string{}}
+	res := &Result{Model: p.Conn.Model, Connection: p.Conn.Name, Errors: []string{}, Warnings: []string{}, Todo: []string{}, Placeholders: []string{}}
 	for round := 1; round <= p.MaxRounds; round++ {
 		reply, err := chat(ctx, p.HTTP, p.Conn, msgs)
 		if err != nil {
 			return nil, err
 		}
 		y := ExtractYAML(reply)
-		diff, errs, warns := p.Check(ctx, y)
+		ck := p.Check(ctx, y)
+		errs, warns := ck.Errors, []string{}
+		for _, w := range ck.Warnings { // a rule on the wrong kind of source is a mistake to repair, not a note
+			if mismatch(w) {
+				errs = append(errs, w)
+			} else {
+				warns = append(warns, w)
+			}
+		}
 		errs = append(errs, approvalErrors(p.Request, y)...)
-		res.YAML, res.Diff, res.Errors, res.Warnings, res.Rounds = y, diff, nonNil(errs), nonNil(warns), round
+		res.YAML, res.Diff, res.Errors, res.Warnings, res.Rounds, res.Placeholders = y, ck.Diff, nonNil(errs), warns, round, nonNil(ck.Placeholders)
 		if len(errs) == 0 {
 			break
 		}
@@ -85,9 +103,15 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 			"The apply file has these problems:\n- " + strings.Join(errs, "\n- ") + "\nFix only these. Reply with the full corrected apply file in one ```yaml block and nothing else."})
 	}
 	if items, err := applyfile.Parse([]byte(res.YAML)); err == nil {
-		res.Todo = Todo(items, p.Inventory)
+		res.Todo = Todo(items, p.Inventory, res.Placeholders)
 	}
 	return res, nil
+}
+
+// mismatch is config's "rule reads a provider's header, but its source is not
+// that provider's webhook" warning.
+func mismatch(w string) bool {
+	return strings.HasPrefix(w, "rules/") && strings.Contains(w, " reads ") && strings.Contains(w, " but source ")
 }
 
 func nonNil(s []string) []string {
@@ -201,6 +225,7 @@ func fieldTable(kind string) string {
 func Prompt(request string, inv map[string]any) []Message {
 	var sys strings.Builder
 	sys.WriteString("You write Siphon apply files. Reply with ONE fenced ```yaml block containing the apply file, and nothing else: no explanation.\n")
+	sys.WriteString("Conventional source names: GitHub events arrive on a webhook source named github-hooks (signature: github) and GitHub tools for agents come from an mcp source named github; GitLab events use gitlab-hooks; AWS events use aws-hooks and AWS tools aws-cloudwatch. Use those names for those services even when they are not in the inventory yet (the user connects them). Never reuse an unrelated existing source for a service: read each existing source's type and signature in the inventory; a generic token webhook such as hello-hook is not GitHub.\n")
 	sys.WriteString("Sections allowed: sources, agents, routines, credentials (each a map of name to settings) and rules (a list, each with a name). Use names from the inventory for things that exist; create anything else in the same file. Never write secret values: a webhook source needs no secret in the file. Never write approve: false unless the request asks for no approval.\n\n")
 	if g, ok := docs.Page("llm"); ok {
 		sys.WriteString("## Guide\n" + string(g) + "\n\n")
@@ -332,8 +357,37 @@ func names(inv map[string]any, section string) map[string]bool {
 	return out
 }
 
+// ConnectHint is the connect command that creates a conventionally named
+// service source: github and github-hooks, gitlab-hooks, aws-hooks, <name>-cloudwatch.
+func ConnectHint(source string) string {
+	base := strings.TrimSuffix(strings.TrimSuffix(source, "-hooks"), "-cloudwatch")
+	svc := "aws"
+	switch {
+	case strings.HasPrefix(base, "github"):
+		svc = "github"
+	case strings.HasPrefix(base, "gitlab"):
+		svc = "gitlab"
+	}
+	cmd := "`siphon connect " + svc
+	if base != svc {
+		cmd += " --name " + base
+	}
+	switch {
+	case strings.HasSuffix(source, "-hooks"):
+		cmd += " --webhook`"
+		if base == svc && svc != "aws" {
+			cmd += " (creates " + svc + " and " + svc + "-hooks)"
+		}
+	case strings.HasSuffix(source, "-cloudwatch"):
+		cmd += " --servers cloudwatch`"
+	default:
+		cmd += "`"
+	}
+	return cmd
+}
+
 // Todo is what the user still has to do for the file to work.
-func Todo(items []applyfile.Item, inv map[string]any) []string {
+func Todo(items []applyfile.Item, inv map[string]any, placeholders []string) []string {
 	conns, srcs := names(inv, "connections"), names(inv, "sources")
 	defined := map[string]bool{}
 	for _, it := range items {
@@ -342,6 +396,9 @@ func Todo(items []applyfile.Item, inv map[string]any) []string {
 	var todo []string
 	for _, s := range WebhookNeedsSecret(items) {
 		todo = append(todo, "secret "+s+".secret: pass it with `siphon apply -f <file> --secret "+s+".secret=-` (`siphon draft --apply` generates one for you)")
+	}
+	for _, ph := range placeholders {
+		todo = append(todo, "source "+strings.TrimPrefix(ph, "sources/")+" does not exist yet: run "+ConnectHint(strings.TrimPrefix(ph, "sources/")))
 	}
 	approval := false
 	for _, it := range items {

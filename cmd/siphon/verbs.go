@@ -547,8 +547,15 @@ func (c *cli) runApply(items []applyItem, sec map[string]string, dry, yes, stdin
 	}
 	out := &applyOutcome{DryRun: dry, Diff: check.Diff, Errors: []string{}, Warnings: nonNil(check.Warnings)}
 	out.Changed = check.Diff != "" && check.Diff != "(no change)"
+	if !c.json() {
+		for _, w := range check.Warnings {
+			fmt.Fprintln(c.errw, "warning:", w)
+		}
+	}
 	if dry {
-		c.showDiff(check.Diff)
+		if !c.json() {
+			c.showDiff(check.Diff)
+		}
 		return out, nil
 	}
 	if !out.Changed {

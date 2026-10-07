@@ -470,3 +470,10 @@ self-approved; the PR lists it.
   - **Applying a draft isn't tagged `draft:<connection>`** (the plan said it would be). The `draft` audit row (connection, model, request clipped to 500 characters) is the trace, and the applied revision's actor is `cli:<user>`.
   - Model-side failures return a fixed 422 message, never the response body.
   - The MCP `draft` tool never applies.
+- **Step 9 follow-up (coder, from Opus's live run):**
+  - A config warning fires when a rule reads a provider header (GitHub, GitLab, EventBridge) from a source of the wrong kind.
+  - Dry-runs return the warnings a change adds.
+  - Drafts may name the conventional service sources before they exist: stand-ins are used for validation only, each comes with a `todo` connect command, and `--apply` refuses until they're connected.
+  - The repair loop treats a provider-mismatch warning as an error.
+  - The inventory shows each source's `signature` and `token_header`.
+  - `apply --dry-run -o json` no longer prints the text diff before the JSON.

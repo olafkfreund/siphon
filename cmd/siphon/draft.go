@@ -78,8 +78,10 @@ func buildDraft(fs *flag.FlagSet) func(*cli, []string) error {
 				fmt.Fprintf(c.out, "\nChanges:\n%s\n", strings.TrimRight(str(res, "diff"), "\n"))
 			}
 		}
+		placeholders := strList(res["placeholders"])
+		blocked := *apply && len(errs) == 0 && len(placeholders) > 0
 		var outcome *applyOutcome
-		if len(errs) == 0 && *apply {
+		if len(errs) == 0 && *apply && !blocked {
 			if perr != nil {
 				return perr
 			}
@@ -107,6 +109,10 @@ func buildDraft(fs *flag.FlagSet) func(*cli, []string) error {
 			for _, t := range todo {
 				fmt.Fprintln(c.out, "  -", t)
 			}
+		}
+		if blocked {
+			return &client.Error{Msg: "not applied: the draft uses sources that do not exist yet: " + strings.Join(placeholders, ", "), Code: client.ExitInvalid,
+				Hint: "connect them first (see the to-do list), then run the draft again with --apply"}
 		}
 		if len(errs) > 0 {
 			return &client.Error{Msg: fmt.Sprintf("the draft still has problems after %s rounds", str(res, "rounds")), Errors: errs, Code: client.ExitInvalid,

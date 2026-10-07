@@ -631,6 +631,9 @@ func (c *Config) Warnings() []string {
 		if s := c.Sources[r.Source]; s != nil && s.Type == "mcp" && !s.Polled() {
 			w = append(w, fmt.Sprintf("rule %s: source %s is agent tools only and never produces events", r.Name, r.Source))
 		}
+		if m := providerMismatch(r, c.Sources[r.Source]); m != "" {
+			w = append(w, m)
+		}
 	}
 	for _, name := range sortedKeys(c.Agents) {
 		a := c.Agents[name]
@@ -1457,4 +1460,22 @@ func (c *Config) PrivateEndpoint(host string, port int) bool {
 		}
 	}
 	return false
+}
+
+// providerMismatch is a warning when a rule's `when` reads a provider's own
+// header or field but its source is not that provider's webhook.
+func providerMismatch(r Rule, s *Source) string {
+	if s == nil {
+		return ""
+	}
+	w := strings.ToLower(r.When)
+	switch {
+	case strings.Contains(w, "x-github-event") && !(s.Type == "webhook" && s.Signature == "github"):
+		return fmt.Sprintf("rules/%s: reads GitHub's X-GitHub-Event header but source %s is not a GitHub webhook (signature: github); run `siphon connect github --webhook` and use its github-hooks source", r.Name, r.Source)
+	case strings.Contains(w, "x-gitlab-event") && !(s.Type == "webhook" && s.Signature == "token" && strings.EqualFold(s.TokenHeader, "X-Gitlab-Token")):
+		return fmt.Sprintf("rules/%s: reads GitLab's X-Gitlab-Event header but source %s is not a GitLab webhook (signature: token with token_header: X-Gitlab-Token); run `siphon connect gitlab --webhook` and use its gitlab-hooks source", r.Name, r.Source)
+	case strings.Contains(w, "detail-type") && !(s.Type == "webhook" && s.Signature == "token"):
+		return fmt.Sprintf("rules/%s: reads EventBridge's detail-type but source %s is not a token webhook; run `siphon connect aws --webhook` and use its aws-hooks source", r.Name, r.Source)
+	}
+	return ""
 }

@@ -24,7 +24,14 @@ func (s *server) inventory() map[string]any {
 			add(n)
 		}
 	}) {
-		sources = append(sources, m{"name": n, "type": cfg.Sources[n].Type})
+		src := m{"name": n, "type": cfg.Sources[n].Type}
+		if sg := cfg.Sources[n].Signature; sg != "" { // how a webhook is verified: tells GitHub's from a generic one
+			src["signature"] = sg
+		}
+		if th := cfg.Sources[n].TokenHeader; th != "" {
+			src["token_header"] = th
+		}
+		sources = append(sources, src)
 	}
 	off, _ := store.RuleOverrides(s.Store.DB)
 	for _, r := range cfg.Rules {
