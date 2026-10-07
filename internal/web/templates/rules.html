@@ -8,9 +8,9 @@
   </div>
   <div class="flow{{if not .Enabled}} off{{end}}">
     <div class="node"><small>Source{{if .SourceType}} · {{.SourceType}}{{end}}</small><code>{{.Source}}</code></div>
-    <svg class="pipe" viewBox="0 0 46 14" aria-hidden="true"><line x1="3" y1="7" x2="43" y2="7"/></svg>
+    <span class="pipe" aria-hidden="true"></span>
     <div class="node cond"><small>When · {{if eq .On "each"}}each event{{else}}on edge{{end}}</small><code>{{.When}}</code></div>
-    <svg class="pipe" viewBox="0 0 46 14" aria-hidden="true"><line x1="3" y1="7" x2="43" y2="7"/></svg>
+    <span class="pipe" aria-hidden="true"></span>
     <div class="node"><small>{{.Kind}}</small><code>{{.Target}}</code></div>
   </div>
   {{if .Cooldown}}<div class="muted small">cooldown {{.Cooldown}}</div>{{end}}
