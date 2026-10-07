@@ -369,3 +369,20 @@ func TestOverlayPackages(t *testing.T) {
 		t.Error("mcp_packages change accepted by sameFixedSections")
 	}
 }
+
+// A portal-made source may use allow_private only for a listed service endpoint.
+func TestOverlayServicePrivateEndpoint(t *testing.T) {
+	file := []byte("server: { services: { private_endpoints: [\"gitlab.lan:443\"] } }\nsources:\n  s: { type: webhook, secret: env:X }\n")
+	ok := []Item{{Kind: "sources", Name: "gl", YAML: "type: http\nurl: https://gitlab.lan/api/v4/user\nallow_private: true\n"}}
+	f, err := Parse(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkOverlay(f, ok, t.TempDir()); err != nil {
+		t.Fatalf("listed: %v", err)
+	}
+	bad := []Item{{Kind: "sources", Name: "gl", YAML: "type: http\nurl: https://other.lan/api\nallow_private: true\n"}}
+	if err := checkOverlay(f, bad, t.TempDir()); err == nil || !strings.Contains(err.Error(), "services.private_endpoints") {
+		t.Fatalf("unlisted: %v", err)
+	}
+}

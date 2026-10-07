@@ -218,8 +218,8 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			if s.Package == "" && !slices.Equal(sortedKeys(s.Env), sortedKeys(fs.Env)) {
 				return errors.New("env names (stdio MCP) can only be set in siphon.yaml; the portal may change their values")
 			}
-			if s.AllowPrivate && !fs.AllowPrivate {
-				return errors.New("allow_private can only be set in siphon.yaml")
+			if s.AllowPrivate && !fs.AllowPrivate && !file.ServiceEndpoint(s.URL) {
+				return errors.New("allow_private can only be set in siphon.yaml, or for a host:port listed in server.services.private_endpoints")
 			}
 			moved = !sameEndpoint(s.URL, fs.URL)
 			refs, fileRefs = sourceRefs(&s), sourceRefs(fs)

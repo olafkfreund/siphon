@@ -104,6 +104,9 @@ type Server struct {
 	ActionsDir string       `yaml:"actions_dir"`
 	Egress     EgressServer `yaml:"egress"`
 	Models     ModelsServer `yaml:"models"`
+	// PublicURL is how the outside world reaches this server (shown as webhook URLs).
+	PublicURL string         `yaml:"public_url"`
+	Services  ServicesServer `yaml:"services"`
 	// MCPPackages are the stdio MCP servers a source may name with package:.
 	// Only siphon.yaml can list them; the portal picks from the list.
 	MCPPackages map[string]MCPPackage `yaml:"mcp_packages"`
@@ -118,6 +121,37 @@ type MCPPackage struct {
 }
 
 // ModelsServer holds model-endpoint settings that only siphon.yaml may set.
+// ServicesServer holds service-integration settings that only siphon.yaml may set.
+type ServicesServer struct {
+	// PrivateEndpoints are LAN/self-hosted service host:ports (e.g. a GitLab on
+	// the LAN) that portal-made sources may reach with allow_private.
+	PrivateEndpoints []string `yaml:"private_endpoints"`
+}
+
+// ServiceEndpoint reports whether a source URL's host:port is listed in
+// server.services.private_endpoints.
+func (c *Config) ServiceEndpoint(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
+		return false
+	}
+	host, port := u.Hostname(), 443
+	if u.Scheme == "http" {
+		port = 80
+	}
+	if p := u.Port(); p != "" {
+		if port, err = strconv.Atoi(p); err != nil {
+			return false
+		}
+	}
+	for _, e := range c.Server.Services.PrivateEndpoints {
+		if h, p, ok := endpointKey(e); ok && h == strings.ToLower(host) && p == port {
+			return true
+		}
+	}
+	return false
+}
+
 type ModelsServer struct {
 	// PrivateEndpoints are the host:port model endpoints allowed to be on a
 	// private, loopback or LAN address (never link-local or metadata).
@@ -692,6 +726,16 @@ func (c *Config) Validate() error {
 			add("server.models.private_endpoints: %q: want host:port", e)
 		}
 	}
+	for _, e := range c.Server.Services.PrivateEndpoints {
+		if _, _, ok := endpointKey(e); !ok {
+			add("server.services.private_endpoints: %q: want host:port", e)
+		}
+	}
+	if u := c.Server.PublicURL; u != "" {
+		if pu, err := url.Parse(u); err != nil || (pu.Scheme != "http" && pu.Scheme != "https") || pu.Host == "" || pu.User != nil {
+			add("server.public_url: want http(s)://host[:port][/path]")
+		}
+	}
 	if c.Limits.HTTPTimeout < 0 {
 		add("limits.http_timeout: must not be negative")
 	}
@@ -1142,12 +1186,8 @@ func (c *Config) AgentEgress(a *Agent) (allow []HostPort, enabled bool) {
 	}
 	for _, m := range a.MCP {
 		src := c.Sources[m]
-		if src != nil && src.Package != "" {
-			for _, h := range c.Server.MCPPackages[src.Package].Hosts {
-				if hp, err := parseHostPort(h); err == nil {
-					allow = append(allow, hp)
-				}
-			}
+		if src != nil && len(src.Env) == 0 { // with env the package runs in its own bridge unit, see BridgeEgress
+			allow = append(allow, c.packageHosts(src)...)
 		}
 		if src == nil || src.URL == "" {
 			continue
@@ -1168,6 +1208,21 @@ func (c *Config) AgentEgress(a *Agent) (allow []HostPort, enabled bool) {
 	allow = append(allow, c.userAllow(a.Egress.Allow, c.Server.Egress.Allow)...)
 	return dedupe(allow), true
 }
+
+func (c *Config) packageHosts(src *Source) (out []HostPort) {
+	if src.Package != "" {
+		for _, h := range c.Server.MCPPackages[src.Package].Hosts {
+			if hp, err := parseHostPort(h); err == nil {
+				out = append(out, hp)
+			}
+		}
+	}
+	return
+}
+
+// BridgeEgress is the allowlist of the MCP bridge unit that runs a stdio
+// source with env: the package's hosts and nothing else.
+func (c *Config) BridgeEgress(src *Source) []HostPort { return dedupe(c.packageHosts(src)) }
 
 // RuleEgress returns the allowlist for a rule's cmd actions and whether they are restricted.
 func (c *Config) RuleEgress(r Rule) (allow []HostPort, enabled bool) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"os"
 	"os/exec"
@@ -60,29 +61,16 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 	}
 	egressSocket := ""
 	if opts.Egress != nil {
-		proxyURL := opts.Egress.ProxyURL
-		secrets = append(secrets, proxyURL)
-		if opts.Mode != "none" && opts.Egress.Socket != "" {
-			if u, err := url.Parse(proxyURL); err == nil {
-				u.Host = forwardAddr
-				proxyURL, egressSocket = u.String(), opts.Egress.Socket
-				secrets = append(secrets, proxyURL)
-			}
+		var extra []string
+		opts.Env, egressSocket, extra = egressSetup(opts.Egress, opts.Mode, opts.Env)
+		secrets = append(secrets, extra...)
+	}
+	if len(opts.Direct) > 0 { // loopback bridge URLs (host:port) must not go through the proxy
+		opts.Env = maps.Clone(opts.Env)
+		if opts.Env == nil {
+			opts.Env = map[string]string{}
 		}
-		baseEnv := opts.Env
-		opts.Env = map[string]string{}
-		for k, v := range baseEnv {
-			opts.Env[k] = v
-		}
-		for _, name := range []string{"HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"} {
-			opts.Env[name] = proxyURL
-		}
-		opts.Env["NO_PROXY"], opts.Env["no_proxy"] = "", ""
-		if u, err := url.Parse(opts.Egress.ProxyURL); err == nil && u.User != nil {
-			if token, ok := u.User.Password(); ok {
-				secrets = append(secrets, token)
-			}
-		}
+		opts.Env["NO_PROXY"], opts.Env["no_proxy"] = strings.Join(opts.Direct, ","), strings.Join(opts.Direct, ",")
 	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = 30 * time.Second
@@ -110,7 +98,7 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 		exit, so, se, writeback, err := templateRun(ctx, opts.Dir, JobSpec{
 			Argv: argv, Stdin: stdin, Env: opts.Env, Files: opts.Files,
 			Writeback:  opts.Writeback,
-			TimeoutSec: timeoutSeconds(opts.Timeout), EgressSocket: egressSocket,
+			TimeoutSec: timeoutSeconds(opts.Timeout), EgressSocket: egressSocket, Forwards: opts.Forwards,
 		}, outputCap+maxExtra, opts.Egress != nil)
 		appendWritebackSecrets(writeback, &secrets)
 		output := capBytes(Mask(append(so, se...), secrets), 64<<10)
@@ -215,6 +203,35 @@ func runCommand(ctx context.Context, argv []string, opts SandboxOptions, secrets
 		return exit.ExitCode(), output, stdoutBytes, writeback, nil
 	}
 	return -1, output, stdoutBytes, writeback, err
+}
+
+// egressSetup adds the proxy variables to env. In systemd mode with a socket
+// the run's proxy URL points at the in-unit forwarder and socket is returned
+// for JobSpec.EgressSocket. extra are values to mask.
+func egressSetup(e *EgressEnv, mode string, env map[string]string) (out map[string]string, socket string, extra []string) {
+	proxyURL := e.ProxyURL
+	extra = append(extra, proxyURL)
+	if mode != "none" && e.Socket != "" {
+		if u, err := url.Parse(proxyURL); err == nil {
+			u.Host = forwardAddr
+			proxyURL, socket = u.String(), e.Socket
+			extra = append(extra, proxyURL)
+		}
+	}
+	out = maps.Clone(env)
+	if out == nil {
+		out = map[string]string{}
+	}
+	for _, name := range []string{"HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"} {
+		out[name] = proxyURL
+	}
+	out["NO_PROXY"], out["no_proxy"] = "", ""
+	if u, err := url.Parse(e.ProxyURL); err == nil && u.User != nil {
+		if token, ok := u.User.Password(); ok {
+			extra = append(extra, token)
+		}
+	}
+	return
 }
 
 func timeoutSeconds(timeout time.Duration) int {

@@ -407,10 +407,31 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 		return "failed", -1, "unknown agent " + pl.Action.Agent, nil
 	}
 	servers := map[string]action.MCPServer{}
+	var bridgeFinish []func() string
+	finishBridges := func() (tail string) {
+		for _, f := range bridgeFinish {
+			tail += f()
+		}
+		bridgeFinish = nil
+		return
+	}
+	defer finishBridges()
 	for _, name := range a.MCP {
 		s := cfg.Sources[name]
 		if len(s.Env) > 0 {
-			return "failed", -1, "source " + name + " needs the MCP bridge (coming in step 4)", nil
+			// Stdio server with secret env: it runs in its own bridge unit with the
+			// package's hosts as its allowlist; the agent only gets a loopback URL.
+			eg, fin, eerr := p.egressFor(cfg, j.ID, cfg.BridgeEgress(s), true)
+			if eerr != nil {
+				return "failed", -1, eerr.Error(), nil
+			}
+			bridgeFinish = append(bridgeFinish, fin)
+			env := make(map[string]string, len(s.Env))
+			for k, v := range s.Env {
+				env[k] = v.Value
+			}
+			servers[name] = action.MCPServer{Command: s.Command, Env: env, Egress: eg}
+			continue
 		}
 		h := headerValues(s.Headers)
 		if s.Auth != nil && s.Auth.Bearer.Value != "" {
@@ -469,7 +490,7 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 	}
 	opts.Sandbox.Egress = egEnv
 	res, err := action.RunAgent(ctx, opts)
-	egressTail := finish()
+	egressTail := finish() + finishBridges()
 	if c != nil {
 		p.saveWriteback(cfg, j, credName, c.Provider, start, res.Writeback)
 	}

@@ -40,6 +40,9 @@ type JobSpec struct {
 	TimeoutSec int               `json:"timeout_sec"`
 	// EgressSocket: exec-job forwards forwardAddr to this unix socket.
 	EgressSocket string `json:"egress_socket,omitempty"`
+	// Forwards: exec-job listens on 127.0.0.1:<port> and forwards to the unix
+	// socket (an MCP bridge's), like the egress forwarder.
+	Forwards map[int]string `json:"forwards,omitempty"`
 }
 
 // forwardAddr is where exec-job listens inside the unit's private network
@@ -123,45 +126,63 @@ var (
 // templateRun runs spec in a fresh siphon-action instance and returns its
 // exit code and (stdout, stderr). exit -1 means it never ran or was cancelled.
 func templateRun(ctx context.Context, dir string, spec JobSpec, captureLimit int, restricted bool) (int, []byte, []byte, map[int][]byte, error) {
-	if dir == "" {
-		return -1, nil, nil, nil, errors.New("sandbox: no action directory configured")
-	}
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		return -1, nil, nil, nil, err
-	}
-	id := hex.EncodeToString(b)
-	runDir := filepath.Join(dir, id)
-	if err := os.Mkdir(runDir, 0o700); err != nil { // Mkdir, not MkdirAll: an id is never shared
+	id, runDir, gid, err := newRunDir(dir)
+	if err != nil {
 		return -1, nil, nil, nil, err
 	}
 	defer os.RemoveAll(runDir)
+	if err := writeJob(runDir, gid, spec); err != nil {
+		return -1, nil, nil, nil, err
+	}
+	return runUnit(ctx, templateUnit(id, restricted), runDir, spec, captureLimit)
+}
+
+// newRunDir makes the per-run directory <dir>/<id>.
+func newRunDir(dir string) (id, runDir string, gid int, err error) {
+	if dir == "" {
+		return "", "", 0, errors.New("sandbox: no action directory configured")
+	}
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", 0, err
+	}
+	id = hex.EncodeToString(b)
+	runDir = filepath.Join(dir, id)
+	if err := os.Mkdir(runDir, 0o700); err != nil { // Mkdir, not MkdirAll: an id is never shared
+		return "", "", 0, err
+	}
 	// The run dir inherits group siphon-io from the setgid parent (created by
 	// root via tmpfiles). Group may enter and create files but not list. No
 	// setgid of our own: RestrictSUIDSGID forbids it, so files get the group
 	// by chown instead (both sides are members of siphon-io).
 	if err := os.Chmod(runDir, 0o730); err != nil {
-		return -1, nil, nil, nil, err
+		os.RemoveAll(runDir)
+		return "", "", 0, err
 	}
-	gid, err := dirGid(runDir)
-	if err != nil {
-		return -1, nil, nil, nil, err
+	if gid, err = dirGid(runDir); err != nil {
+		os.RemoveAll(runDir)
+		return "", "", 0, err
 	}
+	return id, runDir, gid, nil
+}
+
+func writeJob(runDir string, gid int, spec JobSpec) error {
 	job, err := json.Marshal(spec)
 	if err != nil {
-		return -1, nil, nil, nil, err
+		return err
 	}
 	jobPath := filepath.Join(runDir, "job.json")
 	if err := os.WriteFile(jobPath, job, 0o600); err != nil {
-		return -1, nil, nil, nil, err
+		return err
 	}
 	if err := os.Chown(jobPath, -1, gid); err != nil {
-		return -1, nil, nil, nil, fmt.Errorf("sandbox: is siphon in group siphon-io? %w", err)
+		return fmt.Errorf("sandbox: is siphon in group siphon-io? %w", err)
 	}
-	if err := os.Chmod(jobPath, 0o640); err != nil {
-		return -1, nil, nil, nil, err
-	}
-	unit := templateUnit(id, restricted)
+	return os.Chmod(jobPath, 0o640)
+}
+
+// runUnit starts the unit for a prepared run dir and reads back its results.
+func runUnit(ctx context.Context, unit, runDir string, spec JobSpec, captureLimit int) (int, []byte, []byte, map[int][]byte, error) {
 	runErr := startUnit(ctx, unit)
 	if ctx.Err() != nil {
 		// Cancelled or timed out: make sure the unit doesn't outlive the job.
@@ -393,8 +414,8 @@ func saveWriteback(home, runDir string, gid, i int, name string, files map[strin
 // siphon (they live outside its cgroup) and waits for them, so their jobs
 // can be requeued without two copies running at once.
 func StopOrphans(ctx context.Context) error {
-	err := stopUnits(ctx, "siphon-action@*.service", "siphon-action-open@*.service")
-	resetFailed("siphon-action@*.service", "siphon-action-open@*.service")
+	err := stopUnits(ctx, "siphon-action@*.service", "siphon-action-open@*.service", "siphon-mcp@*.service")
+	resetFailed("siphon-action@*.service", "siphon-action-open@*.service", "siphon-mcp@*.service")
 	return err
 }
 
@@ -490,6 +511,15 @@ func execJob(runDir, jobFile string, stdout, stderr io.Writer) int {
 		}
 		defer ln.Close()
 		go forward(ln, spec.EgressSocket)
+	}
+	for port, sock := range spec.Forwards {
+		ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
+		if err != nil {
+			fmt.Fprintln(stderr, "mcp forwarder:", err)
+			return 1
+		}
+		defer ln.Close()
+		go forward(ln, sock)
 	}
 	cmd := exec.CommandContext(ctx, spec.Argv[0], spec.Argv[1:]...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }

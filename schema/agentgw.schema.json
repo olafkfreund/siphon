@@ -337,8 +337,23 @@
           },
           "type": "object"
         },
+        "public_url": {
+          "type": "string"
+        },
         "sandbox": {
           "type": "string"
+        },
+        "services": {
+          "additionalProperties": false,
+          "properties": {
+            "private_endpoints": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
         },
         "token": {
           "description": "env:NAME, file:/path, or (where allowed) a literal",

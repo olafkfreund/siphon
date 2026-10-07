@@ -232,3 +232,12 @@ unchanged, and only the new fields and the page disappear.
   - The overlay checks the package's env keys in `checkOverlay`, since `LoadWithOverlay` doesn't call `Validate`.
   - A portal item may create a new source that uses a listed `package` (intended: that's how Services adds GitHub).
   - Nix: `services.siphon.mcpPackages` (submodule: `package`, `args` (default `["stdio"]`), `env`, `hosts`), defaulting to `github` = `pkgs.github-mcp-server` (1.12.2) with `GITHUB_PERSONAL_ACCESS_TOKEN` and `api.github.com`, rendered with `lib.getExe`. The VM test (13/13) validates the rendered config.
+- **Step 4 (coder, Go):**
+  - `internal/mcpbridge` relays tools only (no resources or prompts), with the tool list read once at start. The socket is created with umask `0o117`, so there's no chmod race.
+  - The bridge is a `siphon-mcp@<16hex>` instance running `exec-job` on its own run dir, like the action units.
+  - The agent's `JobSpec.Forwards` maps ports 3200+ to the bridge sockets.
+  - `sandbox: none` runs the bridge as a child process.
+  - The agent's `NO_PROXY` lists the exact `127.0.0.1:<port>` bridge entries, and the agentloop dialer honours exact `host:port` `NO_PROXY` entries; other loopback stays proxied.
+  - `AgentEgress` drops the package hosts for sources with env, since the bridge reaches them (`Config.BridgeEgress`).
+  - The proxy env setup is factored into `egressSetup`.
+  - **Commit layout:** `internal/config/config.go` was edited by both the coder (step 4: `BridgeEgress`/`packageHosts`) and Opus (step 5: `public_url`, `services.private_endpoints`, `ServiceEndpoint`, and the overlay `allow_private` exception). The whole file lands in the step 4 commit; step 5's commit has the web side.

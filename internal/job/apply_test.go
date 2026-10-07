@@ -168,18 +168,19 @@ sources:
 	<-served
 }
 
-// Until the MCP bridge (plan step 4), an agent never gets a stdio source's env.
-func TestAgentRefusesStdioEnv(t *testing.T) {
+// A stdio source with env goes through the bridge: when it fails to start the
+// run fails, naming the source and never showing the secret.
+func TestAgentBridgeFailureIsReported(t *testing.T) {
 	t.Setenv("AGW_E", "secret-value")
 	p := applyPipeline(t, `
-server: { sandbox: none, db: DIR/state.db, mcp_packages: {gh: {command: [srv], env: [GITHUB_TOKEN]}} }
+server: { sandbox: none, db: DIR/state.db, mcp_packages: {gh: {command: [srv], env: [GITHUB_TOKEN], hosts: [api.github.com]}} }
 sources:
   m: { type: mcp, package: gh, read: {tool: t}, env: {GITHUB_TOKEN: 'env:AGW_E'} }
 agents:
   fix: { kind: codex, command: /bin/true, mcp: [m], prompt: x }
 `)
 	state, _, out, _ := p.agentExec(context.Background(), p.Config(), store.QueuedJob{ID: 1}, Payload{Action: config.Action{Agent: "fix"}}, true)
-	if state != "failed" || !strings.Contains(out, "needs the MCP bridge") || strings.Contains(out, "secret-value") {
+	if state != "failed" || !strings.Contains(out, `mcp bridge for "m"`) || strings.Contains(out, "secret-value") {
 		t.Fatalf("%s %q", state, out)
 	}
 }

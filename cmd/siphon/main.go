@@ -26,6 +26,7 @@ import (
 	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/cred"
 	"github.com/olafkfreund/siphon/internal/job"
+	"github.com/olafkfreund/siphon/internal/mcpbridge"
 	"github.com/olafkfreund/siphon/internal/rule"
 	"github.com/olafkfreund/siphon/internal/source"
 	"github.com/olafkfreund/siphon/internal/store"
@@ -87,6 +88,25 @@ func main() {
 			os.Exit(2)
 		}
 		os.Exit(agentloop.Run(ctx, spec, os.Stdout))
+	case "mcp-bridge":
+		// Internal: `siphon mcp-bridge <spec.json>` runs inside siphon-mcp@.service.
+		var spec mcpbridge.Spec
+		if len(args) != 1 {
+			fmt.Fprintln(os.Stderr, "usage: siphon mcp-bridge <spec.json>")
+			os.Exit(2)
+		}
+		b, rerr := os.ReadFile(args[0])
+		if rerr == nil {
+			rerr = json.Unmarshal(b, &spec)
+		}
+		if rerr == nil {
+			rerr = mcpbridge.Run(ctx, spec)
+		}
+		if rerr != nil && ctx.Err() == nil {
+			fmt.Fprintln(os.Stderr, "mcp-bridge:", rerr)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	case "schema":
 		var b []byte
 		if b, err = config.Schema(); err == nil {

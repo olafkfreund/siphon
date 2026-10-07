@@ -743,3 +743,16 @@ func TestPackageEgressHosts(t *testing.T) {
 		t.Error("package hosts leaked to another agent")
 	}
 }
+
+func TestBridgeEgressHosts(t *testing.T) {
+	t.Setenv("AGW_E", "v")
+	c, _ := Parse([]byte(pkgServer + "sources: {s: {type: mcp, package: github, read: {tool: t}, env: {GITHUB_PERSONAL_ACCESS_TOKEN: 'env:AGW_E'}}}\n" +
+		"agents: {a: {kind: claude, mcp: [s]}}"))
+	if hosts, _ := c.AgentEgress(c.Agents["a"]); slices.ContainsFunc(hosts, func(h HostPort) bool { return h.Host == "api.github.com" }) {
+		t.Error("the agent must not reach the package's hosts: its bridge does")
+	}
+	hosts := c.BridgeEgress(c.Sources["s"])
+	if len(hosts) != 2 || hosts[0].Host != "api.github.com" || hosts[0].Port != 443 {
+		t.Errorf("bridge hosts %v", hosts)
+	}
+}
