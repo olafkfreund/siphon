@@ -219,7 +219,7 @@ yaml-language-server:
 
 See [`examples/siphon.yaml`](examples/siphon.yaml) for every source type, rule
 mode and action type, plus a routine with retry and approval. To add a new kind
-of source, see [`docs/adding-a-source.md`](docs/adding-a-source.md).
+of source, see [`docs/developing/adding-a-source.md`](docs/developing/adding-a-source.md).
 
 ## Agents and subscriptions
 
