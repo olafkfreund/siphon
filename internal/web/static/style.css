@@ -375,7 +375,7 @@ pre .add { color: #5ef0b4 } pre .del { color: #ff8fa0 }
 .doc p, .doc ul, .doc ol { margin: .7rem 0 }
 .doc li + li { margin-top: .25rem }
 .doc code, .gallery code, .cmd code { font-family: var(--mono, ui-monospace, monospace); font-size: .86em; background: var(--surface-2); border-radius: 6px; padding: .1em .35em }
-.doc pre, .gallery pre { overflow-x: auto; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: .8rem 1rem; margin: .8rem 0; line-height: 1.45; font-size: .84rem }
+.doc pre, .gallery pre { overflow-x: auto; color: var(--text); white-space: pre; overflow-wrap: normal; max-height: none; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: .8rem 1rem; margin: .8rem 0; line-height: 1.45; font-size: .84rem }
 .doc pre code, .gallery pre code { background: none; padding: 0; font-size: inherit }
 .doc table { display: block; overflow-x: auto; border-collapse: collapse; margin: 1rem 0 }
 .doc th, .doc td { border: 1px solid var(--line); padding: .4rem .7rem; text-align: left; vertical-align: top }
