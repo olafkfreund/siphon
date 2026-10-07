@@ -24,10 +24,14 @@ func TestMain(m *testing.M) {
 		os.Exit(3)
 	}
 	egressListenOverride = "127.0.0.1:0"
-	os.Exit(m.Run())
+	code := m.Run()
+	os.Remove(bridgeEnvDump(os.Getpid())) // any test's dying bridge may have left one
+	os.Exit(code)
 }
 
 // bridgeEnvDump is where the dying test bridge leaves its env for pid's tests.
+// Fixed /tmp, not os.TempDir(): the bridge child gets no TMPDIR (only PATH,
+// HOME, LANG), so the two sides would disagree wherever TMPDIR is set (CI).
 func bridgeEnvDump(pid int) string {
-	return filepath.Join(os.TempDir(), "siphon-job-test-bridge-"+strconv.Itoa(pid))
+	return filepath.Join("/tmp", "siphon-job-test-bridge-"+strconv.Itoa(pid))
 }
