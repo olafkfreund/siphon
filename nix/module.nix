@@ -280,6 +280,23 @@ in
       '';
     };
 
+    cli.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Put the siphon CLI on every user's PATH, with SIPHON_URL pointing at
+        this daemon, so `siphon login` then `siphon get rules` just work. The
+        token stays each user's to give (`siphon login` stores it 0600).
+      '';
+    };
+
+    cli.url = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "https://siphon.example.com";
+      description = "SIPHON_URL for the CLI; default http://127.0.0.1:<port of server.listen>.";
+    };
+
     aws.enable = lib.mkEnableOption ''
       the pinned AWS MCP servers (aws-cloudwatch, aws-docs) as mcpPackages.
       Off by default: the CloudWatch server pulls in pandas, numpy and
@@ -329,6 +346,15 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    environment.systemPackages = lib.mkIf cfg.cli.enable [ cfg.package ];
+    environment.variables = lib.mkIf cfg.cli.enable {
+      SIPHON_URL =
+        if cfg.cli.url != null then
+          cfg.cli.url
+        else
+          "http://127.0.0.1:${lib.last (lib.splitString ":" (cfg.settings.server.listen or ":8080"))}";
+    };
+
     warnings =
       lib.optional (cfg.configFile != null && builtins.removeAttrs cfg.settings [ "units" ] != { })
         "services.siphon: configFile is set, so services.siphon.settings is ignored (except settings.units, the polkit allowlist)"
