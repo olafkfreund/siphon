@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 20
 spec: spec/2026-10-07-20-model-providers.md
 ---
@@ -202,3 +202,4 @@ Revert the merge. Existing claude/codex/agy configs are untouched, and only
 the new providers and `kind: model` disappear.
 
 ## Deviations log
+- **Approval (2026-10-07):** the owner replied "merge and continue" to "Approve the plan and I'll start". The plan is recorded as approved on that reply.
