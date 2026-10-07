@@ -1,6 +1,8 @@
 package config
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -200,6 +202,49 @@ func TestOverlayItemChecks(t *testing.T) {
 		"own secret":    {Kind: "credentials", Name: "n", YAML: "{provider: claude, api_key: 'file:" + sec + "/credentials-n-api_key'}"},
 		"allow a host":  {Kind: "agents", Name: "n", YAML: "{kind: claude, egress: {allow: [x.example.com]}}"},
 		"tombstone any": {Kind: "sources", Name: "m", Deleted: true},
+	} {
+		if _, _, err := LoadWithOverlay(path, []Item{it}); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+func TestOverlayModelEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	os.WriteFile(path, []byte("server: { db: "+dir+"/s.db, models: {private_endpoints: ['10.0.0.9:11434']} }\n"), 0o600)
+	old := lookupHost
+	defer func() { lookupHost = old }()
+	lookupHost = func(_ context.Context, h string) ([]string, error) {
+		switch h {
+		case "pub.example":
+			return []string{"93.184.216.34"}, nil
+		case "lan.example":
+			return []string{"93.184.216.34", "192.168.1.5"}, nil
+		case "meta.example":
+			return []string{"::ffff:169.254.169.254"}, nil
+		case "10.0.0.9":
+			return []string{"10.0.0.9"}, nil
+		}
+		return nil, errors.New("no such host")
+	}
+	cred := func(prov, u string) Item {
+		return Item{Kind: "credentials", Name: "n", YAML: "{provider: " + prov + ", url: '" + u + "'}"}
+	}
+	for name, it := range map[string]Item{
+		"loopback":   cred("ollama", "http://127.0.0.1:11434"),
+		"mixed":      cred("openai", "https://lan.example/v1"),
+		"metadata":   cred("openai", "http://meta.example/v1"),
+		"unresolved": cred("ollama", "http://nope.example:11434"),
+		"unlisted":   cred("ollama", "http://10.0.0.9:11435"),
+	} {
+		if _, _, err := LoadWithOverlay(path, []Item{it}); err == nil || !strings.Contains(err.Error(), "server.models.private_endpoints") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for name, it := range map[string]Item{
+		"public": cred("openai", "https://pub.example/v1"),
+		"listed": cred("ollama", "http://10.0.0.9:11434"),
 	} {
 		if _, _, err := LoadWithOverlay(path, []Item{it}); err != nil {
 			t.Errorf("%s: %v", name, err)

@@ -55,6 +55,9 @@
             },
             "type": "array"
           },
+          "model": {
+            "type": "string"
+          },
           "prompt": {
             "type": "string"
           },
@@ -84,7 +87,13 @@
           "concurrency": {
             "type": "integer"
           },
+          "preset": {
+            "type": "string"
+          },
           "provider": {
+            "type": "string"
+          },
+          "url": {
             "type": "string"
           }
         },
@@ -288,6 +297,18 @@
         },
         "listen": {
           "type": "string"
+        },
+        "models": {
+          "additionalProperties": false,
+          "properties": {
+            "private_endpoints": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
         },
         "sandbox": {
           "type": "string"

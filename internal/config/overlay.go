@@ -2,14 +2,18 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -213,6 +217,9 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			if fc == nil {
 				fc = &Credential{}
 			}
+			if err := checkModelEndpoint(file, &c); err != nil {
+				return err
+			}
 			refs, fileRefs = map[string]string{"api_key": c.APIKey.Ref}, map[string]string{"api_key": fc.APIKey.Ref}
 		case "agents":
 			var a Agent
@@ -235,6 +242,45 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			if !refAllowed(ref, fileRefs[path], it.Kind, it.Name, dir) {
 				return errors.New("secret refs can only point at this item's stored secrets or keep the value from siphon.yaml")
 			}
+		}
+	}
+	return nil
+}
+
+// lookupHost resolves model endpoint hosts; tests replace it.
+var lookupHost = func(ctx context.Context, host string) ([]string, error) {
+	return net.DefaultResolver.LookupHost(ctx, host)
+}
+
+// checkModelEndpoint refuses a portal ollama/openai credential whose host is
+// (or does not provably stop being) private, loopback or link-local, unless
+// siphon.yaml lists its host:port. Unresolvable names fail closed.
+func checkModelEndpoint(file *Config, c *Credential) error {
+	if !slices.Contains(modelProviders, c.Provider) {
+		return nil
+	}
+	host, port, err := ModelURL(c.URL)
+	if err != nil {
+		return nil // Validate reports it
+	}
+	if file.PrivateEndpoint(host, port) {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	addrs, err := lookupHost(ctx, host)
+	refuse := errors.New(`this endpoint is on a private network; add "host:port" to server.models.private_endpoints in siphon.yaml`)
+	if err != nil || len(addrs) == 0 {
+		return refuse
+	}
+	for _, a := range addrs {
+		ip, err := netip.ParseAddr(a)
+		if err != nil {
+			return refuse
+		}
+		ip = ip.Unmap()
+		if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return refuse
 		}
 	}
 	return nil

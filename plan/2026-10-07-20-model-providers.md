@@ -203,3 +203,8 @@ the new providers and `kind: model` disappear.
 
 ## Deviations log
 - **Approval (2026-10-07):** the owner replied "merge and continue" to "Approve the plan and I'll start". The plan is recorded as approved on that reply.
+- **Step 1 (coder):**
+  - `private_endpoints` entries need an explicit port and no wildcards.
+  - New helpers: `config.ModelURL` (parses, refuses userinfo, defaults the port) and `(*Config).PrivateEndpoint`.
+  - The overlay check refuses a host when any resolved address is private.
+  - `api_key_file` on a model agent falls out through the provider check.
