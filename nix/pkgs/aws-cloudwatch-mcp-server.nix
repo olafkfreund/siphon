@@ -22,7 +22,6 @@ python3Packages.buildPythonApplication rec {
     requests
     statsmodels
   ];
-  pythonRelaxDeps = true;
   # Upstream tests call AWS; checks.aws-mcp-smoke covers start-up instead.
   doCheck = false;
   pythonImportsCheck = [ "awslabs.cloudwatch_mcp_server" ];

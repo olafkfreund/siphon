@@ -512,11 +512,30 @@ agents:
   with a random external ID. Try it in a non-production account first.
   Logs Insights queries are read-only but **billed per GB scanned**. Siphon
   never creates or changes IAM resources.
-- **SSO profile.** Put the profile in `aws.configFile` and log in as the
-  siphon user: `sudo -u siphon aws sso login --profile siphon-readonly`.
+- **SSO profile.** Put the profile in `aws.configFile` (readable by siphon:
+  `chown root:siphon`, `chmod 0640`; sandboxed runs can't read it) and log
+  in as the siphon user, whose home is `/var/lib/siphon`:
+  `sudo -u siphon HOME=/var/lib/siphon AWS_CONFIG_FILE=/etc/siphon/aws-config aws sso login --profile siphon-readonly`.
   SSO sessions expire (typically 8–12 h); runs then fail with a clear
   message until you log in again. A profile that yields long-lived keys is
   refused.
+- **Who may pick an identity.** Credentials in `siphon.yaml` are yours to
+  write. Credentials made in the portal (or the Services tile) may only use
+  the profiles and role ARNs you list, so a portal user can't switch
+  Siphon to a stronger identity its own login can reach:
+
+  ```yaml
+  server:
+    aws:
+      profiles: [siphon-readonly]
+      role_arns: [arn:aws:iam::123456789012:role/siphon-readonly]
+  ```
+
+  A portal credential that brings its own access keys may assume any role
+  those keys can: its power comes from the keys, not from Siphon.
+- **Keys must outlive the run.** A profile whose keys would expire before
+  the run could finish (a stale SSO login or `credential_process` cache) is
+  refused with a message to refresh it.
 - **Session length.** Each run gets one session lasting its timeout plus 5
   minutes, between 15 minutes and 1 hour, with no renewal. That is why an
   agent with an AWS source may run 55 minutes at most.

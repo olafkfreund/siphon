@@ -290,3 +290,11 @@ revert.
   - The tile names sources `<name>-cloudwatch`, `<name>-docs` and `<name>-hooks`.
   - **Config change (Opus decision, closing a plan gap):** an `mcp` source with no `read` is agent-tools-only and never polled. `poll` without `read` is an error, and a tools-only source that no agent uses gets a warning. The spec's `aws-docs: { type: mcp, package: aws-docs }` needs this: otherwise the docs server would be polled daily by the daemon, outside a sandbox. Sources with `read` are unchanged.
   - The job-level `TestAWS` test checks identity, expiry and masked errors. A real tool list is covered by the action-level `ProbeBridge` tests.
+- **Review fixes (Opus, Nix and docs):** a fresh Opus security review found no high issues, and 5 medium and 7 low ones.
+  - **M4:** `users.users.siphon.home` is the state dir, so `aws sso login` as siphon has a `~/.aws/sso/cache`. The README gives the exact command.
+  - **M5:** the AWS VM stub holds its tool call for 10 s, and the subtest checks the live run:
+    - the agent's run dir, unit `Environment` and `/proc/<pid>/environ` hold no temporary or base key (with a positive `PATH=` control);
+    - the bridge's journal is clean.
+  - **L5:** `aws.configFile` is inaccessible to run units, and documented as 0640 `root:siphon`.
+  - **L6:** `pythonRelaxDeps` is removed; no dependency conflicted, so the runtime dependency check now enforces upstream's bounds.
+  - **M1 (owner decision, 2026-10-07):** portal-made aws credentials are limited to the file-only allowlist `server.aws.profiles` / `server.aws.role_arns`, except a role ARN used with the credential's own access keys. Documented in the README; the code is in the coder's review-fix batch.

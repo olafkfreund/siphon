@@ -4,6 +4,8 @@ let
   # A stdio MCP server that needs a secret: run through the MCP bridge.
   stubMcp = pkgs.writeShellScriptBin "stub-mcp" "exec ${pkgs.python3}/bin/python3 ${./stub-mcp-stdio.py}";
   stubToken = "tok-123-SECRET-bridge";
+  # The same stub, slow to answer, so a run can be inspected while it's live.
+  stubMcpSlow = pkgs.writeShellScriptBin "stub-mcp" "STUB_SLOW=10 exec ${pkgs.python3}/bin/python3 ${./stub-mcp-stdio.py}";
   # The real agent CLIs (claude-code is unfree), run in the restricted
   # template to prove they start without nscd and reach the network only
   # through the forwarder.
@@ -66,7 +68,7 @@ pkgs.testers.runNixOSTest {
       services.siphon = {
         enable = true;
         mcpPackages.stubaws = {
-          package = stubMcp;
+          package = stubMcpSlow;
           args = [ ];
           env = [
             "AWS_ACCESS_KEY_ID"
@@ -700,6 +702,19 @@ pkgs.testers.runNixOSTest {
         import hashlib
         assert hook('{"kind":"aws","n":710}') == "202"
         q = "sqlite3 /var/lib/siphon/state.db \"select {} from jobs where rule='aws-agent'\""
+        # While the run is live (the stub holds its tool call for 10 s): the agent's
+        # unit, run dir and process environment hold no AWS key, temporary or base.
+        machine.wait_until_succeeds("systemctl list-units --no-legend --plain --state=running 'siphon-mcp@*' | grep -q .", timeout=60)
+        machine.wait_until_succeeds("systemctl list-units --no-legend --plain --state=running 'siphon-action@*' | grep -q .", timeout=60)
+        live = "temp-secret-vm-test|temp-token-vm-test|ASIATEMPVMTEST|base-secret-NEVER-vm|AKIABASEVMTEST"
+        machine.fail(f"grep -rE '{live}' /var/lib/siphon-actions")
+        envs = machine.succeed(
+            "for u in $(systemctl list-units --no-legend --plain --state=running 'siphon-action@*' | cut -d' ' -f1); do"
+            " p=$(systemctl show -p MainPID --value $u); tr '\\0' '\\n' </proc/$p/environ; systemctl show -p Environment $u; done"
+        )
+        assert "PATH=" in envs, f"could not read the agent's environment: {envs}"
+        for leak in live.split("|"):
+            assert leak not in envs, f"{leak} is in the agent unit's environment"
         try:
             machine.wait_until_succeeds(q.format("state") + " | grep -qx done", timeout=120)
         except Exception:
@@ -719,7 +734,10 @@ pkgs.testers.runNixOSTest {
         # The base secret never leaves the daemon; the temporary ones are masked.
         for leak in ("base-secret-NEVER-vm", "temp-secret-vm-test", "temp-token-vm-test"):
             assert leak not in out, f"{leak} in the job output"
-        machine.fail("grep -r base-secret-NEVER-vm /var/lib/siphon-actions /var/lib/siphon/jobs 2>/dev/null")
+        machine.fail("grep -r base-secret-NEVER-vm /var/lib/siphon/jobs 2>/dev/null")
+        bridge_logs = machine.succeed("journalctl -u 'siphon-mcp@*' --no-pager")
+        for leak in ("base-secret-NEVER-vm", "temp-secret-vm-test", "temp-token-vm-test"):
+            assert leak not in bridge_logs, f"{leak} in the bridge's journal"
         logs = machine.succeed("journalctl -u siphon --no-pager")
         assert "base-secret-NEVER-vm" not in logs and "temp-secret-vm-test" not in logs, "an AWS secret is in the logs"
         machine.succeed("test -z \"$(ls -A /var/lib/siphon/bridge-secrets 2>/dev/null)\"")

@@ -20,7 +20,6 @@ python3Packages.buildPythonApplication rec {
     mcp
     pydantic
   ];
-  pythonRelaxDeps = true;
   # Upstream tests fetch docs.aws.amazon.com; checks.aws-mcp-smoke covers start-up.
   doCheck = false;
   pythonImportsCheck = [ "awslabs.aws_documentation_mcp_server" ];

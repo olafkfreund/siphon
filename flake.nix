@@ -111,6 +111,9 @@
           assert builtins.elem "logs.{region}.amazonaws.com" pk.aws-cloudwatch.hosts;
           assert sys.config.systemd.services.siphon.environment.AWS_CONFIG_FILE == "/etc/siphon/aws-config";
           assert sys.config.warnings == [ ];
+          # SSO profile mode: siphon's home holds ~/.aws/sso/cache; runs can't read the AWS config.
+          assert sys.config.users.users.siphon.home == "/var/lib/siphon";
+          assert builtins.elem "-/etc/siphon/aws-config" sys.config.systemd.services."siphon-action@".serviceConfig.InaccessiblePaths;
           pkgs.runCommand "aws-module-ok" { } "touch $out";
         # The old services.agentgw option path still evaluates to siphon. # legacy-name
         # configFile replaces the generated config in the unit.

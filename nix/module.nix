@@ -85,7 +85,10 @@ let
     ]
     # An operator-managed config's directory holds its secrets (portal token,
     # webhook secrets): runs must not read them.
-    ++ lib.optional (cfg.configFile != null) "-${dirOf cfg.configFile}";
+    ++ lib.optional (cfg.configFile != null) "-${dirOf cfg.configFile}"
+    # The AWS config names accounts, roles, SSO URLs and credential_process
+    # commands: the daemon's business, not a run's.
+    ++ lib.optional (cfg.aws.configFile != null) "-${cfg.aws.configFile}";
     PrivateTmp = true;
     ProtectSystem = "strict";
     ProtectHome = true;
@@ -379,6 +382,9 @@ in
 
     users.users.siphon = {
       isSystemUser = true;
+      # A real home (the state dir), so `aws sso login` as siphon has a
+      # ~/.aws/sso/cache the daemon reads; the default /var/empty is read-only.
+      home = stateDir;
       group = "siphon";
       extraGroups = [ "siphon-io" ];
     };

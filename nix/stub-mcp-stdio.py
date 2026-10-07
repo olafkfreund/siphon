@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 
 tok = os.environ.get("STUB_TOKEN", "")
 digest = hashlib.sha256(tok.encode()).hexdigest()[:16] if tok else "missing"
@@ -37,6 +38,8 @@ for line in sys.stdin:
         res = {"tools": [{"name": "whoami", "description": "token hash and uid",
                           "inputSchema": {"type": "object", "properties": {}}}]}
     elif m == "tools/call":
+        # Hold the run open so the VM test can inspect it while it's live.
+        time.sleep(float(os.environ.get("STUB_SLOW", "0")))
         res = {"content": [{"type": "text", "text": "token-sha=%s uid=%d %s" % (digest, os.getuid(), aws)}]}
     elif m == "ping":
         res = {}
