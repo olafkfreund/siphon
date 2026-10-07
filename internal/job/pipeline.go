@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -20,6 +21,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/olafkfreund/siphon/internal/action"
+	"github.com/olafkfreund/siphon/internal/awscred"
 	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/cred"
 	"github.com/olafkfreund/siphon/internal/egress"
@@ -418,9 +420,10 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 		return
 	}
 	defer finishBridges()
+	secrets := cfg.Secrets()
 	for _, name := range a.MCP {
 		s := cfg.Sources[name]
-		if len(s.Env) > 0 {
+		if len(s.Env) > 0 || s.AWS != "" {
 			// Stdio server with secret env: it runs in its own bridge unit with the
 			// package's hosts as its allowlist; the agent only gets a loopback URL.
 			eg, fin, eerr := p.egressFor(cfg, j.ID, cfg.BridgeEgress(s), true)
@@ -431,6 +434,16 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 			env := make(map[string]string, len(s.Env))
 			for k, v := range s.Env {
 				env[k] = v.Value
+			}
+			if s.AWS != "" {
+				extra, err := awsEnv(ctx, cfg, s.AWS, time.Duration(a.Timeout), j.ID)
+				if err != nil {
+					return "failed", -1, "aws credentials for " + name + ": " + string(action.Mask([]byte(err.Error()), secrets)), nil
+				}
+				for k, v := range extra {
+					env[k] = v
+				}
+				secrets = append(secrets, extra["AWS_ACCESS_KEY_ID"], extra["AWS_SECRET_ACCESS_KEY"], extra["AWS_SESSION_TOKEN"])
 			}
 			servers[name] = action.MCPServer{Command: s.Command, Env: env, Egress: eg}
 			continue
@@ -446,7 +459,7 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 		Prompt: a.Prompt, Env: pl.Env, MCP: servers,
 		AllowedTools: a.AllowedTools, MaxTurns: a.MaxTurns, MaxBudgetUSD: a.MaxBudgetUSD,
 		Timeout: time.Duration(a.Timeout), Sandbox: sandbox(cfg, 0),
-		Secrets: cfg.Secrets(), StateDir: filepath.Dir(cfg.Server.DB), WorkDir: filepath.Join(filepath.Dir(cfg.Server.DB), "jobs", strconv.FormatInt(j.ID, 10)),
+		Secrets: secrets, StateDir: filepath.Dir(cfg.Server.DB), WorkDir: filepath.Join(filepath.Dir(cfg.Server.DB), "jobs", strconv.FormatInt(j.ID, 10)),
 	}
 	// Credential: an API key, or a subscription login from the store. No
 	// credential at all is the legacy path (the runner's own environment).
@@ -601,7 +614,7 @@ func (p *Pipeline) RunOnce(ctx context.Context) error {
 	var errs []error
 	cfg := p.Config()
 	for _, name := range sortedSources(cfg) {
-		if cfg.Sources[name].Type == "webhook" {
+		if !cfg.Sources[name].Polled() {
 			continue
 		}
 		if _, err := p.tick(ctx, cfg, name); err != nil {
@@ -693,4 +706,21 @@ func sandbox(cfg *config.Config, timeout time.Duration) action.SandboxOptions {
 		dir = filepath.Join(filepath.Dir(cfg.Server.DB), "actions")
 	}
 	return action.SandboxOptions{Mode: cfg.Server.Sandbox, Timeout: timeout, Dir: dir}
+}
+
+// awsEnv fetches short-lived keys for the AWS credential and returns the
+// environment a bridged package gets: no IMDS, no config files, only these keys.
+func awsEnv(ctx context.Context, cfg *config.Config, name string, timeout time.Duration, jobID int64) (map[string]string, error) {
+	c := cfg.Credentials[name]
+	spec := awscred.Spec{Region: c.Region, Profile: c.Profile, RoleARN: c.RoleARN, ExternalID: c.ExternalID,
+		AccessKeyID: c.AccessKeyID.Value, SecretAccessKey: c.SecretAccessKey.Value}
+	k, err := awscred.Get(ctx, spec, awscred.Duration(timeout), fmt.Sprintf("siphon-%d", jobID))
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{
+		"AWS_ACCESS_KEY_ID": k.AccessKeyID, "AWS_SECRET_ACCESS_KEY": k.SecretAccessKey, "AWS_SESSION_TOKEN": k.SessionToken,
+		"AWS_REGION": c.Region, "AWS_DEFAULT_REGION": c.Region, "AWS_EC2_METADATA_DISABLED": "true",
+		"AWS_CONFIG_FILE": os.DevNull, "AWS_SHARED_CREDENTIALS_FILE": os.DevNull,
+	}, nil
 }

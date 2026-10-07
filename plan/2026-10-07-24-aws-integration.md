@@ -276,3 +276,7 @@ revert.
   - Extra refusals beyond the plan: `url`/`api_key` on an aws credential, aws-only fields on other providers, and non-`env:`/`file:` key refs.
   - The overlay "moved" rule also covers aws: a credential's file-provided keys are not kept if `region`, `profile`, `role_arn` or `external_id` changes.
   - The JSON schemas were regenerated (`TestSchemaUpToDate`).
+- **Step 3 (coder):**
+  - The job tests use the re-exec'd test bridge (`internal/job/main_test.go`), extended to dump the bridge's secrets file for the test, instead of `internal/action`'s unexported `bridgeFake`.
+  - The job-level "agent job holds no AWS key" test is not written: the job tests' bridge dies before the agent starts. It is covered end to end by the step 8 VM subtest (agent stub and bridge stub, real units), and at action level by #23's bridge tests.
+  - `Polled()` is used at `queue.go:87`, `pipeline.go` (run-once tick) and `web/data.go` (no poll display, no "stale" health for AWS sources).

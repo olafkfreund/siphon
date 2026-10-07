@@ -45,7 +45,7 @@ func (s *server) sources() ([]sourceView, error) {
 	out := []sourceView{}
 	for name, src := range s.Config().Sources {
 		v := sourceView{Name: name, Type: src.Type}
-		if src.Type != "webhook" {
+		if src.Polled() {
 			v.Poll = time.Duration(src.Poll).String()
 		}
 		if st, ok := states[name]; ok {
@@ -56,7 +56,7 @@ func (s *server) sources() ([]sourceView, error) {
 			v.Health = "error"
 		case v.LastPollAt == nil:
 			v.Health = "idle"
-		case src.Type != "webhook" && s.Now().Sub(*v.LastPollAt) > 2*time.Duration(src.Poll)+time.Minute:
+		case src.Polled() && s.Now().Sub(*v.LastPollAt) > 2*time.Duration(src.Poll)+time.Minute:
 			v.Health = "stale"
 		default:
 			v.Health = "ok"
