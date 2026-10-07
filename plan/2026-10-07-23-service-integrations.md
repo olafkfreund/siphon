@@ -241,3 +241,12 @@ unchanged, and only the new fields and the page disappear.
   - `AgentEgress` drops the package hosts for sources with env, since the bridge reaches them (`Config.BridgeEgress`).
   - The proxy env setup is factored into `egressSetup`.
   - **Commit layout:** `internal/config/config.go` was edited by both the coder (step 4: `BridgeEgress`/`packageHosts`) and Opus (step 5: `public_url`, `services.private_endpoints`, `ServiceEndpoint`, and the overlay `allow_private` exception). The whole file lands in the step 4 commit; step 5's commit has the web side.
+- **Step 4 (Opus, Nix and a fix):**
+  - The `siphon-mcp@` template reuses the restricted network attrs (`restrictedNet`, factored out of `siphon-action@`). The polkit regex is `^siphon-(action(-open)?|mcp)@[0-9a-f]{16}\.service$`.
+  - **Found by the VM test:** the bridge socket got the bridge unit's own dynamic group (run dirs aren't setgid, a #7 lesson), so the agent's forwarder was refused (connection reset).
+  - **Fix:** the bridge listens on `<sock>.tmp`, changes its group to the run dir's group (`siphon-io`), and renames it into place, so a waiter never sees a socket it can't use.
+  - **VM test** (14/14):
+    - a model agent calls a stdio stub's tool through the bridge and gets the sha256 prefix of the secret, proving the server received it;
+    - the secret isn't in the job output;
+    - the egress probe agent, which also lists the bridged source, finds no secret in `$HOME`, `/tmp` or `/proc/*/environ`;
+    - the stub model now calls the first tool it's offered.

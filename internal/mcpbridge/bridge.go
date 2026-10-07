@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -61,12 +62,34 @@ func Run(ctx context.Context, spec Spec) error {
 		})
 	}
 	os.Remove(spec.Socket)
-	old := syscall.Umask(0o117) // socket 0660: the run's group (siphon-io) may connect
-	ln, err := net.Listen("unix", spec.Socket)
+	// Listen on a temporary name, give the socket the run dir's group
+	// (siphon-io: run dirs aren't setgid, so a new file would get this unit's
+	// own group), then rename it into place. Whoever waits for spec.Socket
+	// only ever sees a socket the agent's unit may connect to.
+	tmp := spec.Socket + ".tmp"
+	os.Remove(tmp)
+	old := syscall.Umask(0o117) // socket 0660
+	ln, err := net.Listen("unix", tmp)
 	syscall.Umask(old)
 	if err != nil {
 		return err
 	}
+	if ul, ok := ln.(*net.UnixListener); ok {
+		ul.SetUnlinkOnClose(false) // the path moves; it is removed below
+	}
+	if fi, err := os.Stat(filepath.Dir(spec.Socket)); err == nil {
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+			if err := os.Chown(tmp, -1, int(st.Gid)); err != nil && !errors.Is(err, syscall.EPERM) {
+				ln.Close()
+				return err
+			}
+		}
+	}
+	if err := os.Rename(tmp, spec.Socket); err != nil {
+		ln.Close()
+		return err
+	}
+	defer os.Remove(spec.Socket)
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil))
 	hs := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}

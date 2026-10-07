@@ -91,6 +91,27 @@ let
     SystemCallArchitectures = "native";
     SystemCallFilter = [ "@system-service" ];
   };
+  # Network settings of the restricted templates (siphon-action@, siphon-mcp@).
+  restrictedNet =
+      if cfg.egress.enable then
+        {
+          # Own network namespace: only its lo, where exec-job forwards
+          # 127.0.0.1:3128 to the proxy's unix socket. No host port is
+          # reachable; the IP filter is a second layer.
+          PrivateNetwork = true;
+          IPAddressDeny = [ "any" ];
+          IPAddressAllow = [ "127.0.0.1/32" ];
+          # An empty /run: no host daemon socket (nscd, D-Bus, resolved,
+          # avahi, tailscale, databases...) is reachable, only the proxy's.
+          # connect() works on a read-only bind.
+          TemporaryFileSystem = [ "/run:ro" ];
+          BindReadOnlyPaths = [
+            egressDir
+            "/run/current-system" # PATH: /run/current-system/sw
+          ];
+        }
+      else
+        { IPAddressDeny = metadataDeny; };
   # The sandboxed action unit. network is the only difference between the
   # restricted and the open template.
   actionUnit = network: {
@@ -333,27 +354,13 @@ in
     # exec-job, as the DynamicUser, reads job.json and creates stdout/stderr.
     # Restricted: the only reachable address is siphon's egress proxy, so an
     # agent that ignores HTTPS_PROXY gets no network at all.
-    systemd.services."siphon-action@" = actionUnit (
-      if cfg.egress.enable then
-        {
-          # Own network namespace: only its lo, where exec-job forwards
-          # 127.0.0.1:3128 to the proxy's unix socket. No host port is
-          # reachable; the IP filter is a second layer.
-          PrivateNetwork = true;
-          IPAddressDeny = [ "any" ];
-          IPAddressAllow = [ "127.0.0.1/32" ];
-          # An empty /run: no host daemon socket (nscd, D-Bus, resolved,
-          # avahi, tailscale, databases...) is reachable, only the proxy's.
-          # connect() works on a read-only bind.
-          TemporaryFileSystem = [ "/run:ro" ];
-          BindReadOnlyPaths = [
-            egressDir
-            "/run/current-system" # PATH: /run/current-system/sw
-          ];
-        }
-      else
-        { IPAddressDeny = metadataDeny; }
-    );
+    systemd.services."siphon-action@" = actionUnit restrictedNet;
+    # MCP bridge: a stdio MCP server that holds secrets runs here, under its
+    # own DynamicUser, never in the agent's unit. Always the restricted
+    # network; it reaches only its package's hosts through the egress proxy.
+    systemd.services."siphon-mcp@" = actionUnit restrictedNet // {
+      description = "siphon MCP bridge %i";
+    };
     # Open: for runs with egress off (cmd actions by default).
     systemd.services."siphon-action-open@" = actionUnit { IPAddressDeny = metadataDeny; };
 
@@ -370,7 +377,7 @@ in
           var unit = action.lookup("unit") || "";
           var verb = action.lookup("verb") || "";
           var allowed = ${builtins.toJSON units};
-          if (/^siphon-action(-open)?@[0-9a-f]{16}\.service$/.test(unit) &&
+          if (/^siphon-(action(-open)?|mcp)@[0-9a-f]{16}\.service$/.test(unit) &&
               (verb == "start" || verb == "stop" || verb == "reset-failed")) {
             return polkit.Result.YES;
           }
