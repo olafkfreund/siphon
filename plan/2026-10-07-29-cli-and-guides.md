@@ -482,3 +482,17 @@ self-approved; the PR lists it.
   - A job counts as "run" when it is `done` or `failed`.
   - `/llms.txt` and `/llms-full.txt` are served from a root-level `embed.go` (`package siphon`).
   - The draft diff now leaves out placeholder stand-ins; the CLI names each placeholder above "Changes:".
+- **Step 10 (Opus):**
+  - **`services.siphon.cli.enable`** (default on) puts `siphon` on PATH and sets `SIPHON_URL`; checked by `checks.cli-module`.
+  - **The VM subtest** follows `docs/getting-started.md` as user `alice`:
+    - `login` (0600 client file), `connect model`;
+    - `new task` → webhook → job done;
+    - `test --last`, `why`;
+    - a template dry-run;
+    - an agent approved from the CLI;
+    - history showing `api:cli:alice`;
+    - `siphon mcp` through a client-like probe (`nix/mcp-probe.py`): tools listed, none can approve;
+    - `/help` and `/llms.txt`.
+  - **Not in the VM:** `siphon draft`. The VM's stub model can't write YAML; draft is covered by unit tests with a fake model, and was run for real on a local Ollama.
+  - **Fix found by the VM walkthrough:** `connect model openai` always prompted for a key, which hung on a terminal. Only hosted presets (openrouter, groq, mistral) prompt now; `openai`'s key is optional via `--api-key`.
+  - The config-API subtest counts its own revision and audit deltas (earlier subtests now change the config too).

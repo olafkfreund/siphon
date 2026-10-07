@@ -280,7 +280,9 @@ func testDetail(t map[string]any) string {
 	return " (" + strings.Join(p, ", ") + ")"
 }
 
-var presetNeedsKey = []string{"openrouter", "groq", "mistral", "openai"}
+// Hosted presets prompt for a key; a generic OpenAI-compatible endpoint is often
+// self-hosted without one, so its key is only taken from --api-key.
+var presetNeedsKey = []string{"openrouter", "groq", "mistral"}
 
 func (c *cli) connectModel(args []string, o *connectOpts) error {
 	if len(args) != 1 {

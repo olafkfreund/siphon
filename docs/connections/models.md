@@ -26,7 +26,7 @@ test: ok, 14 models: gemma4:12b, gemma4:26b, qwen2.5-coder:14b, qwen2.5:7b, …
 | `openrouter` | `https://openrouter.ai/api/v1` | yes |
 | `groq` | `https://api.groq.com/openai/v1` | yes |
 | `mistral` | `https://api.mistral.ai/v1` | yes |
-| `openai` | (give `--url`) | usually |
+| `openai` | (give `--url`) | optional (`--api-key`) |
 
 Keys are read only from `@file` or stdin (`--api-key -`), and stored
 write-only.
