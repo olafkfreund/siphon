@@ -1,0 +1,15 @@
+# title:    Receive Standard Webhooks (Svix, Clerk, Resend, …)
+# category: Notifications & glue
+# secrets:  sources/provider.secret                (the whsec_… signing secret from the provider)
+# apply:    siphon apply -f standard-webhooks.yaml --secret sources/provider.secret=-
+sources:
+  provider:
+    type: webhook
+    signature: standard-webhooks    # webhook-id / webhook-timestamp / webhook-signature, 5 min window
+rules:
+  - name: new-signup
+    source: provider
+    when: 'event.type == "user.created"'
+    on: each
+    id: event.data.id
+    action: { cmd: [echo, "new user {{.event.data.id}}"] }

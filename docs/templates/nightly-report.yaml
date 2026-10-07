@@ -1,0 +1,37 @@
+# title:    A nightly report: fetch, summarise, notify
+# category: Homelab
+# needs:    credentials/ollama-local               (siphon connect model ollama)
+# secrets:  sources/timer.secret
+# apply:    siphon apply -f nightly-report.yaml --secret sources/timer.secret=-
+# Siphon has no clock source; a systemd timer posts the webhook (NixOS):
+#   systemd.timers.siphon-nightly = { wantedBy = ["timers.target"]; timerConfig.OnCalendar = "06:00"; };
+#   systemd.services.siphon-nightly.script = ''${pkgs.curl}/bin/curl -fsS -H "X-Siphon-Key: $(cat /run/secrets/siphon-timer)"
+#     -d "{"kind":"nightly","day":"$(date +%F)"}" https://<siphon>/hook/timer'';
+sources:
+  timer:
+    type: webhook
+    signature: token
+    token_header: X-Siphon-Key
+agents:
+  reporter:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: "Summarise these numbers for a morning report, in three lines."
+    max_turns: 2
+    timeout: 5m
+    approve: false
+routines:
+  nightly:
+    steps:
+      - { id: fetch, cmd: [curl, -fsS, https://metrics.example.com/api/summary], retry: { attempts: 3, base: 5s, factor: 2 } }
+      - { id: summary, agent: reporter, if: 'steps.fetch.exit == 0', timeout: 5m }
+      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: Morning report", -d, "{{.steps.summary.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+rules:
+  - name: nightly
+    source: timer
+    when: 'event.kind == "nightly"'
+    on: each
+    id: event.day                   # once per day, even if the timer fires twice
+    cooldown: 1h
+    action: { routine: nightly }

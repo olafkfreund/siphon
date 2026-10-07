@@ -1,0 +1,27 @@
+# title:    Diagnose a failed GitHub Actions run
+# category: Code review & CI
+# needs:    sources/github, sources/github-hooks   (siphon connect github --webhook; tick "Workflow runs" in GitHub)
+#           credentials/claude-max                 (siphon connect login claude)
+# apply:    siphon apply -f github-ci-failure.yaml
+agents:
+  ci-doctor:
+    kind: claude
+    credential: claude-max
+    prompt: |
+      Workflow run {{.event.workflow_run.id}} ("{{.event.workflow_run.name}}") failed on
+      {{.event.workflow_run.head_branch}} in {{.event.repository.full_name}}.
+      Read the failed jobs' logs and explain the most likely cause in five lines,
+      with the failing step and a suggested fix. Do not re-run anything.
+    mcp: [github]
+    allowed_tools: [mcp__github__get_workflow_run, mcp__github__list_workflow_jobs, mcp__github__get_job_logs]
+    max_turns: 20
+    max_budget_usd: 1
+    timeout: 15m
+rules:
+  - name: ci-failed
+    source: github-hooks
+    when: 'headers["x-github-event"] == "workflow_run" && event.action == "completed" && event.workflow_run.conclusion == "failure"'
+    on: each
+    id: event.workflow_run.id
+    cooldown: 5m
+    action: { agent: ci-doctor }

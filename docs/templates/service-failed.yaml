@@ -1,0 +1,21 @@
+# title:    Get notified when a systemd service fails
+# category: Ops & monitoring
+# secrets:  sources/systemd.secret
+# apply:    siphon apply -f service-failed.yaml --secret sources/systemd.secret=-
+# On the host, an OnFailure= unit posts to Siphon (NixOS):
+#   systemd.services."notify-siphon@" = { serviceConfig.Type = "oneshot"; script = ''
+#     ${pkgs.curl}/bin/curl -fsS -H "X-Siphon-Key: $(cat /run/secrets/siphon-hook)" #       -d "{"unit":"$1","host":"$(hostname)"}" https://<siphon>/hook/systemd ''; scriptArgs = "%i"; };
+#   systemd.services.restic-backup.unitConfig.OnFailure = "notify-siphon@%n";
+sources:
+  systemd:
+    type: webhook
+    signature: token
+    token_header: X-Siphon-Key
+rules:
+  - name: unit-failed
+    source: systemd
+    when: 'event.unit != ""'
+    on: each
+    id: event.host + "/" + event.unit + "/" + string(int(now().Unix() / 600))   # at most one per unit per 10 min
+    action:
+      cmd: [curl, -fsS, -H, "Title: {{.event.unit}} failed", -d, "on {{.event.host}}", https://ntfy.sh/siphon-CHANGE-ME]

@@ -1,0 +1,17 @@
+# title:    Know when a provider you depend on has an incident
+# category: Ops & monitoring
+# apply:    siphon apply -f upstream-status.yaml
+# Any Atlassian Statuspage works the same way (GitHub, Cloudflare, OpenAI, …):
+# swap the URL. indicator is none | minor | major | critical.
+sources:
+  github-status:
+    type: http
+    url: https://www.githubstatus.com/api/v2/status.json
+    poll: 2m
+rules:
+  - name: github-degraded
+    source: github-status
+    when: 'event.status.indicator != "none"'
+    on: edge
+    action:
+      cmd: [curl, -fsS, -H, "Title: GitHub incident", -d, "{{.event.status.description}}", https://ntfy.sh/siphon-CHANGE-ME]

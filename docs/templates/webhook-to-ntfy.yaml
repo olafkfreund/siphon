@@ -1,0 +1,19 @@
+# title:    Forward any webhook to your phone
+# category: Notifications & glue
+# secrets:  sources/inbox.secret
+# apply:    siphon apply -f webhook-to-ntfy.yaml --secret sources/inbox.secret=-
+# Anything that can POST JSON with a header (scripts, cron, IFTTT, n8n):
+#   curl -H "X-Siphon-Key: <secret>" -d '{"title":"Hi","message":"It works"}' https://<siphon>/hook/inbox
+sources:
+  inbox:
+    type: webhook
+    signature: token
+    token_header: X-Siphon-Key
+rules:
+  - name: forward
+    source: inbox
+    when: 'event.message != ""'
+    on: each
+    id: event.title + event.message
+    action:
+      cmd: [curl, -fsS, -H, "Title: {{.event.title}}", -d, "{{.event.message}}", https://ntfy.sh/siphon-CHANGE-ME]

@@ -44,9 +44,16 @@ Always follow this order. Every step has `-o json`.
 1. `siphon inventory -o json`: the names that exist (sources, agents,
    routines, connections, MCP packages, allowlists). Reuse them; never
    invent a connection or a secret.
-2. `siphon example <name>`: start from the closest example:
-   - `webhook-command`, `poll-threshold`, `mcp-watch`;
-   - `github-pr-agent`, `agent`, `routine`, `model-connection`.
+2. `siphon template`: list the ready-made templates (about 20, by
+   category), then `siphon template <name>` to start from the closest one,
+   for example:
+   - `github-pr-review`, `github-ci-failure`;
+   - `disk-full`, `upstream-status`, `alertmanager-summary`;
+   - `webhook-to-ntfy`, `local-summariser`, `nightly-report`,
+     `aws-cloudwatch-alarm`.
+
+   Each template's header lists what to `connect` first and which
+   `--secret` flags to pass.
 
    `siphon explain <kind>` lists every field of a source, rule, agent,
    routine or credential.

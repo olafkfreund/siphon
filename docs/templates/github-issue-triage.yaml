@@ -1,0 +1,28 @@
+# title:    Suggest labels and a summary for new issues
+# category: Code review & CI
+# needs:    sources/github, sources/github-hooks   (siphon connect github --webhook; tick "Issues")
+#           credentials/ollama-local               (siphon connect model ollama)
+# apply:    siphon apply -f github-issue-triage.yaml
+# Runs on a local model: free and private. The suggestion lands in the job
+# output; nothing is written back to GitHub.
+agents:
+  issue-triage:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: |
+      A new GitHub issue was opened in {{.event.repository.full_name}}:
+      Title: {{.event.issue.title}}
+      Body: {{.event.issue.body}}
+      Reply as JSON: {"labels": [...], "summary": "...", "needs_info": true|false}.
+      Choose labels from: bug, feature, question, docs, security.
+    max_turns: 2
+    timeout: 5m
+rules:
+  - name: triage-new-issues
+    source: github-hooks
+    when: 'headers["x-github-event"] == "issues" && event.action == "opened"'
+    on: each
+    id: event.issue.id
+    cooldown: 30s
+    action: { agent: issue-triage }

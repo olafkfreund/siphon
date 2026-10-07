@@ -1,0 +1,14 @@
+# title:    Push a phone notification when a GitLab pipeline fails
+# category: Code review & CI
+# needs:    sources/gitlab-hooks                   (siphon connect gitlab --webhook; tick "Pipeline events")
+# apply:    siphon apply -f gitlab-pipeline-failed.yaml
+# Uses ntfy.sh: install the ntfy app and subscribe to your topic. Pick a long,
+# random topic name: anyone who knows it can read it.
+rules:
+  - name: pipeline-failed
+    source: gitlab-hooks
+    when: 'headers["x-gitlab-event"] == "Pipeline Hook" && event.object_attributes.status == "failed"'
+    on: each
+    id: event.object_attributes.id
+    action:
+      cmd: [curl, -fsS, -H, "Title: Pipeline failed", -d, "{{.event.project.path_with_namespace}} on {{.event.object_attributes.ref}}", https://ntfy.sh/siphon-CHANGE-ME]

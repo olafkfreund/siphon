@@ -1,5 +1,6 @@
-# example: mcp-watch - watch a resource on an MCP server.
-# apply:   siphon apply -f mcp-watch.yaml
+# title:    Watch a build status on an MCP server
+# category: MCP
+# apply:    siphon apply -f mcp-build-watch.yaml
 sources:
   build-status:
     type: mcp
