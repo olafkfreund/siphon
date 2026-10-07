@@ -353,3 +353,8 @@ Revert the merge.
   - Unknown `/api/…` paths return JSON 404 (the catch-all route).
   - Helpers for later steps: `s.write`, `withSecrets`, `secretPath`, `apiActor`, `s.dryRun`, `errInvalid.list()`.
   - **Gap fixed in step 2:** dry-run skipped the model-endpoint private-address check, which lived in `commit`.
+- **Step 2 (coder):**
+  - The model-endpoint check lives in `credsCheck`, shared by `commit` and `dryRun`.
+  - In a batch, every item's `rev` must equal the latest revision (mixed revs give 409).
+  - Errors that name an item get the `<kind>/<name>:` prefix. `checkOverlay` messages don't name one yet; that's fixed in step 3.
+  - The revision summary is `apply: N items, M deleted`.

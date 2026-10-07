@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -163,6 +164,7 @@ func (s *server) configAPI(mux *http.ServeMux) {
 		}
 		return s.write(r, actor, kind+"/"+name+" "+verb, body.Rev, putItem(kind, name, y), pending)
 	})
+	route("POST /api/config/apply", s.applyBatch)
 	route("DELETE /api/config/{kind}/{name}", func(r *http.Request) (any, int, error) {
 		kind, name := r.PathValue("kind"), r.PathValue("name")
 		rev, err := s.queryRev(r)
@@ -280,4 +282,123 @@ func (s *server) bodyRev(r *http.Request) (*int64, error) {
 		}
 	}
 	return body.Rev, nil
+}
+
+type applyItem struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+	YAML string `json:"yaml"`
+	Rev  *int64 `json:"rev"`
+}
+
+// applyBatch is POST /api/config/apply: every item and delete in one prepare
+// and one commit (one revision), or none of them.
+func (s *server) applyBatch(r *http.Request) (any, int, error) {
+	var body struct {
+		Items   []applyItem       `json:"items"`
+		Delete  []applyItem       `json:"delete"`
+		Secrets map[string]string `json:"secrets"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(&body); err != nil {
+		return nil, 400, errMsg("bad JSON body")
+	}
+	actor, err := apiActor(r)
+	if err != nil {
+		return nil, 400, err
+	}
+	if len(body.Items)+len(body.Delete) == 0 {
+		return nil, 400, errMsg("nothing to apply")
+	}
+	var bad []error
+	seen := map[itemKey]bool{}
+	for _, it := range append(slices.Clone(body.Items), body.Delete...) {
+		k := itemKey{Kind: it.Kind, Name: it.Name}
+		switch {
+		case !config.Kinds[it.Kind] || !itemName.MatchString(it.Name):
+			bad = append(bad, fmt.Errorf("%s/%s: bad kind or name", it.Kind, it.Name))
+		case seen[k]:
+			bad = append(bad, fmt.Errorf("%s/%s: listed more than once", it.Kind, it.Name))
+		}
+		seen[k] = true
+	}
+	// A secret key is <kind>/<name>.<field>; names may hold dots, so match the items.
+	bySecret := map[int]map[string]string{}
+	for k, v := range body.Secrets {
+		found := false
+		for i, it := range body.Items {
+			if f, ok := strings.CutPrefix(k, it.Kind+"/"+it.Name+"."); ok {
+				if bySecret[i] == nil {
+					bySecret[i] = map[string]string{}
+				}
+				bySecret[i][f], found = v, true
+			}
+		}
+		if !found {
+			bad = append(bad, fmt.Errorf("secrets: %q is not for an item in this request", k))
+		}
+	}
+	var pending []pendingSecret
+	var muts []func(map[itemKey]store.ConfigItem)
+	var rev *int64
+	for i, it := range body.Items {
+		y, ps, err := withSecrets(it.Kind, it.Name, it.YAML, bySecret[i], s.Config().Server.DB)
+		var inv errInvalid
+		if errors.As(err, &inv) {
+			for _, l := range inv.list() {
+				bad = append(bad, errors.New(it.Kind+"/"+it.Name+": "+l))
+			}
+			continue
+		} else if err != nil {
+			return nil, 0, err
+		}
+		pending = append(pending, ps...)
+		muts = append(muts, putItem(it.Kind, it.Name, y))
+		if it.Rev != nil {
+			if rev != nil && *rev != *it.Rev {
+				return nil, 0, errStale // two different revs: one of them is stale
+			}
+			rev = it.Rev
+		}
+	}
+	for _, d := range body.Delete {
+		if !config.Kinds[d.Kind] || !itemName.MatchString(d.Name) {
+			continue // reported above
+		}
+		m, err := s.deleteItem(d.Kind, d.Name)
+		if err != nil {
+			return nil, 0, err
+		}
+		muts = append(muts, m)
+	}
+	if len(bad) > 0 {
+		return nil, 0, errInvalid{errors.Join(bad...).Error()}
+	}
+	mutate := func(m map[itemKey]store.ConfigItem) {
+		for _, f := range muts {
+			f(m)
+		}
+	}
+	v, code, err := s.write(r, actor, fmt.Sprintf("apply: %d items, %d deleted", len(body.Items), len(body.Delete)), rev, mutate, pending)
+	var inv errInvalid
+	if errors.As(err, &inv) {
+		lines := inv.list()
+		for i, l := range lines {
+			lines[i] = tagItem(l, body.Items)
+		}
+		return nil, 0, errInvalid{strings.Join(lines, "\n")}
+	}
+	return v, code, err
+}
+
+// tagItem prefixes an error line with the batch item it names, if any: the
+// config checks word them as sources.NAME or rules[N] "NAME".
+func tagItem(line string, items []applyItem) string {
+	for _, it := range items {
+		ref := it.Kind + "." + it.Name
+		if strings.Contains(line, ref+":") || strings.Contains(line, ref+".") ||
+			(it.Kind == "rules" && strings.Contains(line, "rules[") && strings.Contains(line, `"`+it.Name+`":`)) {
+			return it.Kind + "/" + it.Name + ": " + line
+		}
+	}
+	return line
 }

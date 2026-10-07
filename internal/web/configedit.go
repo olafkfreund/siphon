@@ -170,7 +170,38 @@ func (s *server) dryRun(rev *int64, mutate func(map[itemKey]store.ConfigItem), p
 	if rev != nil && *rev != latest {
 		return nil, errStale
 	}
-	return s.prepare(cur, mutate, pending)
+	e, err := s.prepare(cur, mutate, pending)
+	if err == nil {
+		_, err = s.credsCheck(cur, e.items)
+	}
+	return e, err
+}
+
+// credsCheck reports whether a credentials item changed. Items a save changes
+// are checked for private model endpoints (DNS); loading never does, so a name
+// that later turns private can't break startup.
+func (s *server) credsCheck(cur, next []store.ConfigItem) (changed bool, err error) {
+	for _, c := range next {
+		if c.Kind != "credentials" {
+			continue
+		}
+		var prev *store.ConfigItem
+		for i := range cur {
+			if cur[i].Kind == c.Kind && cur[i].Name == c.Name {
+				prev = &cur[i]
+			}
+		}
+		if prev != nil && prev.YAML == c.YAML && prev.Deleted == c.Deleted {
+			continue
+		}
+		changed = true
+		if !c.Deleted {
+			if cerr := s.Config().CheckModelEndpoint(c.YAML); cerr != nil {
+				return changed, errInvalid{cerr.Error()}
+			}
+		}
+	}
+	return changed, nil
 }
 
 // commit validates, then stores the changed overlay rows, a revision and an
@@ -190,28 +221,9 @@ func (s *server) commit(actor, summary string, rev *int64, mutate func(map[itemK
 	if e, err = s.prepare(cur, mutate, pending); err != nil {
 		return 0, nil, nil, err
 	}
-	// Items this save changes are checked for private model endpoints (DNS);
-	// loading never does, so a name that later turns private can't break startup.
-	credsChanged := false
-	for _, c := range e.items {
-		if c.Kind != "credentials" {
-			continue
-		}
-		var prev *store.ConfigItem
-		for i := range cur {
-			if cur[i].Kind == c.Kind && cur[i].Name == c.Name {
-				prev = &cur[i]
-			}
-		}
-		if prev != nil && prev.YAML == c.YAML && prev.Deleted == c.Deleted {
-			continue
-		}
-		credsChanged = true
-		if !c.Deleted {
-			if cerr := s.Config().CheckModelEndpoint(c.YAML); cerr != nil {
-				return 0, nil, nil, errInvalid{cerr.Error()}
-			}
-		}
+	credsChanged, err := s.credsCheck(cur, e.items)
+	if err != nil {
+		return 0, nil, nil, err
 	}
 	// Only now, with the revision current and the candidate valid, touch disk.
 	if len(pending) > 0 {
