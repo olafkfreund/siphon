@@ -2,6 +2,8 @@
 // templates, for the CLI (`template`, `guide`) and the portal.
 package docs
 
+//go:generate sh -c "go run ../cmd/siphon help --json | go run ./internal/gencli > cli.md"
+
 import (
 	"embed"
 	"io/fs"
