@@ -24,7 +24,7 @@ rules:
 YAML
 chmod 700 "$dir"; chmod 600 "$dir"/*   # private; keep-id maps us to uid 65532 inside
 
-podman run -d --name siphon-ci --cap-drop=all --read-only --tmpfs /tmp \
+podman run -d --name siphon-ci --log-driver=k8s-file --cap-drop=all --read-only --tmpfs /tmp \
   --userns=keep-id:uid=65532,gid=65532 \
   -p 127.0.0.1:18095:8080 -v "$dir":/etc/siphon:ro -v siphon-ci-state:/var/lib/siphon "$img" >/dev/null
 for _ in $(seq 60); do curl -sf http://127.0.0.1:18095/healthz >/dev/null && break; sleep 0.5; done
