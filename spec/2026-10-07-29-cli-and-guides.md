@@ -172,6 +172,79 @@ git.
 - `golang.org/x/term` for no-echo prompts. It's the only new dependency:
   small and official, and stdin is the fallback when there's no terminal.
 
+### B2. Built for LLMs (intent outcome 6)
+
+**For an AI assistant driving the CLI:**
+- **Never needs a terminal.** Every wizard has a flag-only form (`siphon new
+  task --source … --when … --action …`), `--yes` skips confirmations, and
+  stdin is the only interactive input (secrets).
+- **Machine-readable everything.**
+  - `-o json` works on every command, with documented, stable shapes.
+  - Errors on stderr are `{"error", "errors": [...], "hint"}` with exit
+    codes 0 ok, 1 error, 2 usage, 3 validation, 4 not found, 5 conflict
+    (stale `rev`).
+  - A `hint` names the next command to run (for example "run
+    `siphon connect github` first").
+- **Safe by default.** Every write supports `--dry-run`, which returns the
+  diff and the validation result, so an assistant can propose, check, then
+  apply.
+- **Self-description in one call each:**
+  - `siphon help --json`: every command, its flags, args, exit codes and
+    one example.
+  - `siphon explain <kind>`: the fields of a source, rule, agent, routine
+    or credential, with types, required fields, defaults and allowed
+    values. It's generated from the JSON schema (`internal/config`'s
+    schema generator, already used for `schema/`), so it can't drift.
+  - `siphon example <name>`: a minimal valid YAML for each task type and
+    item (`webhook-command`, `poll-threshold`, `github-pr-agent`,
+    `mcp-watch`, `routine`, `agent`, `model-connection`, …). These are
+    the same files the docs use, and CI validates them.
+  - `siphon inventory -o json`: the names an assistant may refer to:
+    sources, agents, routines, connections (with provider, never secrets),
+    `mcp_packages`, `server.aws` allowlists, private endpoints, and rules.
+- **A reference written for LLMs:**
+  - `docs/llm.md`: the workflow (inventory → example → write YAML →
+    `apply --dry-run` → fix → apply → test → why), the rules that commonly
+    trip models up (argv, not shell; templates; `on: each` vs `edge`;
+    cooldown being mandatory for agents; secrets as refs), and exit codes.
+  - A root `llms.txt` that points to it and to `docs/`.
+  - `siphon guide` prints `docs/llm.md`, embedded in the binary, so an
+    assistant without the repo can read it.
+- **`siphon mcp`:** Siphon as a stdio MCP server, so Claude Code or Codex
+  can use it natively. It uses the same client config.
+  - **Read-only tools:** `inventory`, `get`, `explain`, `example`, `test`,
+    `why`, `jobs`, `status`.
+  - **Write tools:** `apply` (and `delete`) do a dry-run unless the server
+    was started with `--allow-write`.
+  - **No approval tools:** approve and deny stay a human's job.
+  - Built on the go-sdk, which is already a dependency.
+
+**Siphon using an LLM to write tasks: `siphon draft "<plain-language task>"`**
+- **Where it runs:** on the daemon, via `POST /api/draft`, using a
+  **model connection** (`ollama`/`openai`, so a local Ollama works at no
+  cost; `--model <connection>`, with a default in the client config).
+  The model call goes through the existing model client and egress rules.
+- **What the model is given:**
+  - the item JSON schema;
+  - the matching examples;
+  - the inventory (names only, **never secrets**);
+  - `docs/llm.md`'s rules;
+  - the request.
+- **The repair loop:** it asks for the apply YAML only, then runs
+  `prepare` (dry-run). On errors it feeds them back, up to 3 rounds.
+- **What comes back:** the YAML, the diff, any remaining errors, and what
+  the user must still do (for example "connect github first",
+  "approve: true is set").
+- **It never applies by itself.** The CLI prints the result. With
+  `--apply` it shows the diff and asks for confirmation (`--yes` for
+  scripts), then applies through the normal path.
+- **The model's output is untrusted.** Applying it is the same as a user
+  applying the YAML: every overlay rule applies. The model can't set
+  secrets (it may only reference `connect`ed ones) or file-only fields,
+  and agent rules keep `approve: true` unless the user sets otherwise.
+- **The draft is recorded:** the request text and model are kept in the
+  revision's audit detail as `draft:<connection>`.
+
 ### C. NixOS
 
 - `services.siphon.cli.enable` (default `true`) puts the binary on PATH,
@@ -200,6 +273,8 @@ docs/
     models.md                Ollama and OpenAI-compatible endpoints
     github.md  gitlab.md  aws.md
   troubleshooting.md         siphon why, last event, rejections, logs
+  llm.md                     Siphon for AI assistants: workflow, rules, JSON shapes (also `siphon guide`)
+  drafting.md                write tasks in plain language with siphon draft
   cli.md                     every command and flag (checked against the usage text)
   configuration.md           siphon.yaml reference (points at the schema)
   developing/adding-a-source.md   (the existing developer note, moved)
@@ -241,6 +316,17 @@ docs/
   Hand-written calls are small, and the API is stable.
 - **A docs site generator (mkdocs, hugo):** deferred (owner question 4).
   GitHub renders Markdown, and links are checked by the docs test.
+- **Drafting in the CLI process** (calling the model from the user's
+  machine): the model connections and their keys live in the daemon, and
+  the daemon has the egress rules. A server endpoint keeps keys server-side
+  and works from any client.
+- **Drafting with subscription CLIs (claude/codex):** they would need a
+  sandboxed agent run, which is slow and heavy for a 3-round repair loop.
+  Model connections first (including a local Ollama); a subscription-backed
+  draft can come later.
+- **MCP write tools on by default:** an assistant could change live
+  automation unnoticed. Writes are opt-in with `--allow-write`, and
+  approvals are never exposed.
 - **Per-user tokens and RBAC:** worth doing, but separate. The actor label
   improves the audit now, and the docs are honest that the token is
   shared and is admin.
@@ -263,6 +349,17 @@ docs/
 - **Docs drift:** the CI checks; `cli.md` is tied to the usage text.
 - **`checkOverlay` collecting all errors** changes its control flow. The
   existing overlay tests must keep passing, with the same messages.
+- **Model-written tasks may be wrong, or unsafe** (an over-broad `when`,
+  shell-like argv, wide tool lists). Mitigations:
+  - validation plus `checkOverlay`;
+  - the diff shown before applying;
+  - `approve: true` kept for agents;
+  - the docs telling users to review drafts like any change.
+
+  Prompt injection through inventory names is limited: names match a
+  strict regex, and are data inside the prompt.
+- **A local model may produce poor YAML.** The repair loop and the
+  examples help, and the result is reported honestly when errors remain.
 - **Hosts:** none changed. NixOS users gain the binary on PATH and one env
   var.
 
@@ -278,10 +375,21 @@ docs/
   - local mode unchanged (the existing tests);
   - `explain` reasons: disabled, cooldown, edge already true, eval error,
     rejected webhook, no events yet.
+- **LLM features:**
+  - `help --json` and `explain` are tested against the usage text and the
+    schema;
+  - every `siphon example` passes a dry-run;
+  - `siphon mcp`: a go-sdk client lists the tools, a write without
+    `--allow-write` is only a dry-run, and there's no approve tool;
+  - `draft` against a stub model: a bad first answer, a repair with the
+    validation errors, then valid YAML; secrets are never in the prompt
+    (asserted); and it never applies without `--apply`.
 - **Docs tests:** YAML blocks validated, and the `cli.md`/usage parity.
 - **NixOS VM subtest:** the getting-started and how-to CLI walkthrough
   against the running daemon (above), plus `cli.enable` putting `siphon`
   on PATH with `SIPHON_URL`.
 - **CI:** all existing jobs green.
 - **Owner live:** follow `docs/getting-started.md` on p620 from a clean
-  shell, then add one real task from the CLI and see it in the portal.
+  shell, then add one real task from the CLI and see it in the portal;
+  `siphon draft` one task with the local Ollama; and drive Siphon from
+  Claude Code through `siphon mcp`.

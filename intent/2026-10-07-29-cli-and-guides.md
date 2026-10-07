@@ -94,7 +94,19 @@ The owner expects most users to **add things from the CLI** and to use the
 
    The guide's examples are **checked in CI**, so they can't rot. The README
    shrinks to an overview that links into the guide.
-6. **The existing local commands keep working** (`validate`,
+6. **Built for LLMs, both ways** (added by the owner on 2026-10-07, during
+   the spec: "a cli that is really easy to manage with llms and use llms to
+   create new actions and rules. Well documented and clear in use"):
+   - **An AI assistant** (Claude Code, Codex, …) can drive the CLI reliably:
+     - predictable, non-interactive commands;
+     - machine-readable output and errors;
+     - self-description of every command and item format, with examples;
+     - a short reference written for LLMs.
+   - **Siphon itself can use an LLM** to turn a plain-language description
+     ("when a PR is opened on repo X, have an agent review it") into a valid
+     task. The result is checked by Siphon's own validation, shown to the
+     user, and applied only after they confirm.
+7. **The existing local commands keep working** (`validate`,
    `rules test`, `run-once`, `serve`, `credentials import`), so nothing
    breaks.
 
