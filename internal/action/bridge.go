@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/olafkfreund/siphon/internal/mcpbridge"
 )
@@ -46,7 +49,7 @@ func startBridges(ctx context.Context, o *AgentOptions) (forwards map[int]string
 			stopAll()
 		}
 	}()
-	mcp := maps.Clone(o.MCP)
+	mcp, socks := maps.Clone(o.MCP), map[string]string{}
 	names := slices.Sorted(maps.Keys(mcp))
 	for i, name := range names {
 		s := mcp[name]
@@ -90,10 +93,11 @@ func startBridges(ctx context.Context, o *AgentOptions) (forwards map[int]string
 			return nil, nil, nil, fmt.Errorf("mcp bridge for %q: %w", name, err)
 		}
 		stops = append(stops, stopOne)
+		socks[name] = sock
 		direct = append(direct, "127.0.0.1:"+strconv.Itoa(port))
 		mcp[name] = MCPServer{URL: "http://127.0.0.1:" + strconv.Itoa(port) + "/mcp", Headers: map[string]string{"Authorization": "Bearer " + tok}}
 	}
-	o.MCP = mcp
+	o.MCP, o.bridgeSocks = mcp, socks
 	return forwards, direct, stopAll, nil
 }
 
@@ -219,7 +223,7 @@ func bridgeUnit(ctx context.Context, o *AgentOptions, s MCPServer, token string,
 	stop := func() { cancel(); <-done; os.Remove(secrets); os.RemoveAll(runDir) }
 	if err := waitSocket(sock, done); err != nil {
 		stop()
-		return "", nil, fmt.Errorf("%w: %s", err, Mask(stderr, append(slices.Collect(maps.Values(s.Env)), o.Secrets...)))
+		return "", nil, fmt.Errorf("%w: %s", err, Mask(stderr, bridgeMask(s, o)))
 	}
 	return sock, stop, nil
 }
@@ -287,7 +291,76 @@ func bridgeProcess(ctx context.Context, o *AgentOptions, s MCPServer, token stri
 	}
 	if err := waitSocket(sock, done); err != nil {
 		stop()
-		return "", nil, fmt.Errorf("%w: %s", err, Mask(out.Bytes(), append(slices.Collect(maps.Values(s.Env)), o.Secrets...)))
+		return "", nil, fmt.Errorf("%w: %s", err, Mask(out.Bytes(), bridgeMask(s, o)))
 	}
 	return sock, stop, nil
+}
+
+// probeTimeout caps ProbeBridge; tests shorten it.
+var probeTimeout = 30 * time.Second
+
+// ProbeBridge starts the bridge for server name exactly as a run would, lists
+// its tools over the bridge's unix socket (the daemon is in the socket's group,
+// so this works in both sandbox modes) and stops it again.
+func ProbeBridge(ctx context.Context, o AgentOptions, name string) ([]string, error) {
+	s, ok := o.MCP[name]
+	if !ok || len(s.Env) == 0 || len(s.Command) == 0 {
+		return nil, fmt.Errorf("mcp server %q is not a bridged stdio server", name)
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	o.MCP, o.AllowedTools = map[string]MCPServer{name: s}, []string{"mcp__" + name}
+	if _, _, stop, err := startBridges(ctx, &o); err != nil {
+		return nil, err
+	} else {
+		defer stop()
+	}
+	secrets := bridgeMask(s, &o)
+	tools, err := listTools(ctx, o.bridgeSocks[name], o.MCP[name].Headers["Authorization"])
+	if err != nil {
+		return nil, fmt.Errorf("mcp server %q: %s", name, Mask([]byte(err.Error()), secrets))
+	}
+	return tools, nil
+}
+
+func listTools(ctx context.Context, sock, auth string) ([]string, error) {
+	// ponytail: http over a unix socket by rewriting the dial; the host in the URL is unused.
+	tr := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", sock)
+	}}
+	defer tr.CloseIdleConnections()
+	hc := &http.Client{Transport: bearerTransport{tr, auth}}
+	sess, err := mcp.NewClient(&mcp.Implementation{Name: "siphon-probe", Version: "1"}, nil).Connect(ctx,
+		&mcp.StreamableClientTransport{Endpoint: "http://bridge/mcp", HTTPClient: hc, MaxRetries: -1, DisableStandaloneSSE: true}, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer sess.Close()
+	var out []string
+	for t, err := range sess.Tools(ctx, nil) {
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t.Name)
+	}
+	return out, nil
+}
+
+type bearerTransport struct {
+	rt   http.RoundTripper
+	auth string
+}
+
+func (t bearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("Authorization", t.auth)
+	return t.rt.RoundTrip(r)
+}
+
+// bridgeMask is what bridge errors must hide: the server's secrets and the run's.
+func bridgeMask(s MCPServer, o *AgentOptions) []string {
+	if s.Mask != nil {
+		return append(slices.Clone(s.Mask), o.Secrets...)
+	}
+	return append(slices.Collect(maps.Values(s.Env)), o.Secrets...)
 }

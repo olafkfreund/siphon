@@ -43,6 +43,17 @@ let
   # etc. itself (see the option's description).
   configPath = if cfg.configFile != null then cfg.configFile else generatedConfig;
   units = settings.units or [ ];
+  # What siphon sets in an AWS bridge's env (the package must allow each).
+  awsEnv = [
+    "AWS_ACCESS_KEY_ID"
+    "AWS_SECRET_ACCESS_KEY"
+    "AWS_SESSION_TOKEN"
+    "AWS_REGION"
+    "AWS_DEFAULT_REGION"
+    "AWS_EC2_METADATA_DISABLED"
+    "AWS_CONFIG_FILE"
+    "AWS_SHARED_CREDENTIALS_FILE"
+  ];
   metadataDeny = [
     "169.254.0.0/16"
     "fd00:ec2::254/128"
@@ -74,7 +85,10 @@ let
     ]
     # An operator-managed config's directory holds its secrets (portal token,
     # webhook secrets): runs must not read them.
-    ++ lib.optional (cfg.configFile != null) "-${dirOf cfg.configFile}";
+    ++ lib.optional (cfg.configFile != null) "-${dirOf cfg.configFile}"
+    # The AWS config names accounts, roles, SSO URLs and credential_process
+    # commands: the daemon's business, not a run's.
+    ++ lib.optional (cfg.aws.configFile != null) "-${cfg.aws.configFile}";
     PrivateTmp = true;
     ProtectSystem = "strict";
     ProtectHome = true;
@@ -266,6 +280,24 @@ in
       '';
     };
 
+    aws.enable = lib.mkEnableOption ''
+      the pinned AWS MCP servers (aws-cloudwatch, aws-docs) as mcpPackages.
+      Off by default: the CloudWatch server pulls in pandas, numpy and
+      statsmodels (about 1 GB)'';
+
+    aws.configFile = lib.mkOption {
+      # str, not path: the AWS config may name SSO accounts; keep it out of the store.
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "/etc/siphon/aws-config";
+      description = ''
+        AWS config file (profiles, SSO, credential_process, role_arn chains)
+        for credentials with `provider: aws` and `profile:`. Set as
+        AWS_CONFIG_FILE for the siphon service; the SSO cache stays in the
+        siphon user's home (run `sudo -u siphon aws sso login --profile …`).
+      '';
+    };
+
     models.privateEndpoints = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = lib.optional config.services.ollama.enable "127.0.0.1:${toString config.services.ollama.port}";
@@ -297,8 +329,33 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    warnings = lib.optional (cfg.configFile != null && builtins.removeAttrs cfg.settings [ "units" ] != { })
-      "services.siphon: configFile is set, so services.siphon.settings is ignored (except settings.units, the polkit allowlist)";
+    warnings =
+      lib.optional (cfg.configFile != null && builtins.removeAttrs cfg.settings [ "units" ] != { })
+        "services.siphon: configFile is set, so services.siphon.settings is ignored (except settings.units, the polkit allowlist)"
+      ++ lib.optional (cfg.aws.enable && !(cfg.mcpPackages ? aws-cloudwatch))
+        "services.siphon.aws.enable: mcpPackages is set explicitly, so the AWS servers were not added; add aws-cloudwatch and aws-docs to it";
+    # mkOptionDefault: merge with the default (github) instead of replacing it.
+    services.siphon.mcpPackages = lib.mkIf cfg.aws.enable (lib.mkOptionDefault {
+      aws-cloudwatch = {
+        package = self.packages.${pkgs.stdenv.hostPlatform.system}.aws-cloudwatch-mcp-server;
+        args = [ ]; # stdio by default
+        env = awsEnv;
+        hosts = [
+          "logs.{region}.amazonaws.com"
+          "monitoring.{region}.amazonaws.com"
+        ];
+      };
+      aws-docs = {
+        package = self.packages.${pkgs.stdenv.hostPlatform.system}.aws-documentation-mcp-server;
+        args = [ ];
+        env = [ "FASTMCP_LOG_LEVEL" ];
+        hosts = [
+          "docs.aws.amazon.com"
+          "proxy.search.docs.aws.com"
+          "api.contentrecs.docs.aws.com"
+        ];
+      };
+    });
 
     assertions =
       let
@@ -325,6 +382,9 @@ in
 
     users.users.siphon = {
       isSystemUser = true;
+      # A real home (the state dir), so `aws sso login` as siphon has a
+      # ~/.aws/sso/cache the daemon reads; the default /var/empty is read-only.
+      home = stateDir;
       group = "siphon";
       extraGroups = [ "siphon-io" ];
     };
@@ -344,6 +404,7 @@ in
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
       path = [ config.systemd.package ]; # systemctl, to start siphon-action@ instances
+      environment = lib.optionalAttrs (cfg.aws.configFile != null) { AWS_CONFIG_FILE = cfg.aws.configFile; };
       serviceConfig = {
         ExecStartPre = [
           "+${migrateLegacyState}"

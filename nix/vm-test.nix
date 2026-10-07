@@ -4,6 +4,8 @@ let
   # A stdio MCP server that needs a secret: run through the MCP bridge.
   stubMcp = pkgs.writeShellScriptBin "stub-mcp" "exec ${pkgs.python3}/bin/python3 ${./stub-mcp-stdio.py}";
   stubToken = "tok-123-SECRET-bridge";
+  # The same stub, slow to answer, so a run can be inspected while it's live.
+  stubMcpSlow = pkgs.writeShellScriptBin "stub-mcp" "STUB_SLOW=10 exec ${pkgs.python3}/bin/python3 ${./stub-mcp-stdio.py}";
   # The real agent CLIs (claude-code is unfree), run in the restricted
   # template to prove they start without nscd and reach the network only
   # through the forwarder.
@@ -51,11 +53,35 @@ pkgs.testers.runNixOSTest {
       environment.etc."siphon/hook".text = "hook-secret";
 
       environment.etc."siphon/stub-token".text = stubToken;
+      # AWS: a base key pair for AssumeRole against a fake STS on loopback.
+      environment.etc."siphon/aws-id".text = "AKIABASEVMTEST";
+      environment.etc."siphon/aws-secret".text = "base-secret-NEVER-vm";
+      systemd.services.stub-sts = {
+        wantedBy = [ "multi-user.target" ];
+        before = [ "siphon.service" ];
+        serviceConfig.ExecStart = "${pkgs.python3}/bin/python3 ${./stub-sts.py}";
+      };
+      systemd.services.siphon.environment.AWS_ENDPOINT_URL_STS = "http://127.0.0.1:8099";
       environment.etc."siphon/gl-token".text = "gl-hook-token-123";
       # Standard Webhooks secret: whsec_ + base64 of the key bytes.
       environment.etc."siphon/std-secret".text = "whsec_c2lwaG9uLXN0YW5kYXJkLXdlYmhvb2tzLWtleQ==";
       services.siphon = {
         enable = true;
+        mcpPackages.stubaws = {
+          package = stubMcpSlow;
+          args = [ ];
+          env = [
+            "AWS_ACCESS_KEY_ID"
+            "AWS_SECRET_ACCESS_KEY"
+            "AWS_SESSION_TOKEN"
+            "AWS_REGION"
+            "AWS_DEFAULT_REGION"
+            "AWS_EC2_METADATA_DISABLED"
+            "AWS_CONFIG_FILE"
+            "AWS_SHARED_CREDENTIALS_FILE"
+          ];
+          hosts = [ "logs.{region}.amazonaws.com" ];
+        };
         mcpPackages.stub = {
           package = stubMcp;
           args = [ ];
@@ -98,6 +124,14 @@ pkgs.testers.runNixOSTest {
               url = "http://external:8000/v1";
             };
             google.provider = "agy";
+            aws-test = {
+              provider = "aws";
+              region = "eu-west-1";
+              role_arn = "arn:aws:iam::123456789012:role/siphon-test";
+              external_id = "vm-ext";
+              access_key_id = "file:/etc/siphon/aws-id";
+              secret_access_key = "file:/etc/siphon/aws-secret";
+            };
           };
           server.models.private_endpoints = [ "external:8000" ];
           sources.extm = {
@@ -129,6 +163,22 @@ pkgs.testers.runNixOSTest {
             env.STUB_TOKEN = "file:/etc/siphon/stub-token";
             read.tool = "whoami";
             poll = "1h";
+          };
+          # An AWS source: short-lived keys from the fake STS reach only its bridge.
+          sources.awssrc = {
+            type = "mcp";
+            package = "stubaws";
+            aws = "aws-test";
+          };
+          agents.awsagent = {
+            kind = "model";
+            credential = "stubm";
+            model = "stub-model";
+            prompt = "Use the tool, then answer.";
+            mcp = [ "awssrc" ];
+            allowed_tools = [ "mcp__awssrc__whoami" ];
+            max_turns = 3;
+            approve = false;
           };
           agents.bridged = {
             kind = "model";
@@ -277,6 +327,15 @@ pkgs.testers.runNixOSTest {
               on = "each";
               id = "event.n";
               action.cmd = [ "echo" "standard {{.event.n}}" ];
+            }
+            {
+              name = "aws-agent";
+              source = "gh";
+              when = ''event.kind == "aws"'';
+              on = "each";
+              id = "event.n";
+              cooldown = "1s";
+              action.agent = "awsagent";
             }
             {
               name = "bridge-agent";
@@ -638,6 +697,50 @@ pkgs.testers.runNixOSTest {
         assert f"token-sha={want}" in out, f"the bridged server didn't get its secret: {out}"
         assert "${stubToken}" not in out, f"the secret leaked into the job output: {out}"
         machine.fail("systemctl list-units --no-legend --plain 'siphon-mcp@*' | grep -q running")
+
+    with subtest("AWS: a run's bridge gets short-lived keys from STS; the base key goes nowhere"):
+        import hashlib
+        assert hook('{"kind":"aws","n":710}') == "202"
+        q = "sqlite3 /var/lib/siphon/state.db \"select {} from jobs where rule='aws-agent'\""
+        # While the run is live (the stub holds its tool call for 10 s): the agent's
+        # unit, run dir and process environment hold no AWS key, temporary or base.
+        machine.wait_until_succeeds("systemctl list-units --no-legend --plain --state=running 'siphon-mcp@*' | grep -q .", timeout=60)
+        machine.wait_until_succeeds("systemctl list-units --no-legend --plain --state=running 'siphon-action@*' | grep -q .", timeout=60)
+        live = "temp-secret-vm-test|temp-token-vm-test|ASIATEMPVMTEST|base-secret-NEVER-vm|AKIABASEVMTEST"
+        machine.fail(f"grep -rE '{live}' /var/lib/siphon-actions")
+        envs = machine.succeed(
+            "for u in $(systemctl list-units --no-legend --plain --state=running 'siphon-action@*' | cut -d' ' -f1); do"
+            " p=$(systemctl show -p MainPID --value $u); tr '\\0' '\\n' </proc/$p/environ; systemctl show -p Environment $u; done"
+        )
+        assert "PATH=" in envs, f"could not read the agent's environment: {envs}"
+        for leak in live.split("|"):
+            assert leak not in envs, f"{leak} is in the agent unit's environment"
+        try:
+            machine.wait_until_succeeds(q.format("state") + " | grep -qx done", timeout=120)
+        except Exception:
+            dump()
+            print(machine.execute(q.format("output"))[1])
+            raise
+        out = machine.succeed(q.format("output"))
+        h = lambda v: hashlib.sha256(v.encode()).hexdigest()[:16]
+        for want in (f"aws-akid-sha={h('ASIATEMPVMTEST')}", f"aws-secret-sha={h('temp-secret-vm-test')}",
+                     f"aws-token-sha={h('temp-token-vm-test')}", "aws-region=eu-west-1", "aws-imds-off=true",
+                     "aws-config=/dev/null", "aws-creds-file=/dev/null"):
+            assert want in out, f"bridge env: missing {want}: {out}"
+        sts = machine.succeed("cat /tmp/sts-requests")
+        jid = machine.succeed(q.format("id")).strip()
+        for want in ("Action=AssumeRole", f"RoleSessionName=siphon-{jid}", "DurationSeconds=900", "ExternalId=vm-ext"):
+            assert want in sts, f"STS request: missing {want}: {sts}"
+        # The base secret never leaves the daemon; the temporary ones are masked.
+        for leak in ("base-secret-NEVER-vm", "temp-secret-vm-test", "temp-token-vm-test"):
+            assert leak not in out, f"{leak} in the job output"
+        machine.fail("grep -r base-secret-NEVER-vm /var/lib/siphon/jobs 2>/dev/null")
+        bridge_logs = machine.succeed("journalctl -u 'siphon-mcp@*' --no-pager")
+        for leak in ("base-secret-NEVER-vm", "temp-secret-vm-test", "temp-token-vm-test"):
+            assert leak not in bridge_logs, f"{leak} in the bridge's journal"
+        logs = machine.succeed("journalctl -u siphon --no-pager")
+        assert "base-secret-NEVER-vm" not in logs and "temp-secret-vm-test" not in logs, "an AWS secret is in the logs"
+        machine.succeed("test -z \"$(ls -A /var/lib/siphon/bridge-secrets 2>/dev/null)\"")
 
     with subtest("a rule created over the config API fires without a restart"):
         import json

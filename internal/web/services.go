@@ -12,6 +12,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -48,6 +50,17 @@ type serviceDone struct {
 
 type serviceForm struct {
 	Service, Name, Err string
+	AWSCloudWatch      bool     // server.mcp_packages has aws-cloudwatch
+	AWSDocs            bool     // ... aws-docs
+	Profiles, RoleARNs []string // server.aws allowlists: what a portal credential may use without its own keys
+}
+
+func (s *server) serviceForm() *serviceForm {
+	pk := s.Config().Server.MCPPackages
+	_, cw := pk["aws-cloudwatch"]
+	_, docs := pk["aws-docs"]
+	aws := s.Config().Server.AWS
+	return &serviceForm{AWSCloudWatch: cw, AWSDocs: docs, Profiles: aws.Profiles, RoleARNs: aws.RoleARNs}
 }
 
 func (s *server) serviceRows() []serviceRow {
@@ -59,6 +72,10 @@ func (s *server) serviceRows() []serviceRow {
 			r.Service, r.Detail = "github", "MCP tools"
 		case src.Type == "webhook" && src.Signature == "github":
 			r.Service, r.Detail = "github", "webhook"
+		case src.Type == "mcp" && (src.AWS != "" || src.Package == "aws-docs"):
+			r.Service, r.Detail = "aws", "MCP tools"
+		case src.Type == "webhook" && src.Signature == "token" && strings.EqualFold(src.TokenHeader, awsHookHeader):
+			r.Service, r.Detail = "aws", "webhook"
 		case src.Type == "http" && strings.Contains(src.URL, "/api/v4/"):
 			r.Service, r.Detail = "gitlab", "REST polling"
 		case src.Type == "webhook" && src.Signature == "token" && strings.EqualFold(src.TokenHeader, "X-Gitlab-Token"):
@@ -207,6 +224,106 @@ func (s *server) addGitLab(actor, name, base, project, token string, hook bool) 
 	return done, err
 }
 
+const awsHookHeader = "X-Siphon-Key"
+
+var awsName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,40}$`)
+
+// awsServers maps the form's server choice to the package, source suffix and label.
+var awsServers = []struct{ Key, Package, Suffix string }{
+	{"cloudwatch", "aws-cloudwatch", "-cloudwatch"},
+	{"docs", "aws-docs", "-docs"},
+}
+
+// addAWS creates an aws credential, one source per chosen server and,
+// optionally, a webhook (EventBridge API destination with an API key header).
+// Base keys (role mode only) are stored write-only like other tokens.
+func (s *server) addAWS(actor, name, region, mode, profile, roleARN, externalID, keyID, secretKey string, servers []string, hook bool) (*serviceDone, error) {
+	name, region = strings.TrimSpace(name), strings.TrimSpace(region)
+	profile, roleARN, externalID = strings.TrimSpace(profile), strings.TrimSpace(roleARN), strings.TrimSpace(externalID)
+	if !awsName.MatchString(name) || region == "" {
+		return nil, errInvalid{"a lowercase name (a-z, 0-9, - _) and a region are required"}
+	}
+	cfg := s.Config()
+	var chosen []struct{ Key, Package, Suffix string }
+	for _, sv := range awsServers {
+		if !slices.Contains(servers, sv.Key) {
+			continue
+		}
+		if _, ok := cfg.Server.MCPPackages[sv.Package]; !ok {
+			return nil, errInvalid{"the " + sv.Key + " server isn't installed: enable services.siphon.aws in your NixOS config"}
+		}
+		chosen = append(chosen, sv)
+	}
+	if len(chosen) == 0 {
+		return nil, errInvalid{"choose at least one server"}
+	}
+	if cfg.Credentials[name] != nil {
+		return nil, errInvalid{"a credential named " + name + " already exists; pick another name"}
+	}
+	for _, sv := range chosen {
+		if err := freeNames(cfg, name+sv.Suffix); err != nil {
+			return nil, err
+		}
+	}
+	if err := freeNames(cfg, name); hook && err != nil {
+		return nil, err
+	}
+	dir := secretsDir(cfg.Server.DB)
+	y := fmt.Sprintf("provider: aws\nregion: %q\n", region)
+	var pending []pendingSecret
+	switch mode {
+	case "role":
+		if roleARN == "" {
+			return nil, errInvalid{"a role ARN is required"}
+		}
+		y += fmt.Sprintf("role_arn: %q\n", roleARN)
+		if externalID != "" {
+			y += fmt.Sprintf("external_id: %q\n", externalID)
+		}
+		if (keyID == "") != (secretKey == "") {
+			return nil, errInvalid{"base access keys go together: give both or neither"}
+		}
+		if keyID != "" {
+			ak := pendingSecret{Kind: "credentials", Name: name, Key: "access_key_id", Value: keyID}
+			sk := pendingSecret{Kind: "credentials", Name: name, Key: "secret_access_key", Value: secretKey}
+			y += "access_key_id: file:" + ak.path(dir) + "\nsecret_access_key: file:" + sk.path(dir) + "\n"
+			pending = append(pending, ak, sk)
+		}
+	default:
+		if profile == "" {
+			return nil, errInvalid{"a profile name is required"}
+		}
+		y += fmt.Sprintf("profile: %q\n", profile)
+	}
+	items := []store.ConfigItem{{Kind: "credentials", Name: name, YAML: y}}
+	done := &serviceDone{Service: "AWS", Name: name}
+	var tools []string
+	for _, sv := range chosen {
+		sn := name + sv.Suffix
+		sy := "type: mcp\npackage: " + sv.Package + "\n"
+		if sv.Key == "cloudwatch" {
+			sy += "aws: " + name + "\n"
+		}
+		items = append(items, store.ConfigItem{Kind: "sources", Name: sn, YAML: sy})
+		tools = append(tools, "mcp__"+sn)
+	}
+	done.ReadTools = "[" + strings.Join(tools, ", ") + "]"
+	if hook {
+		hn := name + "-hooks"
+		secret := newSecret(false)
+		ps := pendingSecret{Kind: "sources", Name: hn, Key: "secret", Value: secret}
+		items = append(items, store.ConfigItem{Kind: "sources", Name: hn,
+			YAML: "type: webhook\nsignature: token\ntoken_header: " + awsHookHeader + "\nsecret: file:" + ps.path(dir) + "\n"})
+		pending = append(pending, ps)
+		done.Hook, done.HookURL, done.HookSecret, done.HookHeader = hn, s.hookURL(hn), secret, awsHookHeader
+	}
+	_, _, applyErr, err := s.commit(actor, "services: AWS "+name+" added", nil, putItems(items...), pending)
+	if applyErr != nil {
+		done.ApplyErr = applyErr.Error()
+	}
+	return done, err
+}
+
 func toolList(src string, tools []string) string {
 	out := make([]string, len(tools))
 	for i, t := range tools {
@@ -218,6 +335,8 @@ func toolList(src string, tools []string) string {
 // svcTest is the result of a service Test: who the token belongs to.
 type svcTest struct {
 	Name, User, Latency, Err string
+	ARN, Expires             string // AWS: caller identity and when the test keys lapse
+	Tools                    int    // AWS: tools the bridged server lists
 }
 
 // testService checks a service source's token against the provider's "who
@@ -230,6 +349,13 @@ func (s *server) testService(ctx context.Context, name string) svcTest {
 	src := cfg.Sources[name]
 	if src == nil {
 		t.Err = "no such source"
+		return t
+	}
+	if src.Type == "mcp" && src.AWS != "" {
+		return s.testAWS(ctx, name)
+	}
+	if src.Type == "mcp" && strings.HasPrefix(src.Package, "aws-") {
+		t.Err = "nothing to test: this server needs no credentials"
 		return t
 	}
 	var target, hdr, val string
@@ -312,6 +438,25 @@ func (s *server) testService(ctx context.Context, name string) svcTest {
 	return t
 }
 
+func (s *server) testAWS(ctx context.Context, name string) svcTest {
+	t := svcTest{Name: name}
+	if s.TestAWS == nil {
+		t.Err = "AWS tests are not available here"
+		return t
+	}
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	arn, exp, tools, err := s.TestAWS(ctx, name)
+	t.ARN, t.Tools = arn, len(tools)
+	if !exp.IsZero() {
+		t.Expires = exp.UTC().Format("15:04 MST")
+	}
+	if err != nil {
+		t.Err = err.Error()
+	}
+	return t
+}
+
 func (s *server) serviceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /services/github", s.portal(func(w http.ResponseWriter, r *http.Request, csrf string) {
 		done, err := s.addGitHub("portal", r.PostFormValue("name"), r.PostFormValue("token"), r.PostFormValue("mode"), r.PostFormValue("webhook") != "")
@@ -320,6 +465,12 @@ func (s *server) serviceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /services/gitlab", s.portal(func(w http.ResponseWriter, r *http.Request, csrf string) {
 		done, err := s.addGitLab("portal", r.PostFormValue("name"), r.PostFormValue("base"), r.PostFormValue("project"), r.PostFormValue("token"), r.PostFormValue("webhook") != "")
 		s.serviceResult(w, r, csrf, "gitlab", r.PostFormValue("name"), done, err)
+	}))
+	mux.HandleFunc("POST /services/aws", s.portal(func(w http.ResponseWriter, r *http.Request, csrf string) {
+		done, err := s.addAWS("portal", r.PostFormValue("name"), r.PostFormValue("region"), r.PostFormValue("mode"), r.PostFormValue("profile"),
+			r.PostFormValue("role_arn"), r.PostFormValue("external_id"), r.PostFormValue("access_key_id"), r.PostFormValue("secret_access_key"),
+			r.PostForm["servers"], r.PostFormValue("webhook") != "")
+		s.serviceResult(w, r, csrf, "aws", r.PostFormValue("name"), done, err)
 	}))
 	mux.HandleFunc("POST /services/{name}/test", s.portal(func(w http.ResponseWriter, r *http.Request, _ string) {
 		s.render(w, "svctest", s.testService(r.Context(), r.PathValue("name")))
@@ -330,7 +481,7 @@ func (s *server) serviceRoutes(mux *http.ServeMux) {
 func (s *server) serviceResult(w http.ResponseWriter, r *http.Request, csrf, service, name string, done *serviceDone, err error) {
 	var inv errInvalid
 	if errors.As(err, &inv) {
-		v := view{CSRF: csrf, Services: s.serviceRows(), ServiceForm: &serviceForm{Service: service, Name: name, Err: inv.msg}}
+		v := view{CSRF: csrf, Services: s.serviceRows(), ServiceForm: s.serviceFormErr(service, name, inv.msg)}
 		s.pageStatus(w, r, "services", v, http.StatusUnprocessableEntity)
 		return
 	}
@@ -340,4 +491,10 @@ func (s *server) serviceResult(w http.ResponseWriter, r *http.Request, csrf, ser
 	}
 	w.Header().Set("Cache-Control", "no-store") // the webhook secret is on this page
 	s.page(w, r, "servicedone", view{CSRF: csrf, ServiceDone: done})
+}
+
+func (s *server) serviceFormErr(service, name, msg string) *serviceForm {
+	f := s.serviceForm()
+	f.Service, f.Name, f.Err = service, name, msg
+	return f
 }

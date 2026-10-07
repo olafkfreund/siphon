@@ -1,4 +1,4 @@
-{{define "services"}}<div class="top"><div><h1>Services</h1><div class="muted">Connect GitHub and GitLab: Siphon draws their events in and gives your agents their tools. Tokens are stored write-only.</div></div></div>
+{{define "services"}}<div class="top"><div><h1>Services</h1><div class="muted">Connect GitHub, GitLab and AWS: Siphon draws their events in and gives your agents their tools. Tokens are stored write-only.</div></div></div>
 {{with .ServiceForm}}{{if .Err}}<div class="banner" role="alert">{{.Err}}</div>{{end}}{{end}}
 
 <div class="grid g2e mb">
@@ -31,12 +31,38 @@
     <div class="row-actions"><button class="btn primary">{{template "icon" "check"}}Connect GitLab</button></div>
   </form>
 </section>
+
+<section class="card svc" aria-labelledby="aws-h">
+  <div class="acct-head"><span class="svc-mark aws" aria-hidden="true">{{template "icon" "src"}}</span><h2 id="aws-h">AWS</h2></div>
+  <p class="muted small">CloudWatch and AWS documentation as agent tools, with short-lived credentials (never stored keys), and EventBridge events by webhook.</p>
+  {{with .ServiceForm}}{{if or .AWSCloudWatch .AWSDocs}}
+  <form method="post" action="/services/aws" class="login-add">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <label class="f">Name<input name="name" value="aws" required pattern="[a-z0-9][a-z0-9_\-]{0,40}" autocomplete="off"><span class="hint">Sources are named <code>&lt;name&gt;-cloudwatch</code> and <code>&lt;name&gt;-docs</code>.</span></label>
+    <label class="f">Region<input name="region" value="eu-west-1" required pattern="[a-z]{2}(-[a-z]+)+-[0-9]" autocomplete="off" spellcheck="false"></label>
+    <fieldset class="f"><legend>Credentials</legend><span class="seg">
+      <label><input type="radio" name="mode" value="profile"{{if .Profiles}} checked{{else}} disabled{{end}}><span>Profile / SSO (recommended)</span></label>
+      <label><input type="radio" name="mode" value="role"{{if not .Profiles}} checked{{end}}><span>Assume role</span></label></span>
+      <span class="hint">Profile: a named profile of the siphon user (SSO, a role or credential_process). Role: a read-only role, see <code>examples/aws</code>.</span></fieldset>
+    <label class="f">Profile<select name="profile"{{if not .Profiles}} disabled{{end}}>{{range .Profiles}}<option>{{.}}</option>{{end}}</select><span class="hint">{{if .Profiles}}Profile mode: one of <code>server.aws.profiles</code>.{{else}}List profiles in <code>server.aws.profiles</code> in siphon.yaml.{{end}}</span></label>
+    <label class="f">Role ARN<input name="role_arn" list="aws-roles" placeholder="arn:aws:iam::123456789012:role/siphon-readonly" autocomplete="off" spellcheck="false"><datalist id="aws-roles">{{range .RoleARNs}}<option value="{{.}}">{{end}}</datalist><span class="hint">Other ARNs need this credential's own access keys.</span></label>
+    <label class="f">External ID<input name="external_id" autocomplete="off" spellcheck="false"><span class="hint">Optional, role mode.</span></label>
+    <label class="f">Base access key ID<input name="access_key_id" autocomplete="off" spellcheck="false"><span class="hint">Optional, role mode: otherwise the siphon user's own login assumes the role. Stored write-only.</span></label>
+    <label class="f">Base secret access key<input type="password" name="secret_access_key" autocomplete="off" spellcheck="false"></label>
+    <fieldset class="f"><legend>Servers</legend>
+      {{if .AWSCloudWatch}}<label class="check"><input type="checkbox" name="servers" value="cloudwatch" checked> CloudWatch (logs, metrics, alarms)</label>{{end}}
+      {{if .AWSDocs}}<label class="check"><input type="checkbox" name="servers" value="docs"> AWS documentation</label>{{end}}</fieldset>
+    <label class="check"><input type="checkbox" name="webhook" value="on"> Also receive EventBridge events (API destination)</label>
+    <div class="row-actions"><button class="btn primary">{{template "icon" "check"}}Connect AWS</button></div>
+  </form>
+  {{else}}<p class="small">The AWS servers aren't installed: enable <code>services.siphon.aws</code> in your NixOS config.</p>{{end}}{{end}}
+</section>
 </div>
 
 <h2 class="section-h">{{template "icon" "webhook"}} Connected</h2>
 <div class="grid g3">
 {{range .Services}}<article class="card acct" aria-label="{{.Service}} source {{.Name}}">
-  <div class="acct-head"><span class="pill tag">{{if eq .Service "github"}}GitHub{{else}}GitLab{{end}}</span><span class="sp"></span><span class="muted small">{{.Detail}}</span></div>
+  <div class="acct-head"><span class="pill tag">{{if eq .Service "github"}}GitHub{{else if eq .Service "aws"}}AWS{{else}}GitLab{{end}}</span><span class="sp"></span><span class="muted small">{{.Detail}}</span></div>
   <h2 class="acct-name">{{.Name}}</h2>
   <div id="svc-{{.Name}}"></div>
   <div class="row-actions">
@@ -53,17 +79,23 @@
   <div class="banner" role="alert"><b>Copy the secret now.</b> It is stored write-only and won't be shown again.</div>
   <dl>
     <dt>Payload URL</dt><dd><code id="hook-url" class="wrap">{{.HookURL}}</code> <button type="button" class="btn sm" data-action="copy" data-target="hook-url">{{template "icon" "copy"}}Copy</button></dd>
-    <dt>{{if .HookHeader}}Secret token{{else}}Secret{{end}}</dt><dd><code id="hook-secret" class="wrap">{{.HookSecret}}</code> <button type="button" class="btn sm" data-action="copy" data-target="hook-secret">{{template "icon" "copy"}}Copy</button></dd>
+    <dt>{{if eq .Service "AWS"}}API key value{{else if .HookHeader}}Secret token{{else}}Secret{{end}}</dt><dd><code id="hook-secret" class="wrap">{{.HookSecret}}</code> <button type="button" class="btn sm" data-action="copy" data-target="hook-secret">{{template "icon" "copy"}}Copy</button></dd>
   </dl>
-  {{if eq .Service "GitHub"}}<ol class="small"><li>Repository → <b>Settings → Webhooks → Add webhook</b>.</li><li>Payload URL as above, content type <code>application/json</code>, Secret as above.</li><li>Choose the events (e.g. Pull requests, Issues) and save.</li></ol>
+  {{if eq .Service "AWS"}}<ol class="small"><li>EventBridge → <b>API destinations → Connections → Create</b>: authorization type <b>API key</b>, API key name <code>{{.HookHeader}}</code>, value = the secret above.</li><li><b>API destinations → Create</b>: endpoint = the URL above, method <code>POST</code>, and that connection.</li><li>Add the destination as the <b>target</b> of a rule for the events you want.</li></ol>
+  {{else if eq .Service "GitHub"}}<ol class="small"><li>Repository → <b>Settings → Webhooks → Add webhook</b>.</li><li>Payload URL as above, content type <code>application/json</code>, Secret as above.</li><li>Choose the events (e.g. Pull requests, Issues) and save.</li></ol>
   {{else}}<ol class="small"><li>Project → <b>Settings → Webhooks → Add new webhook</b>.</li><li>URL as above, <b>Secret token</b> as above.</li><li>Choose triggers (e.g. Merge request events, Pipeline events) and save.</li></ol>{{end}}
   {{if not (hasprefix .HookURL "http")}}<p class="muted small">Set <code>server.public_url</code> in <code>siphon.yaml</code> to show the full address. The provider must reach Siphon over HTTPS, usually through a reverse proxy; for local testing use <code>gh webhook forward</code>.</p>{{end}}
 </section>{{end}}
-{{if .ReadTools}}<section class="card mb" aria-labelledby="tools-h"><h2 id="tools-h">{{template "icon" "agent"}} Give agents these tools</h2>
+{{if and .ReadTools (eq .Service "AWS")}}<section class="card mb" aria-labelledby="tools-h"><h2 id="tools-h">{{template "icon" "agent"}} Give agents these tools</h2>
+  <p class="small">Add the sources to an agent's <code>mcp:</code> (with a timeout of 55 minutes or less) and this as its <code>allowed_tools</code>. What they can do is set by the IAM role.</p>
+  <pre id="tools-ro">{{.ReadTools}}</pre>
+  <p class="small">Press <b>Test</b> on the CloudWatch source to check the credentials.</p>
+</section>
+{{else if .ReadTools}}<section class="card mb" aria-labelledby="tools-h"><h2 id="tools-h">{{template "icon" "agent"}} Give agents these tools</h2>
   <p class="small">Add <code>mcp: [{{.Name}}]</code> to an agent and one of these as its <code>allowed_tools</code>:</p>
   <div class="muted small">Read-only (recommended)</div><pre id="tools-ro">{{.ReadTools}}</pre>
   <div class="muted small mt">Read-write (comments, reviews, issues)</div><pre id="tools-rw">{{.WriteTools}}</pre>
 </section>{{end}}
 <a class="btn" href="/services">Back to Services</a>{{end}}{{end}}
 
-{{define "svctest"}}{{if .Err}}<p class="err small">{{template "icon" "x"}} {{.Err}}</p>{{else}}<p class="small ok-text">{{template "icon" "check"}} Token works · {{.User}}{{if .Latency}} · {{.Latency}}{{end}}</p>{{end}}{{end}}
+{{define "svctest"}}{{if .ARN}}<p class="small ok-text">{{template "icon" "check"}} {{.ARN}}{{if .Expires}} · keys until {{.Expires}}{{end}}{{if not .Err}} · {{.Tools}} tools{{end}}</p>{{end}}{{if .Err}}<p class="err small">{{template "icon" "x"}} {{.Err}}</p>{{else if not .ARN}}<p class="small ok-text">{{template "icon" "check"}} Token works · {{.User}}{{if .Latency}} · {{.Latency}}{{end}}</p>{{end}}{{end}}

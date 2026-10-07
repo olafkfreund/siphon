@@ -80,6 +80,10 @@
       "additionalProperties": {
         "additionalProperties": false,
         "properties": {
+          "access_key_id": {
+            "description": "env:NAME, file:/path, or (where allowed) a literal",
+            "type": "string"
+          },
           "api_key": {
             "description": "env:NAME, file:/path, or (where allowed) a literal",
             "type": "string"
@@ -87,10 +91,26 @@
           "concurrency": {
             "type": "integer"
           },
+          "external_id": {
+            "type": "string"
+          },
           "preset": {
             "type": "string"
           },
+          "profile": {
+            "type": "string"
+          },
           "provider": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "role_arn": {
+            "type": "string"
+          },
+          "secret_access_key": {
+            "description": "env:NAME, file:/path, or (where allowed) a literal",
             "type": "string"
           },
           "url": {
@@ -271,6 +291,24 @@
         "actions_dir": {
           "type": "string"
         },
+        "aws": {
+          "additionalProperties": false,
+          "properties": {
+            "profiles": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "role_arns": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
         "db": {
           "type": "string"
         },
@@ -381,6 +419,9 @@
               }
             },
             "type": "object"
+          },
+          "aws": {
+            "type": "string"
           },
           "body": {
             "type": "string"
