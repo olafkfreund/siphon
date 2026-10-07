@@ -346,3 +346,10 @@ Revert the merge.
 - **CLI:** local mode is unchanged, and client mode is new.
 
 ## Deviations log
+- **Step 1 (coder):**
+  - Invalid config returns 422, including under `?dry_run=1` (same body as a real write); the existing tests' 400 assertions were updated.
+  - `external_id` is not a secret path: it's a plain string, not a ref.
+  - `warnings` is always `[]` until something produces warnings.
+  - Unknown `/api/…` paths return JSON 404 (the catch-all route).
+  - Helpers for later steps: `s.write`, `withSecrets`, `secretPath`, `apiActor`, `s.dryRun`, `errInvalid.list()`.
+  - **Gap fixed in step 2:** dry-run skipped the model-endpoint private-address check, which lived in `commit`.

@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -27,6 +28,9 @@ var (
 type errInvalid struct{ msg string }
 
 func (e errInvalid) Error() string { return e.msg }
+
+// list is every problem: errors.Join separates them with newlines.
+func (e errInvalid) list() []string { return strings.Split(e.msg, "\n") }
 
 type itemKey = config.Key
 
@@ -152,6 +156,21 @@ func (s *server) prepare(cur []store.ConfigItem, mutate func(map[itemKey]store.C
 		return nil, err
 	}
 	return &edit{items: next, diff: unifiedDiff(string(before), string(after)), cfg: cfg}, nil
+}
+
+// dryRun is prepare under the edit lock with the same stale check as commit:
+// nothing is stored, written or applied.
+func (s *server) dryRun(rev *int64, mutate func(map[itemKey]store.ConfigItem), pending []pendingSecret) (*edit, error) {
+	s.editMu.Lock()
+	defer s.editMu.Unlock()
+	cur, latest, err := s.overlay()
+	if err != nil {
+		return nil, err
+	}
+	if rev != nil && *rev != latest {
+		return nil, errStale
+	}
+	return s.prepare(cur, mutate, pending)
 }
 
 // commit validates, then stores the changed overlay rows, a revision and an

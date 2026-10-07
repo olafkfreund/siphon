@@ -187,6 +187,8 @@ func hasAnchorOrAlias(n *yaml.Node) bool {
 // Each is allowed only if the file's same item already has the same value.
 func checkOverlay(file *Config, items []Item, secretsDir string) error {
 	dir := filepath.Clean(secretsDir)
+	var errs []error // every problem, not just the first
+	add := func(e error) { errs = append(errs, e) }
 	for _, it := range items {
 		if it.Deleted {
 			continue
@@ -204,22 +206,22 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 				fs = &Source{}
 			}
 			if len(s.Command) > 0 && !slices.Equal(s.Command, fs.Command) {
-				return errors.New("command (stdio MCP) can only be set in siphon.yaml")
+				add(errors.New("command (stdio MCP) can only be set in siphon.yaml"))
 			}
 			if _, ok := file.Server.MCPPackages[s.Package]; s.Package != "" && !ok {
-				return errors.New("package must be one listed in server.mcp_packages in siphon.yaml")
+				add(errors.New("package must be one listed in server.mcp_packages in siphon.yaml"))
 			}
 			// A package source's keys are bounded by the package; others must match the file's.
 			for _, k := range sortedKeys(s.Env) {
 				if s.Package != "" && !slices.Contains(file.Server.MCPPackages[s.Package].Env, k) {
-					return fmt.Errorf("env name %q is not one of package %q's env", k, s.Package)
+					add(fmt.Errorf("env name %q is not one of package %q's env", k, s.Package))
 				}
 			}
 			if s.Package == "" && !slices.Equal(sortedKeys(s.Env), sortedKeys(fs.Env)) {
-				return errors.New("env names (stdio MCP) can only be set in siphon.yaml; the portal may change their values")
+				add(errors.New("env names (stdio MCP) can only be set in siphon.yaml; the portal may change their values"))
 			}
 			if s.AllowPrivate && !fs.AllowPrivate && !file.ServiceEndpoint(s.URL) {
-				return errors.New("allow_private can only be set in siphon.yaml, or for a host:port listed in server.services.private_endpoints")
+				add(errors.New("allow_private can only be set in siphon.yaml, or for a host:port listed in server.services.private_endpoints"))
 			}
 			moved = !sameEndpoint(s.URL, fs.URL) || s.Package != fs.Package || (len(fs.Command) > 0 && !fs.cmdFromPkg && s.Package != "")
 			refs, fileRefs = sourceRefs(&s), sourceRefs(fs)
@@ -235,11 +237,11 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			if c.Provider == "aws" {
 				// The daemon's own login is the portal's to spend only on the operator's list.
 				if c.Profile != "" && c.Profile != fc.Profile && !slices.Contains(file.Server.AWS.Profiles, c.Profile) {
-					return fmt.Errorf("profile %s is not in server.aws.profiles in siphon.yaml", c.Profile)
+					add(fmt.Errorf("profile %s is not in server.aws.profiles in siphon.yaml", c.Profile))
 				}
 				ownKeys := c.AccessKeyID.isSet() && c.SecretAccessKey.isSet()
 				if c.RoleARN != "" && c.RoleARN != fc.RoleARN && !ownKeys && !slices.Contains(file.Server.AWS.RoleARNs, c.RoleARN) {
-					return fmt.Errorf("role_arn %s is not in server.aws.role_arns in siphon.yaml; add it there, or give this credential its own access keys", c.RoleARN)
+					add(fmt.Errorf("role_arn %s is not in server.aws.role_arns in siphon.yaml; add it there, or give this credential its own access keys", c.RoleARN))
 				}
 			}
 			moved = c.Provider != fc.Provider || !sameEndpoint(c.URL, fc.URL) ||
@@ -256,24 +258,26 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 				fa = &Agent{}
 			}
 			if a.Egress.Enabled != nil && !*a.Egress.Enabled && (fa.Egress.Enabled == nil || *fa.Egress.Enabled) {
-				return errors.New("egress.enabled: false can only be set in siphon.yaml")
+				add(errors.New("egress.enabled: false can only be set in siphon.yaml"))
 			}
 			// api_key_file is a path the runner reads: treat it as a file ref.
 			refs, fileRefs = map[string]string{"api_key_file": fileRef(a.APIKeyFile)}, map[string]string{"api_key_file": fileRef(fa.APIKeyFile)}
 		default:
 			continue
 		}
-		for path, ref := range refs {
+		for _, path := range sortedKeys(refs) {
+			ref := refs[path]
 			if moved && ref != "" && ref == fileRefs[path] {
 				// Keeping the file's secret is fine, sending it somewhere new is not.
-				return errors.New("this key comes from siphon.yaml and can't be moved to another provider or URL")
+				add(errors.New("this key comes from siphon.yaml and can't be moved to another provider or URL"))
+				continue
 			}
 			if !refAllowed(ref, fileRefs[path], it.Kind, it.Name, dir) {
-				return errors.New("secret refs can only point at this item's stored secrets or keep the value from siphon.yaml")
+				add(errors.New("secret refs can only point at this item's stored secrets or keep the value from siphon.yaml"))
 			}
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // lookupHost resolves model endpoint hosts; tests replace it.

@@ -32,7 +32,7 @@ func (ce *cfgEnv) apiPut(kind, name, y string) (int, string) {
 	return w.Code, w.Body.String()
 }
 
-// reject: the HTML form path answers 422 and the API 400 with want in the
+// reject: the HTML form path and the API answer 422 with want in the
 // message, and nothing is stored, applied or revised.
 func (ce *cfgEnv) reject(t *testing.T, kind, name, y, want string) {
 	t.Helper()
@@ -41,8 +41,8 @@ func (ce *cfgEnv) reject(t *testing.T, kind, name, y, want string) {
 	if body := html.UnescapeString(w.Body.String()); w.Code != 422 || !strings.Contains(body, want) {
 		t.Fatalf("%s/%s HTML: %d, want 422 with %q\n%s", kind, name, w.Code, want, body)
 	}
-	if code, body := ce.apiPut(kind, name, y); code != 400 || !strings.Contains(body, want) {
-		t.Fatalf("%s/%s API: %d %s, want 400 with %q", kind, name, code, body, want)
+	if code, body := ce.apiPut(kind, name, y); code != 422 || !strings.Contains(body, want) {
+		t.Fatalf("%s/%s API: %d %s, want 422 with %q", kind, name, code, body, want)
 	}
 	if ce.latest() != revs || ce.applied.Load() != applied {
 		t.Fatalf("%s/%s: a rejected item changed state", kind, name)
@@ -101,12 +101,12 @@ func TestSecurityF2Refs(t *testing.T) {
 		ce.reject(t, "credentials", "evil", `{provider: claude, api_key: "`+bad+`"}`, msgRef)
 		ce.reject(t, "agents", "evil", `{kind: claude, prompt: p, api_key_file: "`+strings.TrimPrefix(bad, "file:")+`"}`, msgRef)
 	}
-	if code, body := ce.apiPut("sources", "evil", `{type: webhook, secret: "file:/etc/passwd", signature: github}`); strings.Contains(body, "passwd") || code != 400 {
+	if code, body := ce.apiPut("sources", "evil", `{type: webhook, secret: "file:/etc/passwd", signature: github}`); strings.Contains(body, "passwd") || code != 422 {
 		t.Fatalf("message echoes the ref: %s", body)
 	}
 	// A ref into this item's own secrets that cannot be read: no hint about the OS error.
 	missing := "file:" + sec + "/sources-own-secret"
-	if code, body := ce.apiPut("sources", "own", `{type: webhook, secret: "`+missing+`", signature: github}`); code != 400 || strings.Contains(body, "no such file") {
+	if code, body := ce.apiPut("sources", "own", `{type: webhook, secret: "`+missing+`", signature: github}`); code != 422 || strings.Contains(body, "no such file") {
 		t.Fatalf("missing own secret: %d %s", code, body)
 	}
 	// This item's own stored secret, and the file's own env ref, are fine.

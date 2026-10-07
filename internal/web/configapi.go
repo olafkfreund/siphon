@@ -3,8 +3,14 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"regexp"
+	"slices"
+	"sort"
 	"strconv"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/store"
@@ -16,6 +22,7 @@ type apiItem struct {
 	Name       string `json:"name"`
 	YAML       string `json:"yaml,omitempty"`
 	Provenance string `json:"provenance"`
+	Deleted    bool   `json:"deleted,omitempty"` // a portal tombstone over a file item
 }
 
 // apiError maps a config error to a status and a client-safe message.
@@ -23,7 +30,7 @@ func apiError(err error) (int, error) {
 	var inv errInvalid
 	switch {
 	case errors.As(err, &inv):
-		return 400, errMsg(inv.msg)
+		return 422, inv
 	case errors.Is(err, errStale):
 		return 409, errMsg(err.Error())
 	case errors.Is(err, errNoEditing):
@@ -86,7 +93,11 @@ func (s *server) configAPI(mux *http.ServeMux) {
 		if err != nil {
 			return nil, 400, err
 		}
-		if err := s.restore(id, rev); err != nil {
+		actor, err := apiActor(r)
+		if err != nil {
+			return nil, 400, err
+		}
+		if err := s.restore(actor, id, rev); err != nil {
 			return nil, 0, err
 		}
 		return map[string]bool{"ok": true}, 200, nil
@@ -96,13 +107,20 @@ func (s *server) configAPI(mux *http.ServeMux) {
 		return map[string]string{"yaml": string(eff)}, 200, err
 	})
 	route("GET /api/config/{kind}", func(r *http.Request) (any, int, error) {
-		_, prov, _, _, err := s.state()
+		kind := r.PathValue("kind")
+		_, prov, items, _, err := s.state()
 		out := []apiItem{}
 		for k, p := range prov {
-			if k.Kind == r.PathValue("kind") {
+			if k.Kind == kind {
 				out = append(out, apiItem{Kind: k.Kind, Name: k.Name, Provenance: string(p)})
 			}
 		}
+		for _, c := range items {
+			if c.Kind == kind && c.Deleted {
+				out = append(out, apiItem{Kind: kind, Name: c.Name, Provenance: "deleted", Deleted: true})
+			}
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 		return out, 200, err
 	})
 	route("GET /api/config/{kind}/{name}", func(r *http.Request) (any, int, error) {
@@ -120,11 +138,16 @@ func (s *server) configAPI(mux *http.ServeMux) {
 	route("PUT /api/config/{kind}/{name}", func(r *http.Request) (any, int, error) {
 		kind, name := r.PathValue("kind"), r.PathValue("name")
 		var body struct {
-			YAML string `json:"yaml"`
-			Rev  *int64 `json:"rev"`
+			YAML    string            `json:"yaml"`
+			Rev     *int64            `json:"rev"`
+			Secrets map[string]string `json:"secrets"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 64<<10)).Decode(&body); err != nil {
 			return nil, 400, errMsg("bad JSON body")
+		}
+		actor, err := apiActor(r)
+		if err != nil {
+			return nil, 400, err
 		}
 		_, prov, _, _, err := s.state()
 		if err != nil {
@@ -134,11 +157,11 @@ func (s *server) configAPI(mux *http.ServeMux) {
 		if _, ok := prov[itemKey{Kind: kind, Name: name}]; ok {
 			verb = "updated"
 		}
-		id, _, applyErr, err := s.commit("api", kind+"/"+name+" "+verb, body.Rev, putItem(kind, name, body.YAML), nil)
+		y, pending, err := withSecrets(kind, name, body.YAML, body.Secrets, s.Config().Server.DB)
 		if err != nil {
 			return nil, 0, err
 		}
-		return map[string]any{"rev": id, "applied": applyErr == nil}, 200, nil
+		return s.write(r, actor, kind+"/"+name+" "+verb, body.Rev, putItem(kind, name, y), pending)
 	})
 	route("DELETE /api/config/{kind}/{name}", func(r *http.Request) (any, int, error) {
 		kind, name := r.PathValue("kind"), r.PathValue("name")
@@ -146,15 +169,15 @@ func (s *server) configAPI(mux *http.ServeMux) {
 		if err != nil {
 			return nil, 400, err
 		}
+		actor, err := apiActor(r)
+		if err != nil {
+			return nil, 400, err
+		}
 		mutate, err := s.deleteItem(kind, name)
 		if err != nil {
 			return nil, 0, err
 		}
-		id, _, applyErr, err := s.commit("api", kind+"/"+name+" deleted", rev, mutate, nil)
-		if err != nil {
-			return nil, 0, err
-		}
-		return map[string]any{"rev": id, "applied": applyErr == nil}, 200, nil
+		return s.write(r, actor, kind+"/"+name+" deleted", rev, mutate, nil)
 	})
 	route("POST /api/config/{kind}/{name}/reset", func(r *http.Request) (any, int, error) {
 		kind, name := r.PathValue("kind"), r.PathValue("name")
@@ -162,12 +185,76 @@ func (s *server) configAPI(mux *http.ServeMux) {
 		if err != nil {
 			return nil, 400, err
 		}
-		id, _, applyErr, err := s.commit("api", kind+"/"+name+" reset to file", rev, resetItem(kind, name), nil)
+		actor, err := apiActor(r)
+		if err != nil {
+			return nil, 400, err
+		}
+		return s.write(r, actor, kind+"/"+name+" reset to file", rev, resetItem(kind, name), nil)
+	})
+}
+
+// write is one API change: with ?dry_run=1 only the check and the diff, else
+// the commit. apply_error says the revision is saved but not live.
+func (s *server) write(r *http.Request, actor, summary string, rev *int64, mutate func(map[itemKey]store.ConfigItem), pending []pendingSecret) (any, int, error) {
+	if r.URL.Query().Get("dry_run") != "" {
+		e, err := s.dryRun(rev, mutate, pending)
 		if err != nil {
 			return nil, 0, err
 		}
-		return map[string]any{"rev": id, "applied": applyErr == nil}, 200, nil
-	})
+		return map[string]any{"diff": e.diff, "errors": []string{}, "warnings": []string{}}, 200, nil
+	}
+	id, _, applyErr, err := s.commit(actor, summary, rev, mutate, pending)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := map[string]any{"rev": id, "applied": applyErr == nil}
+	if applyErr != nil {
+		out["apply_error"] = applyErr.Error()
+	}
+	return out, 200, nil
+}
+
+// secretPath are the fields a PUT may fill with a write-only value.
+var secretPath = regexp.MustCompile(`^(api_key|secret|auth\.bearer|access_key_id|secret_access_key|(env|headers)\.[A-Za-z0-9_-]+)$`)
+
+// withSecrets points each secret field of the item at its stored file and
+// returns the values to write (commit does, once the config checks pass).
+// Values never appear in an error.
+func withSecrets(kind, name, y string, secrets map[string]string, db string) (string, []pendingSecret, error) {
+	if len(secrets) == 0 {
+		return y, nil, nil
+	}
+	var m map[string]any
+	if err := yaml.Unmarshal([]byte(y), &m); err != nil {
+		return "", nil, errInvalid{err.Error()}
+	}
+	if m == nil {
+		m = map[string]any{}
+	}
+	keys := make([]string, 0, len(secrets))
+	for k := range secrets {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	var pending []pendingSecret
+	var bad []error
+	for _, k := range keys {
+		switch {
+		case !secretPath.MatchString(k):
+			bad = append(bad, fmt.Errorf("secrets: %q is not a secret field", k))
+		case secrets[k] == "":
+			bad = append(bad, fmt.Errorf("secrets: %s is empty", k))
+		default:
+			ps := pendingSecret{Kind: kind, Name: name, Key: k, Value: secrets[k]}
+			pending = append(pending, ps)
+			setPath(m, k, "file:"+ps.path(secretsDir(db)))
+		}
+	}
+	if len(bad) > 0 {
+		return "", nil, errInvalid{errors.Join(bad...).Error()}
+	}
+	b, err := yaml.Marshal(m)
+	return string(b), pending, err
 }
 
 // queryRev reads the optional ?rev= stale-check (absent: no check).

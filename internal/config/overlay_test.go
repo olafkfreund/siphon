@@ -411,3 +411,24 @@ func TestOverlayKeptSecretCannotMoveToPackage(t *testing.T) {
 		t.Errorf("same package: %v", err)
 	}
 }
+
+// checkOverlay reports every problem at once, with the same messages.
+func TestCheckOverlayCollectsAll(t *testing.T) {
+	f, err := Parse([]byte("sources:\n  s: { type: webhook, secret: env:X }\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := []Item{
+		{Kind: "sources", Name: "a", YAML: "type: mcp\ncommand: [x]\nallow_private: true\n"},
+		{Kind: "agents", Name: "b", YAML: "kind: claude\nprompt: p\negress: { enabled: false }\n"},
+	}
+	err = checkOverlay(f, items, t.TempDir())
+	if err == nil {
+		t.Fatal("no error")
+	}
+	for _, want := range []string{"command (stdio MCP) can only be set in siphon.yaml", "allow_private can only be set", "egress.enabled: false can only be set in siphon.yaml"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q in %v", want, err)
+		}
+	}
+}
