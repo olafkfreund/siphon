@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 14
 spec: spec/2026-10-06-14-microvm-oci-image.md
 ---
