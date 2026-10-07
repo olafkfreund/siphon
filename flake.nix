@@ -51,6 +51,36 @@
           done
           touch $out
         '';
+        # aws.enable adds both AWS servers next to github, with {region} hosts,
+        # and aws.configFile reaches the service.
+        aws-module =
+          let
+            sys = nixpkgs.lib.nixosSystem {
+              inherit (pkgs.stdenv.hostPlatform) system;
+              modules = [
+                self.nixosModules.default
+                {
+                  boot.loader.grub.enable = false;
+                  fileSystems."/" = {
+                    device = "none";
+                    fsType = "tmpfs";
+                  };
+                  system.stateVersion = "26.05";
+                  services.siphon = {
+                    enable = true;
+                    aws.enable = true;
+                    aws.configFile = "/etc/siphon/aws-config";
+                  };
+                }
+              ];
+            };
+            pk = sys.config.services.siphon.mcpPackages;
+          in
+          assert pk ? github && pk ? aws-cloudwatch && pk ? aws-docs;
+          assert builtins.elem "logs.{region}.amazonaws.com" pk.aws-cloudwatch.hosts;
+          assert sys.config.systemd.services.siphon.environment.AWS_CONFIG_FILE == "/etc/siphon/aws-config";
+          assert sys.config.warnings == [ ];
+          pkgs.runCommand "aws-module-ok" { } "touch $out";
         # The old services.agentgw option path still evaluates to siphon. # legacy-name
         legacy-option =
           let
