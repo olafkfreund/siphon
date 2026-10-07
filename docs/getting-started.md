@@ -157,15 +157,22 @@ siphon why digest
 rule digest
  ✓ enabled
  ✓ source digest (webhook) is idle
- ✓ last event at 2026-10-07 15:32:42
- ✗ the last event was held back by the cooldown (arrived 22s after the rule fired, cooldown 30s)
- …
-Likely reason: the last event arrived inside the rule's 30s cooldown.
+ ✓ last event at 2026-10-07 15:41:03
+ ✓ the last event satisfies the condition
+ ✗ the last event was held back by the cooldown
+ ✓ last fired 2026-10-07 15:40:58
+ ✓ no evaluation errors
+ ✓ no webhook deliveries refused
+ ✗ approvals: a job is waiting
+
+Likely reason: The last event arrived 5s after the rule fired, inside its 30s cooldown, so it was held back.
 Next: siphon get audit --rule digest
 ```
 
-`why` checks every reason a rule might not fire, and ends with the likely
-one and the next command to run. More in [Troubleshooting](troubleshooting.md).
+Here two events arrived 5 seconds apart. The first fired the rule (and
+waits for approval); the second came inside the 30-second `cooldown` and was
+held back, on purpose. `why` checks every reason a rule might not fire, and
+ends with the likely one and the next command to run. More in [Troubleshooting](troubleshooting.md).
 
 ## Where next
 
