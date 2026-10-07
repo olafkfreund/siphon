@@ -280,3 +280,7 @@ revert.
   - The job tests use the re-exec'd test bridge (`internal/job/main_test.go`), extended to dump the bridge's secrets file for the test, instead of `internal/action`'s unexported `bridgeFake`.
   - The job-level "agent job holds no AWS key" test is not written: the job tests' bridge dies before the agent starts. It is covered end to end by the step 8 VM subtest (agent stub and bridge stub, real units), and at action level by #23's bridge tests.
   - `Polled()` is used at `queue.go:87`, `pipeline.go` (run-once tick) and `web/data.go` (no poll display, no "stale" health for AWS sources).
+- **Step 8 (Opus):**
+  - The VM subtest does not assert the bridge's egress allowlist. Offline, the proxy answers 403 both for a denied host and for an allowed host it can't resolve, so the two can't be told apart. The `{region}` expansion and the bridge-only allowlist are covered by `internal/config` unit tests, and the run wires `cfg.BridgeEgress(s)` unchanged from #23.
+  - The subtest also asserts the STS request (`RoleSessionName=siphon-<job id>`, `DurationSeconds=900`, `ExternalId`), and that the bridge secrets are cleaned up.
+- **Fix (Opus):** step 1's `vendorHash` matched a stale `siphon-dev-go-modules` store path, so local builds reused an old vendor dir. The hash is corrected (`c1eee4f`). Verify vendor changes with `nix build --rebuild .#siphon.goModules`.

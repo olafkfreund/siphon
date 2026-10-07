@@ -9,6 +9,19 @@ import sys
 tok = os.environ.get("STUB_TOKEN", "")
 digest = hashlib.sha256(tok.encode()).hexdigest()[:16] if tok else "missing"
 
+
+def sha(name):
+    v = os.environ.get(name, "")
+    return hashlib.sha256(v.encode()).hexdigest()[:16] if v else "missing"
+
+
+# As an AWS bridge: hashes of the keys it got (never the keys), and the
+# settings that stop it falling back to other credentials.
+aws = "aws-akid-sha=%s aws-secret-sha=%s aws-token-sha=%s aws-region=%s aws-imds-off=%s aws-config=%s aws-creds-file=%s" % (
+    sha("AWS_ACCESS_KEY_ID"), sha("AWS_SECRET_ACCESS_KEY"), sha("AWS_SESSION_TOKEN"),
+    os.environ.get("AWS_REGION", "missing"), os.environ.get("AWS_EC2_METADATA_DISABLED", "missing"),
+    os.environ.get("AWS_CONFIG_FILE", "missing"), os.environ.get("AWS_SHARED_CREDENTIALS_FILE", "missing"))
+
 for line in sys.stdin:
     try:
         req = json.loads(line)
@@ -24,7 +37,7 @@ for line in sys.stdin:
         res = {"tools": [{"name": "whoami", "description": "token hash and uid",
                           "inputSchema": {"type": "object", "properties": {}}}]}
     elif m == "tools/call":
-        res = {"content": [{"type": "text", "text": "token-sha=%s uid=%d" % (digest, os.getuid())}]}
+        res = {"content": [{"type": "text", "text": "token-sha=%s uid=%d %s" % (digest, os.getuid(), aws)}]}
     elif m == "ping":
         res = {}
     else:
