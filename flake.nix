@@ -27,7 +27,7 @@
           pname = "siphon";
           version = self.shortRev or "dev";
           src = self;
-          vendorHash = "sha256-8s5VV3W8KjA3n/+ReK4Xph6FplXmEZJN9mC6HSYDmwI=";
+          vendorHash = "sha256-rmZZpQN3fAQtM4nMgRhrHD0xLcOjBdzLeGD8WwCI1Fs=";
           env.CGO_ENABLED = 0;
           subPackages = [ "cmd/siphon" ];
           ldflags = [
