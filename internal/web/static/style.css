@@ -293,6 +293,12 @@ form:has(input[name="event_src"][value="last"]:checked) .paste { display: none }
 .prov.openrouter i { background: #475569 } .prov.groq i { background: #F55036 } .prov.mistral i { background: #FA520F }
 .prov.oai i { background: #0F766E; font-size: .55rem }
 
+/* services */
+.svc h2 { margin: 0 }
+.svc-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: #fff }
+.svc-mark.gh { background: #24292F } .svc-mark.gl { background: #E24329 }
+.svc .ico { width: 18px; height: 18px }
+
 /* motion off on request */
 @media (prefers-reduced-motion: reduce) { *, *::after { animation: none !important; transition: none !important } }
 

@@ -14,26 +14,29 @@ import (
 
 // view is the data for every portal partial; only the fields a page uses are set.
 type view struct {
-	CSRF      string
-	State     string
-	Sources   []sourceView
-	Rules     []ruleView
-	Jobs      []store.JobAction
-	Job       store.JobDetail
-	Approvals []store.PendingApproval
-	Audit     []store.AuditRow
-	Dash      *dashView
-	JobV      *jobView
-	Logins    []loginView
-	Egress    *egressView
-	Counts    map[string]int
-	ActionOf  map[int64]store.JobAction
-	LoginForm *loginForm
-	Models    []modelConnView
-	Presets   []modelPreset
-	ModelForm *modelForm
-	Cfg       *cfgView  // config item list / editor
-	Hist      *histView // revision history
+	CSRF        string
+	State       string
+	Sources     []sourceView
+	Rules       []ruleView
+	Jobs        []store.JobAction
+	Job         store.JobDetail
+	Approvals   []store.PendingApproval
+	Audit       []store.AuditRow
+	Dash        *dashView
+	JobV        *jobView
+	Logins      []loginView
+	Egress      *egressView
+	Counts      map[string]int
+	ActionOf    map[int64]store.JobAction
+	LoginForm   *loginForm
+	Models      []modelConnView
+	Presets     []modelPreset
+	ModelForm   *modelForm
+	Services    []serviceRow
+	ServiceForm *serviceForm
+	ServiceDone *serviceDone
+	Cfg         *cfgView  // config item list / editor
+	Hist        *histView // revision history
 }
 
 type layout struct {
@@ -103,6 +106,11 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 			v.Approvals, err = store.PendingApprovals(s.Store.DB)
 		}
 		return true, err
+	})
+	page("/services", "services", func(_ *http.Request, v *view) (bool, error) {
+		v.Services = s.serviceRows()
+		v.ServiceForm = &serviceForm{}
+		return true, nil
 	})
 	page("/connections", "logins", func(r *http.Request, v *view) (bool, error) {
 		*v = s.connectionsView(r, v.CSRF)

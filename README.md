@@ -411,6 +411,106 @@ agents:
   - Models that can't use tools still answer: the loop falls back to a
     plain completion and notes it.
 
+## Services: GitHub and GitLab
+
+The **Services** page connects GitHub and GitLab in a few fields. It creates
+ordinary sources (editable afterwards), stores tokens write-only, and shows
+a generated webhook secret **once**, with the exact payload URL and the
+provider's setup steps. Set `server.public_url` so it can show the full URL.
+Webhooks from the internet need Siphon behind a reverse proxy with TLS; for
+local testing use `gh webhook forward`.
+
+### GitHub
+
+```yaml
+sources:
+  github:                                   # agent tools (GitHub-hosted MCP server)
+    type: mcp
+    url: https://api.githubcopilot.com/mcp/
+    auth: { bearer: file:/run/credentials/siphon.service/github-token }
+    read: { tool: get_me }
+    poll: 24h
+  github-hooks:                             # events
+    type: webhook
+    signature: github
+    secret: file:/run/credentials/siphon.service/github-webhook
+    id: header.X-GitHub-Delivery
+agents:
+  pr-reviewer:
+    mcp: [github]
+    allowed_tools: [mcp__github__get_pull_request, mcp__github__get_pull_request_diff]
+```
+
+- **Token:** a **fine-grained** personal access token for only the repos
+  agents need, with Contents, Pull requests and Issues set to read and
+  Metadata set to read. Add write only if agents should comment or review.
+- **Local server:** `package: github` runs the Nix-pinned `github-mcp-server`
+  instead (needed for GitHub Enterprise). Its token goes in `env:` and never
+  reaches the agent (see below).
+
+### GitLab
+
+```yaml
+server:
+  services: { private_endpoints: ["gitlab.lan:443"] }   # only for a self-hosted GitLab on your LAN
+sources:
+  gitlab:                                   # open merge requests, polled
+    type: http
+    url: "https://gitlab.com/api/v4/projects/group%2Fproject/merge_requests?state=opened"
+    headers: { PRIVATE-TOKEN: file:/run/credentials/siphon.service/gitlab-token }
+    poll: 5m
+  gitlab-hooks:                             # events
+    type: webhook
+    signature: token
+    token_header: X-Gitlab-Token
+    secret: file:/run/credentials/siphon.service/gitlab-webhook
+    id: header.X-Gitlab-Event-UUID
+```
+
+**Token:** a **project access token** with `read_api`.
+
+## Webhook authentication
+
+| `signature:` | Checks | Use for |
+|---|---|---|
+| `github` | HMAC-SHA256 in `X-Hub-Signature-256` | GitHub |
+| `sha256` | hex HMAC-SHA256 in `signature_header`, optional `timestamp_header` | generic providers |
+| `standard-webhooks` | HMAC over `webhook-id.webhook-timestamp.body` (`whsec_` secrets), ±5 min, `webhook-id` as the replay key | GitLab signing tokens, Svix, other modern providers |
+| `token` | a shared secret in `token_header`, compared in constant time | GitLab `X-Gitlab-Token`, AWS EventBridge API keys |
+
+`token` doesn't protect the body's integrity, so `validate` warns about it.
+Prefer an HMAC mode where the provider offers one, and always put TLS in
+front.
+
+## MCP servers with secrets
+
+A local (stdio) MCP server that needs a secret gets it from `env:`. The
+values are secret references; only `siphon.yaml` decides which variable names
+exist, and dangerous names such as `LD_*`, `PATH` and `NODE_OPTIONS` are
+refused.
+
+```yaml
+server:
+  mcp_packages:          # on NixOS: services.siphon.mcpPackages (github-mcp-server by default)
+    github: { command: ["/nix/store/…/bin/github-mcp-server", "stdio"], env: [GITHUB_PERSONAL_ACCESS_TOKEN], hosts: ["api.github.com"] }
+sources:
+  gh-local:
+    type: mcp
+    package: github
+    env: { GITHUB_PERSONAL_ACCESS_TOKEN: file:/run/credentials/siphon.service/github-token }
+    read: { tool: get_me }
+    poll: 24h
+```
+
+- **The MCP bridge keeps the secret away from the agent.** When an agent uses
+  such a server, Siphon runs the server in its own sandbox
+  (`siphon-mcp@`, under a different user, reaching only the package's
+  hosts) and relays only its tools to the agent. The agent never sees the
+  secret in its environment, its files or `/proc`.
+- **Packages:** the portal may enable only the servers listed in
+  `server.mcp_packages`. Any other command can only be set in
+  `siphon.yaml`.
+
 ## Egress restriction
 
 Agents hold logins and read untrusted data, so their network is restricted

@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -158,5 +161,38 @@ func TestMCPStructuredContentPreservesInteger(t *testing.T) {
 	ev, err := (MCP{Options: MCPOptions{Tool: "id"}, Transport: clientSide}).Poll(ctx)
 	if err != nil || ev.Data.(map[string]any)["id"] != int64(9007199254740993) {
 		t.Fatalf("event=%+v err=%v", ev, err)
+	}
+}
+
+// TestStubMCP is the stdio child of TestMCPStdioEnv: it records its env and serves one tool.
+func TestStubMCP(t *testing.T) {
+	out := os.Getenv("STUB_OUT")
+	if out == "" {
+		t.Skip("helper process")
+	}
+	os.WriteFile(out, []byte(strings.Join(os.Environ(), "\n")), 0o600)
+	server := mcp.NewServer(&mcp.Implementation{Name: "stub", Version: "1"}, nil)
+	mcp.AddTool(server, &mcp.Tool{Name: "ping"}, func(context.Context, *mcp.CallToolRequest, any) (*mcp.CallToolResult, any, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: `{"ok":true}`}}}, nil, nil
+	})
+	server.Run(context.Background(), &mcp.StdioTransport{})
+	os.Exit(0)
+}
+
+func TestMCPStdioEnv(t *testing.T) {
+	t.Setenv("OUTER_SECRET", "must-not-leak")
+	out := filepath.Join(t.TempDir(), "env")
+	ev, err := (MCP{Options: MCPOptions{
+		Name: "m", Tool: "ping", Timeout: 10 * time.Second,
+		Command: []string{os.Args[0], "-test.run=^TestStubMCP$"},
+		Env:     map[string]string{"STUB_OUT": out, "GITHUB_TOKEN": "tok-123"},
+	}}).Poll(context.Background())
+	if err != nil || ev.Data.(map[string]any)["ok"] != true {
+		t.Fatalf("%v %+v", err, ev)
+	}
+	b, _ := os.ReadFile(out)
+	got := string(b)
+	if !strings.Contains(got, "GITHUB_TOKEN=tok-123") || strings.Contains(got, "must-not-leak") {
+		t.Fatalf("child env:\n%s", got)
 	}
 }

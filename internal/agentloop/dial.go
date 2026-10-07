@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -21,7 +23,8 @@ func newClient() *http.Client {
 		Proxy: nil, // never the env proxy: plain-http targets must be tunnelled too
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			p := os.Getenv("HTTPS_PROXY")
-			if p == "" {
+			// NO_PROXY lists host:port pairs to reach directly (the MCP bridge forwarders).
+			if p == "" || slices.Contains(strings.Split(os.Getenv("NO_PROXY"), ","), addr) {
 				return d.DialContext(ctx, network, addr)
 			}
 			u, err := url.Parse(p)

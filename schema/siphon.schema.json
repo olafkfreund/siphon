@@ -298,6 +298,33 @@
         "listen": {
           "type": "string"
         },
+        "mcp_packages": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "command": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "env": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "hosts": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
         "models": {
           "additionalProperties": false,
           "properties": {
@@ -310,8 +337,23 @@
           },
           "type": "object"
         },
+        "public_url": {
+          "type": "string"
+        },
         "sandbox": {
           "type": "string"
+        },
+        "services": {
+          "additionalProperties": false,
+          "properties": {
+            "private_endpoints": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
         },
         "token": {
           "description": "env:NAME, file:/path, or (where allowed) a literal",
@@ -349,6 +391,13 @@
             },
             "type": "array"
           },
+          "env": {
+            "additionalProperties": {
+              "description": "env:NAME, file:/path, or (where allowed) a literal",
+              "type": "string"
+            },
+            "type": "object"
+          },
           "headers": {
             "additionalProperties": {
               "description": "env:NAME, file:/path, or (where allowed) a literal",
@@ -360,6 +409,9 @@
             "type": "string"
           },
           "method": {
+            "type": "string"
+          },
+          "package": {
             "type": "string"
           },
           "poll": {
@@ -390,6 +442,9 @@
             "type": "string"
           },
           "timestamp_header": {
+            "type": "string"
+          },
+          "token_header": {
             "type": "string"
           },
           "type": {

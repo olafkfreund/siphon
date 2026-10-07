@@ -20,6 +20,8 @@ func TestResolveAllowed(t *testing.T) {
 		{"127.0.0.1", false, true},
 		{"127.0.0.1", true, false},
 		{"1.1.1.1", false, false},
+		{"169.254.169.254", true, true}, // allow_private never reaches metadata
+		{"fe80::1", true, true},
 	} {
 		addrs, err := ResolveAllowed(ctx, tt.host, tt.allowPrivate)
 		if (err != nil) != tt.wantError {

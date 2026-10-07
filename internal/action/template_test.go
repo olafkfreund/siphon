@@ -121,7 +121,7 @@ func TestStopOrphansTargetsTemplateInstances(t *testing.T) {
 	stops := fakeSystemd(t, t.TempDir())
 	var reset []string
 	resetFailed = func(units ...string) { reset = append(reset, units...) }
-	if err := StopOrphans(context.Background()); err != nil || !reflect.DeepEqual(*stops, []string{"siphon-action@*.service", "siphon-action-open@*.service"}) {
+	if err := StopOrphans(context.Background()); err != nil || !reflect.DeepEqual(*stops, []string{"siphon-action@*.service", "siphon-action-open@*.service", "siphon-mcp@*.service"}) {
 		t.Fatalf("stops=%v err=%v", *stops, err)
 	}
 	if !reflect.DeepEqual(reset, *stops) {
