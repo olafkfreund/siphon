@@ -127,6 +127,8 @@ The owner expects most users to **add things from the CLI** and to use the
 
 ## Open questions
 
+Resolved by the owner on 2026-10-07 ("approved"): all four proposals below are adopted.
+
 1. **What is a "task" in the CLI?** Proposal: a single file (or a guided
    prompt) holding source + rule + action together. The CLI splits it into
    the existing items, so the portal shows the parts, plus a "task" view
