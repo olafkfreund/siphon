@@ -324,18 +324,20 @@ func (s *server) applyBatch(r *http.Request) (any, int, error) {
 	// A secret key is <kind>/<name>.<field>; names may hold dots, so match the items.
 	bySecret := map[int]map[string]string{}
 	for k, v := range body.Secrets {
-		found := false
+		best, field := -1, ""
 		for i, it := range body.Items {
-			if f, ok := strings.CutPrefix(k, it.Kind+"/"+it.Name+"."); ok {
-				if bySecret[i] == nil {
-					bySecret[i] = map[string]string{}
-				}
-				bySecret[i][f], found = v, true
+			if f, ok := strings.CutPrefix(k, it.Kind+"/"+it.Name+"."); ok && (best < 0 || len(it.Name) > len(body.Items[best].Name)) {
+				best, field = i, f // the longest item name wins: a-b.c is a-b's c, not a's b.c
 			}
 		}
-		if !found {
+		if best < 0 {
 			bad = append(bad, fmt.Errorf("secrets: %q is not for an item in this request", k))
+			continue
 		}
+		if bySecret[best] == nil {
+			bySecret[best] = map[string]string{}
+		}
+		bySecret[best][field] = v
 	}
 	var pending []pendingSecret
 	var muts []func(map[itemKey]store.ConfigItem)
@@ -369,6 +371,12 @@ func (s *server) applyBatch(r *http.Request) (any, int, error) {
 			return nil, 0, err
 		}
 		muts = append(muts, m)
+		if d.Rev != nil {
+			if rev != nil && *rev != *d.Rev {
+				return nil, 0, errStale
+			}
+			rev = d.Rev
+		}
 	}
 	if len(bad) > 0 {
 		return nil, 0, errInvalid{errors.Join(bad...).Error()}

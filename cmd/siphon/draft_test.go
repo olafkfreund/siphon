@@ -164,7 +164,7 @@ func TestDraftApplyGeneratesSecretOnce(t *testing.T) {
 	if m == nil || !strings.Contains(out, "shown once") || !strings.Contains(out, "applied revision") {
 		t.Fatalf("apply:\n%s", out)
 	}
-	if b, _ := os.ReadFile(filepath.Join(e.dir, "secrets", "sources-drafthook-secret")); string(b) != m[1] {
+	if b, _ := os.ReadFile(filepath.Join(e.dir, "secrets", "sources--drafthook+secret")); string(b) != m[1] {
 		t.Fatal("secret file differs from the printed secret")
 	}
 	if strings.Contains(out, "secret sources/") {

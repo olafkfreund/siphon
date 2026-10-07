@@ -97,8 +97,17 @@ jobs (last 100): none
 ```
 
 The CLI talks to the running Siphon over its API, from this machine or
-another one. The token is stored in a 0600 file. In scripts, use
-`SIPHON_URL` and `SIPHON_TOKEN_FILE` instead.
+another one. The URL and token are saved together in a 0600 file you own,
+and always used as a pair, so the token never goes to another address.
+
+- **In scripts with no saved login,** set `SIPHON_URL` and
+  `SIPHON_TOKEN_FILE`.
+- **To reach a different server,** pass `-url` with its own `-token-file`.
+- **On NixOS,** `SIPHON_URL` is already set, so `siphon login` alone is
+  enough.
+- **Plain `http://`** is only accepted for this machine (loopback). For a
+  remote Siphon use `https://`, or pass `--insecure-http` if you really
+  mean it.
 
 **In the portal:** open the address in a browser, sign in with the same
 token, and see the empty **Dashboard**.
@@ -454,11 +463,17 @@ offers these tools:
 - `apply`, `delete`.
 
 Without `--allow-write`, `apply` and `delete` **only dry-run**, even when
-asked not to: the result says `"dry_run": true` with a note. Secret values
-are refused unless the user also passes `--allow-secrets`: secrets belong
-in a terminal (`--secret …=-`), not in a chat. There is **no** approve or
-deny tool. Changes made this way show in `siphon history` as
-`api:cli:<user>:mcp`.
+asked not to: the result says `"dry_run": true` with a note.
+
+Even with `--allow-write`:
+- **Secrets:** secret values, and plain-text header values (which may be
+  tokens), are refused unless the user also passes `--allow-secrets`.
+  Secrets belong in a terminal (`--secret …=-`), not in a chat.
+- **Approval:** turning an agent's `approve` off is refused unless the user
+  passes `--allow-unapproved`.
+- **No approve or deny tool.**
+
+Changes made this way show in `siphon history` as `api:cli:<user>:mcp`.
 
 ## Rules that commonly go wrong
 
@@ -512,6 +527,9 @@ With `-o json`, errors on stderr are `{"error": "...", "errors": [...], "hint": 
   the user tells you to, for that job.
 - `siphon mcp` (Siphon as an MCP server) only dry-runs writes unless the
   user started it with `--allow-write`, and has no approve tool.
+- On the CLI, `-o json` never counts as consent. `apply`, `restore` and
+  `draft --apply` need an explicit `--yes`, which you add only after the
+  user has seen the diff.
 - Every change is recorded in `siphon history` with the actor `api:cli:<user>`.
   `siphon restore <rev>` undoes it.
 
@@ -1177,7 +1195,7 @@ the same as data.
 | `disabled` | someone ran `siphon disable` | `siphon enable <rule>` |
 | `no_events_yet` | the source never delivered | check the sender's URL and secret; `siphon get sources` |
 | `source_error` | polling failed (DNS, TLS, HTTP status, bad JSON) | the error is shown; fix the URL or allow the host |
-| `webhook_rejected` | deliveries were refused (signature, timestamp, rate limit) | check the secret and the header name the sender uses |
+| `webhook_rejected` | deliveries were refused (signature, timestamp, rate limit); under a flood the stored reason updates at most every 10 s | check the secret and the header name the sender uses |
 | `eval_error` | `when:` or `id:` failed on a real event (a missing field, a wrong type) | `siphon test <rule> --last` shows the error; guard with `event.x != nil` |
 | `condition_false` | the last event didn't match | `siphon test <rule> --last`; compare with `siphon get sources` / the event |
 | `edge_already_true` | `on: edge` already fired and the condition is still true | expected; add `repeat:` to re-fire while true |
@@ -1216,8 +1234,17 @@ siphon test <rule> - --header X-GitHub-Event=pull_request < event.json
   `127.77.0.1:3139`).
 - **exit 5 (conflict):** someone changed the item since you read it. Run
   `siphon get` again and re-apply.
-- **"not logged in":** `siphon login <url>`, or set `SIPHON_URL` and
+- **"not logged in":** `siphon login <url>` (or `siphon login`, which uses
+  `SIPHON_URL`). In scripts with no saved login, set `SIPHON_URL` and
   `SIPHON_TOKEN_FILE`.
+- **"needs its own token":** `-url` pointing at a server other than your
+  saved login needs `-token-file`. The saved token is never sent to
+  another address.
+- **"refusing plain http":** use `https://` for a remote Siphon, or pass
+  `--insecure-http` (or set `SIPHON_INSECURE_HTTP=1`).
+- **"pass --yes":** `apply`, `restore` and `draft --apply` ask before
+  changing anything. With `-o json`, or with no terminal, add `--yes`;
+  JSON output alone never counts as a yes.
 
 ## Logs and state
 
@@ -1394,10 +1421,11 @@ should also read `siphon guide`.
 
 | Flag | Default | Meaning |
 |---|---|---|
+| `--insecure-http` | `false` | allow http:// to a non-loopback host (default: SIPHON_INSECURE_HTTP=1; the token is then sent in clear text) |
 | `-o` | `text` | output format: text or json |
 | `--quiet` | `false` | print only data and errors, no progress messages |
 | `--token-file` |  | file holding the API token (default: SIPHON_TOKEN_FILE, SIPHON_TOKEN, then client.yaml) |
-| `--url` |  | siphon URL (default: SIPHON_URL, then client.yaml) |
+| `--url` |  | siphon URL (default: the saved login, else SIPHON_URL; needs -token-file or SIPHON_TOKEN* unless it is the saved login's) |
 
 Kinds for `get`: `sources`, `rules`, `agents`, `routines`, `credentials`, `jobs`, `approvals`, `audit`, `connections`.
 
@@ -1418,10 +1446,10 @@ With `-o json`, errors on stderr are `{"error": "…", "errors": […], "hint": 
 
 ### siphon login
 
-Save the server URL and API token (token from a no-echo prompt, or stdin).
+Save the server URL (default SIPHON_URL) and API token (token from a no-echo prompt, or stdin).
 
 ```sh
-siphon login <url>
+siphon login [url]
 ```
 
 Example:
@@ -1842,12 +1870,13 @@ siphon draft "tell me on ntfy when a deploy webhook reports failed"
 Run an MCP server on stdio so an assistant can inspect and (with --allow-write) change this siphon.
 
 ```sh
-siphon mcp [--allow-write] [--allow-secrets]
+siphon mcp [--allow-write] [--allow-secrets] [--allow-unapproved]
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `--allow-secrets` | `false` | with --allow-write: accept secret values through apply (they pass through the assistant's context) |
+| `--allow-unapproved` | `false` | let apply turn an agent's approval off (default: refused) |
 | `--allow-write` | `false` | let apply and delete really change things (default: they only dry-run) |
 
 Example:

@@ -222,7 +222,7 @@ func TestCLISecretsAndExitCodes(t *testing.T) {
 	}
 	kf := e.write("hk.key", "file-SECRET\n")
 	e.ok("apply", "-f", f, "--yes", "--secret", "sources/hk.secret=@"+kf)
-	sf := filepath.Join(e.dir, "secrets", "sources-hk-secret")
+	sf := filepath.Join(e.dir, "secrets", "sources--hk+secret")
 	if b, err := os.ReadFile(sf); err != nil || string(b) != "file-SECRET" {
 		t.Fatalf("secret file: %q %v", b, err)
 	}
@@ -233,7 +233,7 @@ func TestCLISecretsAndExitCodes(t *testing.T) {
 	g := e.write("hk2.yaml", "sources:\n  hk2: { type: webhook, signature: github }\n")
 	e.stdin = "stdin-SECRET\n"
 	e.ok("apply", "-f", g, "--yes", "--secret", "sources/hk2.secret=-")
-	if b, _ := os.ReadFile(filepath.Join(e.dir, "secrets", "sources-hk2-secret")); string(b) != "stdin-SECRET" {
+	if b, _ := os.ReadFile(filepath.Join(e.dir, "secrets", "sources--hk2+secret")); string(b) != "stdin-SECRET" {
 		t.Fatalf("stdin secret %q", b)
 	}
 	for _, args := range [][]string{{"get", "sources", "hk"}, {"get", "sources"}, {"history"}, {"history", "1"}} {
@@ -416,7 +416,7 @@ func TestHelpJSONMatchesTable(t *testing.T) {
 		t.Fatalf("help --json: %d %s", code, o.String())
 	}
 	usage := usageText()
-	if len(h.Commands) != len(commands()) || h.Version == "" || len(h.GlobalFlags) != 4 || len(h.ExitCodes) != 6 {
+	if len(h.Commands) != len(commands()) || h.Version == "" || len(h.GlobalFlags) != 5 || len(h.ExitCodes) != 6 {
 		t.Fatalf("%+v", h)
 	}
 	for i, k := range commands() {
@@ -468,5 +468,25 @@ func TestClientModeRule(t *testing.T) {
 		if got := clientMode(tc.cmd, tc.args); got != tc.want {
 			t.Errorf("%s %v: client=%v, want %v", tc.cmd, tc.args, got, tc.want)
 		}
+	}
+}
+
+// -o json is never consent: without --yes, apply and restore refuse (exit 2).
+func TestJSONOutputIsNotConsent(t *testing.T) {
+	e := newCLIEnv(t)
+	f := e.write("n.yaml", "sources:\n  nj: { type: http, url: 'https://example.com/', poll: 1m }\n")
+	g := e.write("m.yaml", "sources:\n  mj: { type: http, url: 'https://example.com/m', poll: 1m }\n")
+	e.ok("apply", "-f", g, "--yes")
+	for _, args := range [][]string{{"apply", "-f", f, "-o", "json"}, {"restore", "1", "-o", "json"}} {
+		code, _, er := e.do(args...)
+		if code != 2 || !strings.Contains(er, "pass --yes to apply without asking") {
+			t.Errorf("%v: %d %s", args, code, er)
+		}
+	}
+	if out := e.ok("get", "sources", "-o", "json"); strings.Contains(out, `"nj"`) {
+		t.Fatal("applied without consent")
+	}
+	if code, _, er := e.do("apply", "-f", f, "-o", "json", "--yes"); code != 0 {
+		t.Fatalf("with --yes: %d %s", code, er)
 	}
 }

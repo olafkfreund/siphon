@@ -113,3 +113,49 @@ rules:
 		t.Fatalf("stored %q", msg)
 	}
 }
+
+// A flood of refused webhook deliveries costs a couple of writes, and the
+// latest reason is the one recorded.
+func TestWebhookRejectsThrottled(t *testing.T) {
+	old := rejectEvery
+	rejectEvery = 300 * time.Millisecond
+	defer func() { rejectEvery = old }()
+	dir := t.TempDir()
+	t.Setenv("AGW_HOOK", "s3cret")
+	cfg, err := config.Parse([]byte("server: { sandbox: none, db: " + dir + "/state.db }\nsources:\n  gh: { type: webhook, secret: env:AGW_HOOK, signature: github }\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(cfg.Server.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.DB.Exec(`CREATE TABLE writes(n); CREATE TRIGGER w_i AFTER INSERT ON source_state BEGIN INSERT INTO writes VALUES (1); END;
+		CREATE TRIGGER w_u AFTER UPDATE ON source_state BEGIN INSERT INTO writes VALUES (1); END;`); err != nil {
+		t.Fatal(err)
+	}
+	p := New(cfg, st, time.Now)
+	for i := 0; i < 200; i++ {
+		r := httptest.NewRequest(http.MethodPost, "/hook/gh", strings.NewReader("{}"))
+		r.Header.Set("X-Hub-Signature-256", "sha256=00")
+		p.Webhooks()("gh").ServeHTTP(httptest.NewRecorder(), r)
+	}
+	r := httptest.NewRequest(http.MethodPost, "/hook/gh", strings.NewReader("{}")) // no signature: a different reason
+	p.Webhooks()("gh").ServeHTTP(httptest.NewRecorder(), r)
+	want := p.rejectThrottle("gh").reason
+	time.Sleep(700 * time.Millisecond)
+	var n int
+	st.DB.QueryRow(`SELECT count(*) FROM writes`).Scan(&n)
+	d, _ := store.SourceDiagnostics(st.DB, "gh")
+	if n > 3 || !strings.HasPrefix(d.Reject, want) {
+		t.Fatalf("%d writes, reject %q, want %q", n, d.Reject, want)
+	}
+}
+
+func TestStripQuoted(t *testing.T) {
+	got := stripQuoted(`cannot convert "SECRET-VALUE" and 'other' to int`)
+	if strings.Contains(got, "SECRET") || strings.Contains(got, "other") || !strings.Contains(got, `"…"`) {
+		t.Fatal(got)
+	}
+}

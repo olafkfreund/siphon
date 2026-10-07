@@ -46,7 +46,7 @@ func TestConnectGitHubGitLab(t *testing.T) {
 	if m == nil || !strings.Contains(out, "shown once") || !strings.Contains(out, `connected GitHub: "ghub"`) {
 		t.Fatalf("github output: %s", out)
 	}
-	sf := filepath.Join(e.dir, "secrets", "sources-ghub-token")
+	sf := filepath.Join(e.dir, "secrets", "sources--ghub+token")
 	_ = sf
 	for _, args := range [][]string{{"get", "sources", "ghub"}, {"get", "sources", "ghub-hooks"}, {"history", "1"}, {"get", "audit"}} {
 		if o := e.ok(args...); strings.Contains(o, m[1]) || strings.Contains(o, "ghp_SECRET1") {
@@ -248,7 +248,7 @@ func TestNewTaskFlags(t *testing.T) {
 	if m == nil || !strings.Contains(out, "shown once") || !strings.Contains(out, "/hook/alerts2") || !strings.Contains(out, "applied revision") {
 		t.Fatalf("new task: %s", out)
 	}
-	if b, _ := os.ReadFile(filepath.Join(e.dir, "secrets", "sources-alerts2-secret")); string(b) != m[1] {
+	if b, _ := os.ReadFile(filepath.Join(e.dir, "secrets", "sources--alerts2+secret")); string(b) != m[1] {
 		t.Fatal("secret file differs from the printed one")
 	}
 	for _, args := range [][]string{{"get", "sources", "alerts2"}, {"history", "2"}, {"get", "audit"}} {

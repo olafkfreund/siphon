@@ -496,3 +496,15 @@ self-approved; the PR lists it.
   - **Not in the VM:** `siphon draft`. The VM's stub model can't write YAML; draft is covered by unit tests with a fake model, and was run for real on a local Ollama.
   - **Fix found by the VM walkthrough:** `connect model openai` always prompted for a key, which hung on a terminal. Only hosted presets (openrouter, groq, mistral) prompt now; `openai`'s key is optional via `--api-key`.
   - The config-API subtest counts its own revision and audit deltas (earlier subtests now change the config too).
+- **Step 12, security review fixes** (fresh Opus review: 1 high, 4 medium, 8 low; all fixed with regression tests):
+  - **H1/M1:** secret files are now `<kind>--<name>+<field>` (injective), and `refAllowed` requires an exact match. This closes stealing or overwriting another item's secret through a hyphenated name, a flaw that predates this branch. Legacy refs stay valid only where the item already had them.
+  - **M2:** `-o json` never counts as consent; `--yes` is required.
+  - **M3:** a saved login's URL and token are used as a pair, so `SIPHON_URL` can't redirect the saved token, and `-url` needs its own token. `siphon login` defaults to `SIPHON_URL`.
+  - **M4:** webhook rejections are throttled to one DB write per source per 10 s.
+  - **L1/L2:** MCP needs `--allow-unapproved` to turn approval off, and `--allow-secrets` for plain-text header values.
+  - **L3/L4:** batch delete revs are checked, and secret keys match the longest item prefix.
+  - **L5:** secrets are published after the commit.
+  - **L6:** quoted literals are stripped from stored eval errors.
+  - **L7:** draft limits (model name clipped, no `server.*` in the prompt, 2 concurrent drafts).
+  - **L8:** plain `http://` only to loopback unless `--insecure-http`; `client.yaml` must be owned by the user.
+  - The docs are updated to match.

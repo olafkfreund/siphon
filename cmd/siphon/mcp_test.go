@@ -28,7 +28,7 @@ func newMCPEnvFrom(t *testing.T, e *cliEnv, allowWrite, allowSecrets bool) *mcpE
 	c := &cli{in: strings.NewReader(""), out: &strings.Builder{}, errw: &strings.Builder{}, g: globals{output: "text"}, actor: "cli:olaf:mcp"}
 	srvT, cliT := mcp.NewInMemoryTransports()
 	ctx := context.Background()
-	ss, err := newMCPServer(c, allowWrite, allowSecrets).Connect(ctx, srvT, nil)
+	ss, err := newMCPServer(c, allowWrite, allowSecrets, false).Connect(ctx, srvT, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,5 +227,31 @@ func TestMCPHelpExample(t *testing.T) {
 	}
 	if code, _, _ := e.do("mcp", "--allow-secrets"); code != 2 {
 		t.Fatalf("--allow-secrets alone: %d", code)
+	}
+}
+
+func TestMCPGuards(t *testing.T) {
+	m := newMCPEnv(t, true, false)
+	if out, isErr := m.call(t, "apply", map[string]any{"yaml": "agents:\n  ag: { kind: claude }\n"}); isErr {
+		t.Fatalf("agent: %s", out)
+	}
+	// approval off: refused for an existing agent (default true) and a new one
+	for _, y := range []string{"agents:\n  ag: { kind: claude, approve: false }\n", "agents:\n  fresh: { kind: claude, approve: false }\n"} {
+		if out, isErr := m.call(t, "apply", map[string]any{"yaml": y}); !isErr || !strings.Contains(out, "--allow-unapproved") {
+			t.Errorf("approve false accepted: %s", out)
+		}
+	}
+	if out, isErr := m.call(t, "apply", map[string]any{"yaml": "agents:\n  ag: { kind: claude, approve: true }\n"}); isErr {
+		t.Fatalf("approve true: %s", out)
+	}
+	// plain header values may be tokens
+	hdr := "sources:\n  hh: { type: http, url: 'https://example.com/', poll: 1m, headers: { Authorization: 'Bearer abc' } }\n"
+	if out, isErr := m.call(t, "apply", map[string]any{"yaml": hdr}); !isErr || !strings.Contains(out, "--allow-secrets") {
+		t.Fatalf("plain header accepted: %s", out)
+	}
+	// with the flags, both pass the guard
+	items, _ := parseApply([]byte(hdr + "agents:\n  ag: { kind: claude, approve: false }\n"))
+	if err := mcpGuard(&cli{}, items, true, true); err != nil {
+		t.Fatal(err)
 	}
 }

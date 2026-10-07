@@ -32,8 +32,17 @@ jobs (last 100): none
 ```
 
 The CLI talks to the running Siphon over its API, from this machine or
-another one. The token is stored in a 0600 file. In scripts, use
-`SIPHON_URL` and `SIPHON_TOKEN_FILE` instead.
+another one. The URL and token are saved together in a 0600 file you own,
+and always used as a pair, so the token never goes to another address.
+
+- **In scripts with no saved login,** set `SIPHON_URL` and
+  `SIPHON_TOKEN_FILE`.
+- **To reach a different server,** pass `-url` with its own `-token-file`.
+- **On NixOS,** `SIPHON_URL` is already set, so `siphon login` alone is
+  enough.
+- **Plain `http://`** is only accepted for this machine (loopback). For a
+  remote Siphon use `https://`, or pass `--insecure-http` if you really
+  mean it.
 
 **In the portal:** open the address in a browser, sign in with the same
 token, and see the empty **Dashboard**.

@@ -17,10 +17,11 @@ should also read `siphon guide`.
 
 | Flag | Default | Meaning |
 |---|---|---|
+| `--insecure-http` | `false` | allow http:// to a non-loopback host (default: SIPHON_INSECURE_HTTP=1; the token is then sent in clear text) |
 | `-o` | `text` | output format: text or json |
 | `--quiet` | `false` | print only data and errors, no progress messages |
 | `--token-file` |  | file holding the API token (default: SIPHON_TOKEN_FILE, SIPHON_TOKEN, then client.yaml) |
-| `--url` |  | siphon URL (default: SIPHON_URL, then client.yaml) |
+| `--url` |  | siphon URL (default: the saved login, else SIPHON_URL; needs -token-file or SIPHON_TOKEN* unless it is the saved login's) |
 
 Kinds for `get`: `sources`, `rules`, `agents`, `routines`, `credentials`, `jobs`, `approvals`, `audit`, `connections`.
 
@@ -41,10 +42,10 @@ With `-o json`, errors on stderr are `{"error": "…", "errors": […], "hint": 
 
 ### siphon login
 
-Save the server URL and API token (token from a no-echo prompt, or stdin).
+Save the server URL (default SIPHON_URL) and API token (token from a no-echo prompt, or stdin).
 
 ```sh
-siphon login <url>
+siphon login [url]
 ```
 
 Example:
@@ -465,12 +466,13 @@ siphon draft "tell me on ntfy when a deploy webhook reports failed"
 Run an MCP server on stdio so an assistant can inspect and (with --allow-write) change this siphon.
 
 ```sh
-siphon mcp [--allow-write] [--allow-secrets]
+siphon mcp [--allow-write] [--allow-secrets] [--allow-unapproved]
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `--allow-secrets` | `false` | with --allow-write: accept secret values through apply (they pass through the assistant's context) |
+| `--allow-unapproved` | `false` | let apply turn an agent's approval off (default: refused) |
 | `--allow-write` | `false` | let apply and delete really change things (default: they only dry-run) |
 
 Example:

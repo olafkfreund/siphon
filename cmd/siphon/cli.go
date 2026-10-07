@@ -48,9 +48,10 @@ type globals struct {
 // purpose (connect, new) leaves the server URL to SIPHON_URL / client.yaml.
 func (g *globals) register(fs *flag.FlagSet, ownURL bool) {
 	if !ownURL {
-		fs.StringVar(&g.url, "url", "", "siphon URL (default: SIPHON_URL, then client.yaml)")
+		fs.StringVar(&g.url, "url", "", "siphon URL (default: the saved login, else SIPHON_URL; needs -token-file or SIPHON_TOKEN* unless it is the saved login's)")
 	}
 	fs.StringVar(&g.tokenFile, "token-file", "", "file holding the API token (default: SIPHON_TOKEN_FILE, SIPHON_TOKEN, then client.yaml)")
+	fs.BoolVar(&client.InsecureHTTP, "insecure-http", false, "allow http:// to a non-loopback host (default: SIPHON_INSECURE_HTTP=1; the token is then sent in clear text)")
 	fs.StringVar(&g.output, "o", "text", "output format: text or json")
 	fs.BoolVar(&g.quiet, "quiet", false, "print only data and errors, no progress messages")
 }
@@ -79,7 +80,7 @@ func cfgFlag() flagDoc {
 
 func commands() []command {
 	return []command{
-		{Name: "login", Usage: "login <url>", Mode: "client", build: buildLogin, Summary: "save the server URL and API token (token from a no-echo prompt, or stdin)", Example: "siphon login http://127.0.0.1:8080"},
+		{Name: "login", Usage: "login [url]", Mode: "client", build: buildLogin, Summary: "save the server URL (default SIPHON_URL) and API token (token from a no-echo prompt, or stdin)", Example: "siphon login http://127.0.0.1:8080"},
 		{Name: "logout", Usage: "logout", Mode: "client", build: buildLogout, Summary: "forget the saved login", Example: "siphon logout"},
 		{Name: "status", Usage: "status", Mode: "client", build: buildStatus, Summary: "sources, rules, pending approvals and recent jobs at a glance", Example: "siphon status -o json"},
 		{Name: "get", Usage: "get <kind> [name]", Mode: "client", build: buildGet, Summary: "list or show config items (sources rules agents routines credentials) or jobs, approvals, audit, connections", Example: "siphon get rules disk-full"},
@@ -103,7 +104,7 @@ func commands() []command {
 		{Name: "inventory", Usage: "inventory", Mode: "client", build: buildInventory, Summary: "names of everything configured plus the operator's allowlists (never secrets)", Example: "siphon inventory -o json"},
 		{Name: "guide", Usage: "guide", Mode: "client", build: buildGuide, Summary: "print the guide for LLM agents (docs/llm.md)", Example: "siphon guide"},
 		{Name: "draft", Usage: `draft "<text>" [--connection c] [--model m] [--apply] [--yes]`, Mode: "client", build: buildDraft, Summary: "have a model connection draft an apply file from plain words; checked, never applied without --apply", Example: `siphon draft "tell me on ntfy when a deploy webhook reports failed"`},
-		{Name: "mcp", Usage: "mcp [--allow-write] [--allow-secrets]", Mode: "client", build: buildMCP, Summary: "run an MCP server on stdio so an assistant can inspect and (with --allow-write) change this siphon", Example: "claude mcp add siphon -- siphon mcp"},
+		{Name: "mcp", Usage: "mcp [--allow-write] [--allow-secrets] [--allow-unapproved]", Mode: "client", build: buildMCP, Summary: "run an MCP server on stdio so an assistant can inspect and (with --allow-write) change this siphon", Example: "claude mcp add siphon -- siphon mcp"},
 		{Name: "help", Usage: "help [command] [--json]", Mode: "client", build: buildHelp, Summary: "usage; --json is the machine-readable command list", Example: "siphon help --json"},
 
 		{Name: "validate", Usage: "validate [-config f] [-v] [-file-only]", Mode: "local", Summary: "check the config (file + portal edits; -file-only: file alone; -v: print egress allowlists)", Example: "siphon validate -config siphon.yaml",
@@ -274,10 +275,12 @@ func (c *cli) readLine() (string, error) {
 	return strings.TrimRight(s, "\r\n"), nil
 }
 
+var errNeedYes = client.Usage("this needs confirmation and -o json cannot ask", "pass --yes to apply without asking, or --dry-run to only look")
+
 // confirm asks a yes/no question on a terminal; elsewhere it refuses to guess.
 func (c *cli) confirm(question string) (bool, error) {
 	if !c.isTTY {
-		return false, client.Usage("this needs confirmation and there is no terminal", "pass --yes to go ahead, or --dry-run to only look")
+		return false, client.Usage("this needs confirmation and there is no terminal", "pass --yes to apply without asking, or --dry-run to only look")
 	}
 	fmt.Fprintf(c.out, "%s [y/N] ", question)
 	s, err := c.readLine()

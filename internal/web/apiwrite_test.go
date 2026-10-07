@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"github.com/olafkfreund/siphon/internal/config"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -83,7 +84,7 @@ func TestAPISecrets(t *testing.T) {
 		return ce.api("PUT", path, string(b))
 	}
 	y := "type: webhook\nsignature: github\n"
-	f := filepath.Join(ce.dir, "secrets", "sources-hk-secret")
+	f := filepath.Join(ce.dir, "secrets", "sources--hk+secret")
 	if w := put("/api/config/sources/hk?dry_run=1", y, map[string]string{"secret": val}); w.Code != 200 || strings.Contains(w.Body.String(), val) {
 		t.Fatalf("dry: %d %s", w.Code, w.Body.String())
 	}
@@ -220,4 +221,77 @@ func storeRevs(ce *cfgEnv) (string, error) {
 		return "", err
 	}
 	return r[0].Actor, nil
+}
+
+// Secret file names are injective: no item can borrow or overwrite another's.
+func TestAPISecretNamesInjective(t *testing.T) {
+	ce := newCfgEnv(t)
+	put := func(path, y string, sec map[string]string) *httptest.ResponseRecorder {
+		b, _ := json.Marshal(map[string]any{"yaml": y, "secrets": sec})
+		return ce.api("PUT", path, string(b))
+	}
+	sec := filepath.Join(ce.dir, "secrets")
+	if w := put("/api/config/sources/a-headers", "type: webhook\nsignature: github\n", map[string]string{"secret": "victim"}); w.Code != 200 {
+		t.Fatalf("victim: %d %s", w.Code, w.Body.String())
+	}
+	if w := put("/api/config/sources/a", "type: http\nurl: https://example.com/\npoll: 1m\n", map[string]string{"headers.secret": "mine"}); w.Code != 200 {
+		t.Fatalf("a: %d %s", w.Code, w.Body.String())
+	}
+	if b, _ := os.ReadFile(filepath.Join(sec, config.SecretFileName("sources", "a-headers", "secret"))); string(b) != "victim" {
+		t.Fatalf("victim's secret overwritten: %q", b)
+	}
+	// theft: web-auth points at sources/web's auth.bearer, by the old and the new name
+	if w := put("/api/config/sources/web", "type: http\nurl: https://example.com/\npoll: 1m\n", map[string]string{"auth.bearer": "tok"}); w.Code != 200 {
+		t.Fatalf("web: %d %s", w.Code, w.Body.String())
+	}
+	for _, f := range []string{"sources-web-auth-bearer", config.SecretFileName("sources", "web", "auth.bearer")} {
+		y := "type: http\nurl: https://elsewhere.example/\npoll: 1m\nauth:\n  bearer: file:" + filepath.Join(sec, f) + "\n"
+		if w := put("/api/config/sources/web-auth", y, nil); w.Code != 422 {
+			t.Errorf("theft via %s: %d %s", f, w.Code, w.Body.String())
+		}
+	}
+}
+
+// Secret files are published only after the transaction commits: a failed save
+// leaves the old value and no temp files.
+func TestSecretKeptOnFailedCommit(t *testing.T) {
+	ce := newCfgEnv(t)
+	put := func(v string) *httptest.ResponseRecorder {
+		b, _ := json.Marshal(map[string]any{"yaml": "type: webhook\nsignature: github\n", "secrets": map[string]string{"secret": v}})
+		return ce.api("PUT", "/api/config/sources/hk", string(b))
+	}
+	if w := put("old"); w.Code != 200 {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	if _, err := ce.st.DB.Exec(`DROP TABLE config_revision`); err != nil {
+		t.Fatal(err)
+	}
+	if w := put("new"); w.Code == 200 {
+		t.Fatal("save succeeded without a revision table")
+	}
+	dir := filepath.Join(ce.dir, "secrets")
+	if b, _ := os.ReadFile(filepath.Join(dir, config.SecretFileName("sources", "hk", "secret"))); string(b) != "old" {
+		t.Fatalf("secret is %q", b)
+	}
+	if es, _ := os.ReadDir(dir); len(es) != 1 {
+		t.Fatalf("leftover files: %v", es)
+	}
+}
+
+func TestDraftLimitsAndInventory(t *testing.T) {
+	ce := newCfgEnv(t)
+	draftSlots <- struct{}{}
+	draftSlots <- struct{}{}
+	w := ce.api("POST", "/api/draft", `{"request":"x"}`)
+	<-draftSlots
+	<-draftSlots
+	if w.Code != 429 {
+		t.Fatalf("third draft: %d %s", w.Code, w.Body.String())
+	}
+	if _, ok := draftInventory(map[string]any{"server": 1, "sources": 2})["server"]; ok {
+		t.Fatal("server allowlists reach the prompt")
+	}
+	if got := clip(strings.Repeat("é", 300), 100); len([]rune(got)) != 101 {
+		t.Fatalf("clip: %d", len([]rune(got)))
+	}
 }

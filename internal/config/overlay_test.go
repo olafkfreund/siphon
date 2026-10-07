@@ -322,8 +322,8 @@ func TestOverlayEnvKeysFileOnly(t *testing.T) {
 		}
 	}
 	os.MkdirAll(sec, 0o700)
-	os.WriteFile(sec+"/sources-m-env.A_KEY", []byte("v"), 0o600)
-	if _, _, err := LoadWithOverlay(path, []Item{item("A_KEY: 'file:" + sec + "/sources-m-env.A_KEY', B_KEY: 'env:HOME'")}); err != nil {
+	os.WriteFile(sec+"/"+SecretFileName("sources", "m", "env.A_KEY"), []byte("v"), 0o600)
+	if _, _, err := LoadWithOverlay(path, []Item{item("A_KEY: 'file:" + sec + "/" + SecretFileName("sources", "m", "env.A_KEY") + "', B_KEY: 'env:HOME'")}); err != nil {
 		t.Errorf("rotate: %v", err)
 	}
 	if _, _, err := LoadWithOverlay(path, []Item{{Kind: "sources", Name: "n", YAML: "{type: mcp, command: [srv], read: {tool: t}, env: {A_KEY: x}}"}}); err == nil {
@@ -378,11 +378,11 @@ func TestOverlayServicePrivateEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := checkOverlay(f, ok, t.TempDir()); err != nil {
+	if err := checkOverlay(f, ok, nil, t.TempDir()); err != nil {
 		t.Fatalf("listed: %v", err)
 	}
 	bad := []Item{{Kind: "sources", Name: "gl", YAML: "type: http\nurl: https://other.lan/api\nallow_private: true\n"}}
-	if err := checkOverlay(f, bad, t.TempDir()); err == nil || !strings.Contains(err.Error(), "services.private_endpoints") {
+	if err := checkOverlay(f, bad, nil, t.TempDir()); err == nil || !strings.Contains(err.Error(), "services.private_endpoints") {
 		t.Fatalf("unlisted: %v", err)
 	}
 }
@@ -402,12 +402,12 @@ func TestOverlayKeptSecretCannotMoveToPackage(t *testing.T) {
 		"command to package": {Kind: "sources", Name: "cmd", YAML: "{type: mcp, package: p, env: {FOO: 'env:HOME'}, read: {tool: t}}"},
 		"package to package": {Kind: "sources", Name: "pkg", YAML: "{type: mcp, package: q, env: {FOO: 'env:HOME'}, read: {tool: t}}"},
 	} {
-		if err := checkOverlay(f, []Item{it}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "can't be moved") {
+		if err := checkOverlay(f, []Item{it}, nil, t.TempDir()); err == nil || !strings.Contains(err.Error(), "can't be moved") {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
 	same := Item{Kind: "sources", Name: "pkg", YAML: "{type: mcp, package: p, env: {FOO: 'env:HOME'}, read: {tool: t}, poll: 2m}"}
-	if err := checkOverlay(f, []Item{same}, t.TempDir()); err != nil {
+	if err := checkOverlay(f, []Item{same}, nil, t.TempDir()); err != nil {
 		t.Errorf("same package: %v", err)
 	}
 }
@@ -422,7 +422,7 @@ func TestCheckOverlayCollectsAll(t *testing.T) {
 		{Kind: "sources", Name: "a", YAML: "type: mcp\ncommand: [x]\nallow_private: true\n"},
 		{Kind: "agents", Name: "b", YAML: "kind: claude\nprompt: p\negress: { enabled: false }\n"},
 	}
-	err = checkOverlay(f, items, t.TempDir())
+	err = checkOverlay(f, items, nil, t.TempDir())
 	if err == nil {
 		t.Fatal("no error")
 	}
@@ -430,5 +430,42 @@ func TestCheckOverlayCollectsAll(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("missing %q in %v", want, err)
 		}
+	}
+}
+
+// The secret file name is injective, and a ref must match its item and field
+// exactly; a legacy ref survives only where the item already had it.
+func TestSecretRefExactAndLegacy(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	os.WriteFile(path, []byte("server: { db: "+dir+"/s.db }\n"), 0o600)
+	sec := filepath.Join(dir, "secrets")
+	src := func(name, ref string) Item {
+		return Item{Kind: "sources", Name: name, YAML: "{type: http, url: 'https://x.example/', auth: {bearer: '" + ref + "'}}"}
+	}
+	own := "file:" + filepath.Join(sec, SecretFileName("sources", "web-auth", "auth.bearer"))
+	if _, _, err := LoadWithOverlay(path, []Item{src("web-auth", own)}); err != nil {
+		t.Fatalf("own: %v", err)
+	}
+	// theft: web-auth pointing at sources/web's auth.bearer (old and new names)
+	for _, f := range []string{"sources-web-auth-bearer", SecretFileName("sources", "web", "auth.bearer")} {
+		if _, _, err := LoadWithOverlayStub(path, []Item{src("web-auth", "file:"+filepath.Join(sec, f))}, nil, nil); err == nil {
+			t.Errorf("%s accepted", f)
+		}
+	}
+	// injective: sources/a field "headers.secret" vs sources/a-headers field "secret"
+	if SecretFileName("sources", "a", "headers.secret") == SecretFileName("sources", "a-headers", "secret") {
+		t.Error("names collide")
+	}
+	// legacy: kept when the item already had it, refused when newly pointed at
+	legacy := "file:" + filepath.Join(sec, "sources-web-auth-bearer")
+	if _, _, err := LoadWithOverlay(path, []Item{src("web-auth", legacy)}); err != nil {
+		t.Errorf("legacy kept: %v", err)
+	}
+	if _, _, err := LoadWithOverlayStub(path, []Item{src("web-auth", legacy)}, nil, nil); err == nil {
+		t.Error("legacy newly pointed at accepted")
+	}
+	if _, _, err := LoadWithOverlayStub(path, []Item{src("web-auth", legacy)}, nil, []Item{src("web-auth", own)}); err == nil {
+		t.Error("legacy accepted over a different prior ref")
 	}
 }

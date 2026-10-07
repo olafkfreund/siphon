@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/olafkfreund/siphon/internal/config"
@@ -32,12 +33,58 @@ func (p *Pipeline) Webhooks() func(source string) http.Handler {
 			Name: name, Secret: s.Secret.Value, Signature: s.Signature, SigHeader: s.SigHeader, TokenHeader: s.TokenHeader,
 			TimestampHeader: s.TimestampHdr, IDHeader: strings.TrimPrefix(s.ID, "header."),
 			MaxBody: int64(cfg.Limits.HTTPMaxBody), Now: p.Now, PreLimit: lim.pre, Limit: lim.post,
-			OnReject: func(status int, reason string) {
-				if err := store.SetSourceReject(p.Store.DB, name, p.Now(), status, reason); err != nil {
-					slog.Warn("store webhook rejection", "source", name, "err", err)
-				}
-			},
+			OnReject: p.rejectThrottle(name).note,
 		}, p.deliver)
+	}
+}
+
+// rejectEvery is the least gap between database writes of one source's refused
+// deliveries; a flood of bad requests costs one write per gap, not one each.
+var rejectEvery = 10 * time.Second // var so tests can shorten it
+
+// rejects keeps a source's latest refusal and writes it at most once per rejectEvery.
+type rejects struct {
+	p       *Pipeline
+	name    string
+	mu      sync.Mutex
+	last    time.Time // of the last write
+	status  int
+	reason  string
+	pending bool // a newer refusal than the last write, flush timer armed
+}
+
+func (p *Pipeline) rejectThrottle(name string) *rejects {
+	r, _ := p.hookRejects.LoadOrStore(name, &rejects{p: p, name: name})
+	return r.(*rejects)
+}
+
+func (r *rejects) note(status int, reason string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.status, r.reason = status, reason
+	if wait := rejectEvery - time.Since(r.last); wait > 0 {
+		if !r.pending {
+			r.pending = true
+			time.AfterFunc(wait, r.flush)
+		}
+		return
+	}
+	r.write()
+}
+
+func (r *rejects) flush() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.pending {
+		r.write()
+	}
+}
+
+// write stores the latest refusal; r.mu is held.
+func (r *rejects) write() {
+	r.pending, r.last = false, time.Now()
+	if err := store.SetSourceReject(r.p.Store.DB, r.name, r.p.Now(), r.status, r.reason); err != nil {
+		slog.Warn("store webhook rejection", "source", r.name, "err", err)
 	}
 }
 

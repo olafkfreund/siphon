@@ -28,7 +28,23 @@ func (s *server) draftAPI(mux *http.ServeMux) {
 	}))
 }
 
+// draftSlots bounds concurrent drafts: each holds a model call for minutes.
+var draftSlots = make(chan struct{}, 2)
+
+func clip(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
+}
+
 func (s *server) draft(r *http.Request) (any, int, error) {
+	select {
+	case draftSlots <- struct{}{}:
+		defer func() { <-draftSlots }()
+	default:
+		return nil, 429, errMsg("two drafts are already running: wait for one to finish and try again")
+	}
 	var body struct {
 		Request    string `json:"request"`
 		Connection string `json:"connection"`
@@ -79,7 +95,7 @@ func (s *server) draft(r *http.Request) (any, int, error) {
 	res, err := draft.Run(r.Context(), draft.Params{
 		Request:   body.Request,
 		Conn:      draft.Conn{Name: name, BaseURL: cred.BaseURL(), APIKey: cred.APIKey.Value, Model: model},
-		Inventory: s.inventory(),
+		Inventory: draftInventory(s.inventory()),
 		Check:     s.draftCheck,
 		HTTP:      hc,
 	})
@@ -90,7 +106,7 @@ func (s *server) draft(r *http.Request) (any, int, error) {
 	if len(req) > 500 {
 		req = req[:500] + "…"
 	}
-	s.audit(actor, "draft", name+" "+model+": "+req)
+	s.audit(actor, "draft", name+" "+clip(model, 100)+": "+req)
 	return res, 200, nil
 }
 
@@ -317,4 +333,11 @@ func itemShape(it applyfile.Item) []string {
 		}
 	}
 	return out
+}
+
+// draftInventory is the inventory the model sees: names and types, without the
+// operator's allowlists (AWS role ARNs, private endpoints).
+func draftInventory(inv map[string]any) map[string]any {
+	delete(inv, "server")
+	return inv
 }

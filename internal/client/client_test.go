@@ -19,43 +19,96 @@ func isolate(t *testing.T) string {
 	return dir
 }
 
-func TestResolvePrecedence(t *testing.T) {
+func TestResolvePairing(t *testing.T) {
 	isolate(t)
 	if _, err := Resolve("", ""); err == nil || !strings.Contains(err.(*Error).Hint, "siphon login") {
 		t.Fatalf("not logged in: %v", err)
 	}
-	if err := Save(Conn{"http://file:1", "tok-file"}); err != nil {
+	// no saved login: SIPHON_URL goes with the env token
+	t.Setenv("SIPHON_URL", "http://127.0.0.1:2/")
+	t.Setenv("SIPHON_TOKEN", "tok-env")
+	if c, err := Resolve("", ""); err != nil || c.URL != "http://127.0.0.1:2" || c.Token != "tok-env" {
+		t.Fatalf("env: %+v %v", c, err)
+	}
+	// -url alone has no token to go with
+	t.Setenv("SIPHON_TOKEN", "")
+	if _, err := Resolve("http://127.0.0.1:9", ""); err == nil || err.(*Error).ExitCode() != ExitUsage {
+		t.Fatalf("-url without a token: %v", err)
+	}
+	tf := filepath.Join(t.TempDir(), "tok")
+	os.WriteFile(tf, []byte("tok-flag\n"), 0o600)
+	if c, err := Resolve("http://127.0.0.1:3", tf); err != nil || c.URL != "http://127.0.0.1:3" || c.Token != "tok-flag" {
+		t.Fatalf("flags: %+v %v", c, err)
+	}
+	// a saved login is a pair: SIPHON_URL does not replace its URL
+	if err := Save(Conn{"http://127.0.0.1:1", "tok-file"}); err != nil {
 		t.Fatal(err)
 	}
 	fi, _ := os.Stat(Path())
 	if fi.Mode().Perm() != 0o600 {
 		t.Fatalf("client.yaml mode %v", fi.Mode())
 	}
-	c, err := Resolve("", "")
-	if err != nil || c.URL != "http://file:1" || c.Token != "tok-file" {
-		t.Fatalf("file: %+v %v", c, err)
+	if c, err := Resolve("", ""); err != nil || c.URL != "http://127.0.0.1:1" || c.Token != "tok-file" {
+		t.Fatalf("saved pair beats SIPHON_URL: %+v %v", c, err)
 	}
-	t.Setenv("SIPHON_URL", "http://env:2/")
+	// -url equal to the saved URL uses the saved token; another one must bring its own
+	if c, err := Resolve("http://127.0.0.1:1/", ""); err != nil || c.Token != "tok-file" {
+		t.Fatalf("same url: %+v %v", c, err)
+	}
+	if c, err := Resolve("http://127.0.0.1:9", ""); err == nil {
+		t.Fatalf("saved token sent to another url: %+v", c)
+	}
+	if c, err := Resolve("http://127.0.0.1:9", tf); err != nil || c.URL != "http://127.0.0.1:9" || c.Token != "tok-flag" {
+		t.Fatalf("other url with its token: %+v %v", c, err)
+	}
+	// an explicit token goes to the saved URL only
 	t.Setenv("SIPHON_TOKEN", "tok-env")
-	if c, _ = Resolve("", ""); c.URL != "http://env:2" || c.Token != "tok-env" {
-		t.Fatalf("env: %+v", c)
+	if c, _ := Resolve("", ""); c.URL != "http://127.0.0.1:1" || c.Token != "tok-env" {
+		t.Fatalf("env token: %+v", c)
 	}
-	tf := filepath.Join(t.TempDir(), "tok")
-	os.WriteFile(tf, []byte("tok-envfile\n"), 0o600)
 	t.Setenv("SIPHON_TOKEN_FILE", tf)
-	if c, _ = Resolve("", ""); c.Token != "tok-envfile" {
+	if c, _ := Resolve("", ""); c.Token != "tok-flag" {
 		t.Fatalf("env file beats env token: %+v", c)
 	}
-	tf2 := filepath.Join(t.TempDir(), "tok2")
-	os.WriteFile(tf2, []byte("tok-flag"), 0o600)
-	if c, _ = Resolve("http://flag:3", tf2); c.URL != "http://flag:3" || c.Token != "tok-flag" {
-		t.Fatalf("flags: %+v", c)
+}
+
+func TestHTTPToRemoteRefused(t *testing.T) {
+	isolate(t)
+	for _, u := range []string{"http://example.com", "http://10.0.0.5:8080", "http://[2001:db8::1]:1"} {
+		if _, err := CleanURL(u); err == nil || err.(*Error).Hint == "" {
+			t.Errorf("%s accepted", u)
+		}
+	}
+	for _, u := range []string{"https://example.com", "http://localhost:1", "http://127.0.0.2:1", "http://[::1]:1"} {
+		if _, err := CleanURL(u); err != nil {
+			t.Errorf("%s: %v", u, err)
+		}
+	}
+	t.Setenv("SIPHON_INSECURE_HTTP", "1")
+	if _, err := CleanURL("http://example.com"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SIPHON_INSECURE_HTTP", "")
+	InsecureHTTP = true
+	defer func() { InsecureHTTP = false }()
+	if _, err := CleanURL("http://example.com"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientFileOwner(t *testing.T) {
+	isolate(t)
+	Save(Conn{"http://127.0.0.1:1", "tok"})
+	uid = func() int { return os.Getuid() + 1 }
+	defer func() { uid = os.Getuid }()
+	if _, err := Resolve("", ""); err == nil || !strings.Contains(err.Error(), "not owned") {
+		t.Fatalf("%v", err)
 	}
 }
 
 func TestLooseClientFileRefused(t *testing.T) {
 	isolate(t)
-	Save(Conn{"http://x:1", "tok-secret"})
+	Save(Conn{"http://127.0.0.1:1", "tok-secret"})
 	os.Chmod(Path(), 0o640)
 	_, err := Resolve("", "")
 	e, ok := err.(*Error)

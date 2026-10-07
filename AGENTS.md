@@ -42,7 +42,11 @@ siphon draft "<what the user wants>"   # or let a model connection write the tas
   5 conflict. With `-o json`, errors are `{"error", "errors", "hint"}`;
   follow the `hint`.
 - **`siphon mcp`** exposes the same operations as MCP tools. Writes are only
-  dry-run unless the user started it with `--allow-write`.
+  dry-run unless the user started it with `--allow-write`. Secret or
+  plain-header values need `--allow-secrets`, and turning an agent's
+  approval off needs `--allow-unapproved`.
+- **`-o json` is not consent:** `apply`, `restore` and `draft --apply`
+  need an explicit `--yes`.
 
 **More:**
 - the task-oriented guide: [`docs/README.md`](docs/README.md);

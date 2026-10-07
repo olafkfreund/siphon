@@ -52,10 +52,13 @@ func str(m map[string]any, k string) string {
 
 func buildLogin(fs *flag.FlagSet) func(*cli, []string) error {
 	return func(c *cli, args []string) error {
-		if err := needArgs(args, 1, "login <url>"); err != nil {
-			return err
+		raw := os.Getenv("SIPHON_URL") // the default URL, as set for every user by the NixOS module
+		if len(args) > 1 || len(args) == 0 && raw == "" {
+			return usageErr("usage: siphon login [url]", "give the URL, or set SIPHON_URL")
+		} else if len(args) == 1 {
+			raw = args[0]
 		}
-		u, err := client.CleanURL(args[0])
+		u, err := client.CleanURL(raw)
 		if err != nil {
 			return err
 		}
@@ -562,7 +565,10 @@ func (c *cli) runApply(items []applyItem, sec map[string]string, dry, yes, stdin
 		c.say("no change\n")
 		return out, nil
 	}
-	if !yes && !c.json() {
+	if !yes {
+		if c.json() { // -o json is never consent
+			return nil, errNeedYes
+		}
 		if stdinUsed && !c.isTTY {
 			return nil, usageErr("the file came from stdin, so there is nowhere to ask", "pass --yes, or --dry-run to only look")
 		}
@@ -831,7 +837,10 @@ func buildRestore(fs *flag.FlagSet) func(*cli, []string) error {
 		if err := c.call("GET", p, nil, &rev); err != nil {
 			return err
 		}
-		if !*yes && !c.json() {
+		if !*yes {
+			if c.json() {
+				return errNeedYes
+			}
 			fmt.Fprintf(c.out, "revision %d: %s (by %s)\n", id, str(rev, "summary"), str(rev, "actor"))
 			ok, err := c.confirm("Put the config back to this revision?")
 			if err != nil {

@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -99,6 +101,8 @@ func Remove() error {
 	return nil
 }
 
+var uid = os.Getuid // var so tests can pose as another user
+
 func readFile() (f file, found bool, err error) {
 	p := Path()
 	fi, err := os.Stat(p)
@@ -107,6 +111,9 @@ func readFile() (f file, found bool, err error) {
 	}
 	if err != nil {
 		return f, false, err
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok && int(st.Uid) != uid() {
+		return f, true, &Error{Msg: p + " is not owned by you, so its token is not trusted", Hint: "run `siphon logout` and log in again"}
 	}
 	if fi.Mode().Perm()&0o077 != 0 {
 		return f, true, &Error{Msg: p + " is readable by other users, so its token is not trusted", Hint: "run `chmod 600 " + p + "` (or `siphon logout` and log in again)"}
@@ -118,26 +125,48 @@ func readFile() (f file, found bool, err error) {
 	return f, true, yaml.Unmarshal(b, &f)
 }
 
-// Resolve picks the connection: flags, then SIPHON_URL / SIPHON_TOKEN_FILE /
-// SIPHON_TOKEN, then client.yaml. URL and token are chosen independently.
+// Resolve picks the connection. A saved login (client.yaml) is a URL and token
+// pair: SIPHON_URL never replaces its URL, and a different -url needs its own
+// token (-token-file, SIPHON_TOKEN_FILE or SIPHON_TOKEN), so a saved token can
+// not be sent to a URL the user did not log in to. Without a saved login,
+// SIPHON_URL (or -url) goes with the explicit token.
 func Resolve(flagURL, flagTokenFile string) (Conn, error) {
-	f, _, err := readFile()
+	f, saved, err := readFile()
 	if err != nil {
 		return Conn{}, err
 	}
-	c := Conn{URL: firstOf(flagURL, os.Getenv("SIPHON_URL"), f.URL)}
+	saved = saved && f.URL != "" && f.Token != ""
+	var tok string // an explicit token: flag, then environment
 	switch {
 	case flagTokenFile != "":
-		c.Token, err = readToken(flagTokenFile)
+		tok, err = readToken(flagTokenFile)
 	case os.Getenv("SIPHON_TOKEN_FILE") != "":
-		c.Token, err = readToken(os.Getenv("SIPHON_TOKEN_FILE"))
-	case os.Getenv("SIPHON_TOKEN") != "":
-		c.Token = strings.TrimSpace(os.Getenv("SIPHON_TOKEN"))
+		tok, err = readToken(os.Getenv("SIPHON_TOKEN_FILE"))
 	default:
-		c.Token = f.Token
+		tok = strings.TrimSpace(os.Getenv("SIPHON_TOKEN"))
 	}
 	if err != nil {
 		return Conn{}, err
+	}
+	var c Conn
+	switch {
+	case flagURL != "":
+		u, err := CleanURL(flagURL)
+		if err != nil {
+			return Conn{}, err
+		}
+		switch {
+		case tok != "":
+			c = Conn{u, tok}
+		case saved && u == strings.TrimRight(f.URL, "/"):
+			c = Conn{u, f.Token}
+		default:
+			return Conn{}, &Error{Msg: "-url needs its own token: the saved login is for another URL", Hint: "pass -token-file <file> (or set SIPHON_TOKEN_FILE / SIPHON_TOKEN) with -url", Code: ExitUsage}
+		}
+	case saved:
+		c = Conn{f.URL, firstOf(tok, f.Token)}
+	default:
+		c = Conn{os.Getenv("SIPHON_URL"), tok}
 	}
 	if c.URL == "" || c.Token == "" {
 		return Conn{}, &Error{Msg: "not logged in", Hint: "run `siphon login <url>`, or set SIPHON_URL and SIPHON_TOKEN_FILE"}
@@ -172,7 +201,21 @@ func CleanURL(raw string) (string, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return "", &Error{Msg: "bad siphon URL: want http(s)://host[:port]", Hint: "for example `siphon login http://127.0.0.1:8080`", Code: ExitUsage}
 	}
+	if h := u.Hostname(); u.Scheme == "http" && !InsecureHTTP && os.Getenv("SIPHON_INSECURE_HTTP") != "1" && !isLoopback(h) {
+		return "", &Error{Msg: "refusing http:// to " + h + ": the token would cross the network in clear text", Hint: "use https://, or pass --insecure-http (SIPHON_INSECURE_HTTP=1) if the network is trusted", Code: ExitUsage}
+	}
 	return strings.TrimRight(u.String(), "/"), nil
+}
+
+// InsecureHTTP allows http:// to a non-loopback host (the --insecure-http flag).
+var InsecureHTTP bool
+
+func isLoopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.IsLoopback()
 }
 
 var actorBad = regexp.MustCompile(`[^\w.@:-]`)

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/olafkfreund/siphon/internal/config"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -174,39 +175,57 @@ func secretsDir(db string) string { return filepath.Join(filepath.Dir(db), "secr
 type pendingSecret struct{ Kind, Name, Key, Value string }
 
 func (p pendingSecret) path(dir string) string {
-	return filepath.Join(dir, p.Kind+"-"+p.Name+"-"+strings.ReplaceAll(p.Key, ".", "-"))
+	return filepath.Join(dir, config.SecretFileName(p.Kind, p.Name, p.Key))
 }
 
 // writeSecret stores the value at p.path(dir), mode 0600, in a dir that is 0700
 // and not a symlink: a temp file created exclusively (no following links),
 // synced, then renamed over the target.
 func writeSecret(dir string, p pendingSecret) error {
+	tmp, err := stageSecret(dir, p)
+	if err != nil {
+		return err
+	}
+	return publishSecret(tmp, p.path(dir))
+}
+
+// publishSecret renames a staged secret over its final name.
+func publishSecret(tmp, final string) error {
+	if err := os.Rename(tmp, final); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// stageSecret writes the value to a temp name in dir and returns it; the
+// caller renames it over p.path(dir) (publishSecret) or removes it.
+func stageSecret(dir string, p pendingSecret) (string, error) {
 	if !itemName.MatchString(p.Name) { // the name is part of the file name: keep it inside dir
-		return errors.New("bad item name")
+		return "", errors.New("bad item name")
 	}
 	if fi, err := os.Lstat(dir); err == nil {
 		if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
-			return errors.New("secrets directory is not a plain directory")
+			return "", errors.New("secrets directory is not a plain directory")
 		}
 	} else if errors.Is(err, os.ErrNotExist) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return err
+			return "", err
 		}
 		if err := os.Chmod(dir, 0o700); err != nil {
-			return err
+			return "", err
 		}
 	} else {
-		return err
+		return "", err
 	}
 	var rnd [8]byte
 	if _, err := rand.Read(rnd[:]); err != nil {
-		return err
+		return "", err
 	}
-	final := p.path(dir)
-	tmp := filepath.Join(dir, "."+filepath.Base(final)+"."+hex.EncodeToString(rnd[:]))
+	tmp := filepath.Join(dir, "."+filepath.Base(p.path(dir))+"."+hex.EncodeToString(rnd[:]))
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
-		return err
+		return "", err
 	}
 	_, werr := f.WriteString(p.Value)
 	if serr := f.Sync(); werr == nil {
@@ -217,13 +236,9 @@ func writeSecret(dir string, p pendingSecret) error {
 	}
 	if werr != nil {
 		os.Remove(tmp)
-		return werr
+		return "", werr
 	}
-	if err := os.Rename(tmp, final); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
+	return tmp, nil
 }
 
 // applyForm layers the submitted form onto the existing item YAML and returns

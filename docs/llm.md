@@ -86,11 +86,17 @@ offers these tools:
 - `apply`, `delete`.
 
 Without `--allow-write`, `apply` and `delete` **only dry-run**, even when
-asked not to: the result says `"dry_run": true` with a note. Secret values
-are refused unless the user also passes `--allow-secrets`: secrets belong
-in a terminal (`--secret …=-`), not in a chat. There is **no** approve or
-deny tool. Changes made this way show in `siphon history` as
-`api:cli:<user>:mcp`.
+asked not to: the result says `"dry_run": true` with a note.
+
+Even with `--allow-write`:
+- **Secrets:** secret values, and plain-text header values (which may be
+  tokens), are refused unless the user also passes `--allow-secrets`.
+  Secrets belong in a terminal (`--secret …=-`), not in a chat.
+- **Approval:** turning an agent's `approve` off is refused unless the user
+  passes `--allow-unapproved`.
+- **No approve or deny tool.**
+
+Changes made this way show in `siphon history` as `api:cli:<user>:mcp`.
 
 ## Rules that commonly go wrong
 
@@ -144,5 +150,8 @@ With `-o json`, errors on stderr are `{"error": "...", "errors": [...], "hint": 
   the user tells you to, for that job.
 - `siphon mcp` (Siphon as an MCP server) only dry-runs writes unless the
   user started it with `--allow-write`, and has no approve tool.
+- On the CLI, `-o json` never counts as consent. `apply`, `restore` and
+  `draft --apply` need an explicit `--yes`, which you add only after the
+  user has seen the diff.
 - Every change is recorded in `siphon history` with the actor `api:cli:<user>`.
   `siphon restore <rev>` undoes it.

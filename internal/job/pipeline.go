@@ -12,6 +12,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -47,7 +48,8 @@ type Pipeline struct {
 
 	egress *egress.Proxy // set by startEgress when any run has an allowlist
 
-	hookLimits sync.Map // source name -> *hookLimit; webhook rate limits survive requests and Apply
+	hookRejects sync.Map // source name -> *rejects
+	hookLimits  sync.Map // source name -> *hookLimit; webhook rate limits survive requests and Apply
 
 	applyMu     sync.Mutex // serialises Apply and Serve's poller start
 	serveCtx    context.Context
@@ -188,7 +190,7 @@ func (p *Pipeline) tick(ctx context.Context, cfg *config.Config, name string) ([
 	ev, err := p.poll(ctx, cfg, name)
 	msg := ""
 	if err != nil {
-		msg = string(action.Mask([]byte(err.Error()), cfg.Secrets()))
+		msg = string(action.Mask([]byte(stripQuoted(err.Error())), cfg.Secrets()))
 	}
 	if serr := store.PutSourceState(p.Store.DB, name, p.Now(), msg); serr != nil {
 		return nil, serr
@@ -247,7 +249,7 @@ func (p *Pipeline) handleEvent(ctx context.Context, cfg *config.Config, ev rule.
 		if ev.Source == r.Source { // remembered for `why`; a clean run clears it
 			var derr error
 			if err != nil {
-				derr = store.PutRuleError(tx, r.Name, now, string(action.Mask([]byte(err.Error()), cfg.Secrets())))
+				derr = store.PutRuleError(tx, r.Name, now, string(action.Mask([]byte(stripQuoted(err.Error())), cfg.Secrets())))
 			} else {
 				derr = store.ClearRuleError(tx, r.Name)
 			}
@@ -806,3 +808,9 @@ func (p *Pipeline) TestAWS(ctx context.Context, source string) (arn string, expi
 	}
 	return arn, k.Expires, tools, nil
 }
+
+var quoted = regexp.MustCompile(`"[^"]*"|'[^']*'`)
+
+// stripQuoted blanks quoted literals in a stored rule error, so event values
+// the expression engine quotes ("cannot use "abc" as int") are not kept.
+func stripQuoted(s string) string { return quoted.ReplaceAllString(s, `"…"`) }

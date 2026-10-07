@@ -269,7 +269,7 @@ func TestConfigSecretNeverLeaks(t *testing.T) {
 	if w := ce.post("/config/sources/new/save", form); w.Code != 303 {
 		t.Fatalf("save: %d %s", w.Code, w.Body.String())
 	}
-	p := filepath.Join(ce.dir, "secrets", "sources-s3-secret")
+	p := filepath.Join(ce.dir, "secrets", "sources--s3+secret")
 	st, err := os.Stat(p)
 	if err != nil || st.Mode().Perm() != 0o600 {
 		t.Fatalf("secret file: %v %v", st, err)

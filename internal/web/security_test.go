@@ -105,13 +105,13 @@ func TestSecurityF2Refs(t *testing.T) {
 		t.Fatalf("message echoes the ref: %s", body)
 	}
 	// A ref into this item's own secrets that cannot be read: no hint about the OS error.
-	missing := "file:" + sec + "/sources-own-secret"
+	missing := "file:" + sec + "/sources--own+secret"
 	if code, body := ce.apiPut("sources", "own", `{type: webhook, secret: "`+missing+`", signature: github}`); code != 422 || strings.Contains(body, "no such file") {
 		t.Fatalf("missing own secret: %d %s", code, body)
 	}
 	// This item's own stored secret, and the file's own env ref, are fine.
 	os.MkdirAll(sec, 0o700)
-	os.WriteFile(filepath.Join(sec, "sources-own-secret"), []byte("v"), 0o600)
+	os.WriteFile(filepath.Join(sec, "sources--own+secret"), []byte("v"), 0o600)
 	ce.accept(t, "sources", "own", `{type: webhook, secret: "`+missing+`", signature: github}`)
 	ce.accept(t, "sources", "gh", `{type: webhook, secret: env:AGW_HOOK, signature: sha256, signature_header: X-Sig}`)
 	// ...but another item may not borrow them.
@@ -173,7 +173,7 @@ func TestSecurityF5SecretWrites(t *testing.T) {
 	if w := ce.post("/config/sources/new/save", form(0, "webhook")); w.Code != 303 {
 		t.Fatalf("save: %d %s", w.Code, w.Body.String())
 	}
-	fi, err := os.Lstat(filepath.Join(sec, "sources-w1-secret"))
+	fi, err := os.Lstat(filepath.Join(sec, "sources--w1+secret"))
 	if err != nil || fi.Mode().Perm() != 0o600 || !fi.Mode().IsRegular() {
 		t.Fatalf("secret file: %v %v", fi, err)
 	}

@@ -144,7 +144,7 @@ func (s *server) prepare(cur []store.ConfigItem, mutate func(map[itemKey]store.C
 	for _, p := range pending {
 		stub["file:"+p.path(secretsDir(s.Config().Server.DB))] = "placeholder"
 	}
-	cfg, _, err := config.LoadWithOverlayStub(s.ConfigPath, toItems(next), stub)
+	cfg, _, err := config.LoadWithOverlayStub(s.ConfigPath, toItems(next), stub, toItems(cur))
 	if err != nil {
 		return nil, errInvalid{err.Error()}
 	}
@@ -225,16 +225,32 @@ func (s *server) commit(actor, summary string, rev *int64, mutate func(map[itemK
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	// Only now, with the revision current and the candidate valid, touch disk.
-	if len(pending) > 0 {
-		dir := secretsDir(s.Config().Server.DB)
-		for _, p := range pending {
-			if err = writeSecret(dir, p); err != nil {
-				return 0, nil, nil, err
+	// Only now, with the revision current and the candidate valid, touch disk:
+	// stage the secrets under temp names, publish them once the transaction
+	// has committed, and remove them on any failure before that.
+	type staged struct{ tmp, final string }
+	var stagedFiles []staged
+	published := false
+	defer func() {
+		if !published {
+			for _, f := range stagedFiles {
+				os.Remove(f.tmp)
 			}
 		}
-		// Re-load for real: the candidate above resolved stand-in values.
-		cfg, _, lerr := config.LoadWithOverlay(s.ConfigPath, toItems(e.items))
+	}()
+	if len(pending) > 0 {
+		dir := secretsDir(s.Config().Server.DB)
+		real := map[string]string{}
+		for _, p := range pending {
+			tmp, serr := stageSecret(dir, p)
+			if serr != nil {
+				return 0, nil, nil, serr
+			}
+			stagedFiles = append(stagedFiles, staged{tmp, p.path(dir)})
+			real["file:"+p.path(dir)] = strings.TrimSpace(p.Value)
+		}
+		// Re-load with the real values (not on disk until the commit).
+		cfg, _, lerr := config.LoadWithOverlayStub(s.ConfigPath, toItems(e.items), real, toItems(cur))
 		if lerr == nil {
 			lerr = cfg.Validate()
 		}
@@ -280,6 +296,12 @@ func (s *server) commit(actor, summary string, rev *int64, mutate func(map[itemK
 	}
 	if err = tx.Commit(); err != nil {
 		return 0, nil, nil, err
+	}
+	published = true
+	for _, f := range stagedFiles {
+		if err = publishSecret(f.tmp, f.final); err != nil {
+			return 0, nil, nil, err
+		}
 	}
 	if credsChanged || len(pending) > 0 { // a rotated key keeps its ref
 		modelCache.clear()

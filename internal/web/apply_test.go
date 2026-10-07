@@ -2,8 +2,10 @@ package web
 
 import (
 	"encoding/json"
+	"github.com/olafkfreund/siphon/internal/config"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -35,7 +37,7 @@ func TestApplyBatch(t *testing.T) {
 	if got := strings.Join(ce.rules(), ","); got != "b1,b2" {
 		t.Fatalf("rules %s", got)
 	}
-	if fi, err := os.Stat(filepath.Join(ce.dir, "secrets", "sources-hk-secret")); err != nil || fi.Mode().Perm() != 0o600 {
+	if fi, err := os.Stat(filepath.Join(ce.dir, "secrets", "sources--hk+secret")); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Fatalf("secret file: %v", err)
 	}
 	if r, _ := store.Revisions(ce.st.DB, 1); r[0].Actor != "api:ci" {
@@ -91,5 +93,28 @@ func TestApplyBatchDryRunAndStale(t *testing.T) {
 	ce.unchanged(t, revs, applied)
 	if w := ce.api("POST", "/api/config/apply", `{"items":[{"kind":"rules","name":"b1","rev":0,"yaml":"`+ruleY+`"}]}`); w.Code != 200 {
 		t.Fatalf("current rev: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// A batch delete gets the same stale check as an item, and a secret key goes to
+// the longest matching item name.
+func TestApplyBatchDeleteRevAndLongestSecretPrefix(t *testing.T) {
+	ce := newCfgEnv(t)
+	old := ce.latest()
+	if w := ce.api("PUT", "/api/config/rules/bump", `{"yaml":"`+ruleY+`"}`); w.Code != 200 {
+		t.Fatalf("bump: %d %s", w.Code, w.Body.String())
+	}
+	revs := ce.latest()
+	w := ce.api("POST", "/api/config/apply", `{"delete":[{"kind":"rules","name":"r1","rev":`+strconv.FormatInt(old, 10)+`}]}`)
+	if w.Code != 409 || ce.latest() != revs {
+		t.Fatalf("stale delete: %d %s", w.Code, w.Body.String())
+	}
+	body := `{"items":[{"kind":"sources","name":"a","yaml":"type: http\nurl: https://example.com/\npoll: 1m\n"},` +
+		`{"kind":"sources","name":"a-b","yaml":"type: webhook\nsignature: github\n"}],"secrets":{"sources/a-b.secret":"v"}}`
+	if w := ce.api("POST", "/api/config/apply", body); w.Code != 200 {
+		t.Fatalf("longest prefix: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(ce.dir, "secrets", config.SecretFileName("sources", "a-b", "secret"))); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"maps"
 	"net/url"
 	"os"
 	"os/signal"
@@ -13,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"gopkg.in/yaml.v3"
 
 	"github.com/olafkfreund/siphon/docs"
 	"github.com/olafkfreund/siphon/internal/client"
@@ -28,9 +30,10 @@ const writesOff = "writes are disabled; the user can restart siphon mcp with --a
 func buildMCP(fs *flag.FlagSet) func(*cli, []string) error {
 	allowWrite := fs.Bool("allow-write", false, "let apply and delete really change things (default: they only dry-run)")
 	allowSecrets := fs.Bool("allow-secrets", false, "with --allow-write: accept secret values through apply (they pass through the assistant's context)")
+	allowUnapproved := fs.Bool("allow-unapproved", false, "let apply turn an agent's approval off (default: refused)")
 	return func(c *cli, args []string) error {
 		if len(args) > 0 {
-			return usageErr("usage: siphon mcp [--allow-write] [--allow-secrets]", "")
+			return usageErr("usage: siphon mcp [--allow-write] [--allow-secrets] [--allow-unapproved]", "")
 		}
 		if *allowSecrets && !*allowWrite {
 			return usageErr("--allow-secrets needs --allow-write", "")
@@ -38,7 +41,7 @@ func buildMCP(fs *flag.FlagSet) func(*cli, []string) error {
 		c.actor = client.ActorLabel(":mcp")
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		if err := newMCPServer(c, *allowWrite, *allowSecrets).Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
+		if err := newMCPServer(c, *allowWrite, *allowSecrets, *allowUnapproved).Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
 			return err
 		}
 		return nil
@@ -107,7 +110,7 @@ type deleteIn struct {
 	DryRun bool   `json:"dry_run,omitempty"`
 }
 
-func newMCPServer(c *cli, allowWrite, allowSecrets bool) *mcp.Server {
+func newMCPServer(c *cli, allowWrite, allowSecrets, allowUnapproved bool) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "siphon", Version: version}, nil)
 	get := func(path string) (*mcp.CallToolResult, any, error) {
 		var v any
@@ -225,6 +228,9 @@ func newMCPServer(c *cli, allowWrite, allowSecrets bool) *mcp.Server {
 			if err != nil {
 				return fail(err), nil, nil
 			}
+			if err := mcpGuard(c, items, allowSecrets, allowUnapproved); err != nil {
+				return fail(err), nil, nil
+			}
 			body := map[string]any{"items": items}
 			if len(in.Secrets) > 0 {
 				body["secrets"] = in.Secrets
@@ -283,4 +289,50 @@ func newMCPServer(c *cli, allowWrite, allowSecrets bool) *mcp.Server {
 			return result(v, false), nil, nil
 		})
 	return s
+}
+
+// mcpGuard refuses what an assistant should not do unasked: turn an agent's
+// approval off, or put a plain value (maybe a token) in a source's headers.
+func mcpGuard(c *cli, items []applyItem, allowSecrets, allowUnapproved bool) error {
+	for _, it := range items {
+		switch it.Kind {
+		case "sources":
+			var s struct {
+				Headers map[string]string `yaml:"headers"`
+			}
+			if yaml.Unmarshal([]byte(it.YAML), &s) != nil || allowSecrets {
+				continue
+			}
+			for _, k := range slices.Sorted(maps.Keys(s.Headers)) {
+				if v := s.Headers[k]; !strings.HasPrefix(v, "env:") && !strings.HasPrefix(v, "file:") {
+					return usageErr("sources/"+it.Name+": header "+k+" holds a plain value, which may be a token",
+						"use an env: or file: ref and have the user supply the secret, or restart siphon mcp with --allow-write --allow-secrets")
+				}
+			}
+		case "agents":
+			var n struct {
+				Approve *bool `yaml:"approve"`
+			}
+			if allowUnapproved || yaml.Unmarshal([]byte(it.YAML), &n) != nil || n.Approve == nil || *n.Approve {
+				continue
+			}
+			var cur struct {
+				YAML string `json:"yaml"`
+			}
+			cerr := c.call("GET", "/api/config/agents/"+url.PathEscape(it.Name), nil, &cur)
+			var old struct {
+				Approve *bool `yaml:"approve"`
+			}
+			if cerr == nil {
+				yaml.Unmarshal([]byte(cur.YAML), &old)
+			} else if ce, ok := cerr.(*client.Error); !ok || ce.Status != 404 {
+				return cerr
+			}
+			if old.Approve == nil || *old.Approve { // true, or the default (true)
+				return usageErr("agents/"+it.Name+": approve: false would let it run without a person's approval",
+					"ask the user to make this change themselves, or restart siphon mcp with --allow-unapproved")
+			}
+		}
+	}
+	return nil
 }

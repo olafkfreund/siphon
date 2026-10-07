@@ -191,7 +191,9 @@ the security notes). Put a TLS-terminating reverse proxy in front of
 
 On NixOS, `services.siphon.cli.enable` (on by default) puts `siphon` on
 PATH and sets `SIPHON_URL` to the local daemon, so `siphon login` is all a
-user needs. Local commands must run as the service user, never root (a
+user needs. The URL and token are saved together in a 0600 file the user
+owns, and always used as a pair. Plain `http://` is only accepted for
+loopback (`--insecure-http` overrides that). Local commands must run as the service user, never root (a
 root-run command would create root-owned SQLite WAL files that the daemon
 then can't open), against the config the unit runs with (`systemctl cat
 siphon` shows its path):

@@ -24,7 +24,7 @@ the same as data.
 | `disabled` | someone ran `siphon disable` | `siphon enable <rule>` |
 | `no_events_yet` | the source never delivered | check the sender's URL and secret; `siphon get sources` |
 | `source_error` | polling failed (DNS, TLS, HTTP status, bad JSON) | the error is shown; fix the URL or allow the host |
-| `webhook_rejected` | deliveries were refused (signature, timestamp, rate limit) | check the secret and the header name the sender uses |
+| `webhook_rejected` | deliveries were refused (signature, timestamp, rate limit); under a flood the stored reason updates at most every 10 s | check the secret and the header name the sender uses |
 | `eval_error` | `when:` or `id:` failed on a real event (a missing field, a wrong type) | `siphon test <rule> --last` shows the error; guard with `event.x != nil` |
 | `condition_false` | the last event didn't match | `siphon test <rule> --last`; compare with `siphon get sources` / the event |
 | `edge_already_true` | `on: edge` already fired and the condition is still true | expected; add `repeat:` to re-fire while true |
@@ -63,8 +63,17 @@ siphon test <rule> - --header X-GitHub-Event=pull_request < event.json
   `127.77.0.1:3139`).
 - **exit 5 (conflict):** someone changed the item since you read it. Run
   `siphon get` again and re-apply.
-- **"not logged in":** `siphon login <url>`, or set `SIPHON_URL` and
+- **"not logged in":** `siphon login <url>` (or `siphon login`, which uses
+  `SIPHON_URL`). In scripts with no saved login, set `SIPHON_URL` and
   `SIPHON_TOKEN_FILE`.
+- **"needs its own token":** `-url` pointing at a server other than your
+  saved login needs `-token-file`. The saved token is never sent to
+  another address.
+- **"refusing plain http":** use `https://` for a remote Siphon, or pass
+  `--insecure-http` (or set `SIPHON_INSECURE_HTTP=1`).
+- **"pass --yes":** `apply`, `restore` and `draft --apply` ask before
+  changing anything. With `-o json`, or with no terminal, add `--yes`;
+  JSON output alone never counts as a yes.
 
 ## Logs and state
 
