@@ -104,6 +104,17 @@ type Server struct {
 	ActionsDir string       `yaml:"actions_dir"`
 	Egress     EgressServer `yaml:"egress"`
 	Models     ModelsServer `yaml:"models"`
+	// MCPPackages are the stdio MCP servers a source may name with package:.
+	// Only siphon.yaml can list them; the portal picks from the list.
+	MCPPackages map[string]MCPPackage `yaml:"mcp_packages"`
+}
+
+// MCPPackage is a vetted stdio MCP server: its command, the env names it may
+// receive, and the extra hosts (host or host:port, default 443) agents using it may reach.
+type MCPPackage struct {
+	Command []string `yaml:"command"`
+	Env     []string `yaml:"env"`
+	Hosts   []string `yaml:"hosts"`
 }
 
 // ModelsServer holds model-endpoint settings that only siphon.yaml may set.
@@ -155,8 +166,11 @@ type Source struct {
 	SigHeader    string            `yaml:"signature_header"` // sha256 preset
 	TokenHeader  string            `yaml:"token_header"`     // token preset
 	TimestampHdr string            `yaml:"timestamp_header"`
-	ID           string            `yaml:"id"`  // delivery id, e.g. header.X-GitHub-Delivery
-	Env          map[string]Secret `yaml:"env"` // stdio MCP child env; values are env:/file: refs
+	ID           string            `yaml:"id"`      // delivery id, e.g. header.X-GitHub-Delivery
+	Env          map[string]Secret `yaml:"env"`     // stdio MCP child env; values are env:/file: refs
+	Package      string            `yaml:"package"` // name in server.mcp_packages; fills Command
+
+	cmdFromPkg bool // Command was filled from Package, not written in the item
 }
 
 type Read struct {
@@ -320,6 +334,11 @@ func parse(b []byte, stub map[string]string) (*Config, error) {
 	for _, s := range c.Sources {
 		if s != nil && s.Poll == 0 && s.Type != "webhook" {
 			s.Poll = Duration(time.Minute)
+		}
+		if s != nil && s.Package != "" && len(s.Command) == 0 {
+			if pkg, ok := c.Server.MCPPackages[s.Package]; ok {
+				s.Command, s.cmdFromPkg = slices.Clone(pkg.Command), true
+			}
 		}
 	}
 	for _, a := range c.Agents {
@@ -637,6 +656,22 @@ func (c *Config) Validate() error {
 	if t := c.Server.Token; t.isSet() && t.Value != "" && len(t.Value) < 32 {
 		add("server.token: must be at least 32 characters")
 	}
+	for _, name := range sortedKeys(c.Server.MCPPackages) {
+		pkg := c.Server.MCPPackages[name]
+		if len(pkg.Command) == 0 {
+			add("server.mcp_packages.%s: command is required", name)
+		}
+		for _, k := range pkg.Env {
+			if !envName.MatchString(k) || envDenied.MatchString(k) {
+				add("server.mcp_packages.%s: env name %q is not allowed", name, k)
+			}
+		}
+		for _, h := range pkg.Hosts {
+			if _, err := parseHostPort(h); err != nil {
+				add("server.mcp_packages.%s: hosts: %v", name, err)
+			}
+		}
+	}
 	// IPv4 only: the NixOS module derives the sandbox's IPAddressAllow=<ip>/32 from it.
 	if h, _, err := net.SplitHostPort(c.Server.Egress.Listen); err != nil || net.ParseIP(h).To4() == nil || !net.ParseIP(h).IsLoopback() {
 		add("server.egress.listen: must be an IPv4 loopback ip:port like 127.77.0.1:3128, got %q", c.Server.Egress.Listen)
@@ -859,6 +894,21 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 		if (s.URL == "") == (len(s.Command) == 0) {
 			add("%s: set exactly one of url or command", p)
 		}
+		if s.Package != "" {
+			pkg, ok := c.Server.MCPPackages[s.Package]
+			switch {
+			case !ok:
+				add("%s: package %q is not in server.mcp_packages", p, s.Package)
+			case s.URL != "" || (len(s.Command) > 0 && !s.cmdFromPkg):
+				add("%s: package excludes url and command", p)
+			default:
+				for _, k := range sortedKeys(s.Env) {
+					if !slices.Contains(pkg.Env, k) {
+						add("%s: env name %q is not one of package %q's env (%s)", p, k, s.Package, strings.Join(pkg.Env, ", "))
+					}
+				}
+			}
+		}
 		if s.Read == nil || (s.Read.Resource == "") == (s.Read.Tool == "") {
 			add("%s: read needs exactly one of resource or tool", p)
 		}
@@ -900,6 +950,9 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 		}
 	default:
 		add("%s: type must be mcp, http or webhook, got %q", p, s.Type)
+	}
+	if s.Package != "" && s.Type != "mcp" {
+		add("%s: package is only for type mcp", p)
 	}
 	if len(s.Env) > 0 && (s.Type != "mcp" || len(s.Command) == 0) {
 		add("%s: env needs a stdio MCP source (type mcp with command)", p)
@@ -1089,6 +1142,13 @@ func (c *Config) AgentEgress(a *Agent) (allow []HostPort, enabled bool) {
 	}
 	for _, m := range a.MCP {
 		src := c.Sources[m]
+		if src != nil && src.Package != "" {
+			for _, h := range c.Server.MCPPackages[src.Package].Hosts {
+				if hp, err := parseHostPort(h); err == nil {
+					allow = append(allow, hp)
+				}
+			}
+		}
 		if src == nil || src.URL == "" {
 			continue
 		}

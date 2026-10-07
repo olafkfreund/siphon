@@ -206,7 +206,16 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			if len(s.Command) > 0 && !slices.Equal(s.Command, fs.Command) {
 				return errors.New("command (stdio MCP) can only be set in siphon.yaml")
 			}
-			if !slices.Equal(sortedKeys(s.Env), sortedKeys(fs.Env)) {
+			if _, ok := file.Server.MCPPackages[s.Package]; s.Package != "" && !ok {
+				return errors.New("package must be one listed in server.mcp_packages in siphon.yaml")
+			}
+			// A package source's keys are bounded by the package; others must match the file's.
+			for _, k := range sortedKeys(s.Env) {
+				if s.Package != "" && !slices.Contains(file.Server.MCPPackages[s.Package].Env, k) {
+					return fmt.Errorf("env name %q is not one of package %q's env", k, s.Package)
+				}
+			}
+			if s.Package == "" && !slices.Equal(sortedKeys(s.Env), sortedKeys(fs.Env)) {
 				return errors.New("env names (stdio MCP) can only be set in siphon.yaml; the portal may change their values")
 			}
 			if s.AllowPrivate && !fs.AllowPrivate {

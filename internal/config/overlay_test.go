@@ -330,3 +330,42 @@ func TestOverlayEnvKeysFileOnly(t *testing.T) {
 		t.Error("new portal stdio source accepted")
 	}
 }
+
+func TestOverlayPackages(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	os.WriteFile(path, []byte("server: { db: "+dir+"/s.db, mcp_packages: {github: {command: [gh], env: [GH_TOKEN, GH_HOST]}} }\n"), 0o600)
+	sec := dir + "/secrets"
+	os.MkdirAll(sec, 0o700)
+	os.WriteFile(sec+"/sources-n-env.GH_TOKEN", []byte("v"), 0o600)
+	src := func(extra string) Item {
+		return Item{Kind: "sources", Name: "n", YAML: "{type: mcp, read: {tool: t}, " + extra + "}"}
+	}
+	for name, it := range map[string]Item{
+		"unlisted":      src("package: other"),
+		"with command":  src("package: github, command: [gh]"),
+		"extra key":     src("package: github, env: {GH_TOKEN: x, EXTRA: x}"),
+		"foreign ref":   src("package: github, env: {GH_TOKEN: 'file:/etc/passwd'}"),
+		"server change": {Kind: "sources", Name: "n", YAML: "{type: mcp, command: [gh], read: {tool: t}}"},
+	} {
+		if _, _, err := LoadWithOverlay(path, []Item{it}); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	for name, it := range map[string]Item{
+		"package":        src("package: github"),
+		"package + env":  src("package: github, env: {GH_TOKEN: 'file:" + sec + "/sources-n-env.GH_TOKEN'}"),
+		"package + keys": src("package: github, env: {GH_TOKEN: 'file:" + sec + "/sources-n-env.GH_TOKEN', GH_HOST: x}"),
+	} {
+		c, _, err := LoadWithOverlay(path, []Item{it})
+		if err != nil || len(c.Sources["n"].Command) != 1 || c.Sources["n"].Command[0] != "gh" {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// The overlay cannot alter the package list (server stays file-only).
+	b, _ := os.ReadFile(path)
+	file, _ := Parse(b)
+	if err := sameFixedSections(file, &Config{Server: Server{MCPPackages: map[string]MCPPackage{"github": {Command: []string{"evil"}}}}}); err == nil {
+		t.Error("mcp_packages change accepted by sameFixedSections")
+	}
+}

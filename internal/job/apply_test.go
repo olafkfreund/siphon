@@ -172,9 +172,9 @@ sources:
 func TestAgentRefusesStdioEnv(t *testing.T) {
 	t.Setenv("AGW_E", "secret-value")
 	p := applyPipeline(t, `
-server: { sandbox: none, db: DIR/state.db }
+server: { sandbox: none, db: DIR/state.db, mcp_packages: {gh: {command: [srv], env: [GITHUB_TOKEN]}} }
 sources:
-  m: { type: mcp, command: [srv], read: {tool: t}, env: {GITHUB_TOKEN: 'env:AGW_E'} }
+  m: { type: mcp, package: gh, read: {tool: t}, env: {GITHUB_TOKEN: 'env:AGW_E'} }
 agents:
   fix: { kind: codex, command: /bin/true, mcp: [m], prompt: x }
 `)

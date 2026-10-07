@@ -692,3 +692,54 @@ func TestSourceEnvValidation(t *testing.T) {
 		t.Errorf("env value not masked: %v", c.Secrets())
 	}
 }
+
+const pkgServer = "server: {mcp_packages: {github: {command: [github-mcp-server, stdio], env: [GITHUB_PERSONAL_ACCESS_TOKEN], hosts: [api.github.com, ghe.example:8443]}}}\n"
+
+func TestSourcePackage(t *testing.T) {
+	t.Setenv("AGW_E", "v")
+	for src, want := range map[string]string{
+		"{type: mcp, package: github, read: {tool: t}}":                                                   "",
+		"{type: mcp, package: github, read: {tool: t}, env: {GITHUB_PERSONAL_ACCESS_TOKEN: 'env:AGW_E'}}": "",
+		"{type: mcp, package: github, read: {tool: t}, env: {OTHER: 'env:AGW_E'}}":                        "not one of package",
+		"{type: mcp, package: nope, read: {tool: t}}":                                                     "not in server.mcp_packages",
+		"{type: mcp, package: github, command: [sh], read: {tool: t}}":                                    "package excludes",
+		"{type: mcp, package: github, command: [github-mcp-server, stdio], read: {tool: t}}":              "package excludes",
+		"{type: mcp, package: github, url: 'https://e.example/mcp', read: {tool: t}}":                     "set exactly one",
+		"{type: http, package: github, url: 'https://e.example'}":                                         "only for type mcp",
+	} {
+		c, err := Parse([]byte(pkgServer + "sources: {s: " + src + "}"))
+		if err == nil {
+			err = c.Validate()
+		}
+		if (want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), want)) {
+			t.Errorf("%s: %v", src, err)
+		}
+	}
+	c, _ := Parse([]byte(pkgServer + "sources: {s: {type: mcp, package: github, read: {tool: t}}}"))
+	if got := c.Sources["s"].Command; len(got) != 2 || got[0] != "github-mcp-server" {
+		t.Errorf("command not resolved: %v", got)
+	}
+	c, _ = Parse([]byte("server: {mcp_packages: {bad: {env: [PATH], hosts: ['a b']}}}"))
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "command is required") || !strings.Contains(err.Error(), "not allowed") {
+		t.Errorf("package validation: %v", err)
+	}
+}
+
+func TestPackageEgressHosts(t *testing.T) {
+	c, _ := Parse([]byte(pkgServer + "sources: {s: {type: mcp, package: github, read: {tool: t}}, o: {type: mcp, command: [x], read: {tool: t}}}\n" +
+		"agents: {with: {kind: claude, mcp: [s]}, without: {kind: claude, mcp: [o]}}"))
+	has := func(a string) (api, ghe bool) {
+		hosts, _ := c.AgentEgress(c.Agents[a])
+		for _, h := range hosts {
+			api = api || (h.Host == "api.github.com" && h.Port == 443)
+			ghe = ghe || (h.Host == "ghe.example" && h.Port == 8443)
+		}
+		return
+	}
+	if api, ghe := has("with"); !api || !ghe {
+		t.Error("package hosts missing")
+	}
+	if api, ghe := has("without"); api || ghe {
+		t.Error("package hosts leaked to another agent")
+	}
+}

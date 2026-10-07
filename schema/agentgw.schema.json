@@ -298,6 +298,33 @@
         "listen": {
           "type": "string"
         },
+        "mcp_packages": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "command": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "env": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "hosts": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
         "models": {
           "additionalProperties": false,
           "properties": {
@@ -367,6 +394,9 @@
             "type": "string"
           },
           "method": {
+            "type": "string"
+          },
+          "package": {
             "type": "string"
           },
           "poll": {

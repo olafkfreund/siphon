@@ -227,3 +227,8 @@ unchanged, and only the new fields and the page disappear.
   - env values must be refs (`env:`/`file:`), never literals.
   - A portal-only stdio source can't carry `env` until step 3's `package` route, since it can't carry `command` either.
   - The bridge refusal sits in `agentExec`, which covers direct agent actions and routine agent steps.
+- **Step 3 (coder Go; Opus Nix):**
+  - `Parse` fills a package source's `Command` (recorded with `cmdFromPkg`), so every reader sees the resolved command.
+  - The overlay checks the package's env keys in `checkOverlay`, since `LoadWithOverlay` doesn't call `Validate`.
+  - A portal item may create a new source that uses a listed `package` (intended: that's how Services adds GitHub).
+  - Nix: `services.siphon.mcpPackages` (submodule: `package`, `args` (default `["stdio"]`), `env`, `hosts`), defaulting to `github` = `pkgs.github-mcp-server` (1.12.2) with `GITHUB_PERSONAL_ACCESS_TOKEN` and `api.github.com`, rendered with `lib.getExe`. The VM test (13/13) validates the rendered config.

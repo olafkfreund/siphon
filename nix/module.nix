@@ -22,9 +22,18 @@ let
       server.actions_dir = actionsDir;
     }
     (lib.recursiveUpdate (lib.optionalAttrs cfg.egress.enable { server.egress.socket = "${egressDir}/egress.sock"; })
-      (lib.optionalAttrs (cfg.models.privateEndpoints != [ ]) {
-        server.models.private_endpoints = cfg.models.privateEndpoints;
-      })
+      (lib.recursiveUpdate
+        (lib.optionalAttrs (cfg.models.privateEndpoints != [ ]) {
+          server.models.private_endpoints = cfg.models.privateEndpoints;
+        })
+        (lib.optionalAttrs (cfg.mcpPackages != { }) {
+          # Nix-pinned MCP servers the portal may enable by name (never a free command).
+          server.mcp_packages = lib.mapAttrs (_: p: {
+            command = [ (lib.getExe p.package) ] ++ p.args;
+            inherit (p) env hosts;
+          }) cfg.mcpPackages;
+        })
+      )
     )
   ) cfg.settings;
   configFile = yaml.generate "siphon.yaml" settings;
@@ -164,6 +173,46 @@ in
       type = lib.types.str;
       default = "2h";
       description = "Hard ceiling (RuntimeMaxSec) for any sandboxed action; per-action timeouts apply below it.";
+    };
+
+    mcpPackages = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            package = lib.mkOption {
+              type = lib.types.package;
+              description = "The MCP server package (its mainProgram is run).";
+            };
+            args = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ "stdio" ];
+              description = "Arguments after the program.";
+            };
+            env = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              description = "Environment variable names a source may set (values are secret refs).";
+            };
+            hosts = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              description = "Hosts agents using this server may reach (port 443).";
+            };
+          };
+        }
+      );
+      default = {
+        github = {
+          package = pkgs.github-mcp-server;
+          env = [ "GITHUB_PERSONAL_ACCESS_TOKEN" ];
+          hosts = [ "api.github.com" ];
+        };
+      };
+      description = ''
+        MCP servers sources may run by name (`package: <name>`), pinned by
+        Nix. The portal can enable only these; any other command stays
+        file-only.
+      '';
     };
 
     models.privateEndpoints = lib.mkOption {
