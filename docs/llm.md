@@ -70,6 +70,28 @@ Instead of steps 2–4, `siphon draft "<what the user wants>"` asks a model
 connection to write the apply file and validates it. Review its output the
 same way.
 
+## Using Siphon as MCP tools
+
+If your assistant speaks MCP, give it Siphon directly instead of a shell:
+
+```sh
+claude mcp add siphon -- siphon mcp                     # Claude Code: read and dry-run only
+claude mcp add siphon -- siphon mcp --allow-write       # also let it apply and delete
+```
+
+`siphon mcp` uses the same login as the CLI (`siphon login` first). It
+offers these tools:
+- `inventory`, `get`, `explain`, `template`, `guide`;
+- `test`, `why`, `status`, `jobs`, `job`;
+- `apply`, `delete`.
+
+Without `--allow-write`, `apply` and `delete` **only dry-run**, even when
+asked not to: the result says `"dry_run": true` with a note. Secret values
+are refused unless the user also passes `--allow-secrets`: secrets belong
+in a terminal (`--secret …=-`), not in a chat. There is **no** approve or
+deny tool. Changes made this way show in `siphon history` as
+`api:cli:<user>:mcp`.
+
 ## Rules that commonly go wrong
 
 - **Commands are argv lists, never a shell string.** Write
