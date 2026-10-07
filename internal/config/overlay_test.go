@@ -386,3 +386,28 @@ func TestOverlayServicePrivateEndpoint(t *testing.T) {
 		t.Fatalf("unlisted: %v", err)
 	}
 }
+
+// A file secret kept on an item can't ride along when its package changes, or
+// when a file `command` source becomes a `package` source.
+func TestOverlayKeptSecretCannotMoveToPackage(t *testing.T) {
+	file := []byte("server: { mcp_packages: { p: { command: [/bin/p], env: [FOO] }, q: { command: [/bin/q], env: [FOO] } } }\n" +
+		"sources:\n" +
+		"  cmd: { type: mcp, command: [/bin/c], env: { FOO: 'env:HOME' }, read: { tool: t } }\n" +
+		"  pkg: { type: mcp, package: p, env: { FOO: 'env:HOME' }, read: { tool: t } }\n")
+	f, err := Parse(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, it := range map[string]Item{
+		"command to package": {Kind: "sources", Name: "cmd", YAML: "{type: mcp, package: p, env: {FOO: 'env:HOME'}, read: {tool: t}}"},
+		"package to package": {Kind: "sources", Name: "pkg", YAML: "{type: mcp, package: q, env: {FOO: 'env:HOME'}, read: {tool: t}}"},
+	} {
+		if err := checkOverlay(f, []Item{it}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "can't be moved") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	same := Item{Kind: "sources", Name: "pkg", YAML: "{type: mcp, package: p, env: {FOO: 'env:HOME'}, read: {tool: t}, poll: 2m}"}
+	if err := checkOverlay(f, []Item{same}, t.TempDir()); err != nil {
+		t.Errorf("same package: %v", err)
+	}
+}

@@ -250,3 +250,16 @@ unchanged, and only the new fields and the page disappear.
     - the secret isn't in the job output;
     - the egress probe agent, which also lists the bridged source, finds no secret in `$HOME`, `/tmp` or `/proc/*/environ`;
     - the stub model now calls the first tool it's offered.
+- **Step 6, security review fixes** (fresh Opus reviewer; Go by the coder, Nix and two VM-found fixes by Opus; VM 15/15):
+  - **F1 (high, open template):**
+    - every action unit hides `/run/systemd` and `/run/dbus`, so no run can list other runs' unit names;
+    - run dirs are sticky (01730, no setgid: `RestrictSUIDSGID`; the VM test caught a setgid attempt);
+    - bridge secrets never go into `job.json`. They're written to `<state>/bridge-secrets/<id>` (`0700` dir, `0600` file, `O_EXCL|O_NOFOLLOW`), handed over by `LoadCredential=bridge:` on `siphon-mcp@`, and cleaned up at stop and on startup;
+    - `exec-job` passes `CREDENTIALS_DIRECTORY` to its child (the VM test caught the missing variable).
+  - **F2:** bridges only for restricted agents (or `sandbox: none`), each with a per-run 32-byte bearer token (constant-time check, masked).
+  - **F3:** every `allow_private` resolves as `PrivateNoLinkLocal` (never link-local or metadata), and egress entries carry `NoLinkLocal`.
+  - **F4:** a bridge serves only the agent's allowed tools for that server.
+  - **F5:** a kept file secret ref also counts as "moved" on a package change, or a command→package change.
+  - **F6:** the GitLab preset needs https (unless loopback or listed). The cleartext warning now covers header and env refs.
+  - **F7:** Services refuses existing names, and apply errors show on the result page.
+  - **P1:** per-source webhook rate limiters that survive requests and `Apply`: one before verification (100 burst, 50/s) and one after (20 burst, 10/s).

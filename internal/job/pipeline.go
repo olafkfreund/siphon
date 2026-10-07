@@ -44,6 +44,8 @@ type Pipeline struct {
 
 	egress *egress.Proxy // set by startEgress when any run has an allowlist
 
+	hookLimits sync.Map // source name -> *hookLimit; webhook rate limits survive requests and Apply
+
 	applyMu     sync.Mutex // serialises Apply and Serve's poller start
 	serveCtx    context.Context
 	stopPollers func() // nil unless Serve is running
@@ -444,7 +446,7 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 		Prompt: a.Prompt, Env: pl.Env, MCP: servers,
 		AllowedTools: a.AllowedTools, MaxTurns: a.MaxTurns, MaxBudgetUSD: a.MaxBudgetUSD,
 		Timeout: time.Duration(a.Timeout), Sandbox: sandbox(cfg, 0),
-		Secrets: cfg.Secrets(), WorkDir: filepath.Join(filepath.Dir(cfg.Server.DB), "jobs", strconv.FormatInt(j.ID, 10)),
+		Secrets: cfg.Secrets(), StateDir: filepath.Dir(cfg.Server.DB), WorkDir: filepath.Join(filepath.Dir(cfg.Server.DB), "jobs", strconv.FormatInt(j.ID, 10)),
 	}
 	// Credential: an API key, or a subscription login from the store. No
 	// credential at all is the legacy path (the runner's own environment).

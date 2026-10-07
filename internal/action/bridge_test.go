@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -120,7 +121,8 @@ func envServer(extra map[string]string) MCPServer {
 func TestBridgeUnitLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	f := newBridgeFake(t, dir)
-	o := AgentOptions{Sandbox: SandboxOptions{Mode: "systemd", Dir: dir}, Timeout: time.Minute,
+	state := t.TempDir()
+	o := AgentOptions{Sandbox: SandboxOptions{Mode: "systemd", Dir: dir, Egress: &EgressEnv{}}, Timeout: time.Minute, StateDir: state, AllowedTools: []string{"mcp__gh__check"},
 		MCP: map[string]MCPServer{"gh": envServer(nil), "plain": {URL: "https://e.example/mcp"}}}
 	forwards, direct, stop, err := startBridges(context.Background(), &o)
 	if err != nil {
@@ -135,7 +137,9 @@ func TestBridgeUnitLifecycle(t *testing.T) {
 	if len(forwards) != 1 || filepath.Base(sock) != "mcp.sock" || strings.Join(direct, ",") != "127.0.0.1:3200" {
 		t.Fatalf("forwards %v direct %v", forwards, direct)
 	}
-	if got := o.MCP["gh"]; got.URL != "http://127.0.0.1:3200/mcp" || got.Env != nil || got.Command != nil {
+	got := o.MCP["gh"]
+	tok := strings.TrimPrefix(got.Headers["Authorization"], "Bearer ")
+	if got.URL != "http://127.0.0.1:3200/mcp" || got.Env != nil || got.Command != nil || len(tok) != 64 || !slices.Contains(o.Secrets, tok) {
 		t.Fatalf("not rewritten: %+v", got)
 	}
 	if o.MCP["plain"].URL != "https://e.example/mcp" {
@@ -147,10 +151,25 @@ func TestBridgeUnitLifecycle(t *testing.T) {
 	}
 	var spec mcpbridge.Spec
 	json.Unmarshal(job.Files["bridge.json"], &spec)
-	if string(job.Files["env-0"]) != "tok-123" || spec.Env["TOKEN"] != FilePath("env-0") || spec.Socket != sock || strings.Join(spec.Command, " ") != "srv --flag" {
+	if len(job.Files) != 1 || strings.Contains(string(job.Files["bridge.json"]), "tok-123") || spec.Socket != sock || spec.Token != tok || strings.Join(spec.Command, " ") != "srv --flag" || strings.Join(spec.Tools, ",") != "check" {
 		t.Fatalf("spec %+v files %v", spec, job.Files)
 	}
+	// The secret lives only in bridge-secrets/<id> (0600, in a 0700 dir), for LoadCredential.
+	id := filepath.Base(filepath.Dir(sock))
+	sf := filepath.Join(state, "bridge-secrets", id)
+	if b, err := os.ReadFile(sf); err != nil || string(b) != `{"TOKEN":"tok-123"}` {
+		t.Fatalf("secrets file: %q %v", b, err)
+	}
+	if fi, _ := os.Stat(sf); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("secrets file mode %v", fi.Mode())
+	}
+	if fi, _ := os.Stat(filepath.Dir(sf)); fi.Mode().Perm() != 0o700 {
+		t.Fatalf("secrets dir mode %v", fi.Mode())
+	}
 	stop()
+	if _, err := os.Stat(sf); !os.IsNotExist(err) {
+		t.Fatalf("secrets file left behind: %v", err)
+	}
 	if len(*f.stops) != 1 || (*f.stops)[0] != started[0] {
 		t.Fatalf("stops %v, started %v", *f.stops, started)
 	}
@@ -164,12 +183,71 @@ func TestBridgeSocketNeverAppears(t *testing.T) {
 	f := newBridgeFake(t, dir)
 	_ = f
 	startUnit = func(context.Context, string) error { return os.ErrInvalid } // the unit dies at once
-	o := AgentOptions{Sandbox: SandboxOptions{Mode: "systemd", Dir: dir}, MCP: map[string]MCPServer{"gh": envServer(nil)}}
+	state := t.TempDir()
+	o := AgentOptions{Sandbox: SandboxOptions{Mode: "systemd", Dir: dir, Egress: &EgressEnv{}}, StateDir: state, MCP: map[string]MCPServer{"gh": envServer(nil)}}
 	if _, _, _, err := startBridges(context.Background(), &o); err == nil || !strings.Contains(err.Error(), "exited before it listened") || strings.Contains(err.Error(), "tok-123") {
 		t.Fatalf("err %v", err)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Fatalf("dir left behind: %v", entries)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(state, "bridge-secrets")); len(entries) != 0 {
+		t.Fatalf("secrets left behind: %v", entries)
+	}
+}
+
+// An open sandbox (no egress) never gets a bridge: the secrets would reach the agent's network.
+func TestBridgeRefusedForOpenAgent(t *testing.T) {
+	o := AgentOptions{Sandbox: SandboxOptions{Mode: "systemd", Dir: t.TempDir()}, StateDir: t.TempDir(), MCP: map[string]MCPServer{"gh": envServer(nil)}}
+	_, _, _, err := startBridges(context.Background(), &o)
+	if err == nil || !strings.Contains(err.Error(), "MCP server gh needs a restricted agent (egress enabled)") {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestBridgeSecretsRefuseSymlinkDir(t *testing.T) {
+	state := t.TempDir()
+	target := t.TempDir()
+	os.Symlink(target, filepath.Join(state, "bridge-secrets"))
+	if _, err := writeBridgeSecrets(state, "abc", map[string]string{"A": "b"}); err == nil {
+		t.Fatal("wrote through a symlinked secrets dir")
+	}
+	if entries, _ := os.ReadDir(target); len(entries) != 0 {
+		t.Fatalf("leaked into %v", entries)
+	}
+	os.Remove(filepath.Join(state, "bridge-secrets"))
+	if _, err := writeBridgeSecrets(state, "abc", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeBridgeSecrets(state, "abc", nil); err == nil {
+		t.Fatal("overwrote an existing secrets file (O_EXCL)")
+	}
+	CleanBridgeSecrets(state)
+	if _, err := os.Stat(filepath.Join(state, "bridge-secrets")); !os.IsNotExist(err) {
+		t.Fatal("not cleaned")
+	}
+}
+
+func TestBridgeTools(t *testing.T) {
+	a := []string{"mcp__gh__a", "mcp__gh__b", "mcp__ghost__c", "mcp__x"}
+	if got := bridgeTools("gh", a); strings.Join(got, ",") != "a,b" {
+		t.Fatal(got)
+	}
+	if got := bridgeTools("x", a); strings.Join(got, ",") != "*" {
+		t.Fatal(got)
+	}
+	if got := bridgeTools("none", a); len(got) != 0 {
+		t.Fatal(got)
+	}
+}
+
+func TestRunDirSticky(t *testing.T) {
+	_, runDir, _, err := newRunDir(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(runDir); fi.Mode()&os.ModeSticky == 0 || fi.Mode().Perm() != 0o730 {
+		t.Fatalf("mode %v", fi.Mode())
 	}
 }
 
@@ -182,16 +260,16 @@ func TestAgentConfigRewrittenForBridge(t *testing.T) {
 			stub := filepath.Join(t.TempDir(), "agent")
 			os.WriteFile(stub, []byte("#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = --mcp-config ] && cat \"$2\"; shift; done\ncat \"$CODEX_HOME/config.toml\" 2>/dev/null\nenv\n"), 0o755)
 			res, err := RunAgent(context.Background(), AgentOptions{
-				Kind: kind, Command: stub, Prompt: "x", Timeout: 10 * time.Second, WorkDir: t.TempDir(),
+				Kind: kind, Command: stub, Prompt: "x", Timeout: 10 * time.Second, WorkDir: t.TempDir(), StateDir: t.TempDir(),
 				AllowedTools: []string{"mcp__gh__x"},
-				Sandbox:      SandboxOptions{Mode: "systemd", Dir: dir},
+				Sandbox:      SandboxOptions{Mode: "systemd", Dir: dir, Egress: &EgressEnv{ProxyURL: "http://127.0.0.1:1", Socket: "/run/e.sock"}},
 				MCP:          map[string]MCPServer{"gh": envServer(nil)},
 			})
 			if err != nil || res.Exit != 0 {
 				t.Fatalf("%v %+v", err, res)
 			}
 			out := string(res.Stdout)
-			if !strings.Contains(out, "127.0.0.1:3200/mcp") || strings.Contains(out, "tok-123") || strings.Contains(out, "srv") {
+			if !strings.Contains(out, "127.0.0.1:3200/mcp") || !strings.Contains(out, "Bearer ") || strings.Contains(out, "tok-123") || strings.Contains(out, "srv") {
 				t.Fatalf("agent saw:\n%s", out)
 			}
 			_, _, agent := f.snap()
@@ -286,7 +364,7 @@ func TestBridgeSandboxNoneEndToEnd(t *testing.T) {
 	exe, _ := os.Executable()
 	res, err := RunAgent(context.Background(), AgentOptions{
 		Kind: "model", Model: "m", BaseURL: llm.URL, Prompt: "go", Timeout: 30 * time.Second, WorkDir: t.TempDir(),
-		AllowedTools: []string{"mcp__srv__check"}, Sandbox: SandboxOptions{Mode: "none"},
+		AllowedTools: []string{"mcp__srv__check"}, Sandbox: SandboxOptions{Mode: "none"}, StateDir: t.TempDir(),
 		MCP:     map[string]MCPServer{"srv": {Command: []string{exe, "stub-mcp"}, Env: map[string]string{"TOKEN": "tok-123"}}},
 		Secrets: []string{"tok-123"},
 	})

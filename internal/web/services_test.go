@@ -26,15 +26,15 @@ func TestServicesGitHubAndGitLab(t *testing.T) {
 		`server: { sandbox: none, db: DIR/s.db, public_url: "https://siphon.example", services: { private_endpoints: ["`+u.Host+`"] } }`, 1))
 
 	// GitHub, remote MCP + webhook
-	w := ce.post("/services/github", url.Values{"name": {"gh"}, "token": {"ghp_SECRET1"}, "mode": {"remote"}, "webhook": {"on"}})
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "https://siphon.example/hook/gh-hooks") {
+	w := ce.post("/services/github", url.Values{"name": {"ghub"}, "token": {"ghp_SECRET1"}, "mode": {"remote"}, "webhook": {"on"}})
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "https://siphon.example/hook/ghub-hooks") {
 		t.Fatalf("github: %d %s", w.Code, w.Body.String())
 	}
 	if w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("result page must not be cached")
 	}
 	cfg := ce.cur.Load()
-	src, hook := cfg.Sources["gh"], cfg.Sources["gh-hooks"]
+	src, hook := cfg.Sources["ghub"], cfg.Sources["ghub-hooks"]
 	if src == nil || src.URL != githubMCP || src.Auth == nil || src.Auth.Bearer.Value != "ghp_SECRET1" || hook == nil || hook.Signature != "github" {
 		t.Fatal("github items not applied")
 	}
@@ -45,7 +45,7 @@ func TestServicesGitHubAndGitLab(t *testing.T) {
 	if len(secret) != 64 || !strings.Contains(w.Body.String(), secret) {
 		t.Fatal("webhook secret not shown on the result page")
 	}
-	for _, p := range []string{"/services", "/config/sources/gh", "/config/sources/gh-hooks", "/history", "/history/export"} {
+	for _, p := range []string{"/services", "/config/sources/ghub", "/config/sources/ghub-hooks", "/history", "/history/export"} {
 		b := ce.get(p).Body.String()
 		if strings.Contains(b, "ghp_SECRET1") || strings.Contains(b, secret) {
 			t.Fatalf("secret visible again on %s", p)
@@ -72,5 +72,34 @@ func TestServicesGitHubAndGitLab(t *testing.T) {
 	test := ce.post("/services/gl/test", nil).Body.String()
 	if !strings.Contains(test, "olaf") || strings.Contains(test, "glpat-SECRET2") {
 		t.Fatalf("test: %s", test)
+	}
+}
+
+// F6/F7: an existing name (or its -hooks twin) is never replaced, GitLab needs
+// https unless the host is local or listed, and a failed apply is shown.
+func TestServicesNamesHTTPSAndApplyError(t *testing.T) {
+	ce := newCfgEnv(t)
+	form := func(name, base string) url.Values {
+		return url.Values{"name": {name}, "base": {base}, "project": {"g/p"}, "token": {"glpat-X"}, "webhook": {"on"}}
+	}
+	if w := ce.post("/services/gitlab", form("gl", "http://gitlab.lan")); w.Code != 422 || !strings.Contains(w.Body.String(), "must be https") {
+		t.Fatalf("http gitlab: %d %s", w.Code, w.Body.String())
+	}
+	if ce.cur.Load().Sources["gl"] != nil {
+		t.Fatal("created over http")
+	}
+	if w := ce.post("/services/gitlab", form("gl", "http://127.0.0.1:9")); w.Code != 200 {
+		t.Fatalf("loopback http: %d", w.Code)
+	}
+	for _, name := range []string{"gl", "gl-hooks", "gh"} { // a made source, its -hooks twin, a file-defined source
+		w := ce.post("/services/github", url.Values{"name": {name}, "token": {"t"}, "mode": {"remote"}})
+		if w.Code != 422 || !strings.Contains(w.Body.String(), "already exists; pick another name or edit it") {
+			t.Fatalf("%s: %d %s", name, w.Code, w.Body.String())
+		}
+	}
+	ce.applyFail.Store(true)
+	w := ce.post("/services/github", url.Values{"name": {"gh9"}, "token": {"t"}, "mode": {"remote"}})
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "applying it live failed") || !strings.Contains(w.Body.String(), "apply boom") {
+		t.Fatalf("apply failure not shown: %d %s", w.Code, w.Body.String())
 	}
 }

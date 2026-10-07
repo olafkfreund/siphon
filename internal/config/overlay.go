@@ -221,7 +221,7 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			if s.AllowPrivate && !fs.AllowPrivate && !file.ServiceEndpoint(s.URL) {
 				return errors.New("allow_private can only be set in siphon.yaml, or for a host:port listed in server.services.private_endpoints")
 			}
-			moved = !sameEndpoint(s.URL, fs.URL)
+			moved = !sameEndpoint(s.URL, fs.URL) || s.Package != fs.Package || (len(fs.Command) > 0 && !fs.cmdFromPkg && s.Package != "")
 			refs, fileRefs = sourceRefs(&s), sourceRefs(fs)
 		case "credentials":
 			var c Credential

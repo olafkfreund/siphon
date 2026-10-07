@@ -155,7 +155,9 @@ func newRunDir(dir string) (id, runDir string, gid int, err error) {
 	// root via tmpfiles). Group may enter and create files but not list. No
 	// setgid of our own: RestrictSUIDSGID forbids it, so files get the group
 	// by chown instead (both sides are members of siphon-io).
-	if err := os.Chmod(runDir, 0o730); err != nil {
+	// Sticky (01730): group members may create files here but can't rename or
+	// replace each other's. (Sticky is allowed under RestrictSUIDSGID.)
+	if err := os.Chmod(runDir, 0o730|os.ModeSticky); err != nil {
 		os.RemoveAll(runDir)
 		return "", "", 0, err
 	}
@@ -524,6 +526,11 @@ func execJob(runDir, jobFile string, stdout, stderr io.Writer) int {
 	cmd := exec.CommandContext(ctx, spec.Argv[0], spec.Argv[1:]...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = 10 * time.Second
+	// systemd's credentials (siphon-mcp@'s LoadCredential) are readable only by
+	// this unit's user; pass their location to the child that consumes them.
+	if d := os.Getenv("CREDENTIALS_DIRECTORY"); d != "" {
+		cmdEnv = append(cmdEnv, "CREDENTIALS_DIRECTORY="+d)
+	}
 	cmd.Env = cmdEnv
 	cmd.Stdin = bytes.NewReader(spec.Stdin)
 	cmd.Stdout, cmd.Stderr = stdout, stderr

@@ -27,12 +27,23 @@ func (p *Pipeline) Webhooks() func(source string) http.Handler {
 		if s == nil || s.Type != "webhook" {
 			return nil
 		}
+		lim := p.hookLimiters(name)
 		return source.NewWebhook(source.WebhookOptions{
 			Name: name, Secret: s.Secret.Value, Signature: s.Signature, SigHeader: s.SigHeader, TokenHeader: s.TokenHeader,
 			TimestampHeader: s.TimestampHdr, IDHeader: strings.TrimPrefix(s.ID, "header."),
-			MaxBody: int64(cfg.Limits.HTTPMaxBody), Now: p.Now,
+			MaxBody: int64(cfg.Limits.HTTPMaxBody), Now: p.Now, PreLimit: lim.pre, Limit: lim.post,
 		}, p.deliver)
 	}
+}
+
+type hookLimit struct{ pre, post *source.Limiter }
+
+// hookLimiters returns the source's rate limiters. They live in the Pipeline,
+// not the per-request handler, so a burst is counted across requests and Apply.
+// ponytail: entries of deleted sources stay (two small structs each).
+func (p *Pipeline) hookLimiters(name string) *hookLimit {
+	l, _ := p.hookLimits.LoadOrStore(name, &hookLimit{pre: source.NewLimiter(100, 50), post: source.NewLimiter(20, 10)})
+	return l.(*hookLimit)
 }
 
 // deliver records the replay key and enqueues in one transaction, so a

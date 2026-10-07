@@ -59,8 +59,11 @@ let
     # config, rather than an unreadable one); others are made inaccessible.
     TemporaryFileSystem = map (d: "/etc/${d}:ro") (lib.filter etcManaged agentEtcDirs);
     InaccessiblePaths = map (d: "-/etc/${d}") (lib.filter (d: !etcManaged d) agentEtcDirs) ++ [
-      # Unit names there reveal other runs' ids (and so their run dirs).
-      "-/run/systemd/units"
+      # Unit names (and so other runs' ids and run dirs) are visible in
+      # /run/systemd and over the system bus; neither is needed by a run.
+      # stdout/stderr reach the journal through fds set up before this.
+      "-/run/systemd"
+      "-/run/dbus"
       # The daemon fetches URLs for any client: network outside the sandbox.
       "-/nix/var/nix/daemon-socket"
     ];
@@ -358,9 +361,19 @@ in
     # MCP bridge: a stdio MCP server that holds secrets runs here, under its
     # own DynamicUser, never in the agent's unit. Always the restricted
     # network; it reaches only its package's hosts through the egress proxy.
-    systemd.services."siphon-mcp@" = actionUnit restrictedNet // {
-      description = "siphon MCP bridge %i";
-    };
+    systemd.services."siphon-mcp@" =
+      actionUnit (
+        restrictedNet
+        // {
+          # The MCP server's secrets: written 0600 by siphon into its 0700
+          # state dir (never in the group-shared run dir), read by PID 1 and
+          # handed only to this instance as $CREDENTIALS_DIRECTORY/bridge.
+          LoadCredential = [ "bridge:${stateDir}/bridge-secrets/%i" ];
+        }
+      )
+      // {
+        description = "siphon MCP bridge %i";
+      };
     # Open: for runs with egress off (cmd actions by default).
     systemd.services."siphon-action-open@" = actionUnit { IPAddressDeny = metadataDeny; };
 

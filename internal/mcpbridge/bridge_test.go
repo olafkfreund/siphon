@@ -24,23 +24,33 @@ func TestStub(t *testing.T) {
 	}) (*mcp.CallToolResult, any, error) {
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: in.Name + "=" + os.Getenv(in.Name)}}}, nil, nil
 	})
+	mcp.AddTool(s, &mcp.Tool{Name: "other", Description: "not allowed"}, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "other ran"}}}, nil, nil
+	})
 	s.Run(context.Background(), &mcp.StdioTransport{})
 	os.Exit(0)
+}
+
+// bearer adds the bridge's token to every request.
+type bearer struct{ rt http.RoundTripper }
+
+func (b bearer) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("Authorization", "Bearer tok-bridge")
+	return b.rt.RoundTrip(r)
 }
 
 func TestBridgeRelaysToolsOverSocket(t *testing.T) {
 	t.Setenv("OUTER", "must-not-leak")
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "marker"), []byte("1\n"), 0o600)
-	os.WriteFile(filepath.Join(dir, "token"), []byte("tok-123\n"), 0o600)
+	os.WriteFile(filepath.Join(dir, "secrets"), []byte(`{"STUB_MCP":"1","TOKEN":"tok-123"}`), 0o600)
 	sock := filepath.Join(dir, "mcp.sock")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
 		done <- Run(ctx, Spec{
 			Command: []string{os.Args[0], "-test.run=^TestStub$"},
-			Env:     map[string]string{"STUB_MCP": filepath.Join(dir, "marker"), "TOKEN": filepath.Join(dir, "token")},
-			Socket:  sock,
+			Socket:  sock, Token: "tok-bridge", Tools: []string{"env"}, SecretsFile: filepath.Join(dir, "secrets"),
 		})
 	}()
 	for i := 0; i < 200; i++ {
@@ -52,9 +62,20 @@ func TestBridgeRelaysToolsOverSocket(t *testing.T) {
 	if fi, err := os.Stat(sock); err != nil || fi.Mode().Perm() != 0o660 {
 		t.Fatalf("socket: %v %v", fi, err)
 	}
-	hc := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+	tr := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", sock)
-	}}}
+	}}
+	// No token, or a wrong one: 401 before anything is served.
+	for _, auth := range []string{"", "Bearer wrong", "tok-bridge"} {
+		req, _ := http.NewRequest("POST", "http://127.0.0.1:3200/mcp", strings.NewReader("{}"))
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		if resp, err := (&http.Client{Transport: tr}).Do(req); err != nil || resp.StatusCode != 401 {
+			t.Fatalf("auth %q: %v %v", auth, resp, err)
+		}
+	}
+	hc := &http.Client{Transport: bearer{tr}}
 	sess, err := mcp.NewClient(&mcp.Implementation{Name: "t", Version: "1"}, nil).Connect(ctx,
 		&mcp.StreamableClientTransport{Endpoint: "http://127.0.0.1:3200/mcp", HTTPClient: hc, MaxRetries: -1, DisableStandaloneSSE: true}, nil)
 	if err != nil {
@@ -69,7 +90,10 @@ func TestBridgeRelaysToolsOverSocket(t *testing.T) {
 		n++
 	}
 	if n != 1 {
-		t.Fatalf("%d tools", n)
+		t.Fatalf("%d tools (only the allowed one is served)", n)
+	}
+	if res, err := sess.CallTool(ctx, &mcp.CallToolParams{Name: "other"}); err == nil && !res.IsError {
+		t.Fatalf("a disallowed tool was called: %v", res)
 	}
 	call := func(name string) string {
 		res, err := sess.CallTool(ctx, &mcp.CallToolParams{Name: "env", Arguments: map[string]any{"name": name}})

@@ -25,6 +25,41 @@ type WebhookOptions struct {
 	IDHeader        string
 	MaxBody         int64
 	Now             func() time.Time
+	// PreLimit counts every request before it is read or verified (a flood of
+	// unauthenticated posts); Limit counts verified deliveries. Both are per
+	// source; nil means a private limiter (fine for tests, not for per-request use).
+	PreLimit, Limit *Limiter
+}
+
+// Limiter is a token bucket. A webhook's limiters must outlive the handler
+// (which is rebuilt per request), so callers keep them and pass them in.
+type Limiter struct {
+	mu          sync.Mutex
+	tokens      float64
+	burst, rate float64
+	last        time.Time
+}
+
+func NewLimiter(burst, perSecond float64) *Limiter {
+	return &Limiter{tokens: burst, burst: burst, rate: perSecond}
+}
+
+func (l *Limiter) Allow(now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.last.IsZero() {
+		if elapsed := now.Sub(l.last).Seconds(); elapsed > 0 {
+			l.tokens = min(l.burst, l.tokens+elapsed*l.rate)
+			l.last = now
+		}
+	} else {
+		l.last = now
+	}
+	if l.tokens < 1 {
+		return false
+	}
+	l.tokens--
+	return true
 }
 
 type Deliver func(ctx context.Context, ev Event, deliveryID string) (dup bool, err error)
@@ -39,15 +74,22 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 	if o.Signature != "sha256" {
 		o.TimestampHeader = "" // github signs none; token and standard-webhooks bring their own
 	}
-	var mu sync.Mutex
-	tokens := 20.0
-	last := o.Now()
+	if o.PreLimit == nil {
+		o.PreLimit = NewLimiter(100, 50)
+	}
+	if o.Limit == nil {
+		o.Limit = NewLimiter(20, 10)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
 		now := o.Now()
+		if !o.PreLimit.Allow(now) {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, o.MaxBody+1))
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -118,16 +160,7 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		mu.Lock()
-		if elapsed := now.Sub(last).Seconds(); elapsed > 0 {
-			tokens = min(20, tokens+elapsed*10)
-			last = now
-		}
-		allowed := tokens >= 1
-		if allowed {
-			tokens--
-		}
-		mu.Unlock()
+		allowed := o.Limit.Allow(now)
 		if !allowed {
 			w.WriteHeader(http.StatusTooManyRequests)
 			return

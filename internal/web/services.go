@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/source"
 	"github.com/olafkfreund/siphon/internal/store"
 )
@@ -42,6 +43,7 @@ type serviceRow struct {
 type serviceDone struct {
 	Service, Name, Hook, HookURL, HookSecret, HookHeader string
 	ReadTools, WriteTools                                string
+	ApplyErr                                             string // the save worked but applying it live failed
 }
 
 type serviceForm struct {
@@ -68,6 +70,24 @@ func (s *server) serviceRows() []serviceRow {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// freeNames refuses a name whose source, or its -hooks twin, already exists:
+// creating it would silently replace the item (and its secret).
+func freeNames(cfg *config.Config, name string) error {
+	for _, n := range []string{name, name + "-hooks"} {
+		if cfg.Sources[n] != nil {
+			return errInvalid{"a source named " + n + " already exists; pick another name or edit it"}
+		}
+	}
+	return nil
+}
+
+func loopbackHost(h string) bool {
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return h == "localhost"
 }
 
 func newSecret(b64 bool) string {
@@ -103,6 +123,9 @@ func (s *server) addGitHub(actor, name, token, mode string, hook bool) (*service
 		return nil, errInvalid{"a name and a token are required"}
 	}
 	cfg := s.Config()
+	if err := freeNames(cfg, name); err != nil {
+		return nil, err
+	}
 	dir := secretsDir(cfg.Server.DB)
 	var y string
 	var pending []pendingSecret
@@ -131,7 +154,10 @@ func (s *server) addGitHub(actor, name, token, mode string, hook bool) (*service
 		pending = append(pending, ps)
 		done.Hook, done.HookURL, done.HookSecret = hn, s.hookURL(hn), secret
 	}
-	_, _, _, err := s.commit(actor, "services: GitHub "+name+" added", nil, putItems(items...), pending)
+	_, _, applyErr, err := s.commit(actor, "services: GitHub "+name+" added", nil, putItems(items...), pending)
+	if applyErr != nil {
+		done.ApplyErr = applyErr.Error()
+	}
 	return done, err
 }
 
@@ -149,6 +175,12 @@ func (s *server) addGitLab(actor, name, base, project, token string, hook bool) 
 		return nil, errInvalid{"base URL must be http(s)://host[:port][/path]"}
 	}
 	cfg := s.Config()
+	if u, _ := url.Parse(base); u.Scheme != "https" && !loopbackHost(u.Hostname()) && !cfg.ServiceEndpoint(base) {
+		return nil, errInvalid{"the base URL must be https (http only for localhost or a host listed in server.services.private_endpoints): the token would travel in clear"}
+	}
+	if err := freeNames(cfg, name); err != nil {
+		return nil, err
+	}
 	dir := secretsDir(cfg.Server.DB)
 	ps := pendingSecret{Kind: "sources", Name: name, Key: "headers.PRIVATE-TOKEN", Value: token}
 	src := base + "/api/v4/projects/" + url.PathEscape(strings.Trim(project, "/")) + "/merge_requests?state=opened&per_page=20"
@@ -168,7 +200,10 @@ func (s *server) addGitLab(actor, name, base, project, token string, hook bool) 
 		pending = append(pending, hps)
 		done.Hook, done.HookURL, done.HookSecret, done.HookHeader = hn, s.hookURL(hn), secret, "X-Gitlab-Token"
 	}
-	_, _, _, err := s.commit(actor, "services: GitLab "+name+" added", nil, putItems(items...), pending)
+	_, _, applyErr, err := s.commit(actor, "services: GitLab "+name+" added", nil, putItems(items...), pending)
+	if applyErr != nil {
+		done.ApplyErr = applyErr.Error()
+	}
 	return done, err
 }
 

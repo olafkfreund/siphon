@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -134,5 +135,59 @@ rules:
 	}
 	if strings.Join(rules, ",") != "ok" {
 		t.Fatalf("jobs for rules %v, want only [ok] (broken errors, off is disabled)", rules)
+	}
+}
+
+// P1: the webhook rate limits belong to the source in the Pipeline, so they
+// count across requests (the handler is rebuilt per request), don't leak
+// between sources, and an unauthenticated flood is cut off before verification.
+func TestWebhookRateLimitPerSource(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AGW_HOOK", "s3cret")
+	cfg, err := config.Parse([]byte(`
+server: { sandbox: none, db: ` + dir + `/state.db }
+sources:
+  a: { type: webhook, secret: env:AGW_HOOK, signature: github }
+  b: { type: webhook, secret: env:AGW_HOOK, signature: github }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(cfg.Server.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	p := New(cfg, st, time.Now)
+	post := func(src, body, sig string) int {
+		if sig == "" {
+			mac := hmac.New(sha256.New, []byte("s3cret"))
+			mac.Write([]byte(body))
+			sig = "sha256=" + hex.EncodeToString(mac.Sum(nil))
+		}
+		r := httptest.NewRequest(http.MethodPost, "/hook/"+src, strings.NewReader(body))
+		r.Header.Set("X-Hub-Signature-256", sig)
+		w := httptest.NewRecorder()
+		p.Webhooks()(src).ServeHTTP(w, r) // a fresh handler each time, as the server does
+		return w.Code
+	}
+	for i := 0; i < 20; i++ {
+		if c := post("a", fmt.Sprintf(`{"n":%d}`, i), ""); c != http.StatusAccepted {
+			t.Fatalf("request %d: %d", i+1, c)
+		}
+	}
+	if c := post("a", `{"n":21}`, ""); c != http.StatusTooManyRequests {
+		t.Fatalf("21st request: %d, want 429", c)
+	}
+	if c := post("b", `{"n":1}`, ""); c != http.StatusAccepted {
+		t.Fatalf("source b shares a's limit: %d", c)
+	}
+	// An unauthenticated flood on b hits the pre-verification limit.
+	got429 := false
+	for i := 0; i < 200 && !got429; i++ {
+		got429 = post("b", `{}`, "sha256=00") == http.StatusTooManyRequests
+	}
+	if !got429 {
+		t.Fatal("bad-signature flood never limited")
 	}
 }

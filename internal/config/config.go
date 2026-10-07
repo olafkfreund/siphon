@@ -556,6 +556,18 @@ func (c *Config) Warnings() []string {
 		if s := c.Sources[name]; s != nil && s.Auth != nil && s.Auth.Bearer.isSet() && cleartextRemote(s.URL) {
 			w = append(w, fmt.Sprintf("source %s: bearer token sent over plain http to a non-loopback host", name))
 		}
+		if s := c.Sources[name]; s != nil && cleartextRemote(s.URL) {
+			for _, k := range sortedKeys(s.Headers) {
+				if s.Headers[k].isSet() {
+					w = append(w, fmt.Sprintf("source %s: header %s (a secret) sent over plain http to a non-loopback host", name, k))
+				}
+			}
+			for _, k := range sortedKeys(s.Env) {
+				if s.Env[k].isSet() {
+					w = append(w, fmt.Sprintf("source %s: env %s (a secret) goes to a server at a plain http URL on a non-loopback host", name, k))
+				}
+			}
+		}
 	}
 	for _, name := range sortedKeys(c.Agents) {
 		a := c.Agents[name]
@@ -1203,7 +1215,7 @@ func (c *Config) AgentEgress(a *Agent) (allow []HostPort, enabled bool) {
 		if p, err := strconv.Atoi(u.Port()); err == nil {
 			port = p
 		}
-		allow = append(allow, HostPort{Host: strings.ToLower(u.Hostname()), Port: port, AllowPrivate: src.AllowPrivate})
+		allow = append(allow, HostPort{Host: strings.ToLower(u.Hostname()), Port: port, AllowPrivate: src.AllowPrivate, NoLinkLocal: src.AllowPrivate})
 	}
 	allow = append(allow, c.userAllow(a.Egress.Allow, c.Server.Egress.Allow)...)
 	return dedupe(allow), true

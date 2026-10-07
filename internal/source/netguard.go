@@ -70,7 +70,7 @@ var metadataAddrs = []netip.Addr{
 // ResolveAllowed resolves host and rejects it if any returned address is blocked.
 func ResolveAllowed(ctx context.Context, host string, allowPrivate bool) ([]netip.Addr, error) {
 	if allowPrivate {
-		return ResolveAllowedMode(ctx, host, Private)
+		return ResolveAllowedMode(ctx, host, PrivateNoLinkLocal) // allow_private: LAN yes, link-local/metadata never
 	}
 	return ResolveAllowedMode(ctx, host, Public)
 }

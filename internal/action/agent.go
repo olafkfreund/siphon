@@ -45,6 +45,7 @@ type AgentOptions struct {
 	Sandbox      SandboxOptions
 	Secrets      []string
 	WorkDir      string
+	StateDir     string // directory of server.db: bridge secrets go in <StateDir>/bridge-secrets
 }
 
 type AgentResult struct {

@@ -186,6 +186,21 @@ func TestBearerCleartextWarning(t *testing.T) {
 	}
 }
 
+func TestHeaderAndEnvCleartextWarning(t *testing.T) {
+	t.Setenv("AGW_B", "b")
+	for url, want := range map[string]bool{"http://gitlab.lan/api": true, "http://localhost:1/api": false, "https://gitlab.lan/api": false} {
+		c, _ := Parse([]byte("sources: {s: {type: http, url: \"" + url + "\", poll: 1m, headers: {PRIVATE-TOKEN: env:AGW_B}}}"))
+		if got := hasWarning(c, "header PRIVATE-TOKEN"); got != want {
+			t.Errorf("%s: header warning=%v want %v", url, got, want)
+		}
+	}
+	c, _ := Parse([]byte("server: {mcp_packages: {p: {command: [/bin/p], env: [K]}}}\nsources: {s: {type: mcp, package: p, url: \"\", env: {K: env:AGW_B}, read: {tool: t}}}"))
+	c.Sources["s"].URL = "http://mcp.lan/x" // env on a plain http URL, non-loopback
+	if !hasWarning(c, "env K") {
+		t.Errorf("no env warning: %v", c.Warnings())
+	}
+}
+
 func TestDurationsAndAgentMCP(t *testing.T) {
 	t.Setenv("AGW_X", "x")
 	c, _ := Parse([]byte(`
@@ -492,7 +507,7 @@ agents:
 		t.Fatal(err)
 	}
 	got, on := c.AgentEgress(c.Agents["sub"])
-	want := "chatgpt.com:443,auth.openai.com:443,mcp.example.com:443,10.0.0.5:9000 (allow_private),api.github.com:443,*.corp.example:8443,global.example.com:443"
+	want := "chatgpt.com:443,auth.openai.com:443,mcp.example.com:443,10.0.0.5:9000 (allow_private) (no_link_local),api.github.com:443,*.corp.example:8443,global.example.com:443"
 	if !on || hostsOf(got) != want {
 		t.Fatalf("sub: %v\n%s", on, hostsOf(got))
 	}

@@ -3,11 +3,12 @@ package job
 import (
 	"context"
 	"fmt"
-	"github.com/olafkfreund/siphon/internal/action"
 	"log/slog"
+	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/olafkfreund/siphon/internal/action"
 	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/store"
 )
@@ -20,6 +21,7 @@ const idlePoll = time.Second
 var stopOrphans = action.StopOrphans
 
 func (p *Pipeline) Requeue() error {
+	action.CleanBridgeSecrets(filepath.Dir(p.Config().Server.DB))
 	if p.Config().Server.Sandbox != "none" {
 		// A crashed siphon leaves its siphon-action@ units running (they live
 		// outside our cgroup); stop them before their jobs are requeued, so a

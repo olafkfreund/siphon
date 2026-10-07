@@ -48,6 +48,7 @@
 </div>{{end}}
 
 {{define "servicedone"}}{{with .ServiceDone}}<div class="top"><div><h1>{{.Service}} connected</h1><div class="muted">Source <b>{{.Name}}</b> is saved and live. This page is shown <b>once</b>.</div></div></div>
+{{if .ApplyErr}}<div class="banner" role="alert">Saved, but applying it live failed: {{.ApplyErr}}. Fix it on the Config page, or restart.</div>{{end}}
 {{if .Hook}}<section class="card mb" aria-labelledby="hook-h"><h2 id="hook-h">{{template "icon" "webhook"}} Finish the webhook in {{.Service}}</h2>
   <div class="banner" role="alert"><b>Copy the secret now.</b> It is stored write-only and won't be shown again.</div>
   <dl>

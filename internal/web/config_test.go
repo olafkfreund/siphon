@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -24,12 +25,13 @@ rules:
 
 type cfgEnv struct {
 	*env
-	dir     string
-	cur     atomic.Pointer[config.Config]
-	applied atomic.Int32
-	c       *http.Cookie
-	keep    int // overlay rows the security tests expect to remain
-	csrf    string
+	dir       string
+	cur       atomic.Pointer[config.Config]
+	applied   atomic.Int32
+	applyFail atomic.Bool // makes Apply fail (the save still lands)
+	c         *http.Cookie
+	keep      int // overlay rows the security tests expect to remain
+	csrf      string
 }
 
 func newCfgEnv(t *testing.T) *cfgEnv { return newCfgEnvFile(t, cfgFile) }
@@ -49,7 +51,14 @@ func newCfgEnvFile(t *testing.T, content string) *cfgEnv {
 	ce.cur.Store(cfg)
 	ce.env = newEnv(t, func(o *Options) {
 		o.Config = ce.cur.Load
-		o.Apply = func(c *config.Config) error { ce.cur.Store(c); ce.applied.Add(1); return nil }
+		o.Apply = func(c *config.Config) error {
+			if ce.applyFail.Load() {
+				return errors.New("apply boom")
+			}
+			ce.cur.Store(c)
+			ce.applied.Add(1)
+			return nil
+		}
 		o.ConfigPath = path
 	})
 	ce.c, ce.csrf = ce.login()
