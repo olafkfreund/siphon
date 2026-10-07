@@ -1816,6 +1816,46 @@ Example:
 siphon guide
 ```
 
+### siphon draft
+
+Have a model connection draft an apply file from plain words; checked, never applied without --apply.
+
+```sh
+siphon draft "<text>" [--connection c] [--model m] [--apply] [--yes]
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--apply` | `false` | apply the draft after showing the diff and asking |
+| `--connection` |  | the model connection to ask (default: the first one) |
+| `--model` |  | the model id (default: the connection's first listed model) |
+| `--yes` | `false` | with --apply: don't ask |
+
+Example:
+
+```sh
+siphon draft "tell me on ntfy when a deploy webhook reports failed"
+```
+
+### siphon mcp
+
+Run an MCP server on stdio so an assistant can inspect and (with --allow-write) change this siphon.
+
+```sh
+siphon mcp [--allow-write] [--allow-secrets]
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--allow-secrets` | `false` | with --allow-write: accept secret values through apply (they pass through the assistant's context) |
+| `--allow-write` | `false` | let apply and delete really change things (default: they only dry-run) |
+
+Example:
+
+```sh
+claude mcp add siphon -- siphon mcp
+```
+
 ### siphon help
 
 Usage; --json is the machine-readable command list.
