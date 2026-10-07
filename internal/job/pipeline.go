@@ -244,6 +244,17 @@ func (p *Pipeline) handleEvent(ctx context.Context, cfg *config.Config, ev rule.
 		if dryRun {
 			continue
 		}
+		if ev.Source == r.Source { // remembered for `why`; a clean run clears it
+			var derr error
+			if err != nil {
+				derr = store.PutRuleError(tx, r.Name, now, err.Error())
+			} else {
+				derr = store.ClearRuleError(tx, r.Name)
+			}
+			if derr != nil {
+				return nil, nil, false, nil, derr
+			}
+		}
 		for _, f := range fs {
 			id, link, err := p.enqueue(tx, cfg, r, f, ev, now)
 			if err != nil {

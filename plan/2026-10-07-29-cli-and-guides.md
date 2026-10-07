@@ -363,3 +363,9 @@ Revert the merge.
   - Endpoints are in `internal/web/connapi.go`.
   - `GET /api/connections` strips userinfo from model URLs.
   - All these routes send `Cache-Control: no-store`.
+- **Step 4 (coder):**
+  - The migration is in `internal/store/migrations/0003_diagnostics.sql`. It also adds `source_state.event_at`, which `last_event_at` needs.
+  - Eval errors are recorded in `handleEvent` (the one place both poll and webhook evaluate), only for the rule's own source, and cleared by a clean evaluation.
+  - Webhook rejections are recorded through `WebhookOptions.OnReject`, with fixed reason strings. The pre-auth flood 429 is not recorded, so there's no DB write per unauthenticated request.
+  - `last_event_matches` is a clean-slate dry-run; the edge and cooldown reasons use the real state.
+  - Eval error text is clipped to 300 characters and masked with `cfg.Secrets()` (masking done in step 5).

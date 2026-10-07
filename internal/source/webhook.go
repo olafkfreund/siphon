@@ -29,6 +29,10 @@ type WebhookOptions struct {
 	// unauthenticated posts); Limit counts verified deliveries. Both are per
 	// source; nil means a private limiter (fine for tests, not for per-request use).
 	PreLimit, Limit *Limiter
+	// OnReject is told of a refused delivery: the status and a short fixed
+	// reason, never anything from the request. Rate-limit refusals of
+	// unverified floods (PreLimit) are not reported.
+	OnReject func(status int, reason string)
 }
 
 // Limiter is a token bucket. A webhook's limiters must outlive the handler
@@ -85,6 +89,12 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+		reject := func(code int, reason string) {
+			if o.OnReject != nil {
+				o.OnReject(code, reason)
+			}
+			w.WriteHeader(code)
+		}
 		now := o.Now()
 		if !o.PreLimit.Allow(now) {
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -92,11 +102,11 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, o.MaxBody+1))
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
+			reject(http.StatusBadRequest, "unreadable body")
 			return
 		}
 		if int64(len(body)) > o.MaxBody {
-			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			reject(http.StatusRequestEntityTooLarge, "body too large")
 			return
 		}
 		header := o.SigHeader
@@ -107,7 +117,7 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 			header = o.TokenHeader
 			a, b := sha256.Sum256([]byte(r.Header.Get(header))), sha256.Sum256([]byte(o.Secret))
 			if o.Secret == "" || subtle.ConstantTimeCompare(a[:], b[:]) != 1 {
-				w.WriteHeader(http.StatusUnauthorized)
+				reject(http.StatusUnauthorized, "token missing or wrong")
 				return
 			}
 			signed = body
@@ -115,7 +125,7 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 			header = "Webhook-Signature"
 			var ok bool
 			if key, ok = verifyStandard(o.Secret, r, body, now); !ok {
-				w.WriteHeader(http.StatusUnauthorized)
+				reject(http.StatusUnauthorized, "signature or timestamp invalid")
 				return
 			}
 			signed = body
@@ -126,14 +136,14 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 			sig := r.Header.Get(header)
 			if o.Signature == "github" {
 				if !strings.HasPrefix(sig, "sha256=") {
-					w.WriteHeader(http.StatusUnauthorized)
+					reject(http.StatusUnauthorized, "signature missing")
 					return
 				}
 				sig = strings.TrimPrefix(sig, "sha256=")
 			} else if o.Signature == "sha256" {
 				sig = strings.TrimPrefix(sig, "sha256=")
 			} else {
-				w.WriteHeader(http.StatusUnauthorized)
+				reject(http.StatusUnauthorized, "no signature scheme configured")
 				return
 			}
 			provided, err := hex.DecodeString(sig)
@@ -144,25 +154,25 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 			}
 			mac.Write(signed)
 			if o.Secret == "" || err != nil || !hmac.Equal(provided, mac.Sum(nil)) {
-				w.WriteHeader(http.StatusUnauthorized)
+				reject(http.StatusUnauthorized, "signature does not match (wrong secret?)")
 				return
 			}
 			if o.TimestampHeader != "" {
 				seconds, err := strconv.ParseInt(r.Header.Get(o.TimestampHeader), 10, 64)
 				if err != nil || now.Sub(time.Unix(seconds, 0)) > 5*time.Minute || time.Unix(seconds, 0).Sub(now) > 5*time.Minute {
-					w.WriteHeader(http.StatusUnauthorized)
+					reject(http.StatusUnauthorized, "timestamp missing or too old")
 					return
 				}
 			}
 		}
 		id := r.Header.Get(o.IDHeader)
 		if o.IDHeader != "" && id == "" {
-			w.WriteHeader(http.StatusBadRequest)
+			reject(http.StatusBadRequest, "delivery id header missing")
 			return
 		}
 		allowed := o.Limit.Allow(now)
 		if !allowed {
-			w.WriteHeader(http.StatusTooManyRequests)
+			reject(http.StatusTooManyRequests, "rate limited")
 			return
 		}
 		// Without a signed timestamp, identical bodies replay only after the

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/olafkfreund/siphon/internal/store"
 )
@@ -21,6 +22,7 @@ func (s *server) apiRoutes(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) { jsonErr(w, http.StatusNotFound, "not found") })
 	s.connectionAPI(mux)
+	s.diagAPI(mux)
 	get("/api/sources", func(*http.Request) (any, int, error) { v, err := s.sources(); return v, 200, err })
 	get("/api/rules", func(*http.Request) (any, int, error) { v, err := s.rules(); return v, 200, err })
 	get("/api/jobs", func(r *http.Request) (any, int, error) {
@@ -49,7 +51,18 @@ func (s *server) apiRoutes(mux *http.ServeMux) {
 		return v, 200, err
 	})
 	get("/api/audit", func(r *http.Request) (any, int, error) {
-		v, err := store.ListAudit(s.Store.DB, limit(r))
+		q := r.URL.Query()
+		f := store.AuditFilter{Rule: q.Get("rule"), Event: q.Get("event"), Limit: limit(r)}
+		if v := q.Get("since"); v != "" { // a time (RFC 3339) or how long ago (1h)
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				f.Since = t
+			} else if d, err := time.ParseDuration(v); err == nil && d > 0 {
+				f.Since = s.Now().Add(-d)
+			} else {
+				return nil, 400, errMsg("bad since: want a time like 2026-01-02T15:04:05Z or a duration like 1h")
+			}
+		}
+		v, err := store.QueryAudit(s.Store.DB, f)
 		if v == nil {
 			v = []store.AuditRow{}
 		}

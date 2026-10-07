@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,7 +16,7 @@ func TestOpenTwiceIdempotent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, tbl := range []string{"jobs", "rule_state", "seen_event", "approvals", "audit", "rule_override", "source_state", "schema_migrations"} {
+		for _, tbl := range []string{"jobs", "rule_state", "seen_event", "approvals", "audit", "rule_override", "source_state", "schema_migrations", "rule_error"} {
 			var n int
 			if err := s.DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, tbl).Scan(&n); err != nil || n != 1 {
 				t.Fatalf("open %d: table %s missing (%v)", i, tbl, err)
@@ -22,7 +24,7 @@ func TestOpenTwiceIdempotent(t *testing.T) {
 		}
 		var m int
 		s.DB.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&m)
-		if m != 2 {
+		if m != 3 {
 			t.Fatalf("migrations recorded: %d", m)
 		}
 		var fk int
@@ -296,5 +298,43 @@ func TestMigrationOnExistingDB(t *testing.T) {
 	defer s.Close()
 	if _, err := ConfigItems(s.DB); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// 0003 applies on top of a database that only has 0001 and 0002, keeping its rows.
+func TestMigration0003OnExistingDB(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "old.db")
+	q := url.Values{"_pragma": {"foreign_keys(1)"}}
+	db, err := sql.Open("sqlite", "file:"+p+"?"+q.Encode())
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Exec(`CREATE TABLE schema_migrations (version TEXT PRIMARY KEY)`)
+	for _, n := range []string{"0001_init.sql", "0002_config_overlay.sql"} {
+		b, _ := migrationFS.ReadFile("migrations/" + n)
+		if _, err := db.Exec(string(b)); err != nil {
+			t.Fatal(err)
+		}
+		db.Exec(`INSERT INTO schema_migrations(version) VALUES (?)`, n)
+	}
+	db.Exec(`INSERT INTO source_state(source,json,last_error) VALUES ('old','{"a":1}','boom')`)
+	db.Close()
+	s, err := Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if j, _ := SourceEvent(s.DB, "old"); j != `{"a":1}` {
+		t.Fatalf("old row lost: %q", j)
+	}
+	d, err := SourceDiagnostics(s.DB, "old")
+	if err != nil || d.EventAt != nil || d.Reject != "" {
+		t.Fatalf("%+v %v", d, err)
+	}
+	if err := SetSourceReject(s.DB, "old", time.Now(), 401, "bad"); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := SourceDiagnostics(s.DB, "old"); d.Reject != "bad (401)" || d.RejectAt == nil {
+		t.Fatalf("%+v", d)
 	}
 }

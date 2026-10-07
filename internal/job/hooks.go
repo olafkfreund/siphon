@@ -32,6 +32,11 @@ func (p *Pipeline) Webhooks() func(source string) http.Handler {
 			Name: name, Secret: s.Secret.Value, Signature: s.Signature, SigHeader: s.SigHeader, TokenHeader: s.TokenHeader,
 			TimestampHeader: s.TimestampHdr, IDHeader: strings.TrimPrefix(s.ID, "header."),
 			MaxBody: int64(cfg.Limits.HTTPMaxBody), Now: p.Now, PreLimit: lim.pre, Limit: lim.post,
+			OnReject: func(status int, reason string) {
+				if err := store.SetSourceReject(p.Store.DB, name, p.Now(), status, reason); err != nil {
+					slog.Warn("store webhook rejection", "source", name, "err", err)
+				}
+			},
 		}, p.deliver)
 	}
 }
