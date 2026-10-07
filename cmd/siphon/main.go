@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/olafkfreund/siphon/internal/action"
+	"github.com/olafkfreund/siphon/internal/agentloop"
 	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/cred"
 	"github.com/olafkfreund/siphon/internal/job"
@@ -70,6 +71,22 @@ func main() {
 			os.Exit(125)
 		}
 		os.Exit(action.ExecJob(os.Args[2]))
+	case "agent-run":
+		// Internal: `siphon agent-run <spec.json>` is the model agent, run by the action sandbox.
+		var spec agentloop.Spec
+		if len(args) != 1 {
+			fmt.Fprintln(os.Stderr, "usage: siphon agent-run <spec.json>")
+			os.Exit(2)
+		}
+		b, rerr := os.ReadFile(args[0])
+		if rerr == nil {
+			rerr = json.Unmarshal(b, &spec)
+		}
+		if rerr != nil {
+			fmt.Fprintln(os.Stderr, "agent-run:", rerr)
+			os.Exit(2)
+		}
+		os.Exit(agentloop.Run(ctx, spec, os.Stdout))
 	case "schema":
 		var b []byte
 		if b, err = config.Schema(); err == nil {

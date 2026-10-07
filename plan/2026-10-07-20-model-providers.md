@@ -221,3 +221,10 @@ the new providers and `kind: model` disappear.
   - Modes are `source.Public`, `Private` and `PrivateNoLinkLocal`. The last also refuses multicast link-local and the metadata addresses `fd00:ec2::254`, `168.63.129.16` (Azure) and `100.100.100.200` (Alibaba).
   - The proxy's pass case is tested with loopback, since a `10.x` address would hang on dial.
   - The web test and model-list code switched to `PrivateNoLinkLocal` (Opus).
+- **Step 3 (coder; one fix by Opus):**
+  - `allowed_tools` also accepts `mcp__<server>` for a whole server, as in Claude Code.
+  - A 4xx on a request with `tools` (except 401, 403 and 429) retries once without them.
+  - `max_turns` defaults to 20.
+  - Lane deviations, needed: `AgentOptions.Model` and `BaseURL` plus `case "model"` in `internal/action/agent.go`, and `case c.IsModel()` in `internal/job/pipeline.go`, so keyless Ollama doesn't take the subscription path.
+  - Config accessors `Credential.IsModel` and `BaseURL` (adds `/v1` for ollama).
+  - Opus: an auth failure on a model agent now says "connection … was refused (bad or missing API key)" instead of the CLI re-login message.

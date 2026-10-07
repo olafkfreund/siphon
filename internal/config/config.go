@@ -1056,6 +1056,18 @@ func (c *Config) RuleEgress(r Rule) (allow []HostPort, enabled bool) {
 	return dedupe(c.userAllow(r.Egress.Allow, c.Server.Egress.Allow)), true
 }
 
+// IsModel reports whether the credential points at a model endpoint.
+func (c *Credential) IsModel() bool { return slices.Contains(modelProviders, c.Provider) }
+
+// BaseURL is the OpenAI-compatible base: the URL, plus /v1 for Ollama.
+func (c *Credential) BaseURL() string {
+	u := strings.TrimRight(c.URL, "/")
+	if c.Provider == "ollama" {
+		u += "/v1"
+	}
+	return u
+}
+
 // ModelURL checks a model endpoint URL (http(s)://host[:port][/path], no
 // userinfo) and returns its lowercase host and port (default 80/443).
 func ModelURL(raw string) (host string, port int, err error) {

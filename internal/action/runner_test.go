@@ -202,3 +202,27 @@ func TestStdoutQuotaTextDoesNotClassify(t *testing.T) {
 		t.Fatalf("result=%+v err=%v", got, err)
 	}
 }
+
+func TestBuildModel(t *testing.T) {
+	argv, stdin, env, files, _, _, err := buildRun(AgentOptions{
+		Kind: "model", Model: "qwen", BaseURL: "http://h:11434/v1", APIKey: "sk-k", Prompt: "hi",
+		MCP: map[string]MCPServer{"s": {URL: "http://m/mcp"}}, AllowedTools: []string{"mcp__s__t"}, MaxTurns: 3,
+		WorkDir: t.TempDir(),
+	}, "/tmp/siphon")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(argv) != 3 || argv[1] != "agent-run" || argv[2] != "/tmp/siphon/spec.json" || stdin != nil || len(env) != 0 {
+		t.Fatalf("argv %v env %v", argv, env)
+	}
+	for _, a := range argv {
+		if strings.Contains(a, "sk-k") {
+			t.Fatal("key on argv")
+		}
+	}
+	if string(files["model-key"]) != "sk-k" || strings.Contains(string(files["spec.json"]), "sk-k") ||
+		!strings.Contains(string(files["spec.json"]), `"key_file":"/tmp/siphon/model-key"`) ||
+		!strings.Contains(string(files["spec.json"]), `"base_url":"http://h:11434/v1"`) {
+		t.Fatalf("files: %s", files["spec.json"])
+	}
+}

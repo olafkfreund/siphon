@@ -416,7 +416,7 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 		servers[name] = action.MCPServer{URL: s.URL, Command: s.Command, Headers: h}
 	}
 	opts := action.AgentOptions{
-		Kind: a.Kind, Command: a.Command, Runner: a.Runner,
+		Kind: a.Kind, Model: a.Model, Command: a.Command, Runner: a.Runner,
 		Prompt: a.Prompt, Env: pl.Env, MCP: servers,
 		AllowedTools: a.AllowedTools, MaxTurns: a.MaxTurns, MaxBudgetUSD: a.MaxBudgetUSD,
 		Timeout: time.Duration(a.Timeout), Sandbox: sandbox(cfg, 0),
@@ -429,6 +429,8 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 	var start map[string][]byte
 	switch {
 	case c == nil:
+	case c.IsModel(): // an endpoint, not a login: no store files
+		opts.BaseURL, opts.APIKey = c.BaseURL(), c.APIKey.Value
 	case c.APIKey.Value != "":
 		opts.APIKey = c.APIKey.Value
 	default:
@@ -477,6 +479,9 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 		switch res.Class {
 		case "auth":
 			msg := fmt.Sprintf("credential %s needs re-login: log in with %s on the host, then run `siphon credentials import %s`", credName, a.Kind, credName)
+			if a.Kind == "model" { // an endpoint key, not a CLI login
+				msg = fmt.Sprintf("connection %s was refused (bad or missing API key): replace the key on the Connections page", credName)
+			}
 			p.audit("credential_reauth", j.ID, credName)
 			return "failed", res.Exit, msg + "\n" + out, res.Stdout
 		case "quota":

@@ -25,6 +25,8 @@ type MCPServer struct {
 
 type AgentOptions struct {
 	Kind         string
+	Model        string // kind model: model id
+	BaseURL      string // kind model: OpenAI-compatible base URL
 	Command      string
 	Runner       []string // deprecated: only Runner[0] is used for Claude
 	CredFiles    map[string][]byte
@@ -77,7 +79,7 @@ func RunAgent(ctx context.Context, o AgentOptions) (AgentResult, error) {
 	for k, v := range env {
 		sb.Env[k] = v
 	}
-	if sb.Egress != nil {
+	if sb.Egress != nil && kindOrDefault(o.Kind) != "model" {
 		sb.Env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
 	}
 	sb.Files = make(map[string][]byte, len(o.Sandbox.Files)+len(files))
@@ -114,6 +116,13 @@ func RunAgent(ctx context.Context, o AgentOptions) (AgentResult, error) {
 		}
 	}
 	return out, err
+}
+
+func kindOrDefault(k string) string {
+	if k == "" {
+		return "claude"
+	}
+	return k
 }
 
 func buildRun(o AgentOptions, home string) (argv []string, stdin []byte, env map[string]string, files map[string][]byte, writeback []string, wbStore []string, err error) {
@@ -153,6 +162,8 @@ func buildRun(o AgentOptions, home string) (argv []string, stdin []byte, env map
 		return buildCodex(o, cmd, prompt, home)
 	case "agy":
 		return buildAgy(o, cmd, prompt)
+	case "model":
+		return buildModel(o, prompt, home)
 	default:
 		err = fmt.Errorf("unknown agent kind %q", kind)
 		return
