@@ -21,7 +21,11 @@ let
       server.db = "${stateDir}/state.db";
       server.actions_dir = actionsDir;
     }
-    (lib.optionalAttrs cfg.egress.enable { server.egress.socket = "${egressDir}/egress.sock"; })
+    (lib.recursiveUpdate (lib.optionalAttrs cfg.egress.enable { server.egress.socket = "${egressDir}/egress.sock"; })
+      (lib.optionalAttrs (cfg.models.privateEndpoints != [ ]) {
+        server.models.private_endpoints = cfg.models.privateEndpoints;
+      })
+    )
   ) cfg.settings;
   configFile = yaml.generate "siphon.yaml" settings;
   units = settings.units or [ ];
@@ -160,6 +164,18 @@ in
       type = lib.types.str;
       default = "2h";
       description = "Hard ceiling (RuntimeMaxSec) for any sandboxed action; per-action timeouts apply below it.";
+    };
+
+    models.privateEndpoints = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = lib.optional config.services.ollama.enable "127.0.0.1:${toString config.services.ollama.port}";
+      defaultText = lib.literalExpression ''lib.optional config.services.ollama.enable "127.0.0.1:''${toString config.services.ollama.port}"'';
+      example = [ "192.168.1.20:11434" ];
+      description = ''
+        Private (loopback/LAN) model endpoints agents may reach, as exact
+        host:port. A local services.ollama is included automatically.
+        Link-local and cloud metadata addresses are never reachable.
+      '';
     };
 
     egress.enable = lib.mkOption {

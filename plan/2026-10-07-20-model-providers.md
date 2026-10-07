@@ -228,3 +228,9 @@ the new providers and `kind: model` disappear.
   - Lane deviations, needed: `AgentOptions.Model` and `BaseURL` plus `case "model"` in `internal/action/agent.go`, and `case c.IsModel()` in `internal/job/pipeline.go`, so keyless Ollama doesn't take the subscription path.
   - Config accessors `Credential.IsModel` and `BaseURL` (adds `/v1` for ollama).
   - Opus: an auth failure on a model agent now says "connection … was refused (bad or missing API key)" instead of the CLI re-login message.
+- **Step 5 (Opus):**
+  - `services.siphon.models.privateEndpoints` defaults to the local `services.ollama` (`127.0.0.1:<port>`). It's merged into the settings with `recursiveUpdate`; a shallow `//` was caught before it ran.
+  - The VM stub is `nix/stub-model.py`, a stdlib OpenAI-compatible endpoint and minimal streamable-HTTP MCP server.
+  - The subtest passed the first time: the model asks for the tool, the loop calls it through the proxy, and the final answer is checked; the stub records the call.
+  - Live on p620 (`sandbox: none` dev instance): a `kind: model` agent on the local Ollama `qwen3.8:27b` answered "The capital of Norway is Oslo." (1 turn, 64 s).
+  - Also fixed: `validate` no longer warns "max_turns not enforced" for model agents.
