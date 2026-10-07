@@ -31,6 +31,25 @@ webhook  ─┘        cooldown, repeat             agent    claude, codex or ag
   per id; `repeat` and `cooldown` limit how often.
 - **Actions** run as jobs in a worker pool, with approval, audit and retention.
 
+## Documentation
+
+**Start with the [user guide](docs/README.md).** It's organised by what you
+want to do, and each how-to shows the CLI, then how to check it in the
+portal, then the YAML.
+
+| | |
+|---|---|
+| [Getting started](docs/getting-started.md) | 10 minutes: login, connect a model, a webhook task, an agent task |
+| [Templates](docs/templates/README.md) | ~20 ready-made tasks: PR review, CI failures, alerts, uptime, AWS, Home Assistant, … |
+| [Concepts](docs/concepts.md) | source → rule → action, agents, connections, approvals, sandboxing |
+| [Connections](docs/README.md#connections) | models (Ollama, OpenAI-compatible), logins (Claude, Codex, agy), GitHub, GitLab, AWS |
+| [Troubleshooting](docs/troubleshooting.md) | `siphon why`, testing against the last event, common errors |
+| [CLI reference](docs/cli.md) | every command and flag |
+| [For AI assistants](docs/llm.md) · [`AGENTS.md`](AGENTS.md) · [`llms.txt`](llms.txt) | drive Siphon from Claude Code or Codex (`siphon mcp`), or let a model draft tasks (`siphon draft`) |
+
+The portal has the same guide under **Help & Docs**, with a live "get
+started" checklist and the template gallery.
+
 ## Development
 
 The project ships a [devenv](https://devenv.sh) shell (Go, gopls, sqlite, jq,
@@ -87,41 +106,31 @@ podman run -d --name siphon --cap-drop=all --read-only --tmpfs /tmp \
 
 ## Quick start
 
-Needs Nix with flakes. The example config needs these in the environment
-(any values will do for `validate`; `SIPHON_TOKEN` must be 32+ characters):
+With Siphon running (see above), from any machine:
 
 ```sh
-export SIPHON_TOKEN=$(head -c 32 /dev/urandom | base64 | tr -d '=+/')
-export FACTORY_TOKEN=x METRICS_API_KEY=x GH_WEBHOOK_SECRET=x PARTNER_WEBHOOK_SECRET=x
-
-nix run github:olafkfreund/siphon -- validate -config examples/siphon.yaml
+siphon login http://127.0.0.1:8080            # the portal token, at a no-echo prompt
+siphon connect model ollama --name ollama-local   # or: siphon connect login claude --setup-token -
+siphon template                               # ready-made tasks
+siphon template upstream-status > t.yaml && siphon apply -f t.yaml --dry-run && siphon apply -f t.yaml --yes
+siphon draft "tell me on ntfy topic my-alerts when GitHub has an incident"   # or let a model write it
+siphon status
 ```
 
-Dry-run a rule against a saved event (nothing is written):
+The full walk-through, with real output, is in [Getting started](docs/getting-started.md).
+The portal is at the same address: sign in with the `server.token` value.
+`/healthz` needs no login, and the JSON API is under `/api/` with
+`Authorization: Bearer <token>`.
+
+**Without a running daemon**, the local commands work on a config file:
 
 ```sh
-echo '{"used_pct": 95}' > event.json
+nix run github:olafkfreund/siphon -- validate -config examples/siphon.yaml
 nix run github:olafkfreund/siphon -- rules test -config examples/siphon.yaml disk-full event.json
 ```
 
-Poll every source once and run whatever fires, or run the daemon. Outside the
-NixOS module there is no polkit rule, so the systemd sandbox is not available
-to an ordinary user; run unsandboxed for a local try-out (not for real use):
-
-```sh
-sed 's/sandbox: systemd/sandbox: none/' examples/siphon.yaml > siphon.local.yaml
-nix run github:olafkfreund/siphon -- run-once -config siphon.local.yaml
-nix run github:olafkfreund/siphon -- serve    -config siphon.local.yaml
-```
-
-Header names in `headers[...]` are lower-case for every source type
-(`headers["x-github-event"]`).
-
-`serve` listens on `server.listen` (default `:8080`). The portal is at
-`http://127.0.0.1:8080/`: log in with the `server.token` value, then browse
-jobs, approvals, rules (enable or disable at runtime), sources and the audit
-log. `/healthz` needs no login. The JSON API is under `/api/` with
-`Authorization: Bearer <token>`.
+Outside the NixOS module or microVM there is no systemd sandbox for an
+ordinary user. Use `sandbox: none` only for a local try-out.
 
 From a checkout, `nix develop -c go test ./...` runs the tests and
 `nix build` builds `./result/bin/siphon`.
@@ -173,34 +182,22 @@ the security notes). Put a TLS-terminating reverse proxy in front of
 
 ## CLI
 
-All commands that read the config take `-config <file>` (default `siphon.yaml`).
+`siphon` is both a **client** of a running Siphon (`login`, `get`, `apply`,
+`connect`, `new task`, `test`, `why`, `draft`, `mcp`, …) and a set of
+**local** commands that work on a config file (`serve`, `validate`,
+`rules test`, `run-once`, `credentials import`). Any command given
+`-config` is local. Every command and flag is in the
+[CLI reference](docs/cli.md); `siphon help --json` gives the same as data.
 
-| Command | What it does |
-|---|---|
-| `siphon validate [-config f]` | Check the config; prints every problem at once, then `ok`. Warnings go to stderr. |
-| `siphon rules test [-config f] <rule> <event.json>` | Dry-run one rule against an event; prints the fires and the rendered argv as JSON. A file shaped `{"headers": {...}, "event": {...}}` supplies request headers (names are lower-cased); any other JSON is the event itself. |
-| `siphon run-once [-config f]` | Poll every source once, evaluate rules, run the jobs. Holds the DB lock. |
-| `siphon serve [-config f]` | The daemon: pollers, webhook endpoints, workers, portal and API. Holds the DB lock. |
-| `siphon jobs ls [-config f] [-state s]` | List jobs (newest first). |
-| `siphon credentials import [-config f] [-token-stdin] <name>` | Read a login file (or, with `-token-stdin`, a Claude setup-token) from stdin, check its shape and store it. |
-| `siphon credentials ls [-config f]` | List stored logins: name, provider, token expiry, last write-back. Never prints secrets. |
-| `siphon approve [-config f] [-by name] <job id>` | Approve a pending job (`-by` defaults to `$USER`). |
-| `siphon deny [-config f] [-by name] <job id>` | Deny a pending job. |
-| `siphon schema` | Print the JSON Schema for `siphon.yaml`. |
-| `siphon version` | Print the version. |
-
-`serve` and `run-once` exclude each other on one DB file; `jobs ls`, `approve`
-and `deny` are safe next to a running `serve`.
-
-**On NixOS** the binary is not on `PATH` unless you add it
-(`environment.systemPackages = [ config.services.siphon.package ];`), and the
-CLI must run as the service user, never as root: a root-run command would create
-root-owned SQLite WAL files that the daemon then cannot open. Use the config
-file the unit runs with (`systemctl cat siphon` shows its path in `ExecStart`):
+On NixOS, `services.siphon.cli.enable` (on by default) puts `siphon` on
+PATH and sets `SIPHON_URL` to the local daemon, so `siphon login` is all a
+user needs. Local commands must run as the service user, never root (a
+root-run command would create root-owned SQLite WAL files that the daemon
+then can't open), against the config the unit runs with (`systemctl cat
+siphon` shows its path):
 
 ```sh
 sudo -u siphon siphon jobs ls -config /nix/store/...-siphon.yaml
-sudo -u siphon siphon approve -config /nix/store/...-siphon.yaml 42
 ```
 
 ### Editor support
@@ -361,55 +358,11 @@ operator's responsibility.
 
 ## Model connections (Ollama and OpenAI-compatible APIs)
 
-Agents can also run on local or hosted models through Siphon's own small
-agent loop (`kind: model`). It speaks the OpenAI-compatible chat API with
-tool calling, offers the agent exactly its `allowed_tools` from its MCP
-servers, and runs in the same sandbox, egress restriction and approval flow
-as Claude, Codex and agy.
-
-```yaml
-server:
-  models:
-    private_endpoints: ["127.0.0.1:11434"]   # local/LAN endpoints, exact host:port
-
-credentials:
-  ollama-local: { provider: ollama, url: "http://127.0.0.1:11434" }
-  openrouter:
-    provider: openai                       # any OpenAI-compatible API
-    url: https://openrouter.ai/api/v1
-    api_key: file:/run/agenix/openrouter   # optional; local servers need none
-
-agents:
-  triage-local:
-    kind: model
-    credential: ollama-local
-    model: qwen3.8:27b
-    prompt: "Task {{.item.id}} failed: {{.item.error}}. Diagnose with the factory tools."
-    mcp: [factory]
-    allowed_tools: [mcp__factory__task_status]
-    max_turns: 10
-    timeout: 5m
-```
-
-- **The Connections page** (formerly Logins) adds these from the portal:
-  - presets for Ollama, LM Studio, OpenRouter, Groq and Mistral, or any
-    OpenAI-compatible URL;
-  - an optional, write-only API key;
-  - **Test connection**, which lists the endpoint's models and its latency.
-  - The agent editor suggests models from the chosen connection, and marks
-    families known to handle tool calls ("tools ✓": qwen, llama3.x,
-    mistral, gpt-oss, command-r).
-- **Private endpoints** (loopback or LAN, like most Ollama setups) must be
-  listed once in `server.models.private_endpoints`. The portal refuses
-  unlisted ones, and link-local and cloud metadata addresses are never
-  reachable. On NixOS a local `services.ollama` is added for you through
-  `services.siphon.models.privateEndpoints`.
-- **Limits:**
-  - `max_turns` and `timeout` are enforced.
-  - `max_budget_usd` only applies when the endpoint reports a cost
-    (OpenRouter does).
-  - Models that can't use tools still answer: the loop falls back to a
-    plain completion and notes it.
+Agents can run on local or hosted models through Siphon's own agent loop
+(`kind: model`), in the same sandbox, egress restriction and approval flow
+as Claude, Codex and agy. `siphon connect model ollama`, presets for LM
+Studio, OpenRouter, Groq and Mistral, private-endpoint rules: see
+[docs/connections/models.md](docs/connections/models.md).
 
 ## Services: GitHub, GitLab and AWS
 
@@ -422,52 +375,11 @@ local testing use `gh webhook forward`.
 
 ### GitHub
 
-```yaml
-sources:
-  github:                                   # agent tools (GitHub-hosted MCP server)
-    type: mcp
-    url: https://api.githubcopilot.com/mcp/
-    auth: { bearer: file:/run/credentials/siphon.service/github-token }
-    read: { tool: get_me }
-    poll: 24h
-  github-hooks:                             # events
-    type: webhook
-    signature: github
-    secret: file:/run/credentials/siphon.service/github-webhook
-    id: header.X-GitHub-Delivery
-agents:
-  pr-reviewer:
-    mcp: [github]
-    allowed_tools: [mcp__github__get_pull_request, mcp__github__get_pull_request_diff]
-```
-
-- **Token:** a **fine-grained** personal access token for only the repos
-  agents need, with Contents, Pull requests and Issues set to read and
-  Metadata set to read. Add write only if agents should comment or review.
-- **Local server:** `package: github` runs the Nix-pinned `github-mcp-server`
-  instead (needed for GitHub Enterprise). Its token goes in `env:` and never
-  reaches the agent (see below).
+`siphon connect github --webhook`: tokens, webhook setup, the tools to allow, and the YAML are in [docs/connections/github.md](docs/connections/github.md).
 
 ### GitLab
 
-```yaml
-server:
-  services: { private_endpoints: ["gitlab.lan:443"] }   # only for a self-hosted GitLab on your LAN
-sources:
-  gitlab:                                   # open merge requests, polled
-    type: http
-    url: "https://gitlab.com/api/v4/projects/group%2Fproject/merge_requests?state=opened"
-    headers: { PRIVATE-TOKEN: file:/run/credentials/siphon.service/gitlab-token }
-    poll: 5m
-  gitlab-hooks:                             # events
-    type: webhook
-    signature: token
-    token_header: X-Gitlab-Token
-    secret: file:/run/credentials/siphon.service/gitlab-webhook
-    id: header.X-Gitlab-Event-UUID
-```
-
-**Token:** a **project access token** with `read_api`.
+`siphon connect gitlab --webhook`: tokens, webhook setup, the tools to allow, and the YAML are in [docs/connections/gitlab.md](docs/connections/gitlab.md).
 
 ### AWS
 
