@@ -1,0 +1,6 @@
+{{define "helppage"}}{{with .HelpPage}}<div class="helplayout">
+{{template "helpnav" .Nav}}
+<article class="doc" aria-label="{{.Title}}">{{.Body}}<p class="muted small doc-raw"><a href="{{.Raw}}">View as Markdown</a></p></article>
+</div>{{end}}{{end}}
+
+{{define "helpnav"}}<nav class="docnav" aria-label="Help pages">{{range .}}{{if .Title}}<div class="sep">{{.Title}}</div>{{end}}{{range .Items}}<a href="{{.Href}}"{{if .Current}} aria-current="page"{{end}}>{{.Title}}</a>{{end}}{{end}}</nav>{{end}}

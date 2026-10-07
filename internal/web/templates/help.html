@@ -1,0 +1,12 @@
+{{define "help"}}{{with .Help}}<div class="top"><div><h1>Help &amp; Docs</h1><div class="muted">Get started, learn the concepts, copy a template.</div></div><span class="sp"></span><a class="btn" href="/help/templates">{{template "icon" "copy"}}Templates</a></div>
+<section class="card" aria-labelledby="gs"><div class="top tight"><h2 id="gs">Get started</h2><span class="sp"></span><span class="pill tag">{{.DoneCount}} of {{len .Steps}} done</span></div>
+  {{range $i, $s := .Steps}}<div class="need step">
+    <span class="stepmark{{if .Done}} done{{end}}">{{if .Done}}{{template "icon" "check"}}<span class="sr-only">done</span>{{else}}○<span class="sr-only">not yet</span>{{end}}</span>
+    <div class="what"><b>{{.Title}}</b><div class="small muted">{{.How}}</div>
+      <div class="cmd"><code id="step-{{$i}}">{{.Cmd}}</code> <button type="button" class="btn sm" data-action="copy" data-target="step-{{$i}}">{{template "icon" "copy"}}Copy</button></div></div>
+    <a class="btn sm" href="{{.Link}}">{{.LinkText}}</a>
+  </div>{{end}}
+</section>
+<h2 class="mt">Read</h2>
+<div class="grid g3">{{range .Cards}}<a class="card helpcard" href="{{.Href}}"><b>{{.Title}}</b><span class="small muted">{{.Desc}}</span></a>{{end}}</div>
+{{end}}{{end}}

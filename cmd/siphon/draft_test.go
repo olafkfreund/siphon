@@ -279,6 +279,7 @@ func TestDraftWrongProviderSourceIsRepaired(t *testing.T) {
 	e := draftEnv(t, f, true)
 	var res struct {
 		YAML         string   `json:"yaml"`
+		Diff         string   `json:"diff"`
 		Errors       []string `json:"errors"`
 		Warnings     []string `json:"warnings"`
 		Todo         []string `json:"todo"`
@@ -309,6 +310,17 @@ func TestDraftWrongProviderSourceIsRepaired(t *testing.T) {
 		if !strings.Contains(all, want) {
 			t.Errorf("prompt lacks %q", want)
 		}
+	}
+	// the diff does not offer to create the stand-in; the text output says where it comes from
+	if regexp.MustCompile(`(?m)^\+\s+github-hooks:|^\+.*secrets/sources-github`).MatchString(res.Diff) || strings.Contains(res.YAML, "github-hooks:") {
+		t.Fatal("the stand-in source shows up as a change")
+	}
+	txt := e.ok("draft", ghAsk)
+	if !strings.Contains(txt, "Changes:\n(github-hooks: placeholder, created by siphon connect github --webhook)\n") || regexp.MustCompile(`(?m)^\+\s+github-hooks:|^\+.*secrets/sources-github`).MatchString(txt) {
+		t.Fatalf("text output:\n%s", txt)
+	}
+	if !strings.Contains(res.Diff, "pr-open") || !regexp.MustCompile(`(?m)^\+.*name: pr-open`).MatchString(res.Diff) {
+		t.Fatalf("the rule is missing from the diff:\n%s", res.Diff)
 	}
 	// the placeholder is reported, with the connect command, and never written into the draft
 	if len(res.Placeholders) != 1 || res.Placeholders[0] != "sources/github-hooks" || !strings.Contains(strings.Join(res.Todo, "\n"), "`siphon connect github --webhook` (creates github and github-hooks)") {

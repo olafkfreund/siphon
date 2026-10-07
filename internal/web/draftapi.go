@@ -114,6 +114,7 @@ func (s *server) draftCheck(_ context.Context, y string) draft.Checked {
 	type stand struct {
 		kind, name, yaml string
 		secrets          map[string]string
+		placeholder      bool // stands in for something that does not exist yet
 	}
 	var stands []stand
 	needs := map[string]bool{}
@@ -122,19 +123,19 @@ func (s *server) draftCheck(_ context.Context, y string) draft.Checked {
 	}
 	for _, it := range items {
 		if needs[it.Kind+"/"+it.Name] {
-			stands = append(stands, stand{it.Kind, it.Name, it.YAML, map[string]string{"secret": "placeholder"}})
+			stands = append(stands, stand{it.Kind, it.Name, it.YAML, map[string]string{"secret": "placeholder"}, false})
 		} else {
-			stands = append(stands, stand{it.Kind, it.Name, it.YAML, nil})
+			stands = append(stands, stand{it.Kind, it.Name, it.YAML, nil, false})
 		}
 	}
 	var out draft.Checked
 	for _, name := range missingServiceSources(items, cfg) {
 		for _, p := range servicePlaceholders(name, cfg) {
-			stands = append(stands, stand{p.kind, p.name, p.yaml, p.secrets})
+			stands = append(stands, stand{p.kind, p.name, p.yaml, p.secrets, true})
 		}
 		out.Placeholders = append(out.Placeholders, "sources/"+name)
 	}
-	var muts []func(map[itemKey]store.ConfigItem)
+	var muts, phMuts []func(map[itemKey]store.ConfigItem)
 	var pending []pendingSecret
 	var bad []string
 	for _, it := range items {
@@ -154,17 +155,42 @@ func (s *server) draftCheck(_ context.Context, y string) draft.Checked {
 			}
 			pending = append(pending, ps...)
 		}
-		muts = append(muts, putItem(st.kind, st.name, text))
+		if st.placeholder {
+			phMuts = append(phMuts, putItem(st.kind, st.name, text))
+		} else {
+			muts = append(muts, putItem(st.kind, st.name, text))
+		}
 	}
 	if len(bad) > 0 {
 		out.Errors = bad
 		return out
 	}
-	e, err := s.dryRun(nil, func(m map[itemKey]store.ConfigItem) {
-		for _, f := range muts {
-			f(m)
+	// The diff is of the file's items against a base that already holds the
+	// stand-ins, so they never show up as something the apply would create.
+	s.editMu.Lock()
+	defer s.editMu.Unlock()
+	cur, _, err := s.overlay()
+	var e *edit
+	if err == nil {
+		base := map[itemKey]store.ConfigItem{}
+		for _, c := range cur {
+			base[itemKey{Kind: c.Kind, Name: c.Name}] = c
 		}
-	}, pending)
+		for _, f := range phMuts {
+			f(base)
+		}
+		withStands := make([]store.ConfigItem, 0, len(base))
+		for _, c := range base {
+			withStands = append(withStands, c)
+		}
+		if e, err = s.prepare(withStands, func(m map[itemKey]store.ConfigItem) {
+			for _, f := range muts {
+				f(m)
+			}
+		}, pending); err == nil {
+			_, err = s.credsCheck(withStands, e.items)
+		}
+	}
 	if err != nil {
 		if inv, ok := err.(errInvalid); ok {
 			lines := inv.list()

@@ -75,7 +75,13 @@ func buildDraft(fs *flag.FlagSet) func(*cli, []string) error {
 		if !c.json() {
 			fmt.Fprint(c.out, yamlText)
 			if len(errs) == 0 && !*apply {
-				fmt.Fprintf(c.out, "\nChanges:\n%s\n", strings.TrimRight(str(res, "diff"), "\n"))
+				fmt.Fprint(c.out, "\nChanges:\n")
+				for _, p := range strList(res["placeholders"]) {
+					name := strings.TrimPrefix(p, "sources/")
+					hint, _, _ := strings.Cut(strings.ReplaceAll(draft.ConnectHint(name), "`", ""), " (")
+					fmt.Fprintf(c.out, "(%s: placeholder, created by %s)\n", name, hint)
+				}
+				fmt.Fprintln(c.out, strings.TrimRight(str(res, "diff"), "\n"))
 			}
 		}
 		placeholders := strList(res["placeholders"])

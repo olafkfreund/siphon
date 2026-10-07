@@ -37,6 +37,9 @@ type view struct {
 	ServiceDone *serviceDone
 	Cfg         *cfgView  // config item list / editor
 	Hist        *histView // revision history
+	Help        *helpView
+	HelpPage    *helpPageView
+	Gallery     *galleryView
 }
 
 type layout struct {

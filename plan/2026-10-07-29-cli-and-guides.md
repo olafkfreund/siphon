@@ -477,3 +477,8 @@ self-approved; the PR lists it.
   - The repair loop treats a provider-mismatch warning as an error.
   - The inventory shows each source's `signature` and `token_header`.
   - `apply --dry-run -o json` no longer prints the text diff before the JSON.
+- **Step 13 (coder):**
+  - goldmark drops raw HTML (its safe default) instead of escaping it, and blanks `javascript:` links.
+  - A job counts as "run" when it is `done` or `failed`.
+  - `/llms.txt` and `/llms-full.txt` are served from a root-level `embed.go` (`package siphon`).
+  - The draft diff now leaves out placeholder stand-ins; the CLI names each placeholder above "Changes:".
