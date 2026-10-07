@@ -27,7 +27,11 @@ let
       })
     )
   ) cfg.settings;
-  configFile = yaml.generate "siphon.yaml" settings;
+  generatedConfig = yaml.generate "siphon.yaml" settings;
+  # An operator-managed file (services.siphon.configFile) replaces the
+  # generated one; it must then set server.db, actions_dir, egress.socket
+  # etc. itself (see the option's description).
+  configPath = if cfg.configFile != null then cfg.configFile else generatedConfig;
   units = settings.units or [ ];
   metadataDeny = [
     "169.254.0.0/16"
@@ -133,6 +137,21 @@ in
       description = "The siphon package.";
     };
 
+    configFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "/etc/siphon/siphon.yaml";
+      description = ''
+        Use this siphon.yaml instead of one generated from `settings` (for a
+        config managed outside Nix, e.g. the microVM's shared directory). It
+        is validated (`-file-only`) at every start. It must set what the
+        module otherwise fills in: server.db (/var/lib/siphon/state.db),
+        server.actions_dir (/var/lib/siphon-actions) and, with egress,
+        server.egress.socket (/run/siphon/egress.sock). str, not path: a
+        path literal would copy it into the Nix store.
+      '';
+    };
+
     settings = lib.mkOption {
       type = yaml.type;
       default = { };
@@ -197,6 +216,9 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    warnings = lib.optional (cfg.configFile != null && cfg.settings != { })
+      "services.siphon: configFile is set, so services.siphon.settings is ignored";
+
     assertions =
       let
         secretPaths = lib.attrValues cfg.credentials ++ lib.optional (cfg.environmentFile != null) cfg.environmentFile;
@@ -232,9 +254,9 @@ in
           "+${migrateLegacyState}"
           # -file-only: a bad portal edit must not stop the service; serve falls
           # back to the last valid revision and shows a banner instead.
-          "${cfg.package}/bin/siphon validate -file-only -config ${configFile}"
+          "${cfg.package}/bin/siphon validate -file-only -config ${configPath}"
         ];
-        ExecStart = "${cfg.package}/bin/siphon serve -config ${configFile}";
+        ExecStart = "${cfg.package}/bin/siphon serve -config ${configPath}";
         User = "siphon";
         Group = "siphon";
         StateDirectory = "siphon";

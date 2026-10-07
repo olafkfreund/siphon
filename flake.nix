@@ -39,6 +39,28 @@
       checks = forAll (pkgs: {
         vm = import ./nix/vm-test.nix { inherit self pkgs; };
         # The old services.agentgw option path still evaluates to siphon. # legacy-name
+        # configFile replaces the generated config in the unit.
+        config-file =
+          let
+            sys = nixpkgs.lib.nixosSystem {
+              inherit (pkgs.stdenv.hostPlatform) system;
+              modules = [
+                self.nixosModules.default
+                {
+                  boot.loader.grub.enable = false;
+                  fileSystems."/" = {
+                    device = "none";
+                    fsType = "tmpfs";
+                  };
+                  system.stateVersion = "26.05";
+                  services.siphon.enable = true;
+                  services.siphon.configFile = "/etc/siphon/siphon.yaml";
+                }
+              ];
+            };
+          in
+          assert nixpkgs.lib.hasInfix "-config /etc/siphon/siphon.yaml" sys.config.systemd.services.siphon.serviceConfig.ExecStart;
+          pkgs.runCommand "config-file-ok" { } "touch $out";
         legacy-option =
           let
             sys = nixpkgs.lib.nixosSystem {
