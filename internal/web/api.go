@@ -24,6 +24,7 @@ func (s *server) apiRoutes(mux *http.ServeMux) {
 	s.connectionAPI(mux)
 	s.diagAPI(mux)
 	s.inventoryAPI(mux)
+	s.draftAPI(mux)
 	get("/api/sources", func(*http.Request) (any, int, error) { v, err := s.sources(); return v, 200, err })
 	get("/api/rules", func(*http.Request) (any, int, error) { v, err := s.rules(); return v, 200, err })
 	get("/api/jobs", func(r *http.Request) (any, int, error) {

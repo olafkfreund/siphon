@@ -463,3 +463,10 @@ self-approved; the PR lists it.
     - server messages use relative times, and CLI text shows local times (`humanTime`);
     - the `portal` provenance shows as `live` in text;
     - the AWS test line shows the key expiry and tool count (the new additive `svcTest.expires_at`).
+- **Step 9 (coder):**
+  - The explain hint table moved to `internal/config/explain.go` (shared by the CLI and the draft prompt); the apply-file parser moved to `internal/applyfile`.
+  - A draft with remaining errors returns 200 with `errors` filled, and the CLI exits 3.
+  - `/api/draft` gets a 7-minute write deadline; the CLI waits 8 minutes.
+  - **Applying a draft isn't tagged `draft:<connection>`** (the plan said it would be). The `draft` audit row (connection, model, request clipped to 500 characters) is the trace, and the applied revision's actor is `cli:<user>`.
+  - Model-side failures return a fixed 422 message, never the response body.
+  - The MCP `draft` tool never applies.

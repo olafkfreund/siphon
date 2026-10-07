@@ -18,7 +18,10 @@ type mcpEnv struct {
 
 // mcpSession serves siphon's MCP tools over in-memory transports against the real API.
 func newMCPEnv(t *testing.T, allowWrite, allowSecrets bool) *mcpEnv {
-	e := newCLIEnv(t)
+	return newMCPEnvFrom(t, newCLIEnv(t), allowWrite, allowSecrets)
+}
+
+func newMCPEnvFrom(t *testing.T, e *cliEnv, allowWrite, allowSecrets bool) *mcpEnv {
 	t.Setenv("SIPHON_URL", e.url)
 	t.Setenv("SIPHON_TOKEN_FILE", e.tokf)
 	t.Setenv("USER", "olaf")
@@ -68,12 +71,12 @@ func TestMCPToolList(t *testing.T) {
 			t.Errorf("a deciding tool: %s", tool.Name)
 		}
 	}
-	for _, want := range []string{"inventory", "get", "explain", "template", "test", "why", "jobs", "job", "status", "apply", "delete", "guide"} {
+	for _, want := range []string{"inventory", "get", "explain", "template", "test", "why", "jobs", "job", "status", "apply", "delete", "guide", "draft"} {
 		if !have[want] {
 			t.Errorf("tool %s missing", want)
 		}
 	}
-	if len(res.Tools) != 12 {
+	if len(res.Tools) != 13 {
 		t.Errorf("%d tools: %v", len(res.Tools), have)
 	}
 }

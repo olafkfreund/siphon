@@ -16,10 +16,9 @@ import (
 	"time"
 
 	"golang.org/x/term"
-	"gopkg.in/yaml.v3"
 
+	"github.com/olafkfreund/siphon/internal/applyfile"
 	"github.com/olafkfreund/siphon/internal/client"
-	"github.com/olafkfreund/siphon/internal/config"
 )
 
 // Config kinds the API edits, and the read-only listings `get` also takes.
@@ -412,70 +411,10 @@ func buildToggle(verb string) func(*flag.FlagSet) func(*cli, []string) error {
 	}
 }
 
-// applyItem is one item of an apply request.
-type applyItem struct {
-	Kind string `json:"kind"`
-	Name string `json:"name"`
-	YAML string `json:"yaml"`
-}
+type applyItem = applyfile.Item
 
-// parseApply reads a siphon.yaml-shaped file into items, keeping each item's
-// own YAML text (comments included). Fixed sections are refused.
-func parseApply(b []byte) ([]applyItem, error) {
-	var doc yaml.Node
-	if err := yaml.Unmarshal(b, &doc); err != nil {
-		return nil, usageErr("not valid YAML: "+err.Error(), "")
-	}
-	if doc.Kind == 0 {
-		return nil, usageErr("the file is empty", "")
-	}
-	root := doc.Content[0]
-	if root.Kind != yaml.MappingNode {
-		return nil, usageErr("the top level must be a mapping with sections like rules: and sources:", "see `siphon example`, or `siphon help apply`")
-	}
-	body := func(n *yaml.Node) string {
-		if n.Kind == yaml.ScalarNode && n.Tag == "!!null" {
-			return "{}\n"
-		}
-		out, _ := yaml.Marshal(n)
-		return string(out)
-	}
-	var items []applyItem
-	for i := 0; i+1 < len(root.Content); i += 2 {
-		kind, val := root.Content[i].Value, root.Content[i+1]
-		if !config.Kinds[kind] {
-			return nil, usageErr("section "+strconv.Quote(kind)+" can't be applied: only "+strings.Join(configKinds, ", ")+" are editable (server, limits and units live in siphon.yaml)", "")
-		}
-		switch {
-		case kind == "rules" && val.Kind == yaml.SequenceNode:
-			for _, r := range val.Content {
-				name := ""
-				var rest []*yaml.Node
-				for j := 0; r.Kind == yaml.MappingNode && j+1 < len(r.Content); j += 2 {
-					if r.Content[j].Value == "name" {
-						name = r.Content[j+1].Value
-						continue
-					}
-					rest = append(rest, r.Content[j], r.Content[j+1])
-				}
-				if name == "" {
-					return nil, usageErr("a rule in rules: has no name", "every rule needs `name:`")
-				}
-				items = append(items, applyItem{"rules", name, body(&yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: rest})})
-			}
-		case val.Kind == yaml.MappingNode && kind != "rules":
-			for j := 0; j+1 < len(val.Content); j += 2 {
-				items = append(items, applyItem{kind, val.Content[j].Value, body(val.Content[j+1])})
-			}
-		default:
-			return nil, usageErr("section "+strconv.Quote(kind)+" has the wrong shape", "rules is a list of {name: ...}; the other sections map name to settings")
-		}
-	}
-	if len(items) == 0 {
-		return nil, usageErr("the file has no items", "")
-	}
-	return items, nil
-}
+// parseApply reads an apply file; its errors are usage errors.
+func parseApply(b []byte) ([]applyItem, error) { return applyfile.Parse(b) }
 
 // multi is a repeatable string flag.
 type multi []string

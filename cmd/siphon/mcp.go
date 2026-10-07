@@ -16,6 +16,7 @@ import (
 
 	"github.com/olafkfreund/siphon/docs"
 	"github.com/olafkfreund/siphon/internal/client"
+	"github.com/olafkfreund/siphon/internal/config"
 )
 
 // `siphon mcp` is an MCP server on stdio. Its tools are the read verbs of the
@@ -95,6 +96,11 @@ type applyIn struct {
 	Secrets map[string]string `json:"secrets,omitempty" jsonschema:"<kind>/<name>.<field> to value; refused unless siphon mcp runs with --allow-write and --allow-secrets"`
 	DryRun  bool              `json:"dry_run,omitempty" jsonschema:"only check and show the diff"`
 }
+type draftIn struct {
+	Request    string `json:"request" jsonschema:"what the user wants, in plain words"`
+	Connection string `json:"connection,omitempty" jsonschema:"the model connection to ask; default the first"`
+	Model      string `json:"model,omitempty"`
+}
 type deleteIn struct {
 	Kind   string `json:"kind"`
 	Name   string `json:"name"`
@@ -134,9 +140,9 @@ func newMCPServer(c *cli, allowWrite, allowSecrets bool) *mcp.Server {
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "explain", Description: "Every field of a config kind with its type, whether it is required, its default and allowed values."},
 		func(_ context.Context, _ *mcp.CallToolRequest, in explainIn) (*mcp.CallToolResult, any, error) {
-			kind, fields, err := explainFields(in.Kind)
+			kind, fields, err := config.Explain(in.Kind)
 			if err != nil {
-				return fail(err), nil, nil
+				return fail(usageErr(err.Error(), "")), nil, nil
 			}
 			return result(map[string]any{"kind": kind, "fields": fields}, false), nil, nil
 		})
@@ -243,6 +249,14 @@ func newMCPServer(c *cli, allowWrite, allowSecrets bool) *mcp.Server {
 				return fail(err), nil, nil
 			}
 			res["dry_run"], res["diff"] = false, check.Diff
+			return result(res, false), nil, nil
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "draft", Description: "Ask a model connection to draft an apply file from plain words. It is checked (diff, errors, a to-do list) but NEVER applied, even with --allow-write: review it, then call apply."},
+		func(_ context.Context, _ *mcp.CallToolRequest, in draftIn) (*mcp.CallToolResult, any, error) {
+			res, err := c.draftCall(in.Request, in.Connection, in.Model)
+			if err != nil {
+				return fail(err), nil, nil
+			}
 			return result(res, false), nil, nil
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "delete", Description: "Delete a config item (a file item is hidden, a portal item removed). Without --allow-write on the server this only dry-runs; the result says so."},

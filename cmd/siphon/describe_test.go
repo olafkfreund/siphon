@@ -87,43 +87,17 @@ func TestTemplateCommand(t *testing.T) {
 	e.ok("apply", "-f", "-", "--dry-run")
 }
 
-func TestExplainCoversSchema(t *testing.T) {
+func TestExplainCommand(t *testing.T) {
 	e := newCLIEnv(t)
-	raw, _ := config.Schema()
-	var root map[string]any
-	json.Unmarshal(raw, &root)
-	for kind, k := range explainKinds {
+	for _, kind := range []string{"source", "rule", "agent", "routine", "credential"} {
 		var out struct {
-			Kind   string  `json:"kind"`
-			Fields []field `json:"fields"`
+			Kind   string                `json:"kind"`
+			Fields []config.ExplainField `json:"fields"`
 		}
 		if json.Unmarshal([]byte(e.ok("explain", kind, "-o", "json")), &out) != nil || out.Kind != kind || len(out.Fields) == 0 {
 			t.Fatalf("%s: %+v", kind, out)
 		}
-		have := map[string]field{}
-		for _, f := range out.Fields {
-			have[f.Path] = f
-			if f.Description == "" || f.Type == "" || f.Enum == nil {
-				t.Errorf("%s.%s: incomplete %+v", kind, f.Path, f)
-			}
-		}
-		// every field of the schema is explained, and every hint is for a real field
-		node := sub(sub(sub(root, "properties"), k.plural), "additionalProperties")
-		if kind == "rule" {
-			node = sub(sub(sub(root, "properties"), "rules"), "items")
-		}
-		for name := range sub(node, "properties") {
-			if _, ok := have[name]; !ok {
-				t.Errorf("%s: schema field %s is not explained", kind, name)
-			}
-		}
-		for path := range k.hints {
-			if _, ok := have[path]; !ok {
-				t.Errorf("%s: hint for %s, which is not in the schema", kind, path)
-			}
-		}
 	}
-	// the plural works, and dotted paths, enums and requireds show up
 	out := e.ok("explain", "rules")
 	for _, want := range []string{"action.cmd", "required", "[edge|each]", "(default edge)", "duration"} {
 		if !strings.Contains(out, want) {

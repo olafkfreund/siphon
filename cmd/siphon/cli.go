@@ -102,6 +102,7 @@ func commands() []command {
 		{Name: "explain", Usage: "explain source|rule|agent|routine|credential", Mode: "client", build: buildExplain, Summary: "every field of a config kind: type, required, default, allowed values", Example: "siphon explain rule -o json"},
 		{Name: "inventory", Usage: "inventory", Mode: "client", build: buildInventory, Summary: "names of everything configured plus the operator's allowlists (never secrets)", Example: "siphon inventory -o json"},
 		{Name: "guide", Usage: "guide", Mode: "client", build: buildGuide, Summary: "print the guide for LLM agents (docs/llm.md)", Example: "siphon guide"},
+		{Name: "draft", Usage: `draft "<text>" [--connection c] [--model m] [--apply] [--yes]`, Mode: "client", build: buildDraft, Summary: "have a model connection draft an apply file from plain words; checked, never applied without --apply", Example: `siphon draft "tell me on ntfy when a deploy webhook reports failed"`},
 		{Name: "mcp", Usage: "mcp [--allow-write] [--allow-secrets]", Mode: "client", build: buildMCP, Summary: "run an MCP server on stdio so an assistant can inspect and (with --allow-write) change this siphon", Example: "claude mcp add siphon -- siphon mcp"},
 		{Name: "help", Usage: "help [command] [--json]", Mode: "client", build: buildHelp, Summary: "usage; --json is the machine-readable command list", Example: "siphon help --json"},
 
