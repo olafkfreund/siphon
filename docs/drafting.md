@@ -30,6 +30,46 @@ Changes:
 That came from a local `qwen2.5-coder:14b` in 34 seconds. It was valid on
 the first try, because Siphon gave the model the matching template.
 
+## When a connection is still missing
+
+```sh
+siphon draft "When a GitHub pull request is opened, have an agent on my local ollama model qwen2.5:7b summarise the PR title and description in three bullets."
+```
+
+```text
+agents:
+  pr-summarizer:
+    kind: model
+    credential: ollama-local
+    model: qwen2.5:7b
+    prompt: |
+      Summarize the pull request in three bullets:
+      - Title: {{.event.pull_request.title}}
+      - Description: {{.event.pull_request.body}}
+    max_turns: 5
+    timeout: 5m
+
+rules:
+  - name: summarize-pr
+    source: github-hooks
+    when: 'headers["x-github-event"] == "pull_request" && event.action == "opened"'
+    on: each
+    id: event.pull_request.id
+    cooldown: 1m
+    action: { agent: pr-summarizer }
+
+To do:
+  - source github-hooks does not exist yet: run `siphon connect github --webhook` (creates github and github-hooks)
+  - agent runs wait for approval: `siphon get approvals`, then `siphon approve <job>`
+```
+
+GitHub isn't connected yet, so the draft uses the conventional source name
+`github-hooks` as a **placeholder**, tells you the command that creates it,
+and refuses `--apply` until it exists. Run `siphon connect github --webhook`,
+then run the draft again with `--apply`. Siphon also warns about, and has
+the model repair, a rule that reads GitHub's headers from a webhook that
+isn't GitHub's.
+
 ## How it works
 
 1. **Siphon builds a prompt** from:
