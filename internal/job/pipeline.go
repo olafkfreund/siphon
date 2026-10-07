@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -426,26 +427,12 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 		if len(s.Env) > 0 || s.AWS != "" {
 			// Stdio server with secret env: it runs in its own bridge unit with the
 			// package's hosts as its allowlist; the agent only gets a loopback URL.
-			eg, fin, eerr := p.egressFor(cfg, j.ID, cfg.BridgeEgress(s), true)
-			if eerr != nil {
-				return "failed", -1, eerr.Error(), nil
+			srv, fin, err := p.bridgeServer(ctx, cfg, j.ID, name, s, time.Duration(a.Timeout), &secrets)
+			if err != nil {
+				return "failed", -1, err.Error(), nil
 			}
 			bridgeFinish = append(bridgeFinish, fin)
-			env := make(map[string]string, len(s.Env))
-			for k, v := range s.Env {
-				env[k] = v.Value
-			}
-			if s.AWS != "" {
-				extra, err := awsEnv(ctx, cfg, s.AWS, time.Duration(a.Timeout), j.ID)
-				if err != nil {
-					return "failed", -1, "aws credentials for " + name + ": " + string(action.Mask([]byte(err.Error()), secrets)), nil
-				}
-				for k, v := range extra {
-					env[k] = v
-				}
-				secrets = append(secrets, extra["AWS_ACCESS_KEY_ID"], extra["AWS_SECRET_ACCESS_KEY"], extra["AWS_SESSION_TOKEN"])
-			}
-			servers[name] = action.MCPServer{Command: s.Command, Env: env, Egress: eg}
+			servers[name] = srv
 			continue
 		}
 		h := headerValues(s.Headers)
@@ -723,4 +710,66 @@ func awsEnv(ctx context.Context, cfg *config.Config, name string, timeout time.D
 		"AWS_REGION": c.Region, "AWS_DEFAULT_REGION": c.Region, "AWS_EC2_METADATA_DISABLED": "true",
 		"AWS_CONFIG_FILE": os.DevNull, "AWS_SHARED_CREDENTIALS_FILE": os.DevNull,
 	}, nil
+}
+
+// bridgeServer is the bridge description of a stdio source with env or an AWS
+// credential: its egress allowlist and env (plus fresh AWS keys). Their values
+// are added to *secrets. fin releases the egress registration.
+func (p *Pipeline) bridgeServer(ctx context.Context, cfg *config.Config, jobID int64, name string, s *config.Source, timeout time.Duration, secrets *[]string) (action.MCPServer, func() string, error) {
+	eg, fin, err := p.egressFor(cfg, jobID, cfg.BridgeEgress(s), true)
+	if err != nil {
+		return action.MCPServer{}, nil, err
+	}
+	env := make(map[string]string, len(s.Env))
+	for k, v := range s.Env {
+		env[k] = v.Value
+	}
+	if s.AWS != "" {
+		extra, err := awsEnv(ctx, cfg, s.AWS, timeout, jobID)
+		if err != nil {
+			fin()
+			return action.MCPServer{}, nil, errors.New("aws credentials for " + name + ": " + string(action.Mask([]byte(err.Error()), *secrets)))
+		}
+		maps.Copy(env, extra)
+		*secrets = append(*secrets, extra["AWS_ACCESS_KEY_ID"], extra["AWS_SECRET_ACCESS_KEY"], extra["AWS_SESSION_TOKEN"])
+	}
+	return action.MCPServer{Command: s.Command, Env: env, Egress: eg}, fin, nil
+}
+
+// TestAWS checks an AWS source the way a run would use it: short-lived keys,
+// the caller identity, then the package's bridge started and its tools listed.
+// On a probe failure it still returns the identity. Errors are masked.
+func (p *Pipeline) TestAWS(ctx context.Context, source string) (arn string, expires time.Time, tools []string, err error) {
+	cfg := p.Config()
+	s := cfg.Sources[source]
+	if s == nil || s.AWS == "" || cfg.Credentials[s.AWS] == nil {
+		return "", time.Time{}, nil, errors.New("not an AWS source")
+	}
+	secrets := cfg.Secrets()
+	mask := func(e error) error { return errors.New(string(action.Mask([]byte(e.Error()), secrets))) }
+	c := cfg.Credentials[s.AWS]
+	spec := awscred.Spec{Region: c.Region, Profile: c.Profile, RoleARN: c.RoleARN, ExternalID: c.ExternalID,
+		AccessKeyID: c.AccessKeyID.Value, SecretAccessKey: c.SecretAccessKey.Value}
+	k, err := awscred.Get(ctx, spec, awscred.Duration(0), "siphon-test")
+	if err != nil {
+		return "", time.Time{}, nil, mask(err)
+	}
+	secrets = append(secrets, k.AccessKeyID, k.SecretAccessKey, k.SessionToken)
+	if arn, err = awscred.Identity(ctx, spec, k); err != nil {
+		return "", k.Expires, nil, mask(err)
+	}
+	srv, fin, err := p.bridgeServer(ctx, cfg, 0, source, s, 0, &secrets)
+	if err != nil {
+		return arn, k.Expires, nil, mask(err)
+	}
+	defer fin()
+	opts := action.AgentOptions{
+		MCP: map[string]action.MCPServer{source: srv}, Timeout: time.Minute, Sandbox: sandbox(cfg, 0),
+		Secrets: secrets, StateDir: filepath.Dir(cfg.Server.DB),
+	}
+	opts.Sandbox.Egress = srv.Egress // ProbeBridge only needs it to be set
+	if tools, err = action.ProbeBridge(ctx, opts, source); err != nil {
+		return arn, k.Expires, nil, mask(err)
+	}
+	return arn, k.Expires, tools, nil
 }

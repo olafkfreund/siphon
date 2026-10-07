@@ -297,7 +297,7 @@ form:has(input[name="event_src"][value="last"]:checked) .paste { display: none }
 /* services */
 .svc h2 { margin: 0 }
 .svc-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: #fff }
-.svc-mark.gh { background: #24292F } .svc-mark.gl { background: #E24329 }
+.svc-mark.gh { background: #24292F } .svc-mark.gl { background: #E24329 } .svc-mark.aws { background: #232F3E }
 .svc .ico { width: 18px; height: 18px }
 
 /* motion off on request */

@@ -109,7 +109,7 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 	})
 	page("/services", "services", func(_ *http.Request, v *view) (bool, error) {
 		v.Services = s.serviceRows()
-		v.ServiceForm = &serviceForm{}
+		v.ServiceForm = s.serviceForm()
 		return true, nil
 	})
 	page("/connections", "logins", func(r *http.Request, v *view) (bool, error) {

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/store"
@@ -28,6 +30,7 @@ type cfgEnv struct {
 	dir       string
 	cur       atomic.Pointer[config.Config]
 	applied   atomic.Int32
+	testAWS   func(context.Context, string) (string, time.Time, []string, error)
 	applyFail atomic.Bool // makes Apply fail (the save still lands)
 	c         *http.Cookie
 	keep      int // overlay rows the security tests expect to remain
@@ -60,6 +63,12 @@ func newCfgEnvFile(t *testing.T, content string) *cfgEnv {
 			return nil
 		}
 		o.ConfigPath = path
+		o.TestAWS = func(ctx context.Context, src string) (string, time.Time, []string, error) {
+			if ce.testAWS == nil {
+				return "", time.Time{}, nil, errors.New("no TestAWS stub")
+			}
+			return ce.testAWS(ctx, src)
+		}
 	})
 	ce.c, ce.csrf = ce.login()
 	return ce

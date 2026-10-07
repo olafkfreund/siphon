@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/url"
 	"os"
@@ -268,8 +269,11 @@ var (
 // MaxAWSAgentTimeout keeps an agent inside the 1 h session cap (timeout + 5 min).
 const MaxAWSAgentTimeout = 55 * time.Minute
 
-// Polled reports whether the poller runs the source (AWS sources are agent tools only).
-func (s *Source) Polled() bool { return s.Type != "webhook" && s.AWS == "" }
+// Polled reports whether the poller runs the source. Webhooks, AWS sources and
+// mcp sources without read are agent tools only.
+func (s *Source) Polled() bool {
+	return s.Type != "webhook" && s.AWS == "" && (s.Type != "mcp" || s.Read != nil)
+}
 
 const implicitPrefix = "_apikey_" // credentials made from api_key_file
 
@@ -563,6 +567,10 @@ func (c *Config) Secrets() []string {
 	return out
 }
 
+func (c *Config) usedByAgent(source string) bool {
+	return slices.ContainsFunc(slices.Collect(maps.Values(c.Agents)), func(a *Agent) bool { return a != nil && slices.Contains(a.MCP, source) })
+}
+
 // Warnings lists non-fatal findings.
 func (c *Config) Warnings() []string {
 	var w []string
@@ -586,6 +594,9 @@ func (c *Config) Warnings() []string {
 	for _, name := range sortedKeys(c.Sources) {
 		if s := c.Sources[name]; s != nil && s.AllowPrivate {
 			w = append(w, fmt.Sprintf("source %s: allow_private disables the private-address guard", name))
+		}
+		if s := c.Sources[name]; s != nil && s.Type == "mcp" && !s.Polled() && !c.usedByAgent(name) {
+			w = append(w, fmt.Sprintf("source %s: no read and no agent uses it in mcp: it does nothing", name))
 		}
 		if s := c.Sources[name]; s != nil && s.Type == "webhook" && s.Signature == "token" {
 			w = append(w, fmt.Sprintf("source %s: signature token sends the secret in a header: weaker than an HMAC, and a captured delivery can be replayed", name))
@@ -1016,7 +1027,10 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 				}
 			}
 		}
-		if s.AWS == "" && (s.Read == nil || (s.Read.Resource == "") == (s.Read.Tool == "")) {
+		if s.Read == nil && s.Poll != 0 && s.AWS == "" {
+			add("%s: poll needs read (without read the source is agent tools only)", p)
+		}
+		if s.Read != nil && (s.Read.Resource == "") == (s.Read.Tool == "") {
 			add("%s: read needs exactly one of resource or tool", p)
 		}
 	case "http":

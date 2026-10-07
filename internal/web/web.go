@@ -4,6 +4,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -42,6 +43,9 @@ type Options struct {
 	Banner      string // shown in red on every page (startup fallback notice)
 	// Decide approves or denies a pending job (Pipeline.Decide). Nil uses the store directly.
 	Decide func(jobID int64, approve bool, by string) error
+	// TestAWS checks an AWS source: identity, key expiry and the bridged server's tools
+	// (Pipeline.TestAWS). Nil disables the Test button for AWS sources.
+	TestAWS func(ctx context.Context, source string) (arn string, expires time.Time, tools []string, err error)
 	// Hooks are mounted at POST /hook/{source}, unauthenticated: HMAC is their auth.
 	Hooks func(source string) http.Handler // nil result = not a webhook source
 	Now   func() time.Time

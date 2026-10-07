@@ -285,3 +285,8 @@ revert.
   - The subtest also asserts the STS request (`RoleSessionName=siphon-<job id>`, `DurationSeconds=900`, `ExternalId`), and that the bridge secrets are cleaned up.
 - **Fix (Opus):** step 1's `vendorHash` matched a stale `siphon-dev-go-modules` store path, so local builds reused an old vendor dir. The hash is corrected (`c1eee4f`). Verify vendor changes with `nix build --rebuild .#siphon.goModules`.
 - **Step 4 (coder):** `ProbeBridge` connects to the bridge's unix socket directly (the daemon is in the socket's group, so it works in both sandbox modes), not through a loopback forward. It is capped by `probeTimeout` (30 s), but the go-sdk's own cleanup can add about 5 s when a bridge never answers. That ~35 s worst case was accepted, rather than leaking a goroutine to return at exactly 30 s.
+- **Step 5 (coder):**
+  - The bridge setup was extracted from `agentExec` into `p.bridgeServer(...)` and is shared with `Pipeline.TestAWS`, which reaches the web layer as the `web.Options.TestAWS` hook (wired in `cmd/siphon`).
+  - The tile names sources `<name>-cloudwatch`, `<name>-docs` and `<name>-hooks`.
+  - **Config change (Opus decision, closing a plan gap):** an `mcp` source with no `read` is agent-tools-only and never polled. `poll` without `read` is an error, and a tools-only source that no agent uses gets a warning. The spec's `aws-docs: { type: mcp, package: aws-docs }` needs this: otherwise the docs server would be polled daily by the daemon, outside a sandbox. Sources with `read` are unchanged.
+  - The job-level `TestAWS` test checks identity, expiry and masked errors. A real tool list is covered by the action-level `ProbeBridge` tests.

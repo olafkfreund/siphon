@@ -123,3 +123,31 @@ func TestOverlayAWS(t *testing.T) {
 		t.Error("external_id change keeps file keys")
 	}
 }
+
+func TestToolsOnlyMCPSource(t *testing.T) {
+	parse := func(y string) (*Config, error) {
+		c, err := Parse([]byte(awsPkgs + y))
+		if err == nil {
+			err = c.Validate()
+		}
+		return c, err
+	}
+	c, err := parse("sources: {d: {type: mcp, package: docs}}\ncredentials: {c: {provider: claude}}\nagents: {g: {kind: claude, credential: c, mcp: [d]}}")
+	if err != nil || c.Sources["d"].Polled() || c.Sources["d"].Poll != 0 || hasWarning(c, "does nothing") {
+		t.Fatalf("tools-only: %v polled=%v warnings=%v", err, c.Sources["d"].Polled(), c.Warnings())
+	}
+	if c, _ := parse("sources: {d: {type: mcp, package: docs}}"); !hasWarning(c, "source d: no read and no agent uses it") {
+		t.Errorf("no warning: %v", c.Warnings())
+	}
+	if _, err := parse("sources: {d: {type: mcp, package: docs, poll: 1m}}"); err == nil || !strings.Contains(err.Error(), "poll needs read") {
+		t.Errorf("poll without read: %v", err)
+	}
+	// With read nothing changes: polled, default poll, read still checked.
+	c, err = parse("sources: {d: {type: mcp, package: docs, read: {tool: t}}}")
+	if err != nil || !c.Sources["d"].Polled() || c.Sources["d"].Poll == 0 {
+		t.Errorf("with read: %v", err)
+	}
+	if _, err := parse("sources: {d: {type: mcp, package: docs, read: {}}}"); err == nil || !strings.Contains(err.Error(), "read needs exactly one") {
+		t.Errorf("empty read: %v", err)
+	}
+}

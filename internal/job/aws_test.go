@@ -38,6 +38,10 @@ func awsPipeline(t *testing.T, sts int) *Pipeline {
 			w.Write([]byte(`<ErrorResponse><Error><Code>AccessDenied</Code><Message>denied for baseSecretFake</Message></Error></ErrorResponse>`))
 			return
 		}
+		if r.FormValue("Action") == "GetCallerIdentity" {
+			w.Write([]byte(`<GetCallerIdentityResponse><GetCallerIdentityResult><Arn>arn:aws:sts::123456789012:assumed-role/r/siphon-test</Arn></GetCallerIdentityResult></GetCallerIdentityResponse>`))
+			return
+		}
 		w.Write([]byte(`<AssumeRoleResponse><AssumeRoleResult><Credentials><AccessKeyId>ASIATEMPFAKE</AccessKeyId><SecretAccessKey>tempSecretFake</SecretAccessKey><SessionToken>tempTokenFake</SessionToken><Expiration>2030-01-01T00:00:00Z</Expiration></Credentials></AssumeRoleResult></AssumeRoleResponse>`))
 	}))
 	t.Cleanup(srv.Close)
@@ -104,5 +108,30 @@ func TestAWSSourceIsNotPolled(t *testing.T) {
 	}
 	if _, ok := st["cw"]; ok {
 		t.Errorf("aws source was polled: %+v", st["cw"])
+	}
+}
+
+// Test returns the identity even when the bridge can't start (the test bridge
+// dies at once); the error is the bridge's, with no key in it.
+func TestTestAWS(t *testing.T) {
+	p := awsPipeline(t, 200)
+	arn, exp, tools, err := p.TestAWS(context.Background(), "cw")
+	if arn != "arn:aws:sts::123456789012:assumed-role/r/siphon-test" || exp.IsZero() || tools != nil {
+		t.Fatalf("%q %v %v", arn, exp, tools)
+	}
+	if err == nil || !strings.Contains(err.Error(), "exited before it listened") {
+		t.Fatalf("err = %v", err)
+	}
+	for _, leak := range []string{"ASIATEMPFAKE", "tempSecretFake", "tempTokenFake", "AKIABASEFAKE", "baseSecretFake"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Errorf("leaked %s", leak)
+		}
+	}
+	if _, _, _, err := p.TestAWS(context.Background(), "nope"); err == nil {
+		t.Error("unknown source tested")
+	}
+	p = awsPipeline(t, 403)
+	if _, _, _, err := p.TestAWS(context.Background(), "cw"); err == nil || strings.Contains(err.Error(), "baseSecretFake") {
+		t.Errorf("sts failure: %v", err)
 	}
 }

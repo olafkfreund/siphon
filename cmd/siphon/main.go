@@ -528,7 +528,7 @@ func serve(ctx context.Context, args []string) error {
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		Handler: web.New(web.Options{
-			Token: cfg.Server.Token.Value, Store: st, Config: p.Config, Apply: p.Apply, Banner: banner, Unsandboxed: cfg.Server.Sandbox == "none", ConfigPath: cfgPath, Decide: p.Decide,
+			Token: cfg.Server.Token.Value, Store: st, Config: p.Config, Apply: p.Apply, Banner: banner, Unsandboxed: cfg.Server.Sandbox == "none", ConfigPath: cfgPath, Decide: p.Decide, TestAWS: p.TestAWS,
 			Hooks: p.Webhooks(), Now: time.Now,
 		}),
 	}
