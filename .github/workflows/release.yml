@@ -1,0 +1,81 @@
+name: release
+
+# On a version tag: run CI, then build the OCI image natively for x86_64 and
+# aarch64, push both to ghcr.io and publish a multi-arch manifest (:vX.Y.Z;
+# :latest only for a final vX.Y.Z, not a pre-release like v1.0.0-rc1).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  image:
+    needs: ci
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, arch: amd64 }
+          - { runner: ubuntu-24.04-arm, arch: arm64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+      - name: Build and push
+        # Untrusted values reach the shell as env, never as interpolated script.
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+          TAG: ${{ github.ref_name }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "bad tag: $TAG"; exit 1; }
+          out=$(nix build --print-out-paths .#image)
+          # shellcheck disable=SC2016 # the inner script expands its own env
+          nix shell --inputs-from . nixpkgs#skopeo -c bash -euo pipefail -c '
+            printf %s "$TOKEN" | skopeo login --authfile "$HOME/.docker/config.json" -u "$ACTOR" --password-stdin ghcr.io
+            "$0" | skopeo copy --authfile "$HOME/.docker/config.json" docker-archive:/dev/stdin \
+              "docker://ghcr.io/${OWNER,,}/siphon:$TAG-$ARCH"
+          ' "$out"
+
+  manifest:
+    needs: image
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+      - name: Multi-arch manifest
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "bad tag: $TAG"; exit 1; }
+          # shellcheck disable=SC2016 # the inner script expands its own env
+          nix shell --inputs-from . nixpkgs#skopeo nixpkgs#manifest-tool -c bash -euo pipefail -c '
+            printf %s "$TOKEN" | skopeo login --authfile "$HOME/.docker/config.json" -u "$ACTOR" --password-stdin ghcr.io
+            repo=ghcr.io/${OWNER,,}/siphon
+            targets=("$TAG")
+            [[ $TAG == *-* ]] || targets+=(latest)
+            for t in "${targets[@]}"; do
+              manifest-tool --docker-cfg "$HOME/.docker" push from-args \
+                --platforms linux/amd64,linux/arm64 \
+                --template "$repo:$TAG-ARCH" --target "$repo:$t"
+            done
+          '

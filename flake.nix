@@ -2,14 +2,23 @@
   description = "Siphon: draws events in from MCP servers and APIs, jets agents out (sources -> rules -> actions)";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.microvm = {
+    url = "github:microvm-nix/microvm.nix";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      microvm,
+    }:
     let
       systems = [
         "x86_64-linux"
         "aarch64-linux"
       ];
+      microvmFor = import ./nix/microvm.nix { inherit self microvm nixpkgs; };
       forAll = f: nixpkgs.lib.genAttrs systems (s: f nixpkgs.legacyPackages.${s});
     in
     {
@@ -31,7 +40,29 @@
           meta.mainProgram = "siphon";
         };
         default = siphon;
+        # Siphon in a microVM (full sandbox, host untouched): nix run .#microvm
+        microvm = (microvmFor { system = pkgs.stdenv.hostPlatform.system; }).run;
+        microvm-unfree =
+          (microvmFor {
+            system = pkgs.stdenv.hostPlatform.system;
+            allowUnfreeAgents = true;
+          }).run;
+        # OCI image (stream: `nix build .#image && ./result | podman load`).
+        image = import ./nix/image.nix { inherit pkgs siphon; };
         agentgw = siphon; # legacy-name
+      });
+
+      # Build your own image with agent CLIs: lib.<system>.mkImage { agentPackages = [ ... ]; }
+      lib = forAll (pkgs: {
+        mkImage =
+          args:
+          import ./nix/image.nix (
+            {
+              inherit pkgs;
+              siphon = self.packages.${pkgs.stdenv.hostPlatform.system}.siphon;
+            }
+            // args
+          );
       });
 
       nixosModules.default = import ./nix/module.nix self;
@@ -39,6 +70,28 @@
       checks = forAll (pkgs: {
         vm = import ./nix/vm-test.nix { inherit self pkgs; };
         # The old services.agentgw option path still evaluates to siphon. # legacy-name
+        # configFile replaces the generated config in the unit.
+        config-file =
+          let
+            sys = nixpkgs.lib.nixosSystem {
+              inherit (pkgs.stdenv.hostPlatform) system;
+              modules = [
+                self.nixosModules.default
+                {
+                  boot.loader.grub.enable = false;
+                  fileSystems."/" = {
+                    device = "none";
+                    fsType = "tmpfs";
+                  };
+                  system.stateVersion = "26.05";
+                  services.siphon.enable = true;
+                  services.siphon.configFile = "/etc/siphon/siphon.yaml";
+                }
+              ];
+            };
+          in
+          assert nixpkgs.lib.hasInfix "-config /etc/siphon/siphon.yaml" sys.config.systemd.services.siphon.serviceConfig.ExecStart;
+          pkgs.runCommand "config-file-ok" { } "touch $out";
         legacy-option =
           let
             sys = nixpkgs.lib.nixosSystem {

@@ -348,13 +348,27 @@ func (c *Config) resolveDB(path string) {
 	}
 }
 
+// InContainer reports whether siphon runs inside a container; a var so tests can stub it.
+var InContainer = func() bool {
+	for _, f := range []string{"/run/.containerenv", "/.dockerenv"} {
+		if _, err := os.Stat(f); err == nil {
+			return true
+		}
+	}
+	return os.Getenv("container") != ""
+}
+
 func Parse(b []byte) (*Config, error) { return parse(b, nil) }
 
 // parse is Parse; stub maps a secret ref to a stand-in value, so a candidate
 // whose secret files are not written yet can still be validated.
 func parse(b []byte, stub map[string]string) (*Config, error) {
+	sandbox := "systemd"
+	if InContainer() {
+		sandbox = "none" // the systemd sandbox cannot work in a container
+	}
 	c := &Config{
-		Server: Server{Listen: ":8080", DB: "siphon.db", Workers: 4, Sandbox: "systemd", Egress: EgressServer{Listen: "127.77.0.1:3128"}},
+		Server: Server{Listen: ":8080", DB: "siphon.db", Workers: 4, Sandbox: sandbox, Egress: EgressServer{Listen: "127.77.0.1:3128"}},
 		Limits: Limits{AgentRunsPerDay: 50, HTTPMaxBody: 1 << 20, HTTPTimeout: Duration(30 * time.Second)},
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(b))
@@ -668,6 +682,9 @@ func (c *Config) Validate() error {
 
 	if c.Server.Sandbox != "systemd" && c.Server.Sandbox != "none" {
 		add("server.sandbox: must be systemd or none, got %q", c.Server.Sandbox)
+	}
+	if c.Server.Sandbox == "systemd" && InContainer() {
+		add("server.sandbox: systemd sandbox is not available inside a container; use the NixOS module or the microVM for isolation")
 	}
 	if c.Server.Workers < 1 {
 		add("server.workers: must be >= 1")

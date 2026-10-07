@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call: # the release workflow runs it before publishing
 
 permissions:
   contents: read
@@ -17,8 +18,8 @@ jobs:
     name: go vet, race tests, nix build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: cachix/install-nix-action@v31
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
       - run: nix develop -c go vet ./...
       - run: nix develop -c go test -race -count=1 ./...
       - run: nix build -L .#siphon .#agentgw .#checks.x86_64-linux.legacy-option # also proves vendorHash is current; legacy-name
@@ -27,23 +28,32 @@ jobs:
     name: NixOS VM test (sandbox, polkit, subscriptions)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
         with:
           extra_nix_config: system-features = nixos-test benchmark big-parallel kvm
       - run: nix build -L .#checks.x86_64-linux.vm
+      - run: ci/microvm-test.sh
+
+  container:
+    name: OCI image (podman, rootless, read-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+      - run: ci/container-test.sh
 
   devenv:
     name: devenv test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: cachix/install-nix-action@v31
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
       - run: nix profile install nixpkgs#devenv
       - run: devenv test

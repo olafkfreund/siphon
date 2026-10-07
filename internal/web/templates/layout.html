@@ -30,7 +30,7 @@
 </aside>
 <div>
   <div class="topbar"><img src="/static/mark-bare.svg" alt="">siphon<span class="sp"></span>{{if .Pending}}<a class="pill pending_approval" href="/approvals">✋ {{.Pending}}</a>{{end}}<button type="button" data-action="menu" aria-label="Menu" aria-expanded="false" aria-controls="sidenav">{{template "icon" "menu"}}</button></div>
-  <main class="main" id="main"{{if .Poll}} hx-get="{{.Path}}" hx-trigger="every 5s" hx-swap="innerHTML"{{end}}>{{if .Banner}}<div class="banner" role="alert">{{.Banner}}</div>{{end}}{{.Body}}</main>
+  <main class="main" id="main"{{if .Poll}} hx-get="{{.Path}}" hx-trigger="every 5s" hx-swap="innerHTML"{{end}}>{{if .Unsandboxed}}<div class="banner" role="alert"><b>Unsandboxed:</b> runs are not isolated and egress is not enforced.</div>{{end}}{{if .Banner}}<div class="banner" role="alert">{{.Banner}}</div>{{end}}{{.Body}}</main>
 </div>
 </div>
 <div id="live" class="sr-only" aria-live="polite"></div>
