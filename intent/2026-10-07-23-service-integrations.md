@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 23
 author: olafkfreund
 ---
@@ -152,3 +152,16 @@ three the owner cares about first is either awkward or impossible today:
    then AWS as follow-ups? Proposal: the building blocks plus GitHub and
    GitLab here, and AWS as its own issue, since it has the most security
    surface.
+
+## Decisions at approval (2026-10-07)
+
+The owner approved the proposals:
+1. (c) the portal may enable only allowlisted, Nix-pinned MCP server
+   packages; arbitrary commands stay file-only.
+2. Remote GitHub MCP by default, local as an option.
+3. AWS: (a) assumed roles and (b) profiles or `credential_process`, with
+   long-lived keys off by default.
+4. gitlab.com and self-hosted GitLab from the start.
+5. **Scope:** the building blocks (webhook modes, stdio MCP secrets, the
+   Services page) plus GitHub and GitLab here. **AWS moves to its own
+   issue** (#24).
