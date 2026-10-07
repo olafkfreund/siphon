@@ -46,6 +46,8 @@ type AgentOptions struct {
 	Secrets      []string
 	WorkDir      string
 	StateDir     string // directory of server.db: bridge secrets go in <StateDir>/bridge-secrets
+
+	bridgeSocks map[string]string // server name -> bridge unix socket, set by startBridges
 }
 
 type AgentResult struct {
