@@ -76,7 +76,7 @@
   <label class="f">Name<input name="name" value="{{.Name}}" placeholder="e.g. ollama-local" required pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}" autocomplete="off"><span class="hint">Agents pick it as their connection.</span></label>
   <label class="f">Base URL<input name="url" value="{{.URL}}" placeholder="leave empty for the provider's default" spellcheck="false" autocomplete="off"><span class="hint">Ollama: <code>http://host:11434</code>. OpenAI-compatible: the URL ending in <code>/v1</code>.</span></label>
   <div class="howto howto-model"><p class="h-private">{{template "icon" "shield"}}<span>Local or LAN endpoints (like Ollama on this machine) must also be listed once in <code>siphon.yaml</code> under <code>server.models.private_endpoints</code>, e.g. <code>["127.0.0.1:11434"]</code>. On NixOS, a local <code>services.ollama</code> is added for you.</span></p></div>
-  <label class="f key-field">API key <span class="muted">(optional)</span><input type="password" name="api_key" autocomplete="off" spellcheck="false"><span class="hint">Write-only. Not needed for Ollama or LM Studio.</span></label>
+  <label class="f key-field"><span>API key <span class="muted">(optional)</span></span><input type="password" name="api_key" autocomplete="off" spellcheck="false"><span class="hint">Write-only. Not needed for Ollama or LM Studio.</span></label>
   <div class="row-actions"><button class="btn primary">{{template "icon" "check"}}Add endpoint</button></div>
 </form>
 </section>{{end}}{{end}}

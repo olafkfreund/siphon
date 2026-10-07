@@ -7,9 +7,9 @@
     <form method="post" action="/rules/{{pe .Name}}/{{$verb}}" hx-post="/rules/{{pe .Name}}/{{$verb}}" hx-target="#main"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="switch{{if .Enabled}} on{{end}}" role="switch" aria-checked="{{if .Enabled}}true{{else}}false{{end}}" aria-label="{{if .Enabled}}Disable{{else}}Enable{{end}} {{.Name}}"></button></form>
   </div>
   <div class="flow{{if not .Enabled}} off{{end}}">
-    <div class="node"><small>Source{{if .SourceType}} · {{.SourceType}}{{end}}</small><code>{{.Source}}</code></div>
+    <div class="node"><small><span>Source</span>{{if .SourceType}} · <span>{{.SourceType}}</span>{{end}}</small><code>{{.Source}}</code></div>
     <span class="pipe" aria-hidden="true"></span>
-    <div class="node cond"><small>When · {{if eq .On "each"}}each event{{else}}on edge{{end}}</small><code>{{.When}}</code></div>
+    <div class="node cond"><small><span>When</span> · <span>{{if eq .On "each"}}each event{{else}}on edge{{end}}</span></small><code>{{.When}}</code></div>
     <span class="pipe" aria-hidden="true"></span>
     <div class="node"><small>{{.Kind}}</small><code>{{.Target}}</code></div>
   </div>
