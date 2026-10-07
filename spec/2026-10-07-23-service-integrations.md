@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 23
 intent: intent/2026-10-07-23-service-integrations.md
 ---
