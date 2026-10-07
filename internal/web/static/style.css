@@ -380,7 +380,7 @@ pre .add { color: #5ef0b4 } pre .del { color: #ff8fa0 }
 .doc table { display: block; overflow-x: auto; border-collapse: collapse; margin: 1rem 0 }
 .doc th, .doc td { border: 1px solid var(--line); padding: .4rem .7rem; text-align: left; vertical-align: top }
 .doc th { background: var(--surface-2) }
-.doc blockquote { margin: 1rem 0; padding: .1rem 1rem; border-left: 3px solid var(--current); color: var(--muted) }
+.doc blockquote { margin: 1rem 0; padding: .2rem 1rem; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; color: var(--muted) }
 .doc img { max-width: 100% }
 .doc-raw { margin-top: 2.5rem }
 .gallery h2 { margin: 2rem 0 .8rem; font-size: 1.25rem }
