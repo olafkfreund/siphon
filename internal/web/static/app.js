@@ -20,17 +20,35 @@
       root.dataset.theme = dark() ? "light" : "dark";
       try { localStorage.setItem("siphon-theme", root.dataset.theme); } catch (e2) {}
     } else if (a === "menu") {
-      var app = document.querySelector(".app");
-      if (app) app.classList.toggle("menu-open");
+      setMenu(t, !document.querySelector(".app").classList.contains("menu-open"));
     } else if (a === "copy") {
       var src = document.getElementById(t.dataset.target);
       if (src && navigator.clipboard) navigator.clipboard.writeText(src.textContent);
     }
   });
 
+  function setMenu(btn, open) {
+    var app = document.querySelector(".app");
+    if (!app || !btn) return;
+    app.classList.toggle("menu-open", open);
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) { var first = document.querySelector("#sidenav a"); if (first) first.focus(); }
+    else btn.focus();
+  }
+
+  // Forms that delete something ask first (data-confirm holds the question).
+  document.addEventListener("submit", function (e) {
+    var q = e.target.getAttribute && e.target.getAttribute("data-confirm");
+    if (q && !window.confirm(q)) e.preventDefault();
+  });
+
   // g d / g j / g r / g a jump between pages; / focuses the first search box.
   var g = false;
   document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && document.querySelector(".app.menu-open")) {
+      setMenu(document.querySelector("[data-action=menu]"), false);
+      return;
+    }
     if (e.target.closest("input, textarea, select") || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === "/") {
       var s = document.querySelector("input[type=search]");

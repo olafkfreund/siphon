@@ -5,7 +5,7 @@
 <meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false}'>
 <link rel="stylesheet" href="/static/style.css"><script src="/static/app.js"></script><script src="/static/htmx.min.js" defer></script></head>
 <body>{{template "sprite"}}<div class="app">
-<aside class="side" aria-label="Navigation">
+<aside class="side" id="sidenav" aria-label="Navigation">
   <a class="brand" href="/"><img src="/static/mark-bare.svg" alt="">siphon</a>
   <nav class="nav">
     <a href="/"{{if eq .Active "dash"}} aria-current="page"{{end}}>{{template "icon" "home"}}Dashboard</a>
@@ -28,7 +28,7 @@
   </div>
 </aside>
 <div>
-  <div class="topbar"><img src="/static/mark-bare.svg" alt="">siphon<span class="sp"></span>{{if .Pending}}<a class="pill pending_approval" href="/approvals">✋ {{.Pending}}</a>{{end}}<button type="button" data-action="menu" aria-label="Menu">{{template "icon" "menu"}}</button></div>
+  <div class="topbar"><img src="/static/mark-bare.svg" alt="">siphon<span class="sp"></span>{{if .Pending}}<a class="pill pending_approval" href="/approvals">✋ {{.Pending}}</a>{{end}}<button type="button" data-action="menu" aria-label="Menu" aria-expanded="false" aria-controls="sidenav">{{template "icon" "menu"}}</button></div>
   <main class="main" id="main"{{if .Poll}} hx-get="{{.Path}}" hx-trigger="every 5s" hx-swap="innerHTML"{{end}}>{{if .Banner}}<div class="banner" role="alert">{{.Banner}}</div>{{end}}{{.Body}}</main>
 </div>
 </div>
@@ -38,3 +38,11 @@
 {{define "icon"}}<svg class="ico" aria-hidden="true"><use href="#i-{{.}}"/></svg>{{end}}
 
 {{define "pill"}}{{if eq . "queued"}}<span class="pill queued">◷ Queued</span>{{else if eq . "running"}}<span class="pill running"><span class="i">⟳</span> Running</span>{{else if eq . "pending_approval"}}<span class="pill pending_approval">✋ Waiting for you</span>{{else if eq . "done"}}<span class="pill done">✓ Done</span>{{else if eq . "failed"}}<span class="pill failed">✕ Failed</span>{{else if eq . "cancelled"}}<span class="pill cancelled">⊘ Cancelled</span>{{else}}<span class="pill tag">{{.}}</span>{{end}}{{end}}
+
+{{define "kindicon"}}{{if eq . "agent"}}{{template "icon" "agent"}}{{else if eq . "cmd"}}{{template "icon" "term"}}{{else if eq . "unit"}}{{template "icon" "unit"}}{{else if eq . "routine"}}{{template "icon" "routine"}}{{else}}{{template "icon" "bolt"}}{{end}}{{end}}
+
+{{define "provider"}}{{if eq . "claude"}}<span class="prov claude" title="Claude Code"><i aria-hidden="true">C</i>Claude</span>{{else if eq . "codex"}}<span class="prov codex" title="OpenAI Codex"><i aria-hidden="true">&gt;_</i>Codex</span>{{else if eq . "agy"}}<span class="prov agy" title="Antigravity"><i aria-hidden="true">A</i>agy</span>{{else if .}}<span class="prov">{{.}}</span>{{end}}{{end}}
+
+{{define "srcicon"}}{{if eq . "webhook"}}{{template "icon" "webhook"}}{{else if eq . "http"}}{{template "icon" "http"}}{{else if eq . "mcp"}}{{template "icon" "mcp"}}{{else}}{{template "icon" "src"}}{{end}}{{end}}
+
+{{define "run"}}<span class="run"><span class="run-ico k-{{.Kind}}" title="{{.Kind}}">{{template "kindicon" .Kind}}</span><span class="run-what"><b>{{.Target}}</b>{{if .Provider}} {{template "provider" .Provider}}{{end}}</span></span>{{end}}

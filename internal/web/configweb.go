@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"sort"
@@ -439,13 +440,20 @@ func (s *server) addLogin(actor, name, provider, kind, value string) error {
 	return errInvalid{"kind must be login, token or apikey"}
 }
 
-func (s *server) loginAdd(w http.ResponseWriter, r *http.Request, _ string) {
-	err := s.addLogin("portal", r.PostFormValue("name"), r.PostFormValue("provider"), r.PostFormValue("kind"), r.PostFormValue("value"))
+func (s *server) loginAdd(w http.ResponseWriter, r *http.Request, csrf string) {
+	name, provider, kind := r.PostFormValue("name"), r.PostFormValue("provider"), r.PostFormValue("kind")
+	err := s.addLogin("portal", name, provider, kind, r.PostFormValue("value"))
+	var inv errInvalid
+	if errors.As(err, &inv) { // show the problem on the page; the value is never echoed
+		v := view{CSRF: csrf, Logins: s.logins(), LoginForm: &loginForm{Name: name, Provider: provider, Kind: kind, Err: inv.msg}}
+		s.pageStatus(w, r, "logins", v, http.StatusUnprocessableEntity)
+		return
+	}
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	http.Redirect(w, r, "/logins", http.StatusSeeOther)
+	http.Redirect(w, r, "/logins?added="+url.QueryEscape(name), http.StatusSeeOther)
 }
 
 func (s *server) loginDelete(w http.ResponseWriter, r *http.Request, _ string) {

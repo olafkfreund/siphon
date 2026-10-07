@@ -1,4 +1,4 @@
-{{define "egress"}}{{with .Egress}}<div class="top"><div><h1>Egress</h1><div class="muted">Where sandboxed runs may connect. Everything else is refused.</div></div></div>
+{{define "egress"}}{{with .Egress}}<div class="top"><div><h1>Egress</h1><div class="muted">Allowlisted hosts for restricted runs. Unrestricted agents (egress off in <code>siphon.yaml</code>) can reach any host.</div></div></div>
 <div class="grid g2">
   <section class="card" aria-labelledby="lists"><h2 id="lists">Allowlists</h2>
     {{range .Lists}}<div class="need"><div class="what"><span class="pill tag">{{.Owner}}</span> <b>{{.Name}}</b>

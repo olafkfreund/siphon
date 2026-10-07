@@ -47,3 +47,17 @@ func TestStep6PagesRender(t *testing.T) {
 		}
 	}
 }
+
+// A job that failed for want of a login links straight to connecting it.
+func TestJobFailureLinksToConnect(t *testing.T) {
+	e := newEnv(t, nil)
+	tx, _ := e.st.DB.Begin()
+	id, _ := store.InsertJob(tx, store.Job{Rule: "ask", State: "running", ActionJSON: `{"action":{"Agent":"helper"}}`}, e.now)
+	tx.Commit()
+	store.FinishJob(e.st.DB, id, "failed", 1, "credential claude-max is not imported: run `siphon credentials import`", e.now)
+	c, _ := e.login()
+	body := e.do("GET", "/jobs/1", nil, func(r *http.Request) { r.AddCookie(c) }).Body.String()
+	if !strings.Contains(body, `href="/logins?connect=claude-max#add"`) || !strings.Contains(body, "Why it failed") {
+		t.Fatal(body)
+	}
+}

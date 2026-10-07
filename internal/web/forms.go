@@ -60,9 +60,16 @@ var kindFields = map[string][]field{
 	"routines": nil,
 }
 
+// advanced fields are folded under "More options" so the essentials come first.
+var advanced = map[string]bool{
+	"agents/command": true, "agents/max_turns": true, "agents/max_budget_usd": true, "agents/timeout": true,
+	"agents/egress.enabled": true, "credentials/concurrency": true,
+}
+
 // fieldView is a field with its current value, for the template.
 type fieldView struct {
 	field
+	Adv     bool   // shown under "More options"
 	Name    string // form input name
 	Value   string
 	Checked bool
@@ -135,7 +142,7 @@ func formFields(kind, y string) []fieldView {
 	m := decodeMap(y)
 	var out []fieldView
 	for _, f := range kindFields[kind] {
-		fv := fieldView{field: f, Name: "f." + f.Key}
+		fv := fieldView{field: f, Name: "f." + f.Key, Adv: advanced[kind+"/"+f.Key]}
 		v, ok := getPath(m, f.Key)
 		switch f.Kind {
 		case "secret":

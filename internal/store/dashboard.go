@@ -17,8 +17,9 @@ type Dashboard struct {
 // JobAction is a job with a one-line summary of what it runs.
 type JobAction struct {
 	JobRow
-	Kind   string // agent | cmd | unit | routine
-	Target string // agent name, argv[0], unit or routine name
+	Kind     string // agent | cmd | unit | routine
+	Target   string // agent name, argv[0], unit or routine name
+	Provider string // agent runs: claude | codex | agy (from the job's agent snapshot)
 }
 
 func GetDashboard(db *sql.DB, since time.Time) (Dashboard, error) {
@@ -46,24 +47,30 @@ func GetDashboard(db *sql.DB, since time.Time) (Dashboard, error) {
 	if err != nil {
 		return d, err
 	}
-	if d.Pending, err = jobActions(db, `state='pending_approval'`, 0, 20); err != nil {
+	if d.Pending, err = jobActions(db, `state='pending_approval'`, nil, 20); err != nil {
 		return d, err
 	}
-	d.RecentFailed, err = jobActions(db, `state='failed' AND created_at >= ?`, ms(since), 5)
+	d.RecentFailed, err = jobActions(db, `state='failed' AND created_at >= ?`, []any{ms(since)}, 5)
 	return d, err
 }
 
-func jobActions(db *sql.DB, where string, since int64, limit int) ([]JobAction, error) {
+// ListJobActions is the jobs list with what each job runs; state "" is all.
+func ListJobActions(db *sql.DB, state string, limit int) ([]JobAction, error) {
+	if state == "" {
+		return jobActions(db, `1=1`, nil, limit)
+	}
+	return jobActions(db, `state=?`, []any{state}, limit)
+}
+
+func jobActions(db *sql.DB, where string, args []any, limit int) ([]JobAction, error) {
 	q := `SELECT id, rule, state, attempt, created_at, exit_code,
 		COALESCE(json_extract(action_json,'$.action.Agent'),''),
 		COALESCE(json_extract(action_json,'$.action.Cmd[0]'),''),
 		COALESCE(json_extract(action_json,'$.action.Unit'),''),
-		COALESCE(json_extract(action_json,'$.action.Routine'),'')
+		COALESCE(json_extract(action_json,'$.action.Routine'),''),
+		COALESCE(json_extract(action_json,'$.agents."' || json_extract(action_json,'$.action.Agent') || '".Kind'),'')
 		FROM jobs WHERE ` + where + ` ORDER BY id DESC LIMIT ?`
-	args := []any{limit}
-	if since != 0 {
-		args = []any{since, limit}
-	}
+	args = append(args, limit)
 	rows, err := db.Query(q, args...)
 	if err != nil {
 		return nil, err
@@ -75,7 +82,7 @@ func jobActions(db *sql.DB, where string, since int64, limit int) ([]JobAction, 
 		var created int64
 		var exit sql.NullInt64
 		var agent, cmd, unit, routine string
-		if err := rows.Scan(&j.ID, &j.Rule, &j.State, &j.Attempt, &created, &exit, &agent, &cmd, &unit, &routine); err != nil {
+		if err := rows.Scan(&j.ID, &j.Rule, &j.State, &j.Attempt, &created, &exit, &agent, &cmd, &unit, &routine, &j.Provider); err != nil {
 			return nil, err
 		}
 		j.CreatedAt = time.UnixMilli(created)

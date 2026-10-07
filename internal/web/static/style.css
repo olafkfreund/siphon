@@ -5,7 +5,8 @@
   --kelp: #34D399; --amber: #FFB547; --coral: #FF5D73; --shallows: #F3F8FB;
   --grad: linear-gradient(135deg, var(--ink), var(--current) 55%, var(--biolume));
   --bg: var(--shallows); --surface: #fff; --surface-2: #EAF2F7; --line: #D8E4EC;
-  --text: #0B1B2E; --muted: #5B6F84;
+  --text: #0B1B2E; --muted: #52667A;
+  --link: #1D5BB8; --grad-btn: linear-gradient(135deg, #6447E8, #2563EB);
   --ok-text: #0b7a55; --wait-text: #8a5200; --bad-text: #c22a43;
   --shadow: 0 1px 2px rgba(6,17,31,.06), 0 8px 24px rgba(6,17,31,.06);
   --r: 14px;
@@ -15,12 +16,13 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme=light]) {
-    --bg: var(--abyss); --surface: #0B1D33; --surface-2: #0E2A47; --line: #163A5C;
+    --bg: var(--abyss); --surface: #0B1D33; --surface-2: #0E2A47; --line: #163A5C; --link: #7FB0FF;
     --text: #E6F1FA; --muted: #8AA4BD; --ok-text: var(--kelp); --wait-text: var(--amber); --bad-text: var(--coral);
     --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35); color-scheme: dark;
   }
 }
 :root[data-theme=dark] {
+  --link: #7FB0FF;
   --bg: var(--abyss); --surface: #0B1D33; --surface-2: #0E2A47; --line: #163A5C;
   --text: #E6F1FA; --muted: #8AA4BD; --ok-text: var(--kelp); --wait-text: var(--amber); --bad-text: var(--coral);
   --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35); color-scheme: dark;
@@ -29,7 +31,7 @@
 /* base */
 * { box-sizing: border-box }
 body { margin: 0; font: 15px/1.5 var(--font); background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased }
-a { color: var(--current); text-decoration: none } a:hover { text-decoration: underline }
+a { color: var(--link); text-decoration: none } a:hover { text-decoration: underline }
 h1 { font-size: 1.6rem; margin: 0 0 .2rem; letter-spacing: -.02em; line-height: 1.2 }
 h2 { font-size: 1.05rem; margin: 0 0 .8rem }
 p { margin: 0 0 .8rem }
@@ -69,7 +71,9 @@ pre { margin: 0; background: #06111F; color: #cfe3f5; border-radius: 12px; paddi
 .mt { margin-top: 1rem } .mb { margin-bottom: 1rem }
 .btn, button { display: inline-flex; align-items: center; gap: .45rem; white-space: nowrap; border: 1px solid var(--line); background: var(--surface); color: var(--text); border-radius: 999px; padding: .5rem 1rem; font: 600 .9rem var(--font); cursor: pointer; text-decoration: none }
 .btn:hover, button:hover { border-color: var(--current); text-decoration: none }
-.btn.primary { background: var(--grad); border: 0; color: #fff; box-shadow: var(--shadow) }
+.btn.primary { background: var(--grad-btn); border: 0; color: #fff; box-shadow: var(--shadow) }
+.btn.primary:hover { filter: brightness(1.08) }
+.btn .ico, button .ico { width: 16px; height: 16px }
 .btn.ok { background: var(--kelp); border-color: var(--kelp); color: #04281c }
 .btn.no { color: var(--bad-text); border-color: color-mix(in srgb, var(--coral) 45%, transparent) }
 .btn.sm, .sm > button, form.sm button { padding: .3rem .75rem; font-size: .8rem }
@@ -128,9 +132,11 @@ dt { color: var(--muted) } dd { margin: 0 }
 .flow { display: flex; align-items: center; margin: .5rem 0 }
 .node { flex: 1; min-width: 0; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: .55rem .7rem; font-size: .84rem }
 .node.cond { flex: 1.5 }
-.node small { display: block; font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted) }
+.node small { display: block; font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted) }
 .node code { display: block; overflow-wrap: anywhere; font-size: .8rem }
-.pipe { width: 40px; height: 14px; flex: none }
+.pipe { width: clamp(18px, 2vw, 40px); height: 14px; flex: none }
+.rule-card { container-type: inline-size }
+@container (max-width: 560px) { .flow { flex-direction: column; align-items: stretch } .pipe { transform: rotate(90deg); margin: .1rem auto } }
 .pipe line { stroke: var(--current); stroke-width: 3; stroke-dasharray: 4 6; stroke-linecap: round; animation: flow 1.2s linear infinite }
 .flow.off .pipe line { stroke: var(--line); animation: none }
 .flow.off .node { opacity: .65 }
@@ -182,6 +188,89 @@ input, select, textarea { font: inherit; font-weight: 400; color: var(--text); b
 .empty { text-align: center; padding: 2rem 1rem; color: var(--muted) }
 .empty .bubbles { margin-bottom: .6rem }
 
+/* numbers line up */
+.stat b, table, dl { font-variant-numeric: tabular-nums }
+
+/* page header: a quiet deep-water wash (decorative only) */
+.main > .top:first-child { margin: -1.6rem -2rem 1.4rem; padding: 1.6rem 2rem 1.2rem;
+  background: radial-gradient(700px 160px at 0% 0%, color-mix(in srgb, var(--biolume) 10%, transparent), transparent 70%),
+              radial-gradient(600px 160px at 100% 0%, color-mix(in srgb, var(--ink) 9%, transparent), transparent 70%) }
+.banner.fail { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; justify-content: space-between }
+.banner.ok { background: color-mix(in srgb, var(--kelp) 14%, var(--surface)); border-color: color-mix(in srgb, var(--kelp) 45%, transparent); display: flex; gap: .5rem; align-items: center }
+
+/* runs: kind icon + target + provider */
+.run { display: inline-flex; align-items: center; gap: .55rem; min-width: 0 }
+.run-ico { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; flex: none; background: var(--surface-2); color: var(--muted) }
+.run-ico .ico { width: 16px; height: 16px }
+.run-ico.k-agent { background: color-mix(in srgb, var(--ink) 16%, transparent); color: var(--ink) }
+.run-ico.k-cmd { background: color-mix(in srgb, var(--current) 15%, transparent); color: var(--current) }
+.run-ico.k-unit { background: color-mix(in srgb, var(--amber) 20%, transparent); color: var(--wait-text) }
+.run-ico.k-routine { background: color-mix(in srgb, var(--biolume) 18%, transparent); color: #0b8c82 }
+:root[data-theme=dark] .run-ico.k-routine { color: var(--biolume) }
+.run-what { display: inline-flex; align-items: center; gap: .45rem; flex-wrap: wrap }
+
+/* provider badges: original monograms in each provider's colour (not vendor logos) */
+.prov { display: inline-flex; align-items: center; gap: .35rem; border-radius: 999px; padding: .1rem .55rem .1rem .15rem; font-size: .75rem; font-weight: 650; background: var(--surface-2); color: var(--text) }
+.prov i { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; font: 800 .62rem/1 var(--mono); font-style: normal; color: #fff }
+.prov.claude i { background: #C96442 } .prov.codex i { background: #10161F; box-shadow: inset 0 0 0 1px #3a4656 } .prov.agy i { background: linear-gradient(135deg, #4285F4, #34A0F0) }
+
+/* running: the jet's bubbles instead of a spinner */
+.pill.running .i { animation: none; display: inline-flex; gap: 2px }
+.pill.running .i::before, .pill.running .i::after { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; animation: rise 1.6s ease-in-out infinite }
+.pill.running .i::after { animation-delay: .4s; opacity: .6 }
+
+/* rule editor: the flow as numbered steps */
+.flowsteps { list-style: none; margin: 0; padding: 0; counter-reset: fs }
+.fs { position: relative; padding: 0 0 .4rem 2.9rem }
+.fs::before { content: ""; position: absolute; left: 15px; top: 34px; bottom: -4px; width: 2px; background: linear-gradient(var(--line), var(--line)) }
+.fs:last-child::before { display: none }
+.fs-head { display: flex; align-items: center; gap: .7rem; margin: 0 0 .7rem -2.9rem }
+.fs-head b { display: block; font-size: .95rem } .fs-head small { display: block; color: var(--muted); font-size: .78rem }
+.fs-ico { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; color: #fff; flex: none }
+.fs-ico .ico { width: 17px; height: 17px }
+.fs-ico.src { background: var(--current) } .fs-ico.when { background: var(--ink) } .fs-ico.then { background: linear-gradient(135deg, var(--current), #0b8c82) }
+.seg label span { display: inline-flex; align-items: center; gap: .35rem }
+.seg .ico { width: 15px; height: 15px }
+fieldset { border: 0; margin: 0 0 .9rem; padding: 0; min-width: 0 }
+fieldset.f { display: flex; flex-direction: column; gap: .35rem; font-size: .82rem; font-weight: 600 }
+legend { padding: 0; margin-bottom: .35rem; font-size: .82rem; font-weight: 600 }
+.lbl { display: inline-flex; align-items: center; gap: .35rem }
+label.f .ico { width: 15px; height: 15px; vertical-align: -3px; color: var(--muted) }
+label.check { display: flex; align-items: center; gap: .5rem; flex-direction: row; flex-wrap: wrap; font-size: .85rem }
+label.check .hint { flex-basis: 100%; margin-left: 1.6rem }
+details.more { margin: 0 0 .9rem; border: 1px dashed var(--line); border-radius: 12px; padding: .5rem .8rem }
+details.more summary { cursor: pointer; font-size: .82rem; font-weight: 650; color: var(--muted) }
+details.more[open] summary { margin-bottom: .7rem }
+form > .grid.g2 > .card { align-self: start }
+form:has(input[name="event_src"][value="last"]:checked) .paste { display: none }
+.tester-card h2 { display: flex; align-items: center; gap: .4rem }
+
+/* logins */
+.g3 { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)) }
+.acct { display: flex; flex-direction: column; gap: .35rem }
+.acct-head { display: flex; align-items: center; gap: .5rem }
+.acct-name { margin: .3rem 0 0; font-size: 1.05rem }
+.acct .row-actions { justify-content: flex-start; margin-top: auto; padding-top: .6rem }
+.acct.s-missing, .acct.s-expired { border-color: color-mix(in srgb, var(--amber) 45%, var(--line)) }
+.login-add { max-width: 40rem }
+.login-add input:not([type=radio]), .login-add textarea { width: 100% }
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem }
+.tile { position: relative; cursor: pointer }
+.tile input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer }
+.tile > span { display: flex; flex-direction: column; align-items: flex-start; gap: .35rem; padding: .8rem; border: 1px solid var(--line); border-radius: 12px; background: var(--surface) }
+.tile small { color: var(--muted); font-size: .75rem }
+.tile input:checked + span { border-color: var(--current); box-shadow: 0 0 0 3px color-mix(in srgb, var(--current) 25%, transparent) }
+.tile input:focus-visible + span { outline: 3px solid color-mix(in srgb, var(--ink) 55%, transparent); outline-offset: 2px }
+.howto p { display: none; gap: .6rem; align-items: flex-start; background: var(--surface-2); border-radius: 10px; padding: .7rem .8rem; font-size: .85rem; margin: 0 0 .9rem }
+.howto .ico { margin-top: 2px; color: var(--muted) }
+.login-add:not(:has([name=provider][value=claude]:checked)) .k-token,
+.login-add:has([name=provider][value=agy]:checked) .k-apikey { display: none }
+.login-add:has([name=provider][value=claude]:checked):has([name=kind][value=token]:checked) .h-claude-token,
+.login-add:has([name=provider][value=claude]:checked):has([name=kind][value=login]:checked) .h-claude-login,
+.login-add:has([name=provider][value=codex]:checked):has([name=kind][value=login]:checked) .h-codex-login,
+.login-add:has([name=provider][value=agy]:checked):has([name=kind][value=login]:checked) .h-agy-login,
+.login-add:has([name=kind][value=apikey]:checked) .h-apikey { display: flex }
+
 /* motion off on request */
 @media (prefers-reduced-motion: reduce) { *, *::after { animation: none !important; transition: none !important } }
 
@@ -198,6 +287,17 @@ input, select, textarea { font: inherit; font-weight: 400; color: var(--text); b
   .flow { flex-direction: column; align-items: stretch } .pipe { transform: rotate(90deg); margin: .1rem auto }
   .need { flex-wrap: wrap } .need .acts { width: 100% } .need .acts form, .need .acts .btn { flex: 1 } .need .acts button { width: 100%; justify-content: center }
   .hide-sm { display: none }
+  .main > .top:first-child { margin: -1rem -1rem 1rem; padding: 1rem }
+  .need { display: grid; grid-template-columns: auto 1fr; gap: .4rem .6rem }
+  .need .sp { display: none }
+  .need .acts, .need > .btn { grid-column: 1 / -1 }
+  .need .acts button, .need > .btn { min-height: 44px }
+  table.cards thead { display: none }
+  table.cards tr { display: grid; grid-template-columns: 1fr 1fr; gap: .2rem .8rem; padding: .7rem 0; border-top: 1px solid var(--line) }
+  table.cards td { border: 0; padding: .1rem 0 }
+  table.cards td[data-label]::before { content: attr(data-label); display: block; font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted) }
+  table.cards td.hide-sm { display: none }
+  .tiles { grid-template-columns: 1fr }
 }
 
 /* editors */

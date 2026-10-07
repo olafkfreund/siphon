@@ -8,7 +8,7 @@
   <a class="chip" href="/jobs?state=failed"{{if eq .State "failed"}} aria-current="page"{{end}}>✕ Failed <span class="muted">{{index .Counts "failed"}}</span></a>
   <a class="chip" href="/jobs?state=cancelled"{{if eq .State "cancelled"}} aria-current="page"{{end}}>⊘ Cancelled <span class="muted">{{index .Counts "cancelled"}}</span></a>
 </nav>
-<section class="card"><table><thead><tr><th>#</th><th>Rule</th><th>State</th><th class="hide-sm">Attempt</th><th class="hide-sm">Created</th><th>Exit</th></tr></thead><tbody>
-{{range .Jobs}}<tr><td><a href="/jobs/{{.ID}}">{{.ID}}</a></td><td>{{.Rule}}</td><td>{{template "pill" .State}}</td><td class="hide-sm">{{.Attempt}}</td><td class="hide-sm muted" title="{{tm .CreatedAt}}">{{ago .CreatedAt}}</td><td>{{exit .ExitCode}}</td></tr>
-{{else}}<tr><td colspan="6"><div class="empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>{{if .State}}No jobs in this state.{{else}}Nothing in the current yet. Runs appear here when a rule fires.{{end}}</div></td></tr>{{end}}
+<section class="card"><table class="cards"><thead><tr><th>#</th><th>Rule</th><th>Runs</th><th>State</th><th class="hide-sm">Attempt</th><th class="hide-sm">Created</th><th>Exit</th></tr></thead><tbody>
+{{range .Jobs}}<tr><td data-label="#"><a href="/jobs/{{.ID}}">{{.ID}}</a></td><td data-label="Rule">{{.Rule}}</td><td data-label="Runs">{{template "run" .}}</td><td data-label="State">{{template "pill" .State}}</td><td class="hide-sm" data-label="Attempt">{{.Attempt}}</td><td class="hide-sm muted" title="{{tm .CreatedAt}}" data-label="Created">{{ago .CreatedAt}}</td><td data-label="Exit">{{exit .ExitCode}}</td></tr>
+{{else}}<tr><td colspan="7"><div class="empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>{{if .State}}No jobs in this state.{{else}}Nothing in the current yet. Runs appear here when a rule fires.{{end}}</div></td></tr>{{end}}
 </tbody></table></section>{{end}}

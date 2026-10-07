@@ -18,7 +18,7 @@ type view struct {
 	State     string
 	Sources   []sourceView
 	Rules     []ruleView
-	Jobs      []store.JobRow
+	Jobs      []store.JobAction
 	Job       store.JobDetail
 	Approvals []store.PendingApproval
 	Audit     []store.AuditRow
@@ -28,6 +28,7 @@ type view struct {
 	Egress    *egressView
 	Counts    map[string]int
 	ActionOf  map[int64]store.JobAction
+	LoginForm *loginForm
 	Cfg       *cfgView  // config item list / editor
 	Hist      *histView // revision history
 }
@@ -62,7 +63,7 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 		if v.Sources, err = s.sources(); err != nil {
 			return true, err
 		}
-		if v.Jobs, err = store.QueryJobs(s.Store.DB, "", 8); err != nil {
+		if v.Jobs, err = s.runs("", 8); err != nil {
 			return true, err
 		}
 		v.Dash, err = s.dashboard(v.Sources)
@@ -72,7 +73,7 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 	page("/rules", "rules", func(_ *http.Request, v *view) (ok bool, err error) { v.Rules, err = s.rules(); return true, err })
 	page("/jobs", "jobs", func(r *http.Request, v *view) (ok bool, err error) {
 		v.State = r.URL.Query().Get("state")
-		if v.Jobs, err = store.QueryJobs(s.Store.DB, v.State, 200); err != nil {
+		if v.Jobs, err = s.runs(v.State, 200); err != nil {
 			return true, err
 		}
 		d, err := store.GetDashboard(s.Store.DB, time.Time{})
@@ -99,7 +100,22 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 		}
 		return true, err
 	})
-	page("/logins", "logins", func(_ *http.Request, v *view) (bool, error) { v.Logins = s.logins(); return true, nil })
+	page("/logins", "logins", func(r *http.Request, v *view) (bool, error) {
+		v.Logins = s.logins()
+		v.LoginForm = &loginForm{Kind: "token", Provider: "claude"}
+		if n := r.URL.Query().Get("connect"); n != "" { // "Connect" on a listed login
+			if c := s.Config().Credentials[n]; c != nil {
+				v.LoginForm.Name, v.LoginForm.Provider = n, c.Provider
+				if c.Provider != "claude" {
+					v.LoginForm.Kind = "login"
+				}
+			}
+		}
+		if n := r.URL.Query().Get("added"); n != "" {
+			v.LoginForm.Notice = n + " is connected."
+		}
+		return true, nil
+	})
 	page("/egress", "egress", func(_ *http.Request, v *view) (ok bool, err error) { v.Egress, err = s.egress(); return true, err })
 	page("/audit", "audit", func(_ *http.Request, v *view) (ok bool, err error) {
 		v.Audit, err = store.ListAudit(s.Store.DB, 200)

@@ -27,7 +27,11 @@ type jobView struct {
 	Blocked      []blockedHost
 	Steps        []stepView
 	Duration     string
+	Summary      string // failed jobs: the last meaningful output line
+	Connect      string // a login the job needed but which isn't connected
 }
+
+var notImported = regexp.MustCompile(`credential (\S+) is not imported`)
 
 type blockedHost struct {
 	Host  string
@@ -94,6 +98,18 @@ func (s *server) jobDetail(id int64) (*jobView, bool, error) {
 			v.Event = string(b)
 		}
 	}
+	if j.State == "failed" {
+		lines := strings.Split(strings.TrimSpace(j.Output), "\n")
+		for i := len(lines) - 1; i >= 0; i-- {
+			if l := strings.TrimSpace(lines[i]); l != "" && !strings.HasPrefix(l, "egress: blocked") {
+				v.Summary = l
+				if m := notImported.FindStringSubmatch(l); m != nil {
+					v.Connect = m[1]
+				}
+				break
+			}
+		}
+	}
 	for _, m := range blockedLine.FindAllStringSubmatch(j.Output, -1) {
 		n, _ := strconv.Atoi(m[2])
 		v.Blocked = append(v.Blocked, blockedHost{m[1], n})
@@ -133,24 +149,32 @@ func (s *server) jobDetail(id int64) (*jobView, bool, error) {
 // loginView is one credential's metadata; secrets never leave the store.
 type loginView struct {
 	Name, Provider, Type, Expiry, ExpiryClass, Written string
+	Key                                                string // claude | codex | agy
+	Status                                             string // connected | expiring | expired | missing | apikey
+}
+
+// loginForm is the "Add / connect a login" form state.
+type loginForm struct {
+	Name, Provider, Kind, Err, Notice string
 }
 
 func (s *server) logins() []loginView {
 	st := cred.StoreFor(s.Config())
 	out := []loginView{}
 	for name, c := range s.Config().Credentials {
-		v := loginView{Name: name, Provider: providerName[c.Provider], Type: "Subscription", Expiry: "not imported", ExpiryClass: "cancelled", Written: "—"}
+		v := loginView{Name: name, Provider: providerName[c.Provider], Key: c.Provider, Type: "Subscription", Expiry: "not connected", ExpiryClass: "cancelled", Written: "—", Status: "missing"}
 		if c.APIKey.Ref != "" {
-			v.Type, v.Expiry = "API key", "no expiry"
+			v.Type, v.Expiry, v.Status = "API key", "no expiry", "apikey"
 		} else if exp, wrote, err := st.Info(name); err == nil {
+			v.Status = "connected"
 			v.Written = ago(s.Now(), wrote)
 			switch left := exp.Sub(s.Now()); {
 			case exp.IsZero():
 				v.Expiry, v.ExpiryClass = "unknown", "queued"
 			case left <= 0:
-				v.Expiry, v.ExpiryClass = "expired", "failed"
+				v.Expiry, v.ExpiryClass, v.Status = "expired", "failed", "expired"
 			case left < 24*time.Hour:
-				v.Expiry, v.ExpiryClass = "in "+left.Round(time.Minute).String(), "pending_approval"
+				v.Expiry, v.ExpiryClass, v.Status = "in "+left.Round(time.Minute).String(), "pending_approval", "expiring"
 			default:
 				v.Expiry, v.ExpiryClass = "in "+strconv.Itoa(int(left.Hours()/24))+" d", "done"
 			}
@@ -220,4 +244,18 @@ func (s *server) egress() (*egressView, error) {
 		v.Blocked[i].Count++
 	}
 	return v, nil
+}
+
+// runs lists jobs with what they run. Agent runs from before snapshots, or
+// whose snapshot lacks a kind, take the provider from the live config.
+func (s *server) runs(state string, limit int) ([]store.JobAction, error) {
+	js, err := store.ListJobActions(s.Store.DB, state, limit)
+	for i := range js {
+		if js[i].Kind == "agent" && js[i].Provider == "" {
+			if a := s.Config().Agents[js[i].Target]; a != nil {
+				js[i].Provider = a.Kind
+			}
+		}
+	}
+	return js, err
 }
