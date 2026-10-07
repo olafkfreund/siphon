@@ -503,10 +503,12 @@ func (c *Config) Warnings() []string {
 		if a.Kind == "agy" && len(a.MCP) > 0 {
 			add("tool allowlist not enforced (only MCP server scoping)")
 		}
-		if a.Kind != "claude" && a.MaxTurns > 0 {
+		if a.Kind != "claude" && a.Kind != "model" && a.MaxTurns > 0 { // the built-in loop enforces turns
 			add("max_turns not enforced")
 		}
-		if a.Kind != "claude" && a.MaxBudgetUSD > 0 {
+		if a.Kind == "model" && a.MaxBudgetUSD > 0 {
+			add("max_budget_usd applies only when the endpoint reports a cost")
+		} else if a.Kind != "claude" && a.MaxBudgetUSD > 0 {
 			add("max_budget_usd not enforced")
 		}
 	}
