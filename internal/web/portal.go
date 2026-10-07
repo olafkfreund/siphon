@@ -29,6 +29,9 @@ type view struct {
 	Counts    map[string]int
 	ActionOf  map[int64]store.JobAction
 	LoginForm *loginForm
+	Models    []modelConnView
+	Presets   []modelPreset
+	ModelForm *modelForm
 	Cfg       *cfgView  // config item list / editor
 	Hist      *histView // revision history
 }
@@ -100,20 +103,8 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 		}
 		return true, err
 	})
-	page("/logins", "logins", func(r *http.Request, v *view) (bool, error) {
-		v.Logins = s.logins()
-		v.LoginForm = &loginForm{Kind: "token", Provider: "claude"}
-		if n := r.URL.Query().Get("connect"); n != "" { // "Connect" on a listed login
-			if c := s.Config().Credentials[n]; c != nil {
-				v.LoginForm.Name, v.LoginForm.Provider = n, c.Provider
-				if c.Provider != "claude" {
-					v.LoginForm.Kind = "login"
-				}
-			}
-		}
-		if n := r.URL.Query().Get("added"); n != "" {
-			v.LoginForm.Notice = n + " is connected."
-		}
+	page("/connections", "logins", func(r *http.Request, v *view) (bool, error) {
+		*v = s.connectionsView(r, v.CSRF)
 		return true, nil
 	})
 	page("/egress", "egress", func(_ *http.Request, v *view) (ok bool, err error) { v.Egress, err = s.egress(); return true, err })

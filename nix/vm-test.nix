@@ -23,7 +23,15 @@ pkgs.testers.runNixOSTest {
   # A host outside the sandbox: the only way to it from a restricted action
   # is siphon's egress proxy.
   nodes.external = {
-    networking.firewall.allowedTCPPorts = [ 8080 ];
+    networking.firewall.allowedTCPPorts = [
+      8080
+      8000
+    ];
+    # A stand-in model endpoint (OpenAI-compatible) and MCP server.
+    systemd.services.stub-model = {
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig.ExecStart = "${pkgs.python3}/bin/python3 ${./stub-model.py}";
+    };
     systemd.services.web = {
       wantedBy = [ "multi-user.target" ];
       serviceConfig.ExecStart = "${pkgs.python3}/bin/python3 -m http.server 8080 --directory ${pkgs.writeTextDir "index.html" "external-ok"}";
@@ -72,7 +80,34 @@ pkgs.testers.runNixOSTest {
             };
             claude-max.provider = "claude";
             chatgpt.provider = "codex";
+            # A model connection to the stub (a LAN endpoint, so it must be listed).
+            stubm = {
+              provider = "openai";
+              url = "http://external:8000/v1";
+            };
             google.provider = "agy";
+          };
+          server.models.private_endpoints = [ "external:8000" ];
+          sources.extm = {
+            type = "mcp";
+            url = "http://external:8000/mcp";
+            read = {
+              tool = "echo";
+              args.text = "poll";
+            };
+            poll = "1h";
+            allow_private = true;
+          };
+          # The built-in loop on a model connection, with one allowed MCP tool.
+          agents.local = {
+            kind = "model";
+            credential = "stubm";
+            model = "stub-model";
+            prompt = "Use the echo tool, then answer.";
+            mcp = [ "extm" ];
+            allowed_tools = [ "mcp__extm__echo" ];
+            max_turns = 3;
+            approve = false;
           };
           # A LAN MCP server: its host:port joins the allowlist of agents using it.
           sources.ext = {
@@ -181,6 +216,15 @@ pkgs.testers.runNixOSTest {
               id = "event.n";
               cooldown = "1s";
               action.agent = "probe";
+            }
+            {
+              name = "model-agent";
+              source = "gh";
+              when = ''event.kind == "model"'';
+              on = "each";
+              id = "event.n";
+              cooldown = "1s";
+              action.agent = "local";
             }
             {
               name = "real-clis";
@@ -463,6 +507,22 @@ pkgs.testers.runNixOSTest {
             assert crash not in out, f"user lookup failed without nscd: {out}"
         assert "egress: blocked api.anthropic.com:443" in out, f"claude never reached the proxy: {out}"
         assert "egress: blocked api.openai.com:443" in out, f"codex never reached the proxy: {out}"
+
+    with subtest("a model agent (built-in loop) calls an MCP tool through the sandbox"):
+        external.wait_for_open_port(8000)
+        assert hook('{"kind":"model","n":600}') == "202"
+        try:
+            machine.wait_until_succeeds(
+                "sqlite3 /var/lib/siphon/state.db \"select state from jobs where rule='model-agent'\" | grep -qx done",
+                timeout=120,
+            )
+        except Exception:
+            dump()
+            print(machine.execute("sqlite3 /var/lib/siphon/state.db \"select output from jobs where rule='model-agent'\"")[1])
+            raise
+        out = machine.succeed("sqlite3 /var/lib/siphon/state.db \"select output from jobs where rule='model-agent'\"")
+        assert "final: echo: hi from the model" in out, out
+        external.succeed("grep -q 'hi from the model' /tmp/mcp-calls")
 
     with subtest("a rule created over the config API fires without a restart"):
         import json

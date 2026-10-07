@@ -1,6 +1,8 @@
 package config
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -200,6 +202,100 @@ func TestOverlayItemChecks(t *testing.T) {
 		"own secret":    {Kind: "credentials", Name: "n", YAML: "{provider: claude, api_key: 'file:" + sec + "/credentials-n-api_key'}"},
 		"allow a host":  {Kind: "agents", Name: "n", YAML: "{kind: claude, egress: {allow: [x.example.com]}}"},
 		"tombstone any": {Kind: "sources", Name: "m", Deleted: true},
+	} {
+		if _, _, err := LoadWithOverlay(path, []Item{it}); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+func TestCheckModelEndpoint(t *testing.T) {
+	file, err := Parse([]byte("server: { models: {private_endpoints: ['10.0.0.9:11434']} }\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := lookupHost
+	defer func() { lookupHost = old }()
+	lookupHost = func(_ context.Context, h string) ([]string, error) {
+		switch h {
+		case "pub.example":
+			return []string{"93.184.216.34"}, nil
+		case "lan.example":
+			return []string{"93.184.216.34", "192.168.1.5"}, nil
+		case "meta.example":
+			return []string{"::ffff:169.254.169.254"}, nil
+		case "10.0.0.9":
+			return []string{"10.0.0.9"}, nil
+		}
+		return nil, errors.New("no such host")
+	}
+	cred := func(prov, u string) string { return "{provider: " + prov + ", url: '" + u + "'}" }
+	for name, y := range map[string]string{
+		"loopback":   cred("ollama", "http://127.0.0.1:11434"),
+		"mixed":      cred("openai", "https://lan.example/v1"),
+		"metadata":   cred("openai", "http://meta.example/v1"),
+		"unresolved": cred("ollama", "http://nope.example:11434"),
+		"unlisted":   cred("ollama", "http://10.0.0.9:11435"),
+	} {
+		if err := file.CheckModelEndpoint(y); err == nil || !strings.Contains(err.Error(), "server.models.private_endpoints") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for name, y := range map[string]string{
+		"public": cred("openai", "https://pub.example/v1"),
+		"listed": cred("ollama", "http://10.0.0.9:11434"),
+		"claude": "{provider: claude}",
+	} {
+		if err := file.CheckModelEndpoint(y); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// Loading never resolves names: a saved item whose host later turns private
+// must not stop startup or validate.
+func TestLoadDoesNoModelDNS(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	os.WriteFile(path, []byte("server: { db: "+dir+"/s.db }\n"), 0o600)
+	old := lookupHost
+	defer func() { lookupHost = old }()
+	lookupHost = func(context.Context, string) ([]string, error) {
+		t.Error("DNS lookup during load")
+		return nil, errors.New("x")
+	}
+	it := Item{Kind: "credentials", Name: "n", YAML: "{provider: openai, url: 'https://moved.example/v1'}"}
+	if c, _, err := LoadWithOverlay(path, []Item{it}); err != nil || c.Credentials["n"] == nil {
+		t.Fatalf("load: %v", err)
+	}
+}
+
+// A key kept from siphon.yaml may not be pointed at another provider or URL.
+func TestOverlayKeptSecretCannotMove(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	os.WriteFile(path, []byte("server: { db: "+dir+"/s.db }\n"+
+		"credentials:\n  oa: {provider: openai, url: 'https://api.example/v1', api_key: 'env:HOME'}\n"+
+		"sources:\n  s: {type: http, url: 'https://good.example/x', poll: 1m, auth: {bearer: 'env:HOME'}, headers: {X-Key: 'env:HOME'}}\n"+
+		"  h: {type: webhook, secret: 'env:HOME', signature: github}\n"), 0o600)
+	const msg = "can't be moved"
+	for name, it := range map[string]Item{
+		"other url":      {Kind: "credentials", Name: "oa", YAML: "{provider: openai, url: 'https://evil.example/v1', api_key: 'env:HOME'}"},
+		"other provider": {Kind: "credentials", Name: "oa", YAML: "{provider: ollama, url: 'https://api.example/v1', api_key: 'env:HOME'}"},
+		"other path":     {Kind: "credentials", Name: "oa", YAML: "{provider: openai, url: 'https://api.example/other/v1', api_key: 'env:HOME'}"},
+		"http downgrade": {Kind: "credentials", Name: "oa", YAML: "{provider: openai, url: 'http://api.example/v1', api_key: 'env:HOME'}"},
+		"bearer":         {Kind: "sources", Name: "s", YAML: "{type: http, url: 'https://evil.example/x', poll: 1m, auth: {bearer: 'env:HOME'}}"},
+		"header":         {Kind: "sources", Name: "s", YAML: "{type: http, url: 'https://evil.example/x', poll: 1m, headers: {X-Key: 'env:HOME'}}"},
+	} {
+		if _, _, err := LoadWithOverlay(path, []Item{it}); err == nil || !strings.Contains(err.Error(), msg) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for name, it := range map[string]Item{
+		"same url":   {Kind: "credentials", Name: "oa", YAML: "{provider: openai, url: 'https://API.example/v1', api_key: 'env:HOME', concurrency: 2}"},
+		"same src":   {Kind: "sources", Name: "s", YAML: "{type: http, url: 'https://good.example/x', poll: 2m, auth: {bearer: 'env:HOME'}}"},
+		"no key url": {Kind: "credentials", Name: "oa", YAML: "{provider: openai, url: 'https://other.example/v1'}"},
+		"webhook":    {Kind: "sources", Name: "h", YAML: "{type: webhook, secret: 'env:HOME', signature: github}"},
 	} {
 		if _, _, err := LoadWithOverlay(path, []Item{it}); err != nil {
 			t.Errorf("%s: %v", name, err)

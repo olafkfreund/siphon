@@ -28,6 +28,17 @@ type Entry struct {
 	Host         string
 	Port         int // 0 means 443.
 	AllowPrivate bool
+	NoLinkLocal  bool // with AllowPrivate: refuse link-local and metadata addresses
+}
+
+func (e Entry) mode() source.Mode {
+	switch {
+	case e.AllowPrivate && e.NoLinkLocal:
+		return source.PrivateNoLinkLocal
+	case e.AllowPrivate:
+		return source.Private
+	}
+	return source.Public
 }
 
 type run struct {
@@ -38,16 +49,16 @@ type run struct {
 
 type Proxy struct {
 	listen  string
-	resolve func(context.Context, string, bool) ([]netip.Addr, error)
+	resolve func(context.Context, string, source.Mode) ([]netip.Addr, error)
 	mu      sync.Mutex
 	addr    string
 	runs    map[string]*run
 	tunnels chan struct{}
 }
 
-func New(listen string, resolve func(context.Context, string, bool) ([]netip.Addr, error)) *Proxy {
+func New(listen string, resolve func(context.Context, string, source.Mode) ([]netip.Addr, error)) *Proxy {
 	if resolve == nil {
-		resolve = source.ResolveAllowed
+		resolve = source.ResolveAllowedMode
 	}
 	return &Proxy{listen: listen, resolve: resolve, runs: make(map[string]*run), tunnels: make(chan struct{}, 256)}
 }
@@ -225,14 +236,14 @@ func (p *Proxy) handle(ctx context.Context, conn net.Conn) {
 		return
 	}
 	rctx, rcancel := context.WithTimeout(ctx, 5*time.Second)
-	addrs, err := p.resolve(rctx, host, entry.AllowPrivate)
+	addrs, err := p.resolve(rctx, host, entry.mode())
 	rcancel()
 	if err == nil && len(addrs) == 0 {
 		err = errors.New("no address found")
 	}
 	if err == nil {
 		for _, addr := range addrs {
-			_, err = source.ResolveAllowed(ctx, addr.String(), entry.AllowPrivate)
+			_, err = source.ResolveAllowedMode(ctx, addr.String(), entry.mode())
 			if err != nil {
 				break
 			}

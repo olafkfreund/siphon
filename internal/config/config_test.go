@@ -581,3 +581,65 @@ func TestLegacyDefaultDB(t *testing.T) {
 		t.Fatalf("both exist: %s", c.Server.DB)
 	}
 }
+
+func TestModelValidation(t *testing.T) {
+	t.Setenv("K", "sk-test")
+	const ok = "credentials: {o: {provider: ollama, url: 'http://h:11434'}}\nagents: {m: {kind: model, model: q, credential: o}}\n"
+	for name, tc := range map[string]struct{ y, want string }{
+		"ok":             {ok, ""},
+		"openai key":     {"credentials: {o: {provider: openai, url: 'https://api.x/v1', preset: groq, api_key: 'env:K'}}\nagents: {m: {kind: model, model: q, credential: o}}\n", ""},
+		"no url":         {"credentials: {o: {provider: ollama}}\n", "url:"},
+		"bad scheme":     {"credentials: {o: {provider: openai, url: 'ftp://h'}}\n", "url:"},
+		"userinfo":       {"credentials: {o: {provider: openai, url: 'http://u:p@h'}}\n", "url:"},
+		"ollama key":     {"credentials: {o: {provider: ollama, url: 'http://h', api_key: 'env:K'}}\n", "not allowed for ollama"},
+		"url on claude":  {"credentials: {o: {provider: claude, url: 'http://h'}}\n", "url is only for"},
+		"no model":       {strings.Replace(ok, "model: q, ", "", 1), "model is required"},
+		"wrong cred":     {"credentials: {c: {provider: claude}}\nagents: {m: {kind: model, model: q, credential: c}}\n", "needs an ollama or openai"},
+		"no cred":        {"agents: {m: {kind: model, model: q}}\n", "credential is required"},
+		"bad endpoint":   {"server: {models: {private_endpoints: ['h']}}\n", "private_endpoints"},
+		"wild endpoint":  {"server: {models: {private_endpoints: ['*.x:1']}}\n", "private_endpoints"},
+		"query":          {"credentials: {o: {provider: ollama, url: 'http://h:11434/?x'}}\n", "must not contain ?"},
+		"fragment":       {"credentials: {o: {provider: ollama, url: 'http://h:11434/api/pull#'}}\n", "must not contain ?"},
+		"dotdot":         {"credentials: {o: {provider: openai, url: 'http://h/v1/../api'}}\n", "path segments"},
+		"ollama path":    {"credentials: {o: {provider: ollama, url: 'http://h:11434/api/pull'}}\n", "ollama takes no path"},
+		"openai path":    {"credentials: {o: {provider: openai, url: 'http://h/api/pull'}}\n", "end in /v1"},
+		"openai V1":      {"credentials: {o: {provider: openai, url: 'http://h/V1'}}\n", "end in /v1"},
+		"openai /v1/":    {"credentials: {o: {provider: openai, url: 'http://h/openai/v1/'}}\n", ""},
+		"dunder mcp":     {"sources: {a__b: {type: mcp, url: 'http://m/x', read: {tool: t}}}\ncredentials: {o: {provider: ollama, url: 'http://h:11434'}}\nagents: {m: {kind: model, model: q, credential: o, mcp: [a__b]}}\n", "must not contain __"},
+		"good endpoints": {"server: {models: {private_endpoints: ['127.0.0.1:11434', '[::1]:80']}}\n", ""},
+	} {
+		c, err := Parse([]byte(tc.y))
+		if err == nil {
+			err = c.Validate()
+		}
+		if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%s: %v, want %q", name, err, tc.want)
+		}
+	}
+}
+
+func TestModelEgress(t *testing.T) {
+	c, err := Parse([]byte(`
+server: {models: {private_endpoints: ['10.0.0.5:11434']}}
+credentials:
+  pub:  {provider: openai, url: 'https://api.groq.com/openai/v1'}
+  lan:  {provider: ollama, url: 'http://10.0.0.5:11434'}
+  bad:  {provider: ollama, url: 'http://10.0.0.6:11434'}
+agents:
+  a: {kind: model, model: m, credential: pub}
+  b: {kind: model, model: m, credential: lan}
+  c: {kind: model, model: m, credential: bad}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for a, want := range map[string]string{
+		"a": "api.groq.com:443",
+		"b": "10.0.0.5:11434 (allow_private) (no_link_local)",
+		"c": "10.0.0.6:11434", // unlisted: public mode, the guard refuses it
+	} {
+		if got, _ := c.AgentEgress(c.Agents[a]); hostsOf(got) != want {
+			t.Errorf("%s: %s, want %s", a, hostsOf(got), want)
+		}
+	}
+}

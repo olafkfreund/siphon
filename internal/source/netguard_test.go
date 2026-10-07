@@ -96,3 +96,37 @@ func TestGuardedClientDoesNotRedirect(t *testing.T) {
 		t.Fatalf("status=%d redirected=%v", resp.StatusCode, redirected)
 	}
 }
+
+func TestResolveAllowedMode(t *testing.T) {
+	ctx := context.Background()
+	for _, tt := range []struct {
+		host string
+		mode Mode
+		ok   bool
+	}{
+		{"1.1.1.1", Public, true},
+		{"10.0.0.5", Public, false},
+		{"10.0.0.5", PrivateNoLinkLocal, true},
+		{"127.0.0.1", PrivateNoLinkLocal, true},
+		{"192.168.1.1", PrivateNoLinkLocal, true},
+		{"169.254.169.254", PrivateNoLinkLocal, false},
+		{"169.254.0.1", PrivateNoLinkLocal, false},
+		{"::ffff:169.254.169.254", PrivateNoLinkLocal, false},
+		{"fe80::1", PrivateNoLinkLocal, false},
+		{"fd00:ec2::254", PrivateNoLinkLocal, false},
+		{"168.63.129.16", PrivateNoLinkLocal, false},
+		{"169.254.169.254", Private, true},
+		{"64:ff9b::a9fe:a9fe", PrivateNoLinkLocal, false}, // NAT64 of 169.254.169.254
+		{"64:ff9b::a00:5", PrivateNoLinkLocal, true},      // NAT64 of 10.0.0.5
+		{"64:ff9b:1:a9fe:a9:fe00::", PrivateNoLinkLocal, false},
+		{"64:ff9b:1:a00:0:500::", PrivateNoLinkLocal, true},
+		{"0.0.0.0", PrivateNoLinkLocal, false},
+		{"::", PrivateNoLinkLocal, false},
+		{"224.0.0.1", PrivateNoLinkLocal, false},
+		{"ff02::1", PrivateNoLinkLocal, false},
+	} {
+		if _, err := ResolveAllowedMode(ctx, tt.host, tt.mode); (err == nil) != tt.ok {
+			t.Errorf("%s mode %d: err %v, want ok=%v", tt.host, tt.mode, err, tt.ok)
+		}
+	}
+}

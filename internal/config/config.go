@@ -98,6 +98,14 @@ type Server struct {
 	// module sets it to the setgid siphon-io directory its template unit uses.
 	ActionsDir string       `yaml:"actions_dir"`
 	Egress     EgressServer `yaml:"egress"`
+	Models     ModelsServer `yaml:"models"`
+}
+
+// ModelsServer holds model-endpoint settings that only siphon.yaml may set.
+type ModelsServer struct {
+	// PrivateEndpoints are the host:port model endpoints allowed to be on a
+	// private, loopback or LAN address (never link-local or metadata).
+	PrivateEndpoints []string `yaml:"private_endpoints"`
 }
 
 // EgressServer configures the egress proxy that restricts sandboxed runs.
@@ -178,7 +186,9 @@ type Action struct {
 
 // Credential is a subscription login (no api_key) or an API key for one provider.
 type Credential struct {
-	Provider    string `yaml:"provider"` // claude|codex|agy
+	Provider    string `yaml:"provider"` // claude|codex|agy|ollama|openai
+	URL         string `yaml:"url"`      // ollama|openai: http(s)://host[:port][/path]
+	Preset      string `yaml:"preset"`   // openai: UI tile only
 	APIKey      Secret `yaml:"api_key"`
 	Concurrency int    `yaml:"concurrency"` // parallel jobs on this login, default 1
 }
@@ -189,10 +199,14 @@ var credName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 var kinds = []string{"claude", "codex", "agy"}
 
+// modelProviders are the credential providers that point at a model endpoint.
+var modelProviders = []string{"ollama", "openai"}
+
 type Agent struct {
 	Egress     EgressAgent `yaml:"egress"`
-	Kind       string      `yaml:"kind"` // claude (default)|codex|agy
+	Kind       string      `yaml:"kind"` // claude (default)|codex|agy|model
 	Credential string      `yaml:"credential"`
+	Model      string      `yaml:"model"`   // kind model: the model id
 	Command    string      `yaml:"command"` // binary path override
 	// Deprecated: use kind and command.
 	Runner       []string `yaml:"runner"`
@@ -489,10 +503,12 @@ func (c *Config) Warnings() []string {
 		if a.Kind == "agy" && len(a.MCP) > 0 {
 			add("tool allowlist not enforced (only MCP server scoping)")
 		}
-		if a.Kind != "claude" && a.MaxTurns > 0 {
+		if a.Kind != "claude" && a.Kind != "model" && a.MaxTurns > 0 { // the built-in loop enforces turns
 			add("max_turns not enforced")
 		}
-		if a.Kind != "claude" && a.MaxBudgetUSD > 0 {
+		if a.Kind == "model" && a.MaxBudgetUSD > 0 {
+			add("max_budget_usd applies only when the endpoint reports a cost")
+		} else if a.Kind != "claude" && a.MaxBudgetUSD > 0 {
 			add("max_budget_usd not enforced")
 		}
 	}
@@ -604,6 +620,11 @@ func (c *Config) Validate() error {
 		}
 	}
 	checkAllow("server", c.Server.Egress.Allow)
+	for _, e := range c.Server.Models.PrivateEndpoints {
+		if _, _, ok := endpointKey(e); !ok {
+			add("server.models.private_endpoints: %q: want host:port", e)
+		}
+	}
 	if c.Limits.HTTPTimeout < 0 {
 		add("limits.http_timeout: must not be negative")
 	}
@@ -669,10 +690,24 @@ func (c *Config) Validate() error {
 		switch {
 		case cr == nil:
 			add("%s: empty", p)
-		case !slices.Contains(kinds, cr.Provider):
-			add("%s: provider must be claude, codex or agy, got %q", p, cr.Provider)
+		case !slices.Contains(kinds, cr.Provider) && !slices.Contains(modelProviders, cr.Provider):
+			add("%s: provider must be claude, codex, agy, ollama or openai, got %q", p, cr.Provider)
 		case cr.Concurrency < 1:
 			add("%s: concurrency must be >= 1", p)
+		}
+		if cr != nil && slices.Contains(modelProviders, cr.Provider) {
+			if _, _, err := ModelURL(cr.URL); err != nil {
+				add("%s: url: %v", p, err)
+			} else if u, _ := url.Parse(cr.URL); cr.Provider == "ollama" && strings.Trim(u.Path, "/") != "" {
+				add("%s: url: ollama takes no path (the loop adds /v1)", p)
+			} else if p2 := strings.TrimRight(u.Path, "/"); cr.Provider == "openai" && p2 != "" && !strings.HasSuffix(p2, "/v1") {
+				add("%s: url: path must be empty or end in /v1", p)
+			}
+			if cr.Provider == "ollama" && cr.APIKey.isSet() {
+				add("%s: api_key is not allowed for ollama", p)
+			}
+		} else if cr != nil && cr.URL != "" {
+			add("%s: url is only for ollama and openai", p)
 		}
 		if cr != nil && cr.APIKey.isSet() && !strings.HasPrefix(cr.APIKey.Ref, "env:") && !strings.HasPrefix(cr.APIKey.Ref, "file:") {
 			add("%s: api_key must be env:NAME or file:/path", p)
@@ -702,8 +737,20 @@ func (c *Config) Validate() error {
 		if strings.Contains(a.Command, "{{") {
 			add("%s: command must not be templated", p)
 		}
-		if !slices.Contains(kinds, a.Kind) {
-			add("%s: kind must be claude, codex or agy, got %q", p, a.Kind)
+		if a.Kind == "model" {
+			if a.Model == "" {
+				add("%s: model is required for kind model", p)
+			}
+			for _, m := range a.MCP {
+				if strings.Contains(m, "__") { // tool names are mcp__<server>__<tool>
+					add("%s: mcp source %q: names used by a model agent must not contain __", p, m)
+				}
+			}
+			if cr := c.Credentials[a.Credential]; a.Credential != "" && cr != nil && !slices.Contains(modelProviders, cr.Provider) {
+				add("%s: kind model needs an ollama or openai credential, %q is %s", p, a.Credential, cr.Provider)
+			}
+		} else if !slices.Contains(kinds, a.Kind) {
+			add("%s: kind must be claude, codex, agy or model, got %q", p, a.Kind)
 		} else if len(a.Runner) > 0 && a.Kind != "claude" {
 			add("%s: runner implies kind claude, got %s", p, a.Kind)
 		}
@@ -714,7 +761,7 @@ func (c *Config) Validate() error {
 			}
 		} else if cr := c.Credentials[a.Credential]; cr == nil {
 			add("%s: unknown credential %q", p, a.Credential)
-		} else if cr.Provider != a.Kind {
+		} else if a.Kind != "model" && cr.Provider != a.Kind {
 			add("%s: credential %q is for %s, agent kind is %s", p, a.Credential, cr.Provider, a.Kind)
 		}
 		if a.APIKeyFile != "" && !safePath.MatchString(a.APIKeyFile) {
@@ -902,13 +949,17 @@ func implicitFor(c *Config, name string) bool {
 type HostPort struct {
 	Host         string
 	Port         int
-	AllowPrivate bool // from an allow_private MCP source
+	AllowPrivate bool // from an allow_private MCP source or a listed private model endpoint
+	NoLinkLocal  bool // with AllowPrivate: still refuse link-local and metadata addresses
 }
 
 func (h HostPort) String() string {
 	s := fmt.Sprintf("%s:%d", h.Host, h.Port)
 	if h.AllowPrivate {
 		s += " (allow_private)"
+	}
+	if h.NoLinkLocal {
+		s += " (no_link_local)"
 	}
 	return s
 }
@@ -980,6 +1031,12 @@ func (c *Config) AgentEgress(a *Agent) (allow []HostPort, enabled bool) {
 	for _, h := range providerHosts[a.Kind][mode] {
 		allow = append(allow, HostPort{Host: h, Port: 443})
 	}
+	if cr := c.Credentials[a.Credential]; a.Kind == "model" && cr != nil {
+		if host, port, err := ModelURL(cr.URL); err == nil {
+			listed := c.PrivateEndpoint(host, port)
+			allow = append(allow, HostPort{Host: host, Port: port, AllowPrivate: listed, NoLinkLocal: listed})
+		}
+	}
 	for _, m := range a.MCP {
 		src := c.Sources[m]
 		if src == nil || src.URL == "" {
@@ -1008,4 +1065,63 @@ func (c *Config) RuleEgress(r Rule) (allow []HostPort, enabled bool) {
 		return nil, false
 	}
 	return dedupe(c.userAllow(r.Egress.Allow, c.Server.Egress.Allow)), true
+}
+
+// IsModel reports whether the credential points at a model endpoint.
+func (c *Credential) IsModel() bool { return slices.Contains(modelProviders, c.Provider) }
+
+// BaseURL is the OpenAI-compatible base: the URL, plus /v1 for Ollama.
+func (c *Credential) BaseURL() string {
+	u := strings.TrimRight(c.URL, "/")
+	if c.Provider == "ollama" {
+		u += "/v1"
+	}
+	return u
+}
+
+// ModelURL checks a model endpoint URL (http(s)://host[:port][/path], no
+// userinfo) and returns its lowercase host and port (default 80/443).
+func ModelURL(raw string) (host string, port int, err error) {
+	u, e := url.Parse(raw)
+	if e != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
+		return "", 0, errors.New("must be http(s)://host[:port][/path]")
+	}
+	if strings.ContainsAny(raw, "?#") { // would smuggle a query or fragment onto the paths we append
+		return "", 0, errors.New("must not contain ? or #")
+	}
+	for _, seg := range strings.Split(u.Path, "/") {
+		if seg == ".." || seg == "." {
+			return "", 0, errors.New("must not contain . or .. path segments")
+		}
+	}
+	port = 443
+	if u.Scheme == "http" {
+		port = 80
+	}
+	if u.Port() != "" {
+		if port, e = strconv.Atoi(u.Port()); e != nil || port < 1 || port > 65535 {
+			return "", 0, errors.New("port must be 1-65535")
+		}
+	}
+	return strings.ToLower(u.Hostname()), port, nil
+}
+
+// endpointKey parses a host:port entry (explicit port, no wildcard).
+func endpointKey(e string) (string, int, bool) {
+	h, p, err := net.SplitHostPort(e)
+	n, perr := strconv.Atoi(p)
+	if err != nil || perr != nil || h == "" || n < 1 || n > 65535 || strings.Contains(h, "*") {
+		return "", 0, false
+	}
+	return strings.ToLower(h), n, true
+}
+
+// PrivateEndpoint reports whether host:port is in server.models.private_endpoints.
+func (c *Config) PrivateEndpoint(host string, port int) bool {
+	for _, e := range c.Server.Models.PrivateEndpoints {
+		if h, p, ok := endpointKey(e); ok && h == strings.ToLower(host) && p == port {
+			return true
+		}
+	}
+	return false
 }

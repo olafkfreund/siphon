@@ -41,7 +41,7 @@ func TestJobDetailPage(t *testing.T) {
 func TestStep6PagesRender(t *testing.T) {
 	e := newEnv(t, nil)
 	c, _ := e.login()
-	for _, p := range []string{"/", "/jobs", "/jobs?state=failed", "/approvals", "/rules", "/sources", "/audit", "/logins", "/egress"} {
+	for _, p := range []string{"/", "/jobs", "/jobs?state=failed", "/approvals", "/rules", "/sources", "/audit", "/connections", "/egress"} {
 		if w := e.do("GET", p, nil, func(r *http.Request) { r.AddCookie(c) }); w.Code != 200 {
 			t.Errorf("%s: %d", p, w.Code)
 		}
@@ -57,7 +57,7 @@ func TestJobFailureLinksToConnect(t *testing.T) {
 	store.FinishJob(e.st.DB, id, "failed", 1, "credential claude-max is not imported: run `siphon credentials import`", e.now)
 	c, _ := e.login()
 	body := e.do("GET", "/jobs/1", nil, func(r *http.Request) { r.AddCookie(c) }).Body.String()
-	if !strings.Contains(body, `href="/logins?connect=claude-max#add"`) || !strings.Contains(body, "Why it failed") {
+	if !strings.Contains(body, `href="/connections?connect=claude-max#add"`) || !strings.Contains(body, "Why it failed") {
 		t.Fatal(body)
 	}
 }

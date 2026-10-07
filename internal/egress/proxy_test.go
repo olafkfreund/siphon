@@ -22,7 +22,7 @@ import (
 	"github.com/olafkfreund/siphon/internal/source"
 )
 
-func startProxy(t *testing.T, resolve func(context.Context, string, bool) ([]netip.Addr, error)) *Proxy {
+func startProxy(t *testing.T, resolve func(context.Context, string, source.Mode) ([]netip.Addr, error)) *Proxy {
 	t.Helper()
 	probe, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -78,7 +78,7 @@ func TestProxy(t *testing.T) {
 	host, portText, _ := net.SplitHostPort(u.Host)
 	var port int
 	fmt.Sscan(portText, &port)
-	p := startProxy(t, source.ResolveAllowed)
+	p := startProxy(t, source.ResolveAllowedMode)
 	proxyURL, blocked, release := p.Register([]Entry{{Host: host, Port: port, AllowPrivate: true}})
 	parsed, _ := url.Parse(proxyURL)
 	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(parsed), TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
@@ -113,7 +113,7 @@ func TestProxy(t *testing.T) {
 }
 
 func TestRules(t *testing.T) {
-	resolver := func(_ context.Context, _ string, _ bool) ([]netip.Addr, error) {
+	resolver := func(_ context.Context, _ string, _ source.Mode) ([]netip.Addr, error) {
 		return []netip.Addr{netip.MustParseAddr("10.0.0.1")}, nil
 	}
 	p := startProxy(t, resolver)
@@ -136,7 +136,7 @@ func TestRules(t *testing.T) {
 	}
 	// Only the wildcard subdomain on the default port reaches resolution.
 	var resolves atomic.Int32
-	p2 := startProxy(t, func(_ context.Context, _ string, _ bool) ([]netip.Addr, error) {
+	p2 := startProxy(t, func(_ context.Context, _ string, _ source.Mode) ([]netip.Addr, error) {
 		resolves.Add(1)
 		return nil, errors.New("test resolver")
 	})
@@ -155,7 +155,7 @@ func TestRules(t *testing.T) {
 }
 
 func TestHeadLimit(t *testing.T) {
-	p := startProxy(t, source.ResolveAllowed)
+	p := startProxy(t, source.ResolveAllowedMode)
 	code, _ := raw(t, p, "CONNECT", "example.com:443", "", "X-Large: "+strings.Repeat("x", 8192)+"\r\n")
 	if code != http.StatusRequestHeaderFieldsTooLarge {
 		t.Fatalf("oversized head status = %d", code)
@@ -171,7 +171,7 @@ func TestDialFallback(t *testing.T) {
 	_, portText, _ := net.SplitHostPort(u.Host)
 	var port int
 	fmt.Sscan(portText, &port)
-	p := startProxy(t, func(context.Context, string, bool) ([]netip.Addr, error) {
+	p := startProxy(t, func(context.Context, string, source.Mode) ([]netip.Addr, error) {
 		return []netip.Addr{netip.MustParseAddr("127.0.0.2"), netip.MustParseAddr("127.0.0.1")}, nil
 	})
 	proxyURL, _, release := p.Register([]Entry{{Host: "dual.test", Port: port, AllowPrivate: true}})
@@ -202,7 +202,7 @@ func TestServeUnix(t *testing.T) {
 	host, portText, _ := net.SplitHostPort(u.Host)
 	var port int
 	fmt.Sscan(portText, &port)
-	p := New("127.0.0.1:0", source.ResolveAllowed)
+	p := New("127.0.0.1:0", source.ResolveAllowedMode)
 	sock := t.TempDir() + "/egress.sock"
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -241,5 +241,31 @@ func TestServeUnix(t *testing.T) {
 	<-done
 	if _, err := os.Stat(sock); !os.IsNotExist(err) {
 		t.Fatalf("socket not removed: %v", err)
+	}
+}
+
+func TestNoLinkLocalEntry(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer upstream.Close()
+	u, _ := url.Parse(upstream.URL)
+	_, portText, _ := net.SplitHostPort(u.Host)
+	var port int
+	fmt.Sscan(portText, &port)
+	ip := "169.254.169.254"
+	p := startProxy(t, func(context.Context, string, source.Mode) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr(ip)}, nil
+	})
+	proxyURL, _, _ := p.Register([]Entry{
+		{Host: "model.example", Port: port, AllowPrivate: true, NoLinkLocal: true},
+	})
+	pu, _ := url.Parse(proxyURL)
+	token, _ := pu.User.Password()
+	auth := pu.User.Username() + ":" + token
+	if code, _ := raw(t, p, "CONNECT", "model.example:"+portText, auth, ""); code != 403 {
+		t.Fatalf("link-local with NoLinkLocal: %d", code)
+	}
+	ip = "127.0.0.1" // private: passes the guard and tunnels
+	if code, _ := raw(t, p, "CONNECT", "model.example:"+portText, auth, ""); code != 200 {
+		t.Fatalf("loopback with NoLinkLocal: %d", code)
 	}
 }

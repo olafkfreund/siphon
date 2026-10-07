@@ -16,7 +16,7 @@
     <a href="/sources"{{if eq .Active "sources"}} aria-current="page"{{end}}>{{template "icon" "src"}}Sources</a>
     <a href="/config/agents"{{if eq .Active "agents"}} aria-current="page"{{end}}>{{template "icon" "agent"}}Agents</a>
     <a href="/config/routines"{{if eq .Active "routines"}} aria-current="page"{{end}}>{{template "icon" "routine"}}Routines</a>
-    <a href="/logins"{{if eq .Active "logins"}} aria-current="page"{{end}}>{{template "icon" "key"}}Logins</a>
+    <a href="/connections"{{if eq .Active "logins"}} aria-current="page"{{end}}>{{template "icon" "key"}}Connections</a>
     <a href="/egress"{{if eq .Active "egress"}} aria-current="page"{{end}}>{{template "icon" "shield"}}Egress</a>
     <div class="sep">Records</div>
     <a href="/audit"{{if eq .Active "audit"}} aria-current="page"{{end}}>{{template "icon" "audit"}}Audit</a>
@@ -41,7 +41,7 @@
 
 {{define "kindicon"}}{{if eq . "agent"}}{{template "icon" "agent"}}{{else if eq . "cmd"}}{{template "icon" "term"}}{{else if eq . "unit"}}{{template "icon" "unit"}}{{else if eq . "routine"}}{{template "icon" "routine"}}{{else}}{{template "icon" "bolt"}}{{end}}{{end}}
 
-{{define "provider"}}{{if eq . "claude"}}<span class="prov claude" title="Claude Code"><i aria-hidden="true">C</i>Claude</span>{{else if eq . "codex"}}<span class="prov codex" title="OpenAI Codex"><i aria-hidden="true">&gt;_</i>Codex</span>{{else if eq . "agy"}}<span class="prov agy" title="Antigravity"><i aria-hidden="true">A</i>agy</span>{{else if .}}<span class="prov">{{.}}</span>{{end}}{{end}}
+{{define "provider"}}{{if eq . "ollama"}}<span class="prov ollama" title="Ollama"><i aria-hidden="true">O</i>Ollama</span>{{else if eq . "lmstudio"}}<span class="prov lmstudio" title="LM Studio"><i aria-hidden="true">LM</i>LM Studio</span>{{else if eq . "openrouter"}}<span class="prov openrouter" title="OpenRouter"><i aria-hidden="true">OR</i>OpenRouter</span>{{else if eq . "groq"}}<span class="prov groq" title="Groq"><i aria-hidden="true">G</i>Groq</span>{{else if eq . "mistral"}}<span class="prov mistral" title="Mistral"><i aria-hidden="true">M</i>Mistral</span>{{else if eq . "openai" "model"}}<span class="prov oai" title="OpenAI-compatible"><i aria-hidden="true">{ }</i>OpenAI-compatible</span>{{else if eq . "claude"}}<span class="prov claude" title="Claude Code"><i aria-hidden="true">C</i>Claude</span>{{else if eq . "codex"}}<span class="prov codex" title="OpenAI Codex"><i aria-hidden="true">&gt;_</i>Codex</span>{{else if eq . "agy"}}<span class="prov agy" title="Antigravity"><i aria-hidden="true">A</i>agy</span>{{else if .}}<span class="prov">{{.}}</span>{{end}}{{end}}
 
 {{define "srcicon"}}{{if eq . "webhook"}}{{template "icon" "webhook"}}{{else if eq . "http"}}{{template "icon" "http"}}{{else if eq . "mcp"}}{{template "icon" "mcp"}}{{else}}{{template "icon" "src"}}{{end}}{{end}}
 

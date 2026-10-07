@@ -152,6 +152,7 @@ func TestEditorsRoundTrip(t *testing.T) {
 		{"sources", "type: webhook\nsecret: env:AGW_HOOK\nsignature: sha256\nsignature_header: X-Sig\ntimestamp_header: X-Ts\nid: header.X-Id\n"},
 		{"sources", "type: mcp\ncommand: [srv, --flag]\nread:\n  resource: test://v\n  args:\n    a: 1\nauth:\n  bearer: file:/run/secrets/tok\npoll: 1m\n"},
 		{"agents", "kind: codex\ncredential: c1\ncommand: /bin/codex\nprompt: |\n  Do the thing\n  twice\nmcp: [a, b]\nallowed_tools: [Read, Grep]\nmax_turns: 3\nmax_budget_usd: 0.25\ntimeout: 10m\napprove: false\negress:\n  enabled: true\n  allow: [x.example.com, y.example.com]\n"},
+		{"credentials", "provider: openai\nurl: https://api.groq.com/openai/v1\npreset: groq\nconcurrency: 1\napi_key: file:/run/secrets/k\n"},
 		{"credentials", "provider: claude\nconcurrency: 2\napi_key: file:/run/secrets/k\n"},
 	}
 	for _, it := range items {

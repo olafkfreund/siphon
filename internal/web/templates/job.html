@@ -4,7 +4,7 @@
   <form method="post" action="/approvals/{{.ID}}/deny"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/jobs/{{.ID}}"><button class="btn no">Deny</button></form>
   <form method="post" action="/approvals/{{.ID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/jobs/{{.ID}}"><button class="btn ok">Approve &amp; run</button></form>
 {{end}}</div>
-{{if .Summary}}<div class="banner fail" role="alert"><div><b>Why it failed:</b> <code class="wrap">{{.Summary}}</code></div>{{if .Connect}}<a class="btn sm primary" href="/logins?connect={{pe .Connect}}#add">{{template "icon" "key"}}Connect {{.Connect}}</a>{{end}}</div>{{end}}
+{{if .Summary}}<div class="banner fail" role="alert"><div><b>Why it failed:</b> <code class="wrap">{{.Summary}}</code></div>{{if .Connect}}<a class="btn sm primary" href="/connections?connect={{pe .Connect}}#add">{{template "icon" "key"}}Connect {{.Connect}}</a>{{end}}</div>{{end}}
 <div class="grid g2">
   <div class="stack">
     <section class="card" aria-labelledby="what"><h2 id="what">{{if eq .State "pending_approval"}}What will run{{else}}What ran{{end}}</h2>

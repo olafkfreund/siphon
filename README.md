@@ -321,6 +321,58 @@ operator's responsibility.
 - On NixOS add the CLIs to `services.siphon.agentPackages` so the action
   unit can find them.
 
+## Model connections (Ollama and OpenAI-compatible APIs)
+
+Agents can also run on local or hosted models through Siphon's own small
+agent loop (`kind: model`). It speaks the OpenAI-compatible chat API with
+tool calling, offers the agent exactly its `allowed_tools` from its MCP
+servers, and runs in the same sandbox, egress restriction and approval flow
+as Claude, Codex and agy.
+
+```yaml
+server:
+  models:
+    private_endpoints: ["127.0.0.1:11434"]   # local/LAN endpoints, exact host:port
+
+credentials:
+  ollama-local: { provider: ollama, url: "http://127.0.0.1:11434" }
+  openrouter:
+    provider: openai                       # any OpenAI-compatible API
+    url: https://openrouter.ai/api/v1
+    api_key: file:/run/agenix/openrouter   # optional; local servers need none
+
+agents:
+  triage-local:
+    kind: model
+    credential: ollama-local
+    model: qwen3.8:27b
+    prompt: "Task {{.item.id}} failed: {{.item.error}}. Diagnose with the factory tools."
+    mcp: [factory]
+    allowed_tools: [mcp__factory__task_status]
+    max_turns: 10
+    timeout: 5m
+```
+
+- **The Connections page** (formerly Logins) adds these from the portal:
+  - presets for Ollama, LM Studio, OpenRouter, Groq and Mistral, or any
+    OpenAI-compatible URL;
+  - an optional, write-only API key;
+  - **Test connection**, which lists the endpoint's models and its latency.
+  - The agent editor suggests models from the chosen connection, and marks
+    families known to handle tool calls ("tools ✓": qwen, llama3.x,
+    mistral, gpt-oss, command-r).
+- **Private endpoints** (loopback or LAN, like most Ollama setups) must be
+  listed once in `server.models.private_endpoints`. The portal refuses
+  unlisted ones, and link-local and cloud metadata addresses are never
+  reachable. On NixOS a local `services.ollama` is added for you through
+  `services.siphon.models.privateEndpoints`.
+- **Limits:**
+  - `max_turns` and `timeout` are enforced.
+  - `max_budget_usd` only applies when the endpoint reports a cost
+    (OpenRouter does).
+  - Models that can't use tools still answer: the loop falls back to a
+    plain completion and notes it.
+
 ## Egress restriction
 
 Agents hold logins and read untrusted data, so their network is restricted

@@ -2,14 +2,19 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -187,6 +192,7 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			continue
 		}
 		var refs, fileRefs map[string]string
+		moved := false // the item now talks to a different provider or URL than the file's
 		switch it.Kind {
 		case "sources":
 			var s Source
@@ -203,6 +209,7 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			if s.AllowPrivate && !fs.AllowPrivate {
 				return errors.New("allow_private can only be set in siphon.yaml")
 			}
+			moved = !sameEndpoint(s.URL, fs.URL)
 			refs, fileRefs = sourceRefs(&s), sourceRefs(fs)
 		case "credentials":
 			var c Credential
@@ -213,6 +220,7 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			if fc == nil {
 				fc = &Credential{}
 			}
+			moved = c.Provider != fc.Provider || !sameEndpoint(c.URL, fc.URL)
 			refs, fileRefs = map[string]string{"api_key": c.APIKey.Ref}, map[string]string{"api_key": fc.APIKey.Ref}
 		case "agents":
 			var a Agent
@@ -232,9 +240,65 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			continue
 		}
 		for path, ref := range refs {
+			if moved && ref != "" && ref == fileRefs[path] {
+				// Keeping the file's secret is fine, sending it somewhere new is not.
+				return errors.New("this key comes from siphon.yaml and can't be moved to another provider or URL")
+			}
 			if !refAllowed(ref, fileRefs[path], it.Kind, it.Name, dir) {
 				return errors.New("secret refs can only point at this item's stored secrets or keep the value from siphon.yaml")
 			}
+		}
+	}
+	return nil
+}
+
+// lookupHost resolves model endpoint hosts; tests replace it.
+var lookupHost = func(ctx context.Context, host string) ([]string, error) {
+	return net.DefaultResolver.LookupHost(ctx, host)
+}
+
+// sameEndpoint compares two URLs by scheme, host:port and path.
+func sameEndpoint(a, b string) bool {
+	ua, ea := url.Parse(a)
+	ub, eb := url.Parse(b)
+	if ea != nil || eb != nil {
+		return a == b
+	}
+	return ua.Scheme == ub.Scheme && strings.EqualFold(ua.Host, ub.Host) && ua.Path == ub.Path && ua.RawQuery == ub.RawQuery
+}
+
+// CheckModelEndpoint is run when a portal save changes a credentials item
+// (never at load, so startup and validate do no DNS). It refuses an
+// ollama/openai item whose host is (or does not provably stop being) private,
+// loopback or link-local, unless this config lists its host:port. Unresolvable
+// names fail closed. The runtime guard is the real control.
+func (file *Config) CheckModelEndpoint(itemYAML string) error {
+	var c Credential
+	if yaml.Unmarshal([]byte(itemYAML), &c) != nil || !slices.Contains(modelProviders, c.Provider) {
+		return nil // Parse reports it
+	}
+	host, port, err := ModelURL(c.URL)
+	if err != nil {
+		return nil // Validate reports it
+	}
+	if file.PrivateEndpoint(host, port) {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	addrs, err := lookupHost(ctx, host)
+	refuse := errors.New(`this endpoint is on a private network; add "host:port" to server.models.private_endpoints in siphon.yaml`)
+	if err != nil || len(addrs) == 0 {
+		return refuse
+	}
+	for _, a := range addrs {
+		ip, err := netip.ParseAddr(a)
+		if err != nil {
+			return refuse
+		}
+		ip = ip.Unmap()
+		if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return refuse
 		}
 	}
 	return nil

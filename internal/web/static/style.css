@@ -283,6 +283,16 @@ form:has(input[name="event_src"][value="last"]:checked) .paste { display: none }
 .login-add:has([name=provider][value=agy]:checked):has([name=kind][value=login]:checked) .h-agy-login,
 .login-add:has([name=kind][value=apikey]:checked) .h-apikey { display: flex }
 
+/* connections */
+.section-h { display: flex; align-items: center; gap: .5rem; margin: 1.4rem 0 .8rem; font-size: 1.05rem }
+.section-h .muted { font-weight: 400 }
+.tiles-6 { grid-template-columns: repeat(3, 1fr) }
+.ok-text { color: var(--ok-text) }
+.model-list { columns: 2; margin: .4rem 0 0; padding-left: 1rem }
+.prov.ollama i { background: #111827; box-shadow: inset 0 0 0 1px #4b5563 } .prov.lmstudio i { background: #6D28D9 }
+.prov.openrouter i { background: #475569 } .prov.groq i { background: #F55036 } .prov.mistral i { background: #FA520F }
+.prov.oai i { background: #0F766E; font-size: .55rem }
+
 /* motion off on request */
 @media (prefers-reduced-motion: reduce) { *, *::after { animation: none !important; transition: none !important } }
 
