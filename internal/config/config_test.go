@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -657,5 +658,37 @@ agents:
 		if got, _ := c.AgentEgress(c.Agents[a]); hostsOf(got) != want {
 			t.Errorf("%s: %s, want %s", a, hostsOf(got), want)
 		}
+	}
+}
+
+func TestSourceEnvValidation(t *testing.T) {
+	t.Setenv("AGW_E", "secret-value")
+	for env, want := range map[string]string{
+		"{type: mcp, command: [s], read: {tool: t}, env: {GITHUB_TOKEN: 'env:AGW_E'}}":      "",
+		"{type: mcp, command: [s], read: {tool: t}, env: {_X1: 'env:AGW_E'}}":               "",
+		"{type: mcp, command: [s], read: {tool: t}, env: {lower: 'env:AGW_E'}}":             "must match",
+		"{type: mcp, command: [s], read: {tool: t}, env: {'1A': 'env:AGW_E'}}":              "must match",
+		"{type: mcp, command: [s], read: {tool: t}, env: {A: literal}}":                     "inline secret",
+		"{type: mcp, url: 'https://e.example/mcp', read: {tool: t}, env: {A: 'env:AGW_E'}}": "env needs a stdio",
+		"{type: http, url: 'https://e.example', env: {A: 'env:AGW_E'}}":                     "env needs a stdio",
+	} {
+		c, err := Parse([]byte("sources: {s: " + env + "}"))
+		if err == nil {
+			err = c.Validate()
+		}
+		if (want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), want)) {
+			t.Errorf("%s: %v", env, err)
+		}
+	}
+	for _, name := range []string{"LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "PATH", "HOME", "NODE_OPTIONS", "PYTHONPATH", "PYTHONSTARTUP", "BASH_ENV", "ENV", "PERL5LIB", "RUBYOPT", "JAVA_TOOL_OPTIONS", "SSL_CERT_FILE", "GIT_SSH_COMMAND", "HTTPS_PROXY", "ALL_PROXY"} {
+		c, _ := Parse([]byte("sources: {s: {type: mcp, command: [s], read: {tool: t}, env: {" + name + ": 'env:AGW_E'}}}"))
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "not allowed") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// Masking: the resolved value is in Secrets().
+	c, _ := Parse([]byte("sources: {s: {type: mcp, command: [s], read: {tool: t}, env: {GITHUB_TOKEN: 'env:AGW_E'}}}"))
+	if !slices.Contains(c.Secrets(), "secret-value") {
+		t.Errorf("env value not masked: %v", c.Secrets())
 	}
 }

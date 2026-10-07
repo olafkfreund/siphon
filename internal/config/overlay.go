@@ -206,6 +206,9 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			if len(s.Command) > 0 && !slices.Equal(s.Command, fs.Command) {
 				return errors.New("command (stdio MCP) can only be set in siphon.yaml")
 			}
+			if !slices.Equal(sortedKeys(s.Env), sortedKeys(fs.Env)) {
+				return errors.New("env names (stdio MCP) can only be set in siphon.yaml; the portal may change their values")
+			}
 			if s.AllowPrivate && !fs.AllowPrivate {
 				return errors.New("allow_private can only be set in siphon.yaml")
 			}
@@ -318,6 +321,9 @@ func sourceRefs(s *Source) map[string]string {
 	}
 	for k, v := range s.Headers {
 		m["headers."+k] = v.Ref
+	}
+	for k, v := range s.Env {
+		m["env."+k] = v.Ref
 	}
 	return m
 }

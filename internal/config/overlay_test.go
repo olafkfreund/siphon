@@ -302,3 +302,31 @@ func TestOverlayKeptSecretCannotMove(t *testing.T) {
 		}
 	}
 }
+
+func TestOverlayEnvKeysFileOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	os.WriteFile(path, []byte("server: { db: "+dir+"/s.db }\nsources:\n  m: { type: mcp, command: [srv], read: {tool: t}, env: {A_KEY: 'env:HOME', B_KEY: 'env:HOME'} }\n"), 0o600)
+	sec := dir + "/secrets"
+	item := func(env string) Item {
+		return Item{Kind: "sources", Name: "m", YAML: "{type: mcp, command: [srv], read: {tool: t}, env: {" + env + "}}"}
+	}
+	for name, env := range map[string]string{
+		"add":     "A_KEY: 'env:HOME', B_KEY: 'env:HOME', C_KEY: 'env:HOME'",
+		"remove":  "A_KEY: 'env:HOME'",
+		"rename":  "A_KEY: 'env:HOME', C_KEY: 'env:HOME'",
+		"foreign": "A_KEY: 'file:/etc/passwd', B_KEY: 'env:HOME'",
+	} {
+		if _, _, err := LoadWithOverlay(path, []Item{item(env)}); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	os.MkdirAll(sec, 0o700)
+	os.WriteFile(sec+"/sources-m-env.A_KEY", []byte("v"), 0o600)
+	if _, _, err := LoadWithOverlay(path, []Item{item("A_KEY: 'file:" + sec + "/sources-m-env.A_KEY', B_KEY: 'env:HOME'")}); err != nil {
+		t.Errorf("rotate: %v", err)
+	}
+	if _, _, err := LoadWithOverlay(path, []Item{{Kind: "sources", Name: "n", YAML: "{type: mcp, command: [srv], read: {tool: t}, env: {A_KEY: x}}"}}); err == nil {
+		t.Error("new portal stdio source accepted")
+	}
+}

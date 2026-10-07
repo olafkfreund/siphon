@@ -223,3 +223,7 @@ unchanged, and only the new fields and the page disappear.
   - The replay key stays the body hash for `token`, like the existing presets.
   - The `token` warning fires for every `token` source.
   - Opus added the **published Standard Webhooks reference vector** (`msg_p5jXN8AQM9LWM0D4loKWxJek` / `v1,g0hM9SsE…`) as a test, plus a tampered-signature check. Changing only the final base64 character before `=` is not a forgery: those are padding bits, and the bytes decode the same.
+- **Step 2 (coder):**
+  - env values must be refs (`env:`/`file:`), never literals.
+  - A portal-only stdio source can't carry `env` until step 3's `package` route, since it can't carry `command` either.
+  - The bridge refusal sits in `agentExec`, which covers direct agent actions and routine agent steps.

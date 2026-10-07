@@ -167,3 +167,19 @@ sources:
 	cancel()
 	<-served
 }
+
+// Until the MCP bridge (plan step 4), an agent never gets a stdio source's env.
+func TestAgentRefusesStdioEnv(t *testing.T) {
+	t.Setenv("AGW_E", "secret-value")
+	p := applyPipeline(t, `
+server: { sandbox: none, db: DIR/state.db }
+sources:
+  m: { type: mcp, command: [srv], read: {tool: t}, env: {GITHUB_TOKEN: 'env:AGW_E'} }
+agents:
+  fix: { kind: codex, command: /bin/true, mcp: [m], prompt: x }
+`)
+	state, _, out, _ := p.agentExec(context.Background(), p.Config(), store.QueuedJob{ID: 1}, Payload{Action: config.Action{Agent: "fix"}}, true)
+	if state != "failed" || !strings.Contains(out, "needs the MCP bridge") || strings.Contains(out, "secret-value") {
+		t.Fatalf("%s %q", state, out)
+	}
+}

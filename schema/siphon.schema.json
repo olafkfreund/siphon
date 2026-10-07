@@ -349,6 +349,13 @@
             },
             "type": "array"
           },
+          "env": {
+            "additionalProperties": {
+              "description": "env:NAME, file:/path, or (where allowed) a literal",
+              "type": "string"
+            },
+            "type": "object"
+          },
           "headers": {
             "additionalProperties": {
               "description": "env:NAME, file:/path, or (where allowed) a literal",

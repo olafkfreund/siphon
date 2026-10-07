@@ -409,6 +409,9 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 	servers := map[string]action.MCPServer{}
 	for _, name := range a.MCP {
 		s := cfg.Sources[name]
+		if len(s.Env) > 0 {
+			return "failed", -1, "source " + name + " needs the MCP bridge (coming in step 4)", nil
+		}
 		h := headerValues(s.Headers)
 		if s.Auth != nil && s.Auth.Bearer.Value != "" {
 			h["Authorization"] = "Bearer " + s.Auth.Bearer.Value
@@ -641,6 +644,12 @@ func mcpOptions(cfg *config.Config, name string) source.MCPOptions {
 	}
 	if s.Auth != nil {
 		o.Bearer = s.Auth.Bearer.Value
+	}
+	if len(s.Env) > 0 {
+		o.Env = make(map[string]string, len(s.Env))
+		for k, v := range s.Env {
+			o.Env[k] = v.Value
+		}
 	}
 	return o
 }

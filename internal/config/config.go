@@ -28,6 +28,11 @@ const AgentResultSource = "agent-result"
 // MaxDepth caps agent-result chains (loop guard): an event at a deeper depth never enqueues.
 const MaxDepth = 2
 
+var (
+	envName   = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+	envDenied = regexp.MustCompile(`^(LD_.*|DYLD_.*|PATH|HOME|NODE_OPTIONS|PYTHON.*|BASH_ENV|ENV|PERL5.*|RUBY.*|JAVA_TOOL_OPTIONS|SSL_CERT_.*|GIT_.*|.*_PROXY)$`)
+)
+
 var safePath = regexp.MustCompile(`^/[A-Za-z0-9/._-]+$`)
 
 // Duration unmarshals from strings like "5m".
@@ -150,7 +155,8 @@ type Source struct {
 	SigHeader    string            `yaml:"signature_header"` // sha256 preset
 	TokenHeader  string            `yaml:"token_header"`     // token preset
 	TimestampHdr string            `yaml:"timestamp_header"`
-	ID           string            `yaml:"id"` // delivery id, e.g. header.X-GitHub-Delivery
+	ID           string            `yaml:"id"`  // delivery id, e.g. header.X-GitHub-Delivery
+	Env          map[string]Secret `yaml:"env"` // stdio MCP child env; values are env:/file: refs
 }
 
 type Read struct {
@@ -384,6 +390,13 @@ func parse(b []byte, stub map[string]string) (*Config, error) {
 				}
 				src.Headers[h] = v
 			}
+			for _, k := range sortedKeys(src.Env) {
+				v := src.Env[k]
+				if err := v.resolve(stub); err != nil {
+					c.resolveErrs = append(c.resolveErrs, err)
+				}
+				src.Env[k] = v
+			}
 		}
 	}
 	return c, nil
@@ -447,6 +460,11 @@ func (c *Config) Secrets() []string {
 		if src := c.Sources[name]; src != nil {
 			for _, h := range sortedKeys(src.Headers) {
 				if v := src.Headers[h].Value; v != "" {
+					out = append(out, v)
+				}
+			}
+			for _, k := range sortedKeys(src.Env) {
+				if v := src.Env[k].Value; v != "" {
 					out = append(out, v)
 				}
 			}
@@ -601,6 +619,16 @@ func (c *Config) Validate() error {
 				ref := src.Headers[h].Ref
 				if secretHeader(h) && !strings.HasPrefix(ref, "env:") && !strings.HasPrefix(ref, "file:") {
 					add("sources.%s.headers.%s: inline secret: values must be env:NAME or file:/path", name, h)
+				}
+			}
+		}
+	}
+
+	for _, name := range sortedKeys(c.Sources) {
+		if src := c.Sources[name]; src != nil {
+			for _, k := range sortedKeys(src.Env) {
+				if ref := src.Env[k].Ref; !strings.HasPrefix(ref, "env:") && !strings.HasPrefix(ref, "file:") {
+					add("sources.%s.env.%s: inline secret: values must be env:NAME or file:/path", name, k)
 				}
 			}
 		}
@@ -872,6 +900,16 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 		}
 	default:
 		add("%s: type must be mcp, http or webhook, got %q", p, s.Type)
+	}
+	if len(s.Env) > 0 && (s.Type != "mcp" || len(s.Command) == 0) {
+		add("%s: env needs a stdio MCP source (type mcp with command)", p)
+	}
+	for _, k := range sortedKeys(s.Env) {
+		if !envName.MatchString(k) {
+			add("%s: env name %q must match ^[A-Z_][A-Z0-9_]*$", p, k)
+		} else if envDenied.MatchString(k) {
+			add("%s: env name %q is not allowed (it changes how the child loads code or connects)", p, k)
+		}
 	}
 	if name == AgentResultSource {
 		add("%s: name is reserved", p)
