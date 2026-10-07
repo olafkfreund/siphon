@@ -22,9 +22,10 @@ sources:
 rules:
   - { name: ver, source: gh, when: 'event.kind == "ver"', on: each, id: event.n, action: { cmd: ["$bin", "version"] } }
 YAML
-chmod 755 "$dir"; chmod 644 "$dir"/*   # read by uid 65532 inside
+chmod 700 "$dir"; chmod 600 "$dir"/*   # private; keep-id maps us to uid 65532 inside
 
 podman run -d --name siphon-ci --cap-drop=all --read-only --tmpfs /tmp \
+  --userns=keep-id:uid=65532,gid=65532 \
   -p 127.0.0.1:18095:8080 -v "$dir":/etc/siphon:ro -v siphon-ci-state:/var/lib/siphon "$img" >/dev/null
 for _ in $(seq 60); do curl -sf http://127.0.0.1:18095/healthz >/dev/null && break; sleep 0.5; done
 curl -sf http://127.0.0.1:18095/healthz
@@ -41,8 +42,8 @@ podman exec siphon-ci "$bin" jobs ls -config /etc/siphon/siphon.yaml 2>/dev/null
 podman logs siphon-ci 2>&1 | grep -q 'runs are not isolated' || { echo "no unsandboxed warning"; exit 1; }
 
 # sandbox: systemd inside a container is an error, not a half-working sandbox
-sed 's/  # no sandbox.*/  sandbox: systemd/' "$dir/siphon.yaml" >"$dir/systemd.yaml"; chmod 644 "$dir/systemd.yaml"
-if out=$(podman run --rm -v "$dir":/etc/siphon:ro "$img" validate -config /etc/siphon/systemd.yaml 2>&1); then
+sed 's/  # no sandbox.*/  sandbox: systemd/' "$dir/siphon.yaml" >"$dir/systemd.yaml"; chmod 600 "$dir/systemd.yaml"
+if out=$(podman run --rm --userns=keep-id:uid=65532,gid=65532 -v "$dir":/etc/siphon:ro "$img" validate -config /etc/siphon/systemd.yaml 2>&1); then
   echo "sandbox: systemd was accepted in a container"; exit 1
 fi
 grep -q 'systemd sandbox is not available inside a container' <<<"$out" || { echo "$out"; exit 1; }

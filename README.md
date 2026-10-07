@@ -70,11 +70,15 @@ devenv test         # what CI runs: vet + tests; fails on any failing test
 
 **Container image.**
 ```sh
-mkdir -p ~/siphon && cd ~/siphon        # siphon.yaml, token, secrets: world-readable (read by uid 65532)
+mkdir -p ~/siphon && cd ~/siphon && chmod 700 .   # siphon.yaml, token, secrets: keep them 0600
 podman run -d --name siphon --cap-drop=all --read-only --tmpfs /tmp \
+  --userns=keep-id:uid=65532,gid=65532 \
   -p 127.0.0.1:8090:8080 -v "$PWD":/etc/siphon:ro,Z -v siphon-state:/var/lib/siphon \
   ghcr.io/olafkfreund/siphon:latest
 ```
+- `--userns=keep-id:uid=65532,gid=65532` maps your user to the image's
+  user, so it reads your 0600 files and nobody else on the host can.
+  With Docker, `chown 65532` the files instead. Never make them world-readable.
 - Set `server.db: /var/lib/siphon/state.db` in the config (the volume).
 - `server.sandbox: systemd` is refused inside a container.
 - The image has no shell and no agent CLIs. Build your own with

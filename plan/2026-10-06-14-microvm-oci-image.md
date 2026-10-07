@@ -176,3 +176,21 @@ unchanged. Remove the microvm flake input with the revert.
   - The container default and the `systemd` error are in parse and `Validate`.
   - `applyListenEnv` handles `SIPHON_LISTEN`.
   - The Unsandboxed banner is set at startup from `sandbox == none`. `server.*` is file-only, so it can only change with a restart.
+- **Step 6 review fixes (Opus).** A fresh security review found one high, five medium and six low issues. Fixed:
+  - **H1:** with `configFile`, the config's directory is added to the action units' `InaccessiblePaths`, so runs cannot read the portal token or webhook secrets. `ci/microvm-test.sh` now proves a run's `cat /etc/siphon/token` fails.
+  - **M1:** the 9p share is `readOnly = true`, as the plan said. The wrapper uses `umask 077` and `noclobber`, refuses to start if the directory contains a symlink, and chmods only regular files.
+  - **M2:** `siphon-action-open@` in the microVM denies `10.0.2.2` (the host's loopback through SLiRP). Restricted runs only reach the egress proxy, which refuses private addresses unless they are listed.
+  - **M3:** `release.yml`:
+    - tag, actor and owner reach the shell as env, and the tag is regex-checked;
+    - `skopeo login --password-stdin` replaces the token in argv;
+    - tools come from `nix shell --inputs-from .`;
+    - actions are pinned by SHA (in `ci.yml` too), with `persist-credentials: false`;
+    - `packages: write` is set per job.
+  - **M4:** the README and `ci/container-test.sh` use `--userns=keep-id:uid=65532,gid=65532` with 0600 files, never world-readable ones. This supersedes step 3's "world-readable" note.
+  - **M5:** `configFile` must be absolute, in its own directory, and outside the store and `/var/lib/siphon*` and `/run/siphon` (an assertion). The warning now says `settings.units` still sets the polkit allowlist. The `egress.socket`/`egress.enable` pairing is documented on the option; it can't be checked at eval time.
+  - **L1:** `SIPHON_LISTEN` is applied in `loadCfg`, before the warnings.
+  - **L2:** the generated config sets `server.sandbox: systemd`.
+  - **L3:** the image has no `PATH` entry without agent packages.
+  - **L5:** `release.yml` runs `ci.yml` (`workflow_call`) before publishing, and pre-release tags (`v1.0.0-rc1`) don't move `:latest`.
+  - **L6:** documented in `nix/microvm.nix`.
+  - **Not done, L4 (`HOME` equals the state dir):** a container run has no isolation from the state dir anyway, and a bind-mounted volume would lack a `home/` subdirectory, breaking agent CLIs.

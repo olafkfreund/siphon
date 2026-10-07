@@ -185,6 +185,7 @@ func loadCfg(name string, args []string, fallback bool) (*config.Config, []strin
 	if cfg == nil {
 		return nil, nil, "", "", err
 	}
+	applyListenEnv(cfg) // before Warnings, which judge the listen address
 	for _, w := range cfg.Warnings() {
 		fmt.Fprintln(os.Stderr, "warning:", w)
 	}
@@ -491,7 +492,6 @@ func serve(ctx context.Context, args []string) error {
 	}
 	defer st.Close()
 	p := job.New(cfg, st, time.Now)
-	applyListenEnv(cfg)
 	if cfg.Server.Sandbox == "none" && config.InContainer() {
 		slog.Warn("running in a container with sandbox: none: runs are not isolated and egress is not enforced")
 	}

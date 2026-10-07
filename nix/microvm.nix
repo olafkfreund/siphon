@@ -3,9 +3,10 @@
 # `nix run .#microvm`; see the runner below for the directory layout.
 #
 # Host directory ($SIPHON_VM_DIR, default ~/.config/siphon-vm):
-#   config/   shared read-only-ish (9p) at /etc/siphon: siphon.yaml + secrets
+#   config/   shared read-only (9p) at /etc/siphon: siphon.yaml + secrets
 #   state.img 2 GiB ext4 volume at /var/lib (DB, logins, portal edits)
-# The portal is forwarded to http://127.0.0.1:8090.
+# The portal is forwarded to http://127.0.0.1:8090. Start it with the wrapper
+# (siphon-microvm), not the bare runner: the wrapper checks the directory.
 {
   self,
   microvm,
@@ -61,6 +62,9 @@ let
                 tag = "siphon-config";
                 source = "config";
                 mountPoint = "/etc/siphon";
+                # The guest must not plant files (or symlinks the wrapper
+                # would follow) in the host directory.
+                readOnly = true;
               }
             ];
             volumes = [
@@ -78,6 +82,10 @@ let
             configFile = "/etc/siphon/siphon.yaml";
             agentPackages = [ pkgs.codex ] ++ lib.optional allowUnfreeAgents pkgs.claude-code;
           };
+          # Open runs must not reach the host's loopback services through
+          # the SLiRP gateway (restricted runs only reach the egress proxy,
+          # which refuses private addresses unless listed).
+          systemd.services."siphon-action-open@".serviceConfig.IPAddressDeny = [ "10.0.2.2/32" ];
           # Reachable through the forwarded port; the token protects it.
           systemd.services.siphon.environment.SIPHON_LISTEN = "0.0.0.0:8080";
           systemd.services.siphon.unitConfig.RequiresMountsFor = [
@@ -98,11 +106,19 @@ in
     name = "siphon-microvm";
     runtimeInputs = [
       pkgs.coreutils
+      pkgs.findutils
       pkgs.openssl
     ];
     text = ''
       dir=''${SIPHON_VM_DIR:-$HOME/.config/siphon-vm}
+      umask 077
+      set -o noclobber
       mkdir -p "$dir/config"
+      # Never follow links planted in the directory.
+      if [ -L "$dir/config" ] || [ -n "$(find "$dir/config" "$dir/state.img" -maxdepth 1 -type l 2>/dev/null)" ]; then
+        echo "siphon-microvm: refusing to start: $dir contains a symbolic link." >&2
+        exit 1
+      fi
       chmod 700 "$dir"         # other host users stay out
       chmod 755 "$dir/config"  # the siphon user inside the VM reads it (9p)
       if [ ! -e "$dir/config/siphon.yaml" ]; then
@@ -134,7 +150,7 @@ in
       YAML
         # Files are read by the siphon user inside the VM; the 0700 directory
         # keeps other host users out.
-        chmod 644 "$dir/config/"*
+        find "$dir/config" -maxdepth 1 -type f -exec chmod 644 {} +
         echo "Created $dir/config (siphon.yaml, token, hook)."
       fi
       if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then

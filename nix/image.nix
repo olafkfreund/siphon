@@ -45,8 +45,8 @@ pkgs.dockerTools.streamLayeredImage {
       "TZDIR=${pkgs.tzdata}/share/zoneinfo"
       "HOME=/var/lib/siphon"
       "container=oci"
-      "PATH=${pkgs.lib.makeBinPath agentPackages}"
-    ];
+    ]
+    ++ pkgs.lib.optional (agentPackages != [ ]) "PATH=${pkgs.lib.makeBinPath agentPackages}";
     Labels = {
       "org.opencontainers.image.title" = "Siphon";
       "org.opencontainers.image.description" =

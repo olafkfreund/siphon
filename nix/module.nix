@@ -20,6 +20,7 @@ let
     {
       server.db = "${stateDir}/state.db";
       server.actions_dir = actionsDir;
+      server.sandbox = "systemd";
     }
     (lib.recursiveUpdate (lib.optionalAttrs cfg.egress.enable { server.egress.socket = "${egressDir}/egress.sock"; })
       (lib.optionalAttrs (cfg.models.privateEndpoints != [ ]) {
@@ -58,7 +59,10 @@ let
       "-/run/systemd/units"
       # The daemon fetches URLs for any client: network outside the sandbox.
       "-/nix/var/nix/daemon-socket"
-    ];
+    ]
+    # An operator-managed config's directory holds its secrets (portal token,
+    # webhook secrets): runs must not read them.
+    ++ lib.optional (cfg.configFile != null) "-${dirOf cfg.configFile}";
     PrivateTmp = true;
     ProtectSystem = "strict";
     ProtectHome = true;
@@ -147,8 +151,12 @@ in
         is validated (`-file-only`) at every start. It must set what the
         module otherwise fills in: server.db (/var/lib/siphon/state.db),
         server.actions_dir (/var/lib/siphon-actions) and, with egress,
-        server.egress.socket (/run/siphon/egress.sock). str, not path: a
-        path literal would copy it into the Nix store.
+        server.egress.socket (/run/siphon/egress.sock), and keep that in step
+        with egress.enable. It must sit in its own directory (with its
+        secrets), outside the Nix store and siphon's state: sandboxed runs
+        cannot read that directory. `settings` is ignored, except
+        settings.units, which still sets the polkit allowlist. str, not
+        path: a path literal would copy it into the Nix store.
       '';
     };
 
@@ -216,8 +224,8 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    warnings = lib.optional (cfg.configFile != null && cfg.settings != { })
-      "services.siphon: configFile is set, so services.siphon.settings is ignored";
+    warnings = lib.optional (cfg.configFile != null && builtins.removeAttrs cfg.settings [ "units" ] != { })
+      "services.siphon: configFile is set, so services.siphon.settings is ignored (except settings.units, the polkit allowlist)";
 
     assertions =
       let
@@ -226,7 +234,21 @@ in
       map (p: {
         assertion = lib.hasPrefix "/" p && !lib.hasPrefix builtins.storeDir p;
         message = "services.siphon: secret path ${p} must be an absolute path outside the Nix store";
-      }) secretPaths;
+      }) secretPaths
+      ++ lib.optional (cfg.configFile != null) (
+        let
+          f = cfg.configFile;
+        in
+        {
+          assertion =
+            lib.hasPrefix "/" f
+            && !lib.hasPrefix builtins.storeDir f
+            && !lib.hasPrefix "/var/lib/siphon" f
+            && !lib.hasPrefix "/run/siphon" f
+            && lib.length (lib.splitString "/" (dirOf f)) >= 3;
+          message = "services.siphon.configFile ${f} must be an absolute path in its own directory (e.g. /etc/siphon/siphon.yaml), outside the Nix store and siphon's state; sandboxed runs cannot read that directory";
+        }
+      );
 
     users.users.siphon = {
       isSystemUser = true;
