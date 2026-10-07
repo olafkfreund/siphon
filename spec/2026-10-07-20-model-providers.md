@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 20
 intent: intent/2026-10-07-20-model-providers.md
 ---
