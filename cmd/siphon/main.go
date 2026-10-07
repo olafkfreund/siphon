@@ -21,6 +21,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/olafkfreund/siphon/internal/action"
 	"github.com/olafkfreund/siphon/internal/agentloop"
 	"github.com/olafkfreund/siphon/internal/config"
@@ -35,29 +37,16 @@ import (
 
 var version = "dev"
 
-const usage = `usage: siphon <command> [flags]
-
-commands:
-  validate [-config f] [-v] [-file-only]  check the config (file + portal edits; -file-only: file alone; -v: print egress allowlists)
-  config export [-config f]               print the effective YAML (file + portal edits)
-  rules test [-config f] <rule> <event>   dry-run a rule against a saved event (JSON file)
-  run-once [-config f]                    poll every source once and run matching actions
-  serve [-config f]                       run the daemon
-  jobs ls [-config f] [-state s]          list jobs
-  approve|deny [-config f] [-by n] <id>   decide a pending job
-  credentials import [-config f] [-token-stdin] <name>   store a login read from stdin
-  credentials ls [-config f]              list stored logins (no secrets)
-  schema                                  print the JSON Schema for siphon.yaml
-  version                                 print the version
-`
-
 func main() {
 	if filepath.Base(os.Args[0]) == "agentgw" { // legacy-name
 		fmt.Fprintln(os.Stderr, "agentgw is now siphon; this alias goes away in v0.2.0") // legacy-name
 	}
 	if len(os.Args) < 2 {
-		fmt.Fprint(os.Stderr, usage)
+		fmt.Fprint(os.Stderr, usageText())
 		os.Exit(2)
+	}
+	if clientMode(os.Args[1], os.Args[2:]) {
+		os.Exit(runClient(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, term.IsTerminal(int(os.Stdin.Fd()))))
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -141,7 +130,7 @@ func main() {
 	case "credentials":
 		err = credentials(args)
 	default:
-		fmt.Fprint(os.Stderr, usage)
+		fmt.Fprint(os.Stderr, usageText())
 		os.Exit(2)
 	}
 	if err != nil {

@@ -158,7 +158,10 @@ sources:
 		t.Fatal(err)
 	}
 	defer st.Close()
-	p := New(cfg, st, time.Now)
+	// A frozen clock: the limiter refills 10/s on its clock, so on a busy
+	// machine 20 real-time requests could earn back tokens mid-test.
+	now := time.Now()
+	p := New(cfg, st, func() time.Time { return now })
 	post := func(src, body, sig string) int {
 		if sig == "" {
 			mac := hmac.New(sha256.New, []byte("s3cret"))

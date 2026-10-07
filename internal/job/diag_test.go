@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/rule"
 	"github.com/olafkfreund/siphon/internal/store"
 )
 
@@ -81,5 +82,34 @@ rules:
 		if strings.Contains(d.Reject, bad) {
 			t.Fatalf("reject reason holds %q", bad)
 		}
+	}
+}
+
+// A secret quoted in an evaluation error is masked before it is stored.
+func TestRuleErrorMasked(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AGW_HOOK", "s3cret-hook-value")
+	cfg, err := config.Parse([]byte(`
+server: { sandbox: none, db: ` + dir + `/state.db }
+sources:
+  gh: { type: webhook, secret: env:AGW_HOOK, signature: github }
+rules:
+  - { name: leaky, source: gh, when: 'int("s3cret-hook-value") > 0', action: { cmd: [echo] } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(cfg.Server.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	p := New(cfg, st, time.Now)
+	if _, _, _, _, err := p.handleEvent(t.Context(), cfg, rule.Event{Source: "gh", Data: map[string]any{}}, false, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	msg, _, _ := store.RuleError(st.DB, "leaky")
+	if msg == "" || strings.Contains(msg, "s3cret-hook-value") {
+		t.Fatalf("stored %q", msg)
 	}
 }

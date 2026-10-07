@@ -369,3 +369,12 @@ Revert the merge.
   - Webhook rejections are recorded through `WebhookOptions.OnReject`, with fixed reason strings. The pre-auth flood 429 is not recorded, so there's no DB write per unauthenticated request.
   - `last_event_matches` is a clean-slate dry-run; the edge and cooldown reasons use the real state.
   - Eval error text is clipped to 300 characters and masked with `cfg.Secrets()` (masking done in step 5).
+- **Step 5 (coder + Opus):**
+  - **Modes:**
+    - always local: `serve`, `run-once`, `validate`, `schema`, `exec-job`, `version`, `agent-run`, `mcp-bridge`, `config`, `rules`, `credentials` (the last three have no client form yet);
+    - local with `-config`: `jobs`, `approve`, `deny`;
+    - everything else is client mode.
+  - **Client:** URL and token are resolved independently. `client.yaml` honours `$XDG_CONFIG_HOME`, and is refused if group- or world-readable. URLs with credentials or a query are refused.
+  - **`history <rev>`** shows that revision's diff; `edit` on a missing item starts a new one.
+  - The eval-error mask from step 4 is done.
+  - **Opus fix:** `TestWebhookRateLimitPerSource` was timing-flaky under load (the limiter refills on the real clock). It now uses a frozen clock.

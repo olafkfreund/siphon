@@ -247,7 +247,7 @@ func (p *Pipeline) handleEvent(ctx context.Context, cfg *config.Config, ev rule.
 		if ev.Source == r.Source { // remembered for `why`; a clean run clears it
 			var derr error
 			if err != nil {
-				derr = store.PutRuleError(tx, r.Name, now, err.Error())
+				derr = store.PutRuleError(tx, r.Name, now, string(action.Mask([]byte(err.Error()), cfg.Secrets())))
 			} else {
 				derr = store.ClearRuleError(tx, r.Name)
 			}
