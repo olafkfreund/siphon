@@ -270,3 +270,9 @@ Revert the merge. Nothing changes unless `provider: aws`, `aws:` or
 revert.
 
 ## Deviations log
+- **Step 1 (coder + Opus):** `awscred` errors are scrubbed of the secret key (coder). A profile that assumes a role (`role_arn` + `source_profile`) also gets the run's duration and session name, through `WithAssumeRoleCredentialOptions` (Opus).
+- **Step 2 (coder):**
+  - Added `Source.Polled()` (false for webhook and AWS sources), so AWS sources skip the default `poll: 1m` and the `read` requirement. **Step 3 also changes the poll-loop callers** (`internal/job/queue.go:87`, `internal/job/pipeline.go:603`, `internal/web/data.go:59`) to use `Polled()`.
+  - Extra refusals beyond the plan: `url`/`api_key` on an aws credential, aws-only fields on other providers, and non-`env:`/`file:` key refs.
+  - The overlay "moved" rule also covers aws: a credential's file-provided keys are not kept if `region`, `profile`, `role_arn` or `external_id` changes.
+  - The JSON schemas were regenerated (`TestSchemaUpToDate`).

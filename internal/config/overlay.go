@@ -232,8 +232,10 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			if fc == nil {
 				fc = &Credential{}
 			}
-			moved = c.Provider != fc.Provider || !sameEndpoint(c.URL, fc.URL)
-			refs, fileRefs = map[string]string{"api_key": c.APIKey.Ref}, map[string]string{"api_key": fc.APIKey.Ref}
+			moved = c.Provider != fc.Provider || !sameEndpoint(c.URL, fc.URL) ||
+				c.Region != fc.Region || c.Profile != fc.Profile || c.RoleARN != fc.RoleARN || c.ExternalID != fc.ExternalID
+			refs = map[string]string{"api_key": c.APIKey.Ref, "access_key_id": c.AccessKeyID.Ref, "secret_access_key": c.SecretAccessKey.Ref}
+			fileRefs = map[string]string{"api_key": fc.APIKey.Ref, "access_key_id": fc.AccessKeyID.Ref, "secret_access_key": fc.SecretAccessKey.Ref}
 		case "agents":
 			var a Agent
 			if yaml.Unmarshal([]byte(it.YAML), &a) != nil {

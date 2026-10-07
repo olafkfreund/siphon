@@ -203,6 +203,7 @@ type Source struct {
 	ID           string            `yaml:"id"`      // delivery id, e.g. header.X-GitHub-Delivery
 	Env          map[string]Secret `yaml:"env"`     // stdio MCP child env; values are env:/file: refs
 	Package      string            `yaml:"package"` // name in server.mcp_packages; fills Command
+	AWS          string            `yaml:"aws"`     // provider: aws credential; the daemon injects short-lived keys
 
 	cmdFromPkg bool // Command was filled from Package, not written in the item
 }
@@ -246,7 +247,29 @@ type Credential struct {
 	Preset      string `yaml:"preset"`   // openai: UI tile only
 	APIKey      Secret `yaml:"api_key"`
 	Concurrency int    `yaml:"concurrency"` // parallel jobs on this login, default 1
+
+	// aws: Region plus one of Profile or RoleARN; base keys only with RoleARN.
+	Region          string `yaml:"region"`
+	Profile         string `yaml:"profile"`
+	RoleARN         string `yaml:"role_arn"`
+	ExternalID      string `yaml:"external_id"`
+	AccessKeyID     Secret `yaml:"access_key_id"`
+	SecretAccessKey Secret `yaml:"secret_access_key"`
 }
+
+var (
+	awsRegion  = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-\d$`)
+	awsRoleARN = regexp.MustCompile(`^arn:aws[a-z-]*:iam::\d{12}:role/[\w+=,.@/-]+$`)
+	// awsEnv is what an AWS source's package must accept; the daemon sets all of it.
+	awsEnv = []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_REGION",
+		"AWS_DEFAULT_REGION", "AWS_EC2_METADATA_DISABLED", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE"}
+)
+
+// MaxAWSAgentTimeout keeps an agent inside the 1 h session cap (timeout + 5 min).
+const MaxAWSAgentTimeout = 55 * time.Minute
+
+// Polled reports whether the poller runs the source (AWS sources are agent tools only).
+func (s *Source) Polled() bool { return s.Type != "webhook" && s.AWS == "" }
 
 const implicitPrefix = "_apikey_" // credentials made from api_key_file
 
@@ -366,7 +389,7 @@ func parse(b []byte, stub map[string]string) (*Config, error) {
 		return nil, errors.New("parse config: multiple YAML documents are not supported")
 	}
 	for _, s := range c.Sources {
-		if s != nil && s.Poll == 0 && s.Type != "webhook" {
+		if s != nil && s.Poll == 0 && s.Polled() {
 			s.Poll = Duration(time.Minute)
 		}
 		if s != nil && s.Package != "" && len(s.Command) == 0 {
@@ -461,7 +484,7 @@ func (c *Config) secretPtrs() []*Secret {
 	out := []*Secret{&c.Server.Token}
 	for _, name := range sortedKeys(c.Credentials) {
 		if cr := c.Credentials[name]; cr != nil {
-			out = append(out, &cr.APIKey)
+			out = append(out, &cr.APIKey, &cr.AccessKeyID, &cr.SecretAccessKey)
 		}
 	}
 	for _, name := range sortedKeys(c.Sources) {
@@ -713,7 +736,7 @@ func (c *Config) Validate() error {
 			}
 		}
 		for _, h := range pkg.Hosts {
-			if _, err := parseHostPort(h); err != nil {
+			if _, err := parseHostPort(strings.ReplaceAll(h, "{region}", "eu-west-1")); err != nil {
 				add("server.mcp_packages.%s: hosts: %v", name, err)
 			}
 		}
@@ -813,8 +836,8 @@ func (c *Config) Validate() error {
 		switch {
 		case cr == nil:
 			add("%s: empty", p)
-		case !slices.Contains(kinds, cr.Provider) && !slices.Contains(modelProviders, cr.Provider):
-			add("%s: provider must be claude, codex, agy, ollama or openai, got %q", p, cr.Provider)
+		case !slices.Contains(kinds, cr.Provider) && !slices.Contains(modelProviders, cr.Provider) && cr.Provider != "aws":
+			add("%s: provider must be claude, codex, agy, ollama, openai or aws, got %q", p, cr.Provider)
 		case cr.Concurrency < 1:
 			add("%s: concurrency must be >= 1", p)
 		}
@@ -835,6 +858,9 @@ func (c *Config) Validate() error {
 		if cr != nil && cr.APIKey.isSet() && !strings.HasPrefix(cr.APIKey.Ref, "env:") && !strings.HasPrefix(cr.APIKey.Ref, "file:") {
 			add("%s: api_key must be env:NAME or file:/path", p)
 		}
+		if cr != nil {
+			validateAWSCredential(p, cr, add)
+		}
 	}
 
 	for _, name := range sortedKeys(c.Agents) {
@@ -853,6 +879,11 @@ func (c *Config) Validate() error {
 		}
 		if a.Timeout < 0 {
 			add("%s: timeout must not be negative", p)
+		}
+		for _, m := range a.MCP {
+			if src := c.Sources[m]; src != nil && src.AWS != "" && time.Duration(a.Timeout) > MaxAWSAgentTimeout {
+				add("%s: timeout must be 55m or less with AWS source %q (credentials last 1 h, and the run needs 5 min of margin)", p, m)
+			}
 		}
 		if len(a.Runner) > 0 && strings.Contains(a.Runner[0], "{{") {
 			add("%s: runner[0] must not be templated", p)
@@ -884,6 +915,8 @@ func (c *Config) Validate() error {
 			}
 		} else if cr := c.Credentials[a.Credential]; cr == nil {
 			add("%s: unknown credential %q", p, a.Credential)
+		} else if cr.Provider == "aws" {
+			add("%s: credential %q is an aws credential; reference it from a source with aws:", p, a.Credential)
 		} else if a.Kind != "model" && cr.Provider != a.Kind {
 			add("%s: credential %q is for %s, agent kind is %s", p, a.Credential, cr.Provider, a.Kind)
 		}
@@ -937,9 +970,10 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 		add("%s: empty", p)
 		return
 	}
-	if s.Poll < 0 || (s.Type != "webhook" && s.Poll == 0) {
+	if s.Poll < 0 || (s.Polled() && s.Poll == 0) {
 		add("%s: poll must be > 0", p)
 	}
+	c.validateAWSSource(p, s, add)
 	if s.Type == "mcp" || s.Type == "http" {
 		if u, err := url.Parse(s.URL); err == nil && u.User != nil {
 			add("%s: url must not contain credentials (user:pass@); use auth.bearer or headers", p)
@@ -965,7 +999,7 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 				}
 			}
 		}
-		if s.Read == nil || (s.Read.Resource == "") == (s.Read.Tool == "") {
+		if s.AWS == "" && (s.Read == nil || (s.Read.Resource == "") == (s.Read.Tool == "")) {
 			add("%s: read needs exactly one of resource or tool", p)
 		}
 	case "http":
@@ -1022,6 +1056,66 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 	}
 	if name == AgentResultSource {
 		add("%s: name is reserved", p)
+	}
+}
+
+func validateAWSCredential(p string, cr *Credential, add func(string, ...any)) {
+	if cr.Provider != "aws" {
+		if cr.Region != "" || cr.Profile != "" || cr.RoleARN != "" || cr.ExternalID != "" || cr.AccessKeyID.isSet() || cr.SecretAccessKey.isSet() {
+			add("%s: region, profile, role_arn, external_id and access keys are only for aws", p)
+		}
+		return
+	}
+	if !awsRegion.MatchString(cr.Region) {
+		add("%s: region must look like eu-west-1, got %q", p, cr.Region)
+	}
+	if (cr.Profile == "") == (cr.RoleARN == "") {
+		add("%s: set exactly one of profile or role_arn", p)
+	}
+	if cr.RoleARN != "" && !awsRoleARN.MatchString(cr.RoleARN) {
+		add("%s: role_arn must look like arn:aws:iam::123456789012:role/name", p)
+	}
+	if cr.ExternalID != "" && cr.RoleARN == "" {
+		add("%s: external_id needs role_arn", p)
+	}
+	if cr.AccessKeyID.isSet() != cr.SecretAccessKey.isSet() {
+		add("%s: access_key_id and secret_access_key go together", p)
+	}
+	if cr.AccessKeyID.isSet() && cr.RoleARN == "" {
+		add("%s: access keys need role_arn (a profile has its own keys)", p)
+	}
+	for k, s := range map[string]Secret{"access_key_id": cr.AccessKeyID, "secret_access_key": cr.SecretAccessKey, "api_key": cr.APIKey} {
+		if s.isSet() && !strings.HasPrefix(s.Ref, "env:") && !strings.HasPrefix(s.Ref, "file:") {
+			add("%s: %s must be env:NAME or file:/path", p, k)
+		}
+	}
+	if cr.URL != "" || cr.APIKey.isSet() {
+		add("%s: url and api_key are not for aws", p)
+	}
+}
+
+func (c *Config) validateAWSSource(p string, s *Source, add func(string, ...any)) {
+	pkg := c.Server.MCPPackages[s.Package]
+	if s.AWS == "" {
+		if slices.ContainsFunc(pkg.Hosts, func(h string) bool { return strings.Contains(h, "{region}") }) {
+			add("%s: package %q has {region} hosts and needs aws: <credential>", p, s.Package)
+		}
+		return
+	}
+	if cr := c.Credentials[s.AWS]; cr == nil || cr.Provider != "aws" {
+		add("%s: aws %q is not a credential with provider aws", p, s.AWS)
+	}
+	if s.Type != "mcp" || s.Package == "" {
+		add("%s: aws needs type mcp with package", p)
+	} else if _, ok := c.Server.MCPPackages[s.Package]; ok {
+		for _, k := range awsEnv {
+			if !slices.Contains(pkg.Env, k) {
+				add("%s: package %q must list env %s for aws", p, s.Package, k)
+			}
+		}
+	}
+	if s.Poll != 0 || s.Read != nil {
+		add("%s: AWS sources are agent tools only for now (no poll or read)", p)
 	}
 }
 
@@ -1198,7 +1292,7 @@ func (c *Config) AgentEgress(a *Agent) (allow []HostPort, enabled bool) {
 	}
 	for _, m := range a.MCP {
 		src := c.Sources[m]
-		if src != nil && len(src.Env) == 0 { // with env the package runs in its own bridge unit, see BridgeEgress
+		if src != nil && len(src.Env) == 0 && src.AWS == "" { // with env or aws the package runs in its own bridge unit, see BridgeEgress
 			allow = append(allow, c.packageHosts(src)...)
 		}
 		if src == nil || src.URL == "" {
@@ -1224,6 +1318,9 @@ func (c *Config) AgentEgress(a *Agent) (allow []HostPort, enabled bool) {
 func (c *Config) packageHosts(src *Source) (out []HostPort) {
 	if src.Package != "" {
 		for _, h := range c.Server.MCPPackages[src.Package].Hosts {
+			if cr := c.Credentials[src.AWS]; cr != nil {
+				h = strings.ReplaceAll(h, "{region}", cr.Region)
+			}
 			if hp, err := parseHostPort(h); err == nil {
 				out = append(out, hp)
 			}
