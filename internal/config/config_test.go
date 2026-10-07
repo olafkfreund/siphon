@@ -676,6 +676,36 @@ agents:
 	}
 }
 
+// Plan step 1: container detection seam, sandbox default and the systemd error.
+func TestContainerSandbox(t *testing.T) {
+	old := InContainer
+	t.Cleanup(func() { InContainer = old })
+	for _, in := range []bool{false, true} {
+		InContainer = func() bool { return in }
+		c, err := Parse([]byte("{}"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := map[bool]string{false: "systemd", true: "none"}[in]; c.Server.Sandbox != want {
+			t.Errorf("container=%v: sandbox %q, want %q", in, c.Server.Sandbox, want)
+		}
+		c, err = Parse([]byte("server: {sandbox: systemd}"))
+		if err == nil {
+			err = c.Validate()
+		}
+		if got := err != nil && strings.Contains(err.Error(), "systemd sandbox is not available inside a container; use the NixOS module or the microVM for isolation"); got != in {
+			t.Errorf("container=%v: systemd error = %v (%v)", in, got, err)
+		}
+	}
+}
+
+func TestInContainerEnv(t *testing.T) {
+	t.Setenv("container", "podman")
+	if !InContainer() {
+		t.Fatal("container env not detected")
+	}
+}
+
 func TestSourceEnvValidation(t *testing.T) {
 	t.Setenv("AGW_E", "secret-value")
 	for env, want := range map[string]string{

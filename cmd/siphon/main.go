@@ -205,6 +205,7 @@ func loadCfg(name string, args []string, fallback bool) (*config.Config, []strin
 	if cfg == nil {
 		return nil, nil, "", "", err
 	}
+	applyListenEnv(cfg) // before Warnings, which judge the listen address
 	for _, w := range cfg.Warnings() {
 		fmt.Fprintln(os.Stderr, "warning:", w)
 	}
@@ -487,6 +488,14 @@ func openLocal(fs *flag.FlagSet, args []string) (*store.Store, []string, error) 
 	return st, fs.Args(), err
 }
 
+// applyListenEnv lets SIPHON_LISTEN override server.listen (the image and microVM set it).
+func applyListenEnv(cfg *config.Config) {
+	if l := os.Getenv("SIPHON_LISTEN"); l != "" {
+		cfg.Server.Listen = l
+		slog.Info("listen overridden by SIPHON_LISTEN", "listen", l)
+	}
+}
+
 func serve(ctx context.Context, args []string) error {
 	cfg, _, banner, cfgPath, err := loadCfg("serve", args, true)
 	if err != nil {
@@ -503,6 +512,9 @@ func serve(ctx context.Context, args []string) error {
 	}
 	defer st.Close()
 	p := job.New(cfg, st, time.Now)
+	if cfg.Server.Sandbox == "none" && config.InContainer() {
+		slog.Warn("running in a container with sandbox: none: runs are not isolated and egress is not enforced")
+	}
 	// Bind first so a bad or busy address fails at startup, not silently later.
 	ln, err := net.Listen("tcp", cfg.Server.Listen)
 	if err != nil {
@@ -516,7 +528,7 @@ func serve(ctx context.Context, args []string) error {
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		Handler: web.New(web.Options{
-			Token: cfg.Server.Token.Value, Store: st, Config: p.Config, Apply: p.Apply, Banner: banner, ConfigPath: cfgPath, Decide: p.Decide,
+			Token: cfg.Server.Token.Value, Store: st, Config: p.Config, Apply: p.Apply, Banner: banner, Unsandboxed: cfg.Server.Sandbox == "none", ConfigPath: cfgPath, Decide: p.Decide,
 			Hooks: p.Webhooks(), Now: time.Now,
 		}),
 	}

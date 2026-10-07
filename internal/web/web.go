@@ -37,8 +37,9 @@ type Options struct {
 	Config func() *config.Config
 	Apply  func(*config.Config) error
 	// ConfigPath is the config file the portal edits are layered on; empty disables editing.
-	ConfigPath string
-	Banner     string // shown in red on every page (startup fallback notice)
+	ConfigPath  string
+	Unsandboxed bool   // permanent banner: sandbox is none
+	Banner      string // shown in red on every page (startup fallback notice)
 	// Decide approves or denies a pending job (Pipeline.Decide). Nil uses the store directly.
 	Decide func(jobID int64, approve bool, by string) error
 	// Hooks are mounted at POST /hook/{source}, unauthenticated: HMAC is their auth.

@@ -20,6 +20,7 @@ let
     {
       server.db = "${stateDir}/state.db";
       server.actions_dir = actionsDir;
+      server.sandbox = "systemd";
     }
     (lib.recursiveUpdate (lib.optionalAttrs cfg.egress.enable { server.egress.socket = "${egressDir}/egress.sock"; })
       (lib.recursiveUpdate
@@ -36,7 +37,11 @@ let
       )
     )
   ) cfg.settings;
-  configFile = yaml.generate "siphon.yaml" settings;
+  generatedConfig = yaml.generate "siphon.yaml" settings;
+  # An operator-managed file (services.siphon.configFile) replaces the
+  # generated one; it must then set server.db, actions_dir, egress.socket
+  # etc. itself (see the option's description).
+  configPath = if cfg.configFile != null then cfg.configFile else generatedConfig;
   units = settings.units or [ ];
   # What siphon sets in an AWS bridge's env (the package must allow each).
   awsEnv = [
@@ -77,7 +82,10 @@ let
       "-/run/dbus"
       # The daemon fetches URLs for any client: network outside the sandbox.
       "-/nix/var/nix/daemon-socket"
-    ];
+    ]
+    # An operator-managed config's directory holds its secrets (portal token,
+    # webhook secrets): runs must not read them.
+    ++ lib.optional (cfg.configFile != null) "-${dirOf cfg.configFile}";
     PrivateTmp = true;
     ProtectSystem = "strict";
     ProtectHome = true;
@@ -175,6 +183,25 @@ in
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
       defaultText = lib.literalExpression "siphon.packages.\${system}.default";
       description = "The siphon package.";
+    };
+
+    configFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "/etc/siphon/siphon.yaml";
+      description = ''
+        Use this siphon.yaml instead of one generated from `settings` (for a
+        config managed outside Nix, e.g. the microVM's shared directory). It
+        is validated (`-file-only`) at every start. It must set what the
+        module otherwise fills in: server.db (/var/lib/siphon/state.db),
+        server.actions_dir (/var/lib/siphon-actions) and, with egress,
+        server.egress.socket (/run/siphon/egress.sock), and keep that in step
+        with egress.enable. It must sit in its own directory (with its
+        secrets), outside the Nix store and siphon's state: sandboxed runs
+        cannot read that directory. `settings` is ignored, except
+        settings.units, which still sets the polkit allowlist. str, not
+        path: a path literal would copy it into the Nix store.
+      '';
     };
 
     settings = lib.mkOption {
@@ -299,8 +326,11 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    warnings = lib.optional (cfg.aws.enable && !(cfg.mcpPackages ? aws-cloudwatch))
-      "services.siphon.aws.enable: mcpPackages is set explicitly, so the AWS servers were not added; add aws-cloudwatch and aws-docs to it";
+    warnings =
+      lib.optional (cfg.configFile != null && builtins.removeAttrs cfg.settings [ "units" ] != { })
+        "services.siphon: configFile is set, so services.siphon.settings is ignored (except settings.units, the polkit allowlist)"
+      ++ lib.optional (cfg.aws.enable && !(cfg.mcpPackages ? aws-cloudwatch))
+        "services.siphon.aws.enable: mcpPackages is set explicitly, so the AWS servers were not added; add aws-cloudwatch and aws-docs to it";
     # mkOptionDefault: merge with the default (github) instead of replacing it.
     services.siphon.mcpPackages = lib.mkIf cfg.aws.enable (lib.mkOptionDefault {
       aws-cloudwatch = {
@@ -331,7 +361,21 @@ in
       map (p: {
         assertion = lib.hasPrefix "/" p && !lib.hasPrefix builtins.storeDir p;
         message = "services.siphon: secret path ${p} must be an absolute path outside the Nix store";
-      }) secretPaths;
+      }) secretPaths
+      ++ lib.optional (cfg.configFile != null) (
+        let
+          f = cfg.configFile;
+        in
+        {
+          assertion =
+            lib.hasPrefix "/" f
+            && !lib.hasPrefix builtins.storeDir f
+            && !lib.hasPrefix "/var/lib/siphon" f
+            && !lib.hasPrefix "/run/siphon" f
+            && lib.length (lib.splitString "/" (dirOf f)) >= 3;
+          message = "services.siphon.configFile ${f} must be an absolute path in its own directory (e.g. /etc/siphon/siphon.yaml), outside the Nix store and siphon's state; sandboxed runs cannot read that directory";
+        }
+      );
 
     users.users.siphon = {
       isSystemUser = true;
@@ -360,9 +404,9 @@ in
           "+${migrateLegacyState}"
           # -file-only: a bad portal edit must not stop the service; serve falls
           # back to the last valid revision and shows a banner instead.
-          "${cfg.package}/bin/siphon validate -file-only -config ${configFile}"
+          "${cfg.package}/bin/siphon validate -file-only -config ${configPath}"
         ];
-        ExecStart = "${cfg.package}/bin/siphon serve -config ${configFile}";
+        ExecStart = "${cfg.package}/bin/siphon serve -config ${configPath}";
         User = "siphon";
         Group = "siphon";
         StateDirectory = "siphon";

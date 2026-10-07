@@ -42,6 +42,7 @@ type view struct {
 type layout struct {
 	Title, Path, CSRF, Active, Banner string
 	Pending                           int
+	Unsandboxed                       bool
 	Poll                              bool // lists and live jobs refresh; editors never do
 	Body                              template.HTML
 }
@@ -195,7 +196,7 @@ func (s *server) page(w http.ResponseWriter, r *http.Request, name string, v vie
 		title, act = kindTitle[v.Cfg.Kind], kindNav[v.Cfg.Kind]
 	}
 	s.render(w, "layout", layout{Title: title, Path: r.URL.RequestURI(), CSRF: v.CSRF, Active: act,
-		Pending: len(pending), Poll: poll, Banner: s.banner(), Body: template.HTML(body.String())})
+		Pending: len(pending), Poll: poll, Banner: s.banner(), Unsandboxed: s.Unsandboxed, Body: template.HTML(body.String())})
 }
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {

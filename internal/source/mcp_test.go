@@ -49,7 +49,12 @@ func TestMCPListen(t *testing.T) {
 	changed := make(chan struct{}, 1)
 	done := make(chan error, 1)
 	go func() {
-		done <- (MCP{Options: MCPOptions{Resource: "test://value"}, Transport: clientSide}).Listen(ctx, func() { changed <- struct{}{} })
+		done <- (MCP{Options: MCPOptions{Resource: "test://value"}, Transport: clientSide}).Listen(ctx, func() {
+			select { // never block the client: resent updates may arrive twice
+			case changed <- struct{}{}:
+			default:
+			}
+		})
 	}()
 	select {
 	case uri := <-subscribed:
@@ -68,15 +73,24 @@ func TestMCPListen(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("initial read timed out")
 	}
-	if err := server.ResourceUpdated(ctx, &mcp.ResourceUpdatedNotificationParams{URI: "test://value"}); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-changed:
-	case err := <-done:
-		t.Fatalf("Listen ended before update: %v", err)
-	case <-ctx.Done():
-		t.Fatal("update timed out")
+	// The client's Subscribe can return before the server has recorded the
+	// subscription (2026-07-28 protocol), and an update sent in that window
+	// reaches no one; so resend until one arrives.
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+	for updated := false; !updated; {
+		if err := server.ResourceUpdated(ctx, &mcp.ResourceUpdatedNotificationParams{URI: "test://value"}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-changed:
+			updated = true
+		case err := <-done:
+			t.Fatalf("Listen ended before update: %v", err)
+		case <-ctx.Done():
+			t.Fatal("update timed out")
+		case <-tick.C:
+		}
 	}
 	cancel()
 	select {
