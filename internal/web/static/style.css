@@ -129,11 +129,11 @@ dt { color: var(--muted) } dd { margin: 0 }
 .rule-card { display: flex; flex-direction: column; gap: .4rem }
 .rule-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap }
 .rule-head form { display: flex }
-.flow { display: flex; align-items: center; margin: .5rem 0 }
-.node { flex: 1; min-width: 0; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: .55rem .7rem; font-size: .84rem }
-.node.cond { flex: 1.5 }
-.node small { display: block; font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted) }
-.node code { display: block; overflow-wrap: anywhere; font-size: .8rem }
+.flow { display: flex; align-items: stretch; margin: .5rem 0 }
+.node { flex: 1 1 auto; min-width: 6.5rem; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: .55rem .7rem; font-size: .84rem }
+.node small { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: .2rem }
+.node small span { display: inline-block; max-width: 100%; overflow-wrap: anywhere } /* wrap at the dot; inside only if too long */
+.node code { display: block; overflow-wrap: break-word; font-size: .8rem; line-height: 1.45 }
 /* the current between nodes: flowing dashes with an arrowhead, CSS only.
    Side by side it points right; stacked (narrow card) it points down. */
 .pipe { position: relative; flex: none; align-self: center; width: 30px; height: 3px; margin: 0 10px 0 4px; border-radius: 2px;
@@ -265,6 +265,7 @@ form:has(input[name="event_src"][value="last"]:checked) .paste { display: none }
 .acct .row-actions { justify-content: flex-start; margin-top: auto; padding-top: .6rem }
 .acct.s-missing, .acct.s-expired { border-color: color-mix(in srgb, var(--amber) 45%, var(--line)) }
 .login-add { max-width: 40rem }
+.login-add-card { max-width: calc(40rem + 2.4rem + 2px) } /* hug the form: no empty half card */
 .login-add input:not([type=radio]), .login-add textarea { width: 100% }
 .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem }
 .tile { position: relative; cursor: pointer }
