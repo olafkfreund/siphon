@@ -217,20 +217,29 @@ func (s *server) explain(r *http.Request, rl config.Rule) (map[string]any, error
 	if matches != nil && !*matches && evalMsg == "" && (test == nil || test.Err == "") {
 		add("condition_false", "The last event does not satisfy `when` ("+rl.When+").")
 	}
-	if matches != nil && *matches {
-		if blocked := alreadyTrue(rl, test.Fires, states); blocked {
+	// What the last event did is judged against when it arrived, not against
+	// now: an event after the last fire was either held back or latched out.
+	eventAfterFire := diag.EventAt != nil && (lastFired == nil || diag.EventAt.After(*lastFired))
+	heldBack := false
+	if matches != nil && *matches && eventAfterFire {
+		if alreadyTrue(rl, test.Fires, states) {
 			if rl.On == "each" {
 				add("edge_already_true", "This event id already fired the rule (on: each fires once per id).")
 			} else {
-				add("edge_already_true", "The condition was already true at the last check, and on: edge fires only when it turns true. It fires again after it goes false"+repeatHint(rl)+".")
+				add("edge_already_true", "The condition was already true when the last event arrived, and on: edge fires only when it turns true. It fires again after it goes false"+repeatHint(rl)+".")
 			}
 		}
-		if left > 0 {
-			add("cooldown", "The rule fired recently; the cooldown has "+left.Round(time.Second).String()+" left.")
+		if lastFired != nil && rl.Cooldown > 0 {
+			gap := diag.EventAt.Sub(*lastFired)
+			if cd := time.Duration(rl.Cooldown); gap < cd {
+				heldBack = true
+				add("cooldown", "The last event arrived "+gap.Round(time.Second).String()+" after the rule fired, inside its "+cd.String()+" cooldown, so it was held back.")
+			}
 		}
 	}
+	out["held_back_by_cooldown"] = heldBack
 	if lastFired != nil {
-		add("fired", "The rule last fired at "+lastFired.UTC().Format(time.RFC3339)+".")
+		add("fired", "The rule last fired "+now.Sub(*lastFired).Round(time.Second).String()+" ago.")
 	}
 	for _, p := range pend {
 		if p.Rule == rl.Name {

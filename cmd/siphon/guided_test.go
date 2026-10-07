@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/olafkfreund/siphon/internal/store"
 )
@@ -352,5 +354,79 @@ func TestHelpListsGuidedCommands(t *testing.T) {
 				t.Errorf("%s: -url is the server flag", n)
 			}
 		}
+	}
+}
+
+func TestWhyHeldBackAndLocalTimes(t *testing.T) {
+	e := newCLIEnv(t)
+	e.ok("apply", "-f", e.write("cd.yaml", "rules:\n  - { name: cd, source: gh, when: \"event.v > 5\", on: each, id: event.v, cooldown: 30s, action: { cmd: [echo] } }\n"), "--yes")
+	now := time.Now()
+	tx, _ := e.st.DB.Begin()
+	store.PutRuleState(tx, "cd", "8", true, now.Add(-60*time.Second))
+	tx.Commit()
+	store.SetSourceEvent(e.st.DB, "gh", map[string]any{"v": 9})
+	e.st.DB.Exec(`UPDATE source_state SET event_at=? WHERE source='gh'`, now.Add(-38*time.Second).UnixMilli()) // 22s after the fire
+	out := e.ok("why", "cd")
+	if !strings.Contains(out, "✗ the last event was held back by the cooldown") || !strings.Contains(out, "Likely reason: The last event arrived 22s after the rule fired, inside its 30s cooldown") {
+		t.Fatalf("why:\n%s", out)
+	}
+	if strings.Contains(out, "✓ cooldown: none pending") || strings.Contains(out, "Z\n") || regexp.MustCompile(`\d{4}-\d\d-\d\dT`).MatchString(out) {
+		t.Fatalf("raw timestamps or a wrong cooldown line:\n%s", out)
+	}
+	if !regexp.MustCompile(`last event at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d\n`).MatchString(out) || !regexp.MustCompile(`last fired \d{4}-\d\d-\d\d \d\d:\d\d:\d\d\n`).MatchString(out) {
+		t.Fatalf("times are not short local times:\n%s", out)
+	}
+	// JSON keeps RFC 3339
+	if j := e.ok("why", "cd", "-o", "json"); !regexp.MustCompile(`"last_event_at": "\d{4}-\d\d-\d\dT`).MatchString(j) || !strings.Contains(j, `"held_back_by_cooldown": true`) {
+		t.Fatalf("json:\n%s", j)
+	}
+	// tables show local times too, and the origin of CLI-made items is "live"
+	if h := e.ok("history"); regexp.MustCompile(`\d{4}-\d\d-\d\dT`).MatchString(h) {
+		t.Fatalf("history has raw timestamps:\n%s", h)
+	}
+	g := e.ok("get", "rules")
+	if !strings.Contains(g, "live") || strings.Contains(g, "portal") || !strings.Contains(g, "file") {
+		t.Fatalf("origins:\n%s", g)
+	}
+	if j := e.ok("get", "rules", "-o", "json"); !strings.Contains(j, `"provenance": "portal"`) {
+		t.Fatalf("json origin changed:\n%s", j)
+	}
+}
+
+func TestHumanTime(t *testing.T) {
+	old := time.Local
+	defer func() { time.Local = old }()
+	time.Local = time.FixedZone("BST", 3600)
+	for in, want := range map[string]string{
+		"2026-10-07T14:32:20Z":          "2026-10-07 15:32:20",
+		"2026-10-07T15:32:06.472+01:00": "2026-10-07 15:32:06",
+		"not a time":                    "not a time",
+		"":                              "",
+	} {
+		if got := humanTime(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+}
+
+// The AWS test line: identity, key expiry in local time, tool count.
+func TestConnectAWSTestLine(t *testing.T) {
+	old := time.Local
+	t.Cleanup(func() { time.Local = old; cliTestAWS = nil }) // registered first: runs after the server is closed
+	time.Local = time.FixedZone("BST", 3600)
+	cliTestAWS = func(context.Context, string) (string, time.Time, []string, error) {
+		return "arn:aws:sts::123456789012:assumed-role/siphon-readonly/siphon-test", time.Date(2026, 10, 7, 14, 47, 0, 0, time.UTC), make([]string, 19), nil
+	}
+	e := newCLIEnvCfg(t, awsServer, "")
+	out := e.ok("connect", "aws", "--name", "prod", "--region", "eu-west-1", "--profile", "p1")
+	want := "test: ok (arn:aws:sts::123456789012:assumed-role/siphon-readonly/siphon-test, keys expire 15:47, 19 tools)\n"
+	if !strings.Contains(out, want) {
+		t.Fatalf("want %q in:\n%s", want, out)
+	}
+	if got := testDetail(map[string]any{"user": "olaf", "latency": "120ms"}); got != " (olaf, 120ms)" {
+		t.Fatalf("github-style detail changed: %q", got)
+	}
+	if out := e.ok("test", "service", "prod-cloudwatch"); !strings.Contains(out, "keys expire 15:47, 19 tools") {
+		t.Fatalf("test service: %s", out)
 	}
 }

@@ -454,3 +454,12 @@ self-approved; the PR lists it.
   - The wizard's mcp source asks for URL and tool only, with no auth.
   - `apply -o json` returns one shape for every outcome: `{dry_run, changed, applied, rev, diff, errors, warnings, apply_error}`.
   - `test service|model <x>` are always connection tests.
+- **Step 7 (coder + Opus):**
+  - `docs/docs.go` embeds `*.md templates tasks connections developing`; tests are in `docs/templates_test.go` (an external test package).
+  - `config.Schema()` has no required/default/enum/descriptions, so `explain` uses a hint table in `describe.go`, kept in sync with the schema by two tests.
+  - `GET /api/inventory` was added for `siphon inventory`.
+  - **Fixes from Opus's live run:**
+    - `explain` judges the last event by when it arrived (the new `held_back_by_cooldown`), and the edge check likewise;
+    - server messages use relative times, and CLI text shows local times (`humanTime`);
+    - the `portal` provenance shows as `live` in text;
+    - the AWS test line shows the key expiry and tool count (the new additive `svcTest.expires_at`).

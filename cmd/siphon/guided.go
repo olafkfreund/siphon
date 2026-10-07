@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 
@@ -259,10 +260,19 @@ func (c *cli) finishConnect(done, test map[string]any, terr error, key, name str
 
 func testDetail(t map[string]any) string {
 	var p []string
-	for _, k := range []string{"user", "arn", "latency"} {
+	for _, k := range []string{"user", "arn"} {
 		if v := str(t, k); v != "" {
 			p = append(p, v)
 		}
+	}
+	if at, err := time.Parse(time.RFC3339, str(t, "expires_at")); err == nil {
+		p = append(p, "keys expire "+at.Local().Format("15:04"))
+	}
+	if n := str(t, "tools"); n != "" && n != "0" {
+		p = append(p, n+" tools")
+	}
+	if v := str(t, "latency"); v != "" {
+		p = append(p, v)
 	}
 	if len(p) == 0 {
 		return ""
@@ -518,12 +528,22 @@ func (c *cli) renderWhy(rule string, x map[string]any) {
 	line(x["enabled"] != false, "%s", map[bool]string{true: "enabled", false: "disabled (turned off at runtime)"}[x["enabled"] != false])
 	health := str(src, "health")
 	line(health != "error" && health != "stale", "source %s (%s) is %s%s", str(src, "name"), str(src, "type"), health, map[bool]string{true: ": " + str(src, "last_error"), false: ""}[str(src, "last_error") != ""])
-	line(x["last_event_at"] != nil, "%s", map[bool]string{true: "last event at " + str(x, "last_event_at"), false: "the source has not produced an event yet"}[x["last_event_at"] != nil])
+	line(x["last_event_at"] != nil, "%s", map[bool]string{true: "last event at " + humanTime(str(x, "last_event_at")), false: "the source has not produced an event yet"}[x["last_event_at"] != nil])
 	if m, ok := x["last_event_matches"].(bool); ok {
 		line(m, "%s", map[bool]string{true: "the last event satisfies the condition", false: "the last event does not satisfy the condition"}[m])
 	}
 	left := str(x, "cooldown_left")
-	line(left == "" || left == "0s", "cooldown: %s", map[bool]string{true: "none pending", false: left + " left"}[left == "" || left == "0s"])
+	switch {
+	case x["held_back_by_cooldown"] == true:
+		line(false, "the last event was held back by the cooldown")
+	case left == "" || left == "0s":
+		line(true, "cooldown: none pending")
+	default:
+		line(true, "cooldown: %s left (the last event was not held back)", left)
+	}
+	if x["last_fired"] != nil {
+		line(true, "last fired %s", humanTime(str(x, "last_fired")))
+	}
 	if rows, ok := x["edge_state"].([]any); ok && len(rows) > 0 {
 		var latched []string
 		for _, r := range rows {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"net/http"
@@ -18,6 +19,9 @@ import (
 	"github.com/olafkfreund/siphon/internal/store"
 	"github.com/olafkfreund/siphon/internal/web"
 )
+
+// cliTestAWS, when set, is the servers' AWS test hook.
+var cliTestAWS func(ctx context.Context, source string) (string, time.Time, []string, error)
 
 const cliTok = "tok-0123456789abcdef0123456789abcdef"
 
@@ -39,6 +43,12 @@ func newCLIEnv(t *testing.T) *cliEnv { return newCLIEnvCfg(t, "", "") }
 // newCLIEnvCfg adds settings to the server section and lines to the file's top level.
 func newCLIEnvCfg(t *testing.T, serverExtra, top string) *cliEnv {
 	t.Helper()
+	return newCLIEnvFile(t, "server: { sandbox: none, db: DIR/s.db"+serverExtra+" }\n"+top+"sources:\n  gh: { type: webhook, secret: env:AGW_HOOK, signature: github }\nrules:\n  - { name: r1, source: gh, when: \"true\", action: { cmd: [echo, one] } }\n")
+}
+
+// newCLIEnvFile serves the given siphon.yaml (DIR is the temp directory).
+func newCLIEnvFile(t *testing.T, content string) *cliEnv {
+	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("AGW_HOOK", "s3cret")
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
@@ -46,7 +56,7 @@ func newCLIEnvCfg(t *testing.T, serverExtra, top string) *cliEnv {
 		t.Setenv(k, "")
 	}
 	cfgp := filepath.Join(dir, "siphon.yaml")
-	os.WriteFile(cfgp, []byte("server: { sandbox: none, db: "+dir+"/s.db"+serverExtra+" }\n"+top+"sources:\n  gh: { type: webhook, secret: env:AGW_HOOK, signature: github }\nrules:\n  - { name: r1, source: gh, when: \"true\", action: { cmd: [echo, one] } }\n"), 0o600)
+	os.WriteFile(cfgp, []byte(strings.ReplaceAll(content, "DIR", dir)), 0o600)
 	cfg, err := config.Load(cfgp)
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +67,7 @@ func newCLIEnvCfg(t *testing.T, serverExtra, top string) *cliEnv {
 	}
 	t.Cleanup(func() { st.Close() })
 	p := job.New(cfg, st, time.Now)
-	srv := httptest.NewServer(web.New(web.Options{Token: cliTok, Store: st, Config: p.Config, Apply: p.Apply, ConfigPath: cfgp, Decide: p.Decide, Hooks: p.Webhooks(), Now: time.Now}))
+	srv := httptest.NewServer(web.New(web.Options{Token: cliTok, Store: st, Config: p.Config, Apply: p.Apply, ConfigPath: cfgp, Decide: p.Decide, TestAWS: cliTestAWS, Hooks: p.Webhooks(), Now: time.Now}))
 	t.Cleanup(srv.Close)
 	tokf := filepath.Join(dir, "token")
 	os.WriteFile(tokf, []byte(cliTok+"\n"), 0o600)

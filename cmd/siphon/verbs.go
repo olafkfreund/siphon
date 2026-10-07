@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
@@ -226,11 +227,20 @@ func buildGet(fs *flag.FlagSet) func(*cli, []string) error {
 	}
 }
 
+// humanTime shows an RFC 3339 time in the viewer's zone, short; anything
+// else comes back unchanged. JSON output keeps the API's UTC timestamps.
+func humanTime(s string) string {
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t.Local().Format("2006-01-02 15:04:05")
+	}
+	return s
+}
+
 func mapRows(rows []map[string]any, cols ...string) [][]string {
 	out := make([][]string, len(rows))
 	for i, r := range rows {
 		for _, k := range cols {
-			v := str(r, k)
+			v := humanTime(str(r, k))
 			if v == "" {
 				v = "-"
 			}
@@ -258,6 +268,11 @@ func (c *cli) getConfig(kind, name string) error {
 		}
 		if c.json() {
 			return c.jsonOut(rows)
+		}
+		for _, r := range rows { // "portal" is how the API says: made through the portal or CLI, kept as revisions
+			if r["provenance"] == "portal" {
+				r["provenance"] = "live"
+			}
 		}
 		return c.table([]string{"NAME", "ORIGIN"}, mapRows(rows, "name", "provenance"))
 	}
@@ -302,7 +317,7 @@ func (c *cli) showJob(id string) error {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		fmt.Fprintf(c.out, "%-12s %s\n", k+":", str(j, k))
+		fmt.Fprintf(c.out, "%-12s %s\n", k+":", humanTime(str(j, k)))
 	}
 	if o := str(j, "output"); o != "" {
 		fmt.Fprintf(c.out, "output:\n%s\n", o)
@@ -804,7 +819,7 @@ func buildHistory(fs *flag.FlagSet) func(*cli, []string) error {
 			if c.json() {
 				return c.jsonOut(rev)
 			}
-			fmt.Fprintf(c.out, "revision %s by %s at %s: %s\n\n%s", str(rev, "id"), str(rev, "actor"), str(rev, "at"), str(rev, "summary"), str(rev, "diff"))
+			fmt.Fprintf(c.out, "revision %s by %s at %s: %s\n\n%s", str(rev, "id"), str(rev, "actor"), humanTime(str(rev, "at")), str(rev, "summary"), str(rev, "diff"))
 			return nil
 		}
 		if len(args) != 0 && len(args) != 2 {

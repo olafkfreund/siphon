@@ -23,6 +23,7 @@ func (s *server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) { jsonErr(w, http.StatusNotFound, "not found") })
 	s.connectionAPI(mux)
 	s.diagAPI(mux)
+	s.inventoryAPI(mux)
 	get("/api/sources", func(*http.Request) (any, int, error) { v, err := s.sources(); return v, 200, err })
 	get("/api/rules", func(*http.Request) (any, int, error) { v, err := s.rules(); return v, 200, err })
 	get("/api/jobs", func(r *http.Request) (any, int, error) {

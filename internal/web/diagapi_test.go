@@ -57,6 +57,10 @@ func TestExplainReasons(t *testing.T) {
 	e := diagEnv(t, big, each, cool, hook)
 	db := e.st.DB
 	now := e.now
+	event := func(data any) { // an event arriving "now" on the test clock
+		store.SetSourceEvent(db, "disk", data)
+		db.Exec(`UPDATE source_state SET event_at=? WHERE source='disk'`, now.UnixMilli())
+	}
 
 	// no events yet
 	if _, c := e.explain(t, "big"); !hasCode(c, "no_events_yet") || hasCode(c, "condition_false") {
@@ -70,12 +74,12 @@ func TestExplainReasons(t *testing.T) {
 	store.SetRuleOverride(db, "big", true, "t", now)
 
 	// condition false
-	store.SetSourceEvent(db, "disk", map[string]any{"v": 1})
+	event(map[string]any{"v": 1})
 	if got, c := e.explain(t, "big"); !hasCode(c, "condition_false") || hasCode(c, "no_events_yet", "edge_already_true") || got["last_event_matches"] != false {
 		t.Fatalf("condition_false: %v %v", c, got)
 	}
 	// would fire: no reason against it
-	store.SetSourceEvent(db, "disk", map[string]any{"v": 9})
+	event(map[string]any{"v": 9})
 	if got, c := e.explain(t, "big"); len(c) != 0 || got["last_event_matches"] != true {
 		t.Fatalf("matching: %v", c)
 	}
@@ -115,7 +119,7 @@ func TestExplainReasons(t *testing.T) {
 	if got, c := e.explain(t, "big"); !hasCode(c, "eval_error") || got["last_eval_error"].(map[string]any)["message"] != "boom" {
 		t.Fatalf("eval_error: %v", c)
 	}
-	store.SetSourceEvent(db, "disk", map[string]any{"v": "text"})
+	event(map[string]any{"v": "text"})
 	if _, c := e.explain(t, "cool"); !hasCode(c, "eval_error") || hasCode(c, "condition_false") {
 		t.Fatalf("eval error from event: %v", c)
 	}
@@ -212,5 +216,49 @@ func TestAuditFilters(t *testing.T) {
 	}
 	if w := e.do("GET", "/api/audit?since=yesterday", nil, bearer); w.Code != 400 {
 		t.Fatalf("bad since: %d", w.Code)
+	}
+}
+
+// A fire at T, an event 22s later inside a 30s cooldown: held back, and still
+// explained that way long afterwards (judged against the event, not now).
+func TestExplainHeldBackByCooldown(t *testing.T) {
+	r := config.Rule{Name: "cd", Source: "disk", When: "event.v > 5", On: "each", ID: "event.v", Cooldown: config.Duration(30 * time.Second), Action: config.Action{Cmd: []string{"true"}}}
+	e := diagEnv(t, r)
+	db, T := e.st.DB, e.now
+	tx, _ := db.Begin()
+	store.PutRuleState(tx, "cd", "8", true, T)
+	tx.Commit()
+	arrive := func(v int, at time.Time) {
+		store.SetSourceEvent(db, "disk", map[string]any{"v": v})
+		db.Exec(`UPDATE source_state SET event_at=? WHERE source='disk'`, at.UnixMilli())
+	}
+	// the event that fired it arrived just before the fire: not held back
+	arrive(8, T.Add(-time.Second))
+	if got, c := e.explain(t, "cd"); hasCode(c, "cooldown") || got["held_back_by_cooldown"] != false || !hasCode(c, "fired") {
+		t.Fatalf("firing event: %v", c)
+	}
+	// the next one, 22s later
+	arrive(9, T.Add(22*time.Second))
+	e.now = T.Add(25 * time.Second)
+	got, c := e.explain(t, "cd")
+	var msg string
+	for _, r := range got["reasons"].([]any) {
+		if m := r.(map[string]any); m["code"] == "cooldown" {
+			msg = m["message"].(string)
+		}
+	}
+	if !hasCode(c, "cooldown") || got["held_back_by_cooldown"] != true || !strings.Contains(msg, "22s after the rule fired") || !strings.Contains(msg, "30s cooldown") || !strings.Contains(msg, "held back") {
+		t.Fatalf("held back: %v %q", c, msg)
+	}
+	// minutes later the cooldown is over, but the last event was still held back
+	e.now = T.Add(10 * time.Minute)
+	got, c = e.explain(t, "cd")
+	if !hasCode(c, "cooldown") || got["cooldown_left"] != "0s" {
+		t.Fatalf("later: %v %v", c, got["cooldown_left"])
+	}
+	// an event after the cooldown would fire: nothing holds it back
+	arrive(10, T.Add(time.Minute))
+	if got, c = e.explain(t, "cd"); hasCode(c, "cooldown") || got["held_back_by_cooldown"] != false {
+		t.Fatalf("after the window: %v", c)
 	}
 }

@@ -69,6 +69,7 @@ type command struct {
 	build                               func(fs *flag.FlagSet) func(c *cli, args []string) error
 	extra                               []flagDoc
 	ownURL                              bool // -url means something else here
+	alias                               string
 }
 
 func cfgFlag() flagDoc {
@@ -96,6 +97,10 @@ func commands() []command {
 		{Name: "test", Usage: "test <rule> [event.json|-] [--last] | test service|model <name>", Mode: "client", build: buildTest, Summary: "dry-run a rule on an event or the last stored one; or check a service or model connection", Example: "siphon test disk-full --last"},
 		{Name: "why", Usage: "why <rule>", Mode: "client", build: buildWhy, Summary: "why a rule did or didn't fire: a checklist, the likely reason and what to run next", Example: "siphon why disk-full"},
 		{Name: "new", Usage: "new task [--name n --source s|--webhook w|--poll p --url u ...] [--print]", Mode: "client", build: buildNew, ownURL: true, Summary: "build a rule (and its source) with a wizard or flags, then dry-run, confirm and apply", Example: "siphon new task --name alert --webhook alerts --when 'event.sev == \"high\"' --cmd '[\"notify\"]' --print"},
+		{Name: "template", alias: "example", Usage: "template [name]  (alias: example)", Mode: "client", build: buildTemplate, Summary: "list the ready-made task templates, or print one to pipe into `apply -f -`", Example: "siphon template github-pr-review > pr.yaml"},
+		{Name: "explain", Usage: "explain source|rule|agent|routine|credential", Mode: "client", build: buildExplain, Summary: "every field of a config kind: type, required, default, allowed values", Example: "siphon explain rule -o json"},
+		{Name: "inventory", Usage: "inventory", Mode: "client", build: buildInventory, Summary: "names of everything configured plus the operator's allowlists (never secrets)", Example: "siphon inventory -o json"},
+		{Name: "guide", Usage: "guide", Mode: "client", build: buildGuide, Summary: "print the guide for LLM agents (docs/llm.md)", Example: "siphon guide"},
 		{Name: "help", Usage: "help [command] [--json]", Mode: "client", build: buildHelp, Summary: "usage; --json is the machine-readable command list", Example: "siphon help --json"},
 
 		{Name: "validate", Usage: "validate [-config f] [-v] [-file-only]", Mode: "local", Summary: "check the config (file + portal edits; -file-only: file alone; -v: print egress allowlists)", Example: "siphon validate -config siphon.yaml",
@@ -305,7 +310,7 @@ func (c *cli) run(args []string) int {
 	}
 	var cmd *command
 	for _, k := range commands() {
-		if k.Name == args[0] && k.build != nil {
+		if (k.Name == args[0] || (k.alias != "" && k.alias == args[0])) && k.build != nil {
 			cmd = &k
 		}
 	}

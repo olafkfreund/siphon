@@ -340,13 +340,14 @@ func toolList(src string, tools []string) string {
 
 // svcTest is the result of a service Test: who the token belongs to.
 type svcTest struct {
-	Name    string `json:"name"`
-	User    string `json:"user,omitempty"`
-	Latency string `json:"latency,omitempty"`
-	Err     string `json:"error,omitempty"`
-	ARN     string `json:"arn,omitempty"`     // AWS: caller identity
-	Expires string `json:"expires,omitempty"` // AWS: when the test keys lapse
-	Tools   int    `json:"tools,omitempty"`   // AWS: tools the bridged server lists
+	Name      string `json:"name"`
+	User      string `json:"user,omitempty"`
+	Latency   string `json:"latency,omitempty"`
+	Err       string `json:"error,omitempty"`
+	ARN       string `json:"arn,omitempty"`        // AWS: caller identity
+	Expires   string `json:"expires,omitempty"`    // AWS: when the test keys lapse (UTC, HH:MM)
+	ExpiresAt string `json:"expires_at,omitempty"` // the same as RFC 3339, for clients that show local time
+	Tools     int    `json:"tools,omitempty"`      // AWS: tools the bridged server lists
 }
 
 // testService checks a service source's token against the provider's "who
@@ -460,6 +461,7 @@ func (s *server) testAWS(ctx context.Context, name string) svcTest {
 	t.ARN, t.Tools = arn, len(tools)
 	if !exp.IsZero() {
 		t.Expires = exp.UTC().Format("15:04 MST")
+		t.ExpiresAt = exp.UTC().Format(time.RFC3339)
 	}
 	if err != nil {
 		t.Err = err.Error()
