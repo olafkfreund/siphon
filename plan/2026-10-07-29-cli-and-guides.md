@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 29
 spec: spec/2026-10-07-29-cli-and-guides.md
 ---
