@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 31
 spec: spec/2026-10-08-31-schedule-source.md
 ---
