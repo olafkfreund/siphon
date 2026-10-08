@@ -132,6 +132,8 @@ Evidence:
 
 ## Open questions
 
+Resolved by the owner on 2026-10-08 ("approved"): all four proposals below are adopted.
+
 1. **The first wave.** Proposed, with how each connects:
    - **Code:** GitHub, GitLab (webhooks + polling; tools need OAuth),
      Bitbucket, Gitea/Forgejo (local MCP in nixpkgs).
