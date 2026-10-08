@@ -3,6 +3,7 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -292,6 +293,9 @@ const MinScheduleEvery = time.Minute
 // ParseSchedule parses a schedule's at: cron, @descriptor, or "every <d>".
 func ParseSchedule(at string) (cron.Schedule, error) {
 	at = strings.TrimSpace(at)
+	if strings.HasPrefix(at, "TZ=") || strings.HasPrefix(at, "CRON_TZ=") {
+		return nil, errors.New("use timezone:, not TZ= in at")
+	}
 	if d, ok := strings.CutPrefix(at, "every "); ok {
 		dur, err := time.ParseDuration(strings.TrimSpace(d))
 		if err != nil {
@@ -305,14 +309,29 @@ func ParseSchedule(at string) (cron.Schedule, error) {
 	if strings.HasPrefix(at, "@every") && !strings.HasPrefix(at, "@every ") {
 		return nil, errors.New("use \"every <duration>\"")
 	}
-	return cron.ParseStandard(at)
+	sc, err := cron.ParseStandard(at)
+	if cd, ok := sc.(cron.ConstantDelaySchedule); ok && err == nil && cd.Delay < MinScheduleEvery {
+		return nil, fmt.Errorf("every must be at least %s, got %s", MinScheduleEvery, cd.Delay)
+	}
+	return sc, err
+}
+
+// ScheduleKeyedByInstant reports whether every real moment of sc must run
+// (intervals and cron more often than hourly), so its dedupe key is the UTC
+// instant. Hourly or rarer cron is keyed by zone and wall time instead, so the
+// repeated hour of a DST fall-back fires once.
+func ScheduleKeyedByInstant(sc cron.Schedule) bool {
+	if _, ok := sc.(cron.ConstantDelaySchedule); ok {
+		return true
+	}
+	return minScheduleGap(sc) < time.Hour
 }
 
 // ScheduleEvent is the event a schedule source emits for the moment at.
-func (s *Source) ScheduleEvent(name string, loc *time.Location, at, firedAt time.Time, catchUp bool) map[string]any {
+func (s *Source) ScheduleEvent(loc *time.Location, at, firedAt time.Time, catchUp bool) map[string]any {
 	ev := map[string]any{}
 	maps.Copy(ev, s.Data)
-	ev["schedule"], ev["timezone"], ev["catch_up"] = name, loc.String(), catchUp
+	ev["schedule"], ev["timezone"], ev["catch_up"] = s.At, loc.String(), catchUp
 	ev["scheduled_at"] = at.In(loc).Format(time.RFC3339)
 	ev["fired_at"] = firedAt.In(loc).Format(time.RFC3339)
 	return ev
@@ -713,7 +732,7 @@ func (c *Config) Warnings() []string {
 			w = append(w, fmt.Sprintf("rule %s: source %s is agent tools only and never produces events", r.Name, r.Source))
 		}
 		if s := c.Sources[r.Source]; s != nil && s.Type == "schedule" && r.On == "edge" {
-			w = append(w, fmt.Sprintf("rules/%s: on: edge on schedule source %s fires once and then only when the condition changes; schedule rules usually want on: each (the default)", r.Name, r.Source))
+			w = append(w, fmt.Sprintf("rule %s: on: edge on schedule source %s fires once and then only when the condition changes; schedule rules usually want on: each (the default)", r.Name, r.Source))
 		}
 		if m := providerMismatch(r, c.Sources[r.Source]); m != "" {
 			w = append(w, m)
@@ -1223,6 +1242,11 @@ func (c *Config) validateSchedule(p string, s *Source, add func(string, ...any))
 		if _, ok := s.Data[k]; ok {
 			add("%s: data key %q is reserved", p, k)
 		}
+	}
+	if b, err := json.Marshal(s.Data); err != nil {
+		add("%s: data cannot be encoded as JSON: %v", p, err)
+	} else if len(b) > 16<<10 {
+		add("%s: data is %d bytes; the limit is 16 KiB", p, len(b))
 	}
 	if s.URL != "" || s.Read != nil || s.Poll != 0 || s.Secret.isSet() || len(s.Command) > 0 {
 		add("%s: a schedule has no url, read, poll, secret or command", p)

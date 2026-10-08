@@ -185,3 +185,16 @@ are unchanged.
   - `new task --schedule` defaults to `when: "true"`.
   - The draft boosts templates whose name, title, category or notes contain "schedule".
 - **Step 5 (Opus):** the VM subtest checks the next run through `siphon get sources` (text NEXT column) and `why -o json`, because `get sources -o json` is the config item list, not the health view.
+- **Step 6, security review fixes** (fresh Opus review: 1 high, 4 medium, 7 low; all fixed with regression tests):
+  - **H1:** `@every` below 1m is rejected, and the dedupe key is chosen by the parsed type.
+  - **M1:** catch-up walks to the real latest moment (computed directly for intervals), so a long outage gives `latest` → 1 run and `none` → 0. The scan cap was removed.
+  - **M2/L4:** intervals and sub-hourly crons are keyed by the UTC instant; hourly-or-rarer crons by `zone|local wall time`. A zone change fires both, a daily job fires once in the repeated hour, and `*/5` keeps every real interval.
+  - **M3:** `data` must be JSON-encodable (≤ 16 KiB). Fire errors show in health, and `test --at` reports them.
+  - **M4:** `event.schedule` is the `at` expression, as specified.
+  - **The lows:**
+    - L1: `TZ=`/`CRON_TZ=` prefixes are refused.
+    - L2: waits are capped at 1 minute, then re-sync (suspend and clock jumps).
+    - L3: a startup moment under 2 minutes late fires even with `none`.
+    - L5: converted-source detection parses the stored event.
+    - L7: wording, and a single-row state read.
+  - The docs are updated for each.

@@ -2195,10 +2195,11 @@ siphon why standup                               # shows the next and last run
 | `"0 */4 * * *"` | every 4 hours, on the hour |
 | `"0 0 1 * *"` | midnight on the 1st of each month |
 | `"@daily"`, `"@hourly"`, `"@weekly"`, `"@monthly"` | the usual shortcuts |
-| `"every 15m"` | every 15 minutes, from when the source started (at least 1m) |
+| `"every 15m"` | every 15 minutes, from when the source started (at least 1m, including `@every …`) |
 
 The five fields are *minute hour day-of-month month day-of-week*
-(standard cron, no seconds field).
+(standard cron, no seconds field). Set the zone with `timezone:`; a
+`TZ=`/`CRON_TZ=` prefix in `at` is refused.
 
 ## The source
 
@@ -2221,8 +2222,14 @@ The event a rule sees:
 
 A rule on a schedule source defaults to `on: each` with
 `id: event.scheduled_at`: each scheduled moment fires **once**, even if
-Siphon restarts. Use `data:` to let one schedule feed several rules
-(`when: 'event.kind == "weekly-digest"'`).
+Siphon restarts. `event.schedule` is the `at` expression.
+
+**`data`:**
+- It lets one schedule feed several rules
+  (`when: 'event.kind == "weekly-digest"'`).
+- It's plain text, stored with the event and shown in the portal, so never
+  put a token in it.
+- It's capped at 16 KiB.
 
 ## Missed runs
 
@@ -2231,9 +2238,14 @@ If Siphon was down at a scheduled time:
 - **`catch_up: latest`** (the default) runs the **most recent** missed time
   once, when Siphon starts, with `event.catch_up: true`. Older missed
   times are skipped, and recorded in the audit (`schedule_skipped`).
-- **`catch_up: none`** skips them all, and records that too.
+- **`catch_up: none`** skips them all, and records that too. A moment
+  that's less than 2 minutes late at start-up still runs; that's a
+  restart, not an outage.
 
-A new schedule never fires for times before it existed.
+A new schedule never fires for times before it existed. That includes its
+first moment, if Siphon was down when it came round. After a suspend or a
+clock jump, Siphon notices within a minute, and handles the missed moment
+by the same rule.
 
 ## Time zones and daylight saving
 
@@ -2241,7 +2253,10 @@ Times are in the source's `timezone`. Around clock changes:
 
 - **In spring,** a time inside the skipped hour doesn't run that day.
   For example `30 1 * * *` in Europe/London on the last Sunday of March.
-- **In autumn,** a time in the repeated hour runs **once**.
+- **In autumn,** a schedule that runs hourly or less often runs **once** in
+  the repeated hour. One that runs more often (for example `*/5 * * * *`
+  or `every 10m`) keeps every real interval, so it runs through both
+  passes of the hour.
 
 If a job must run every day without exception, use `timezone: UTC`, or a
 time outside 01:00–03:00.

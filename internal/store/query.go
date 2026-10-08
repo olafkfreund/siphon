@@ -201,3 +201,17 @@ type AuditRow struct {
 func ListAudit(db *sql.DB, limit int) ([]AuditRow, error) {
 	return QueryAudit(db, AuditFilter{Limit: limit})
 }
+
+// SourceStateOf is one source's poll state (ok=false if it has none yet).
+func SourceStateOf(db *sql.DB, source string) (s SourceState, ok bool, err error) {
+	var at sql.NullInt64
+	err = db.QueryRow(`SELECT source, last_poll_at, last_error FROM source_state WHERE source=?`, source).Scan(&s.Source, &at, &s.LastError)
+	if err == sql.ErrNoRows {
+		return s, false, nil
+	}
+	if at.Valid {
+		t := time.UnixMilli(at.Int64)
+		s.LastPollAt = &t
+	}
+	return s, err == nil, err
+}

@@ -3,8 +3,8 @@ package job
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -14,9 +14,8 @@ import (
 	"github.com/olafkfreund/siphon/internal/store"
 )
 
-// maxScheduleScan caps the moments counted when catching up after downtime.
-// ponytail: past the cap the "latest" moment is stale; 100k covers every 1m for ~70 days.
-const maxScheduleScan = 100000
+// liveWindow is how late a moment may be and still count as live, not missed.
+const liveWindow = 2 * time.Minute
 
 // after is the timer seam: tests set Pipeline.After, production uses time.After.
 func (p *Pipeline) after(d time.Duration) <-chan time.Time {
@@ -49,44 +48,33 @@ func (p *Pipeline) scheduleLoop(ctx context.Context, cfg *config.Config, name st
 		select {
 		case <-ctx.Done():
 			return
-		case <-p.after(next.Sub(p.Now())):
+		case <-p.after(min(next.Sub(p.Now()), time.Minute)): // re-sync each minute: a suspend or clock jump fires on time
 		}
 	}
 }
 
 // scheduleSync handles every moment in (last_poll_at, now]: the latest fires
-// once (catch_up: true at startup), older ones are audited as skipped. A source
-// with no state yet records now and fires nothing for the past. With
-// catch_up: none, a startup fires nothing. It returns the new last moment.
+// once, older ones are audited as skipped. A source with no state yet records
+// now and fires nothing for the past. With catch_up: none, a startup fires
+// nothing unless the moment is under liveWindow old. It returns the new last moment.
 func (p *Pipeline) scheduleSync(ctx context.Context, cfg *config.Config, name string, sched cron.Schedule, loc *time.Location, startup bool) (time.Time, error) {
 	now := p.Now()
-	states, err := store.SourceStates(p.Store.DB)
+	st, ok, err := store.SourceStateOf(p.Store.DB, name)
 	if err != nil {
 		return time.Time{}, err
 	}
-	st, ok := states[name]
-	if !ok || st.LastPollAt == nil || !p.hasScheduleEvent(name) {
+	// At startup, state that is not a schedule's own (another type's leftovers,
+	// or no event at all) is a new source: record now, fire nothing for the past.
+	if !ok || st.LastPollAt == nil || (startup && !p.hasScheduleEvent(name)) {
 		return now, store.PutSourceState(p.Store.DB, name, now, "")
 	}
 	last := *st.LastPollAt
-	var first, prev, beforePrev time.Time
-	n := 0
-	for t := last; n < maxScheduleScan; {
-		m := sched.Next(t.In(loc))
-		if m.IsZero() || m.After(now) {
-			break
-		}
-		if n == 0 {
-			first = m
-		}
-		beforePrev, prev, t = prev, m, m
-		n++
-	}
+	first, prev, beforePrev, n := scheduleMoments(sched, loc, last, now)
 	if n == 0 {
 		return last, nil
 	}
-	s := cfg.Sources[name]
-	fire := !(startup && s.CatchUp == "none")
+	late := now.Sub(prev) >= liveWindow
+	fire := !(startup && late && cfg.Sources[name].CatchUp == "none")
 	skipped, to := n, prev
 	if fire {
 		skipped, to = n-1, beforePrev
@@ -101,7 +89,30 @@ func (p *Pipeline) scheduleSync(ctx context.Context, cfg *config.Config, name st
 	if !fire {
 		return prev, store.PutSourceState(p.Store.DB, name, prev, "")
 	}
-	return prev, p.scheduleFire(ctx, cfg, name, loc, prev, startup)
+	if err := p.scheduleFire(ctx, cfg, name, sched, loc, prev, startup && late); err != nil {
+		store.PutSourceState(p.Store.DB, name, last, err.Error()) // health shows the error
+		return last, err
+	}
+	return prev, nil
+}
+
+// scheduleMoments counts the moments in (last, now]: the first, the latest and
+// the one before it. An interval is computed directly, so any outage is cheap.
+func scheduleMoments(sched cron.Schedule, loc *time.Location, last, now time.Time) (first, prev, beforePrev time.Time, n int) {
+	first = sched.Next(last.In(loc))
+	if first.IsZero() || first.After(now) {
+		return first, prev, beforePrev, 0
+	}
+	if cd, ok := sched.(cron.ConstantDelaySchedule); ok {
+		k := int(now.Sub(first) / cd.Delay)
+		prev = first.Add(time.Duration(k) * cd.Delay)
+		return first, prev, prev.Add(-cd.Delay), k + 1
+	}
+	for m := first; !m.IsZero() && !m.After(now); m = sched.Next(m.In(loc)) {
+		beforePrev, prev = prev, m
+		n++
+	}
+	return first, prev, beforePrev, n
 }
 
 func (p *Pipeline) auditSystem(event, detail string) error {
@@ -118,15 +129,18 @@ func (p *Pipeline) auditSystem(event, detail string) error {
 
 // scheduleFire runs the rules for one moment. (schedule:<name>, moment) is
 // recorded with the jobs, so a moment fires at most once, even across restarts.
-func (p *Pipeline) scheduleFire(ctx context.Context, cfg *config.Config, name string, loc *time.Location, at time.Time, catchUp bool) error {
+func (p *Pipeline) scheduleFire(ctx context.Context, cfg *config.Config, name string, sched cron.Schedule, loc *time.Location, at time.Time, catchUp bool) error {
 	s := cfg.Sources[name]
-	data := s.ScheduleEvent(name, loc, at, p.Now(), catchUp)
+	data := s.ScheduleEvent(loc, at, p.Now(), catchUp)
+	if _, err := json.Marshal(data); err != nil {
+		return fmt.Errorf("event data: %w", err)
+	}
 	ev := rule.Event{Source: name, Data: data}
-	// The dedupe id is the UTC instant, except for cron: its wall-clock time, so
-	// the repeated hour of a DST fall-back fires once, not twice.
+	// The dedupe id: the UTC instant, so every real moment runs; for hourly or
+	// rarer cron, zone + wall-clock time, so a DST fall-back's repeated hour fires once.
 	seenID := at.UTC().Format(time.RFC3339)
-	if !strings.HasPrefix(s.At, "every ") {
-		seenID = at.In(loc).Format("2006-01-02T15:04:05")
+	if !config.ScheduleKeyedByInstant(sched) {
+		seenID = loc.String() + "|" + at.In(loc).Format("2006-01-02T15:04:05")
 	}
 	_, ids, _, ruleErr, err := p.handleEvent(ctx, cfg, ev, false, "schedule:"+name, seenID)
 	if err != nil {
@@ -147,10 +161,19 @@ func (p *Pipeline) scheduleFire(ctx context.Context, cfg *config.Config, name st
 	return nil
 }
 
-// hasScheduleEvent is false for state left by an earlier non-schedule source
-// of the same name (it has a last event without scheduled_at): a new source.
-// No event at all is fine: a schedule that has not fired yet.
+// hasScheduleEvent is true when the stored last event is a schedule's own: JSON
+// with schedule, scheduled_at and fired_at. Anything else (another type's
+// event, none at all) means the state is not ours.
 func (p *Pipeline) hasScheduleEvent(name string) bool {
 	j, _ := store.SourceEvent(p.Store.DB, name)
-	return j == "" || strings.Contains(j, `"scheduled_at"`)
+	var m map[string]json.RawMessage
+	if json.Unmarshal([]byte(j), &m) != nil {
+		return false
+	}
+	for _, k := range []string{"schedule", "scheduled_at", "fired_at"} {
+		if _, ok := m[k]; !ok {
+			return false
+		}
+	}
+	return true
 }

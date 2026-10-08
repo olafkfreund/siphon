@@ -89,3 +89,17 @@ func TestScheduleWhyShowsMissed(t *testing.T) {
 		t.Fatalf("missed: %v", sch)
 	}
 }
+
+func TestScheduleTestAtRejectsUnencodableData(t *testing.T) {
+	e := newEnv(t, func(o *Options) {
+		o.Cfg.Sources["tick"] = &config.Source{Type: "schedule", At: "0 6 * * *", Timezone: "UTC", Data: map[string]any{"c": make(chan int)}}
+		o.Cfg.Rules = []config.Rule{{Name: "daily", Source: "tick", When: "true", On: "each", Action: config.Action{Cmd: []string{"true"}}}}
+	})
+	w := e.do("POST", "/api/rules/daily/test", nil, func(r *http.Request) {
+		bearer(r)
+		r.Body = io.NopCloser(strings.NewReader(`{"at":"2027-03-02 06:00"}`))
+	})
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "event data") {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+}

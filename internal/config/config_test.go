@@ -855,6 +855,13 @@ func TestScheduleSource(t *testing.T) {
 		{"descriptor", `{type: schedule, at: "@daily", timezone: Europe/London, catch_up: none, data: {x: 1}}`, ""},
 		{"every", `{type: schedule, at: "every 5m"}`, ""},
 		{"every too short", `{type: schedule, at: "every 30s"}`, "at least"},
+		{"@every 1s", `{type: schedule, at: "@every 1s"}`, "at least"},
+		{"@every 1ms", `{type: schedule, at: "@every 1ms"}`, "at least"},
+		{"@every padded", `{type: schedule, at: "  @every 1s"}`, "at least"},
+		{"TZ in at", `{type: schedule, at: "TZ=Europe/London 0 6 * * *"}`, "use timezone:"},
+		{"CRON_TZ in at", `{type: schedule, at: "CRON_TZ=Asia/Tokyo 0 6 * * *"}`, "use timezone:"},
+		{"data not JSON", `{type: schedule, at: "@daily", data: {x: .inf}}`, "cannot be encoded"},
+		{"data too big", `{type: schedule, at: "@daily", data: {x: "` + strings.Repeat("a", 17<<10) + `"}}`, "16 KiB"},
 		{"every bad", `{type: schedule, at: "every soon"}`, "bad interval"},
 		{"at missing", `{type: schedule}`, "at is required"},
 		{"bad cron", `{type: schedule, at: "61 * * * *"}`, "bad at"},
@@ -909,7 +916,19 @@ func TestScheduleRuleDefaultsToEach(t *testing.T) {
 		t.Errorf("default: %+v", r)
 	}
 	w := strings.Join(c.Warnings(), "\n")
-	if !strings.Contains(w, "rules/b: on: edge on schedule source s") || strings.Contains(w, "rules/a") {
+	if !strings.Contains(w, "rule b: on: edge on schedule source s") || strings.Contains(w, "rule a:") {
 		t.Errorf("warnings: %s", w)
+	}
+}
+
+func TestScheduleKeyedByInstant(t *testing.T) {
+	for at, want := range map[string]bool{"@every 5m": true, "every 2h": true, "*/5 * * * *": true, "30 1 * * *": false, "0 * * * *": false, "@daily": false} {
+		sc, err := ParseSchedule(at)
+		if err != nil {
+			t.Fatal(at, err)
+		}
+		if got := ScheduleKeyedByInstant(sc); got != want {
+			t.Errorf("%s: %v want %v", at, got, want)
+		}
 	}
 }

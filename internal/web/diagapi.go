@@ -38,7 +38,10 @@ func (s *server) diagAPI(mux *http.ServeMux) {
 			if err != nil {
 				return nil, 400, errMsg(err.Error())
 			}
-			b, _ := json.Marshal(ev)
+			b, err := json.Marshal(ev)
+			if err != nil {
+				return nil, 400, errMsg("event data: " + err.Error())
+			}
 			raw = string(b)
 		} else if body.UseLast {
 			var err error
@@ -111,7 +114,7 @@ func (s *server) scheduleTestEvent(rl config.Rule, at string) (map[string]any, e
 	if err != nil {
 		return nil, errors.New("bad time " + strconv.Quote(at) + `: use "2026-03-02 06:00" (in ` + loc.String() + ") or RFC 3339")
 	}
-	return src.ScheduleEvent(rl.Source, loc, t, s.Now(), false), nil
+	return src.ScheduleEvent(loc, t, s.Now(), false), nil
 }
 
 // scheduleFacts are next/last run and a missed-run note for a schedule source.
