@@ -907,7 +907,7 @@ pkgs.testers.runNixOSTest {
         machine.succeed(f"runuser -u siphon -- siphon backup restore -db /var/lib/siphon/state.db --yes {archives[0]}")
         machine.succeed("systemctl start siphon.service")
         machine.wait_for_open_port(8080)
-        assert "vm-kept" in alice("siphon get rules vm-kept")
+        alice("siphon get rules vm-kept")  # exit 4 if the restore lost it
         machine.succeed("test -f /var/lib/siphon/secrets/notify--kept+url")
         # /metrics: the login token, like the API
         metrics = "http://127.0.0.1:8080/metrics"
