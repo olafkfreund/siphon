@@ -84,20 +84,15 @@ expiry window, and tells nobody, mostly expires.
 
 ## Open questions
 
-1. **Mechanism.** Either Siphon emits its own events (approval requested,
-   job failed, connection failing) as a built-in source, so that ordinary
-   rules and actions send the notifications, or Siphon gets a dedicated
-   notifier with its own channels. The first reuses rules, templates and
-   the sandbox, and needs a loop guard. The second is simpler to set up and
-   harder to misconfigure. Proposal: the spec compares both and picks one.
-2. **Channels in v1.** Proposal: ntfy, Slack incoming webhook, a generic
-   webhook (JSON POST) and email. Is email (SMTP) wanted in v1, or later?
-3. **Events in v1.** Proposal: approval requested, approval about to
-   expire, job failed, and a connection or source failing for longer than a
-   threshold. Is anything else wanted, for example job done for chosen
-   rules?
-4. **Who gets what.** With users and roles still out of scope, routing is
-   by event kind and optionally by rule or tag. Is per-rule routing needed
-   in v1?
-5. **Reminders.** Should an approval be re-sent before it expires, once,
-   at a set fraction of the expiry window?
+Resolved by the owner (2026-10-08): "approved, use your recommendations".
+
+1. **Mechanism:** the spec compares a built-in event source with a
+   dedicated notifier, and picks one.
+2. **Channels in v1:** ntfy, Slack incoming webhook, and a generic webhook
+   (a JSON POST). Email (SMTP) is deferred: ntfy and the webhook can
+   already forward to email.
+3. **Events in v1:** approval requested, approval about to expire, job
+   failed, and a source failing for longer than a threshold, plus its
+   recovery.
+4. **Routing:** by event kind per channel. Per-rule routing is deferred.
+5. **Reminders:** one reminder per approval, before it expires.
