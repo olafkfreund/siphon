@@ -105,6 +105,9 @@ func (s *server) connect(actor, id string, values map[string]string) (*serviceDo
 	}
 	done := res.Done
 	_, _, applyErr, err := s.commit(actor, "services: "+e.Name+" "+done.Name+" added", nil, putItems(items...), pending)
+	if err == nil {
+		store.ClearConnectionCheck(s.Store.DB, done.Name) // a reused name starts as Not checked
+	}
 	if applyErr != nil {
 		done.ApplyErr = applyErr.Error()
 	}

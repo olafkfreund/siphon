@@ -93,7 +93,7 @@ func TestServicesNamesHTTPSAndApplyError(t *testing.T) {
 	}
 	for _, name := range []string{"gl", "gl-hooks", "gh"} { // a made source, its -hooks twin, a file-defined source
 		w := ce.post("/services/github", url.Values{"name": {name}, "token": {"t"}, "mode": {"remote"}})
-		if w.Code != 422 || !strings.Contains(w.Body.String(), "already exists; pick another name or edit it") {
+		if w.Code != 422 || !strings.Contains(w.Body.String(), "already exists") {
 			t.Fatalf("%s: %d %s", name, w.Code, w.Body.String())
 		}
 	}

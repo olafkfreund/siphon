@@ -31,3 +31,9 @@ func GetConnectionCheck(db *sql.DB, connection string) (*ConnectionCheck, error)
 	c.At = time.Unix(at, 0)
 	return &c, err
 }
+
+// ClearConnectionCheck forgets a connection's last Test.
+func ClearConnectionCheck(db *sql.DB, connection string) error {
+	_, err := db.Exec(`DELETE FROM connection_check WHERE connection=?`, connection)
+	return err
+}

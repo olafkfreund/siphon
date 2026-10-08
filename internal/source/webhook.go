@@ -137,7 +137,6 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 				reject(http.StatusUnauthorized, "signature or timestamp invalid")
 				return
 			}
-			key = replayKey(ts, body)
 			// Slack verifies a new Request URL with a signed url_verification
 			// event that must be answered with its challenge, not delivered.
 			var v struct{ Type, Challenge string }
@@ -155,7 +154,6 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 				reject(http.StatusUnauthorized, "signature or timestamp invalid")
 				return
 			}
-			key = replayKey(ts, body)
 		case "standard-webhooks":
 			header = "Webhook-Signature"
 			var ok bool
@@ -216,7 +214,8 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 			reject(http.StatusTooManyRequests, "rate limited")
 			return
 		}
-		// Without a signed timestamp, identical bodies replay only after the
+		// Slack and Stripe too: the key is the body alone, so a retry re-signed with
+		// a new timestamp is a duplicate. Identical bodies replay only after the
 		// seen_event TTL (7 days). Delivery IDs are not signed.
 		if key == "" {
 			sum := sha256.Sum256(signed)
@@ -316,11 +315,6 @@ func macMatch(secret string, msg []byte, cands []string, prefix string) bool {
 func freshTS(ts string, now time.Time) bool {
 	seconds, err := strconv.ParseInt(ts, 10, 64)
 	return err == nil && now.Sub(time.Unix(seconds, 0)) <= 5*time.Minute && time.Unix(seconds, 0).Sub(now) <= 5*time.Minute
-}
-
-func replayKey(ts string, body []byte) string {
-	sum := sha256.Sum256(body)
-	return ts + "." + hex.EncodeToString(sum[:])
 }
 
 // parseStripe reads "t=…,v1=…,v1=…"; other schemes (v0) are ignored.

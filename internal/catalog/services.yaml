@@ -323,7 +323,7 @@ services:
     status: available
     fields:
       - {<<: *f_name, default: jira}
-      - {key: site, label: Jira site URL, type: url, required: true, secure: true, help: 'For example https://yourteam.atlassian.net.'}
+      - {key: site, label: Jira site URL, type: url, required: true, secure: true, pattern: 'https://[a-z0-9-]+\.atlassian\.net/?', pattern_error: 'the Jira site is https://yourteam.atlassian.net', help: 'For example https://yourteam.atlassian.net.'}
       - {key: email, label: Atlassian account email, type: text, required: true}
       - {<<: *f_token, label: Scoped API token, help: 'An Atlassian API token with Jira scopes (read). An Atlassian admin must enable API-token access for the Rovo MCP server.'}
       - *f_webhook
@@ -682,7 +682,7 @@ services:
           {{if private "base" -}}
           allow_private: true
           {{end -}}
-    test: {method: GET, url: '{base}/v1/account', header: 'Authorization: Bearer {token}', identity: username}
+    test: {method: GET, url: '{base}/v1/account', header: 'Authorization: {token}', identity: username}
 
   # ---- generic
   - id: webhook
@@ -713,7 +713,7 @@ services:
           {{if not .header}}{{fail "a header is required for token"}}{{end -}}
           token_header: {{.header}}
           {{end -}}
-          secret: {{if has "secret"}}{{secret "secret" "secret"}}{{else}}{{generated "secret"}}{{end}}
+          secret: {{if has "secret"}}{{secret "secret" "secret"}}{{else if or (eq .mode "slack") (eq .mode "stripe")}}{{fail "Slack/Stripe issue their own signing secret: paste it"}}{{else}}{{generated "secret"}}{{end}}
 
   - id: mcp
     name: MCP server

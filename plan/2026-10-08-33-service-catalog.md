@@ -229,3 +229,16 @@ Revert the merge.
 - **Step 8 (Opus):**
   - The VM subtest connects **Uptime Kuma** (generated token webhook → a real delivery → a done job) and **Slack** (the signing secret from a file; `url_verification` answered with the challenge; a signed `app_mention` → a done job), and checks `/services` lists both.
   - **The plan's Linear stub was replaced:** faking Linear's HTTPS MCP inside the VM would mostly test the fake, and Linear's connect and test are covered by unit tests against a fake server.
+- **Step 9, security review fixes** (fresh Opus review: 0 high, 3 medium, 8 low; all fixed with regression tests):
+  - **M1:** a connection name already used by any source or credential is refused.
+  - **M2:** the ntfy test no longer double-prefixes; tokenless ntfy has no Test; the fake-server test asserts exact credential headers.
+  - **M3:** legacy unlabelled connections fall back to their legacy grouping, so Test works.
+  - **The lows:**
+    - L1: the Jira site must be `*.atlassian.net`.
+    - L2: generic slack/stripe webhooks need a pasted secret.
+    - L3: slack/stripe delivery keys are the body hash, so retries are duplicates.
+    - L4: masking covers the bare token after a prefix and the decoded Basic parts.
+    - L5: the Test result target works for dotted names.
+    - L6: values are trimmed, and CR/LF/NUL are refused.
+    - L7: a reused name starts as Not checked.
+    - L8 (Opus): docs for the new modes and options.

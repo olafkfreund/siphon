@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/base64"
 	"net/url"
 	"sort"
 	"strings"
@@ -27,8 +28,35 @@ func connSources(cfg *config.Config, conn string) []string {
 			out = append(out, n)
 		}
 	}
+	if len(out) == 0 { // legacy: unlabelled service sources grouped by name
+		for n, src := range cfg.Sources {
+			if src.Connection == "" && serviceFor(src) != "" && legacyKey(n) == conn {
+				out = append(out, n)
+			}
+		}
+	}
 	sort.Strings(out)
 	return out
+}
+
+// maskParts is every form a token can leak in: whole, bare after a prefix
+// ("Bearer ", "token="), and the parts of a Basic credential.
+func maskParts(tok string) []string {
+	if tok == "" {
+		return nil
+	}
+	parts := []string{tok}
+	if i := strings.LastIndexAny(tok, " ="); i >= 0 && i+1 < len(tok) {
+		parts = append(parts, tok[i+1:])
+	}
+	if b, ok := strings.CutPrefix(tok, "Basic "); ok {
+		if d, err := base64.StdEncoding.DecodeString(b); err == nil {
+			parts = append(parts, string(d))
+			parts = append(parts, strings.Split(string(d), ":")...)
+		}
+	}
+	sort.Slice(parts, func(i, j int) bool { return len(parts[i]) > len(parts[j]) })
+	return parts
 }
 
 // testConnection runs the catalogue entry's test for a connection and stores
@@ -63,7 +91,7 @@ func (s *server) runConnectionTest(ctx context.Context, conn string) (*connTestR
 	switch {
 	case e.Test != nil:
 		token, base := connInputs(cfg, names, e.Test)
-		secrets = append(secrets, token)
+		secrets = append(secrets, maskParts(token)...)
 		rp := strings.NewReplacer("{token}", token, "{base}", base)
 		hdr, val, _ := strings.Cut(rp.Replace(e.Test.Header), ":")
 		t = svcTest{Name: conn}

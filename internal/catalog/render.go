@@ -179,6 +179,16 @@ func (e *Entry) Render(values map[string]string, env Env) (*Result, error) {
 		res.Items = append(res.Items, Item{c.Kind, iname, y})
 	}
 	if env.Config != nil {
+		for _, src := range env.Config.Sources {
+			if src.Connection == name {
+				return nil, badf("name", "a connection named %s already exists (service %s)", name, src.Service)
+			}
+		}
+		for _, cr := range env.Config.Credentials {
+			if cr.Connection == name {
+				return nil, badf("name", "a connection named %s already exists (service %s)", name, cr.Service)
+			}
+		}
 		for _, it := range res.Items {
 			if it.Kind == "sources" && env.Config.Sources[it.Name] != nil {
 				return nil, badf("name", "a source named %s already exists; pick another name or edit it", it.Name)
@@ -290,9 +300,7 @@ func (e *Entry) clean(in map[string]string, cfg *config.Config) (map[string]stri
 	out := map[string]string{}
 	for _, f := range e.Fields {
 		v := in[f.Key]
-		if f.Type != "secret" {
-			v = strings.TrimSpace(v)
-		}
+		v = strings.TrimSpace(v)
 		if f.Type == "bool" { // unchecked means off: a default is only the form's initial state
 			if v != "" {
 				out[f.Key] = "on"
@@ -308,7 +316,7 @@ func (e *Entry) clean(in map[string]string, cfg *config.Config) (map[string]stri
 			}
 			continue
 		}
-		if f.Type != "secret" && strings.ContainsAny(v, "\r\n\x00") {
+		if strings.ContainsAny(v, "\r\n\x00") {
 			return nil, badf(f.Key, "%s must be a single line", f.Label)
 		}
 		switch f.Type {

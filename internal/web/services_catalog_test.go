@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/base64"
 	"io"
 	"time"
 
@@ -316,6 +317,9 @@ func dummyValues(e *catalog.Entry, sentinel string) map[string]string {
 			v[f.Key] = strings.Join(f.Choices, ",")
 		case "url":
 			v[f.Key] = "https://example.com"
+			if e.ID == "jira" {
+				v[f.Key] = "https://t.atlassian.net"
+			}
 		case "choice":
 			v[f.Key] = f.Choices[0]
 		default:
@@ -380,8 +384,17 @@ func TestCatalogEntryTestsAgainstFakeServer(t *testing.T) {
 			t.Errorf("%s: method %q", e.ID, got.method)
 		}
 		name, _, _ := strings.Cut(e.Test.Header, ":")
-		if strings.TrimSpace(got.hdr.Get(strings.TrimSpace(name))) == "" {
-			t.Errorf("%s: header %s not sent", e.ID, name)
+		// the exact credential: the stored value, sent once (no double prefix)
+		_, tmpl, _ := strings.Cut(e.Test.Header, ":")
+		stored := "SENTINEL-TEST-KEY"
+		switch e.ID {
+		case "ntfy":
+			stored = "Bearer " + stored
+		case "bitbucket", "jira":
+			stored = "Basic " + base64.StdEncoding.EncodeToString([]byte(v["email"]+":"+stored))
+		}
+		if want, g := strings.TrimSpace(strings.ReplaceAll(tmpl, "{token}", stored)), got.hdr.Get(strings.TrimSpace(name)); g != want {
+			t.Errorf("%s: header %s = %q, want %q", e.ID, name, g, want)
 		}
 		if e.Test.Body != "" && got.body != e.Test.Body {
 			t.Errorf("%s: body %q", e.ID, got.body)

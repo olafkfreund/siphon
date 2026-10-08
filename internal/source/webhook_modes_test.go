@@ -40,7 +40,7 @@ func TestWebhookSlack(t *testing.T) {
 	now := time.Unix(1531420618+60, 0)
 	o := WebhookOptions{Secret: secret, Signature: "slack"}
 	hdr := map[string]string{"x-slack-signature": sig, "X-Slack-Request-Timestamp": ts}
-	if code, id := post(t, o, now, body, hdr); code != 202 || !strings.HasPrefix(id, ts+".") {
+	if code, id := post(t, o, now, body, hdr); code != 202 || id == "" {
 		t.Fatalf("good: %d %q", code, id)
 	}
 	if code, _ := post(t, o, now, body+"x", hdr); code != 401 {
@@ -67,7 +67,7 @@ func TestWebhookStripe(t *testing.T) {
 	now := time.Unix(1700000000, 0)
 	o := WebhookOptions{Secret: "whsec_test_secret", Signature: "stripe"}
 	h := func(s string) map[string]string { return map[string]string{"Stripe-Signature": s} }
-	if code, id := post(t, o, now, body, h("t="+ts+",v1="+cur+",v0=ignored")); code != 202 || !strings.HasPrefix(id, ts+".") {
+	if code, id := post(t, o, now, body, h("t="+ts+",v1="+cur+",v0=ignored")); code != 202 || id == "" {
 		t.Fatalf("good: %d %q", code, id)
 	}
 	// A rotated secret: Stripe signs with both, the second v1 matches.
@@ -142,5 +142,41 @@ func TestSlackURLVerification(t *testing.T) {
 	}
 	if w := send("v0=00"); w.Code != http.StatusUnauthorized || w.Body.String() == "chal-123" {
 		t.Fatalf("unsigned verification answered: %d %q", w.Code, w.Body.String())
+	}
+}
+
+// A provider retry re-signed with a new timestamp carries the same body: a duplicate.
+func TestWebhookSlackStripeRetryIsDuplicate(t *testing.T) {
+	const secret, body = "k", `{"id":"evt_1"}`
+	now := time.Unix(1700000100, 0)
+	sign := func(msg string) string {
+		m := hmac.New(sha256.New, []byte(secret))
+		m.Write([]byte(msg))
+		return hex.EncodeToString(m.Sum(nil))
+	}
+	for _, mode := range []string{"slack", "stripe"} {
+		seen := map[string]bool{}
+		h := NewWebhook(WebhookOptions{Name: "w", Secret: secret, Signature: mode, Now: func() time.Time { return now }},
+			func(_ context.Context, _ Event, id string) (bool, error) {
+				d := seen[id]
+				seen[id] = true
+				return d, nil
+			})
+		var codes []int
+		for _, ts := range []string{"1700000000", "1700000050"} {
+			r := httptest.NewRequest(http.MethodPost, "/hook/w", strings.NewReader(body))
+			if mode == "slack" {
+				r.Header.Set("X-Slack-Request-Timestamp", ts)
+				r.Header.Set("X-Slack-Signature", "v0="+sign("v0:"+ts+":"+body))
+			} else {
+				r.Header.Set("Stripe-Signature", "t="+ts+",v1="+sign(ts+"."+body))
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			codes = append(codes, w.Code)
+		}
+		if codes[0] != 202 || codes[1] != 409 {
+			t.Errorf("%s: %v", mode, codes)
+		}
 	}
 }
