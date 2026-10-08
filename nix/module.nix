@@ -304,6 +304,28 @@ in
       description = "SIPHON_URL for the CLI; default http://127.0.0.1:<port of server.listen>.";
     };
 
+    backup = {
+      enable = lib.mkEnableOption ''
+        a timer that archives Siphon's state (the database, pasted secrets and
+        logins) with `siphon backup create`. Archives hold every secret: they are
+        0600 in a 0700 directory owned by siphon'';
+      dir = lib.mkOption {
+        type = lib.types.str;
+        default = "/var/backup/siphon";
+        description = "Where the archives go (siphon-<UTC time>.tar.gz).";
+      };
+      calendar = lib.mkOption {
+        type = lib.types.str;
+        default = "daily";
+        description = "When to back up (systemd OnCalendar).";
+      };
+      keep = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 7;
+        description = "How many of the newest archives to keep.";
+      };
+    };
+
     catalogPackages = lib.mkOption {
       type = lib.types.listOf (lib.types.enum (lib.attrNames catalogPackages));
       default = [ ];
@@ -452,7 +474,7 @@ in
     systemd.tmpfiles.rules = [
       "d ${actionsDir} 2710 siphon siphon-io -"
       "d ${egressDir} 2710 siphon siphon-io -"
-    ];
+    ] ++ lib.optional cfg.backup.enable "d ${cfg.backup.dir} 0700 siphon siphon -";
 
     systemd.services.siphon = {
       description = "siphon gateway";
@@ -509,6 +531,53 @@ in
         SystemCallArchitectures = "native";
         CapabilityBoundingSet = "";
         UMask = "0077";
+      };
+    };
+
+    # A live, consistent archive of the state (VACUUM INTO writes its temporary
+    # copy into stateDir), then all but the newest `keep` are deleted.
+    systemd.services.siphon-backup = let
+      # An operator-managed configFile names its own server.db.
+      dbArg = if cfg.configFile != null then "-config ${lib.escapeShellArg configPath}" else "-db ${lib.escapeShellArg settings.server.db}";
+      dir = lib.escapeShellArg cfg.backup.dir;
+    in lib.mkIf cfg.backup.enable {
+      description = "siphon state backup";
+      path = [ pkgs.coreutils pkgs.findutils ];
+      script = ''
+        ${cfg.package}/bin/siphon backup create ${dbArg} \
+          ${dir}/siphon-$(date -u +%Y%m%dT%H%M%SZ).tar.gz
+        ls -1t ${dir}/siphon-*.tar.gz | tail -n +${toString (cfg.backup.keep + 1)} | xargs -r rm --
+      '';
+      serviceConfig = {
+        Type = "oneshot";
+        User = "siphon";
+        Group = "siphon";
+        UMask = "0077";
+        ReadWritePaths = [ stateDir cfg.backup.dir ]; # the main unit, too, can only write stateDir
+        NoNewPrivileges = true;
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
+        PrivateDevices = true;
+        PrivateNetwork = true;
+        ProtectKernelTunables = true;
+        ProtectKernelModules = true;
+        ProtectControlGroups = true;
+        RestrictNamespaces = true;
+        LockPersonality = true;
+        RestrictRealtime = true;
+        RestrictSUIDSGID = true;
+        RestrictAddressFamilies = [ "AF_UNIX" ];
+        SystemCallArchitectures = "native";
+        CapabilityBoundingSet = "";
+      };
+    };
+    systemd.timers.siphon-backup = lib.mkIf cfg.backup.enable {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = cfg.backup.calendar;
+        Persistent = true;
+        RandomizedDelaySec = "10min";
       };
     };
 

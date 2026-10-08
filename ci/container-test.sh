@@ -41,6 +41,10 @@ done
 podman exec siphon-ci "$bin" jobs ls -config /etc/siphon/siphon.yaml 2>/dev/null | grep -E '^1 +ver +done' >/dev/null || { podman logs siphon-ci; exit 1; }
 podman logs siphon-ci 2>&1 | grep 'runs are not isolated' >/dev/null || { echo "no unsandboxed warning"; exit 1; }
 
+# a live backup to stdout (docs/tasks/backup-and-monitoring.md) is a readable archive
+listing=$(podman exec siphon-ci "$bin" backup create -db /var/lib/siphon/state.db - | tar -tzf -)
+grep -x 'state.db' <<<"$listing" >/dev/null && grep -x 'siphon-backup.json' <<<"$listing" >/dev/null || { echo "backup: $listing"; exit 1; }
+
 # sandbox: systemd inside a container is an error, not a half-working sandbox
 sed 's/  # no sandbox.*/  sandbox: systemd/' "$dir/siphon.yaml" >"$dir/systemd.yaml"; chmod 600 "$dir/systemd.yaml"
 if out=$(podman run --rm --userns=keep-id:uid=65532,gid=65532 -v "$dir":/etc/siphon:ro "$img" validate -config /etc/siphon/systemd.yaml 2>&1); then
