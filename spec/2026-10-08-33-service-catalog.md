@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 33
 intent: intent/2026-10-08-33-service-catalog.md
 ---
