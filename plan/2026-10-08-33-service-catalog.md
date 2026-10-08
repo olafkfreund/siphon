@@ -242,3 +242,4 @@ Revert the merge.
     - L6: values are trimmed, and CR/LF/NUL are refused.
     - L7: a reused name starts as Not checked.
     - L8 (Opus): docs for the new modes and options.
+- CI (Opus): `ci/container-test.sh` and `ci/microvm-test.sh` piped into `grep -q` under `pipefail`. grep quit at the first match, which could SIGPIPE the producer and fail a passing check. The larger startup log on this branch made that happen in the OCI job. They now use `grep … >/dev/null`.
