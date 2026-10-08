@@ -20,7 +20,7 @@ baseline in **`siphon.yaml`**.
    working agent task.
 2. **[Concepts](concepts.md):** source → rule → action, agents,
    connections, approvals, and what's sandboxed.
-3. **[Templates](templates/README.md):** about 20 ready-made tasks you can
+3. **[Templates](templates/README.md):** about 30 ready-made tasks you can
    apply as-is.
 
 ## How-to, by task
@@ -38,6 +38,9 @@ baseline in **`siphon.yaml`**.
 
 ## Connections
 
+**[All services you can connect](connections/README.md)** (GitHub, GitLab,
+Bitbucket, Gitea, Linear, Jira, Slack, Sentry, PagerDuty, Grafana, Stripe,
+Home Assistant, Cloudflare, AWS, …) ·
 [Models (Ollama and OpenAI-compatible)](connections/models.md) ·
 [Logins (Claude, Codex, agy)](connections/logins.md) ·
 [GitHub](connections/github.md) · [GitLab](connections/gitlab.md) ·
@@ -423,10 +426,14 @@ connections for you.
 
 Always follow this order. Every step has `-o json`.
 
-1. `siphon inventory -o json`: the names that exist (sources, agents,
+1. `siphon catalog -o json`: the services that can be connected on this
+   install (and why some can't). If the task needs one that isn't
+   connected yet, ask the user to run `siphon connect <id>`, since it needs
+   their token.
+2. `siphon inventory -o json`: the names that exist (sources, agents,
    routines, connections, MCP packages, allowlists). Reuse them; never
    invent a connection or a secret.
-2. `siphon template`: list the ready-made templates (about 20, by
+3. `siphon template`: list the ready-made templates (about 30, by
    category), then `siphon template <name>` to start from the closest one,
    for example:
    - `github-pr-review`, `github-ci-failure`;
@@ -439,16 +446,16 @@ Always follow this order. Every step has `-o json`.
 
    `siphon explain <kind>` lists every field of a source, rule, agent,
    routine or credential.
-3. **Write one apply file** (YAML shaped like `siphon.yaml`: `sources:`,
+4. **Write one apply file** (YAML shaped like `siphon.yaml`: `sources:`,
    `rules:`, `agents:`, `routines:`, `credentials:`).
-4. `siphon apply -f task.yaml --dry-run -o json` returns the diff, `errors`
+5. `siphon apply -f task.yaml --dry-run -o json` returns the diff, `errors`
    and `warnings`. Fix every error and run it again.
-5. **Show the user the diff**, then `siphon apply -f task.yaml --yes`.
-6. `siphon test <rule> --last` (or `siphon test <rule> event.json`) checks
+6. **Show the user the diff**, then `siphon apply -f task.yaml --yes`.
+7. `siphon test <rule> --last` (or `siphon test <rule> event.json`) checks
    the rule against a real or sample event.
-7. If it doesn't fire later: `siphon why <rule> -o json`.
+8. If it doesn't fire later: `siphon why <rule> -o json`.
 
-Instead of steps 2–4, `siphon draft "<what the user wants>"` asks a model
+Instead of steps 3–5, `siphon draft "<what the user wants>"` asks a model
 connection to write the apply file and validates it. Review its output the
 same way.
 
@@ -580,9 +587,22 @@ siphon apply -f deploy.yaml --secret sources/deploy-hook.secret=@hook.key
 | `sha256` | signs with HMAC-SHA256 (hex) in a header you name | most custom senders |
 | `standard-webhooks` | signs per the Standard Webhooks spec (`whsec_…`) | Svix, Clerk, Resend, … |
 | `token` | sends the secret itself in a header you name | GitLab, EventBridge, Alertmanager, Home Assistant, scripts |
+| `slack` | signs `v0:<timestamp>:<body>` (HMAC-SHA256, `X-Slack-Signature`, ±5 min); Siphon also answers Slack's signed `url_verification` with its challenge | Slack (paste the app's Signing Secret) |
+| `stripe` | signs `<t>.<body>` in `Stripe-Signature` (`t=…,v1=…`; any `v1` may match, so rotation works; ±5 min) | Stripe (paste the endpoint's signing secret) |
 
 `token` is the easiest to set up, but weaker: a captured delivery can be
 replayed. Prefer an HMAC signature when the sender supports one.
+
+**`sha256` options** for providers that vary the format:
+- `signature_prefix: v1=`: the header may hold a comma-separated list of
+  `v1=<hex>` signatures, and any one may match (PagerDuty, during secret
+  rotation).
+- `timestamp_header` plus `timestamp_separator: ":"`: the signed text is
+  `<timestamp>:<body>` instead of the default `<timestamp>.<body>`
+  (Grafana).
+
+For a known service, `siphon connect <service>` sets all of this for you
+(see [all services](../connections/README.md)).
 
 ## Commands, safely
 
@@ -1693,37 +1713,64 @@ siphon deny 42
 
 ### siphon connect
 
-Connect a service or model: flags for the fields, prompts for the rest, secrets only via - or @file.
+Connect a service (see `siphon catalog`) or model: a flag per field, prompts for the rest, secrets only via - or @file.
 
 ```sh
-siphon connect github|gitlab|aws|model|login [flags]
+siphon connect <service>|model|login [--<field> value ...]
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--access-key-id` |  | aws role mode: base access key id as - or @file (with --secret-access-key) |
+| `--access-key-id` |  | AWS: Base access key ID as - (stdin) or @file |
 | `--api-key` |  | model, login: API key as - (stdin) or @file |
-| `--base` |  | gitlab: base URL (default https://gitlab.com) |
-| `--external-id` |  | aws role mode: external id |
+| `--base` |  | GitLab: GitLab URL |
+| `--client-secret` |  | Sentry: Client secret as - (stdin) or @file |
+| `--email` |  | Bitbucket: Atlassian account email |
+| `--external-id` |  | AWS: External ID |
 | `--file` |  | login: a login file (kind login), or - for stdin |
-| `--mode` |  | github: remote or local; aws: role or profile |
-| `--name` |  | name of the source, credential or connection (default: the service or preset) |
+| `--header` |  | Webhook: Header |
+| `--mode` |  | GitHub: MCP server |
+| `--name` |  | name of the connection (default: the service or preset) |
 | `--no-test` | `false` | skip the connection test |
-| `--profile` |  | aws profile mode: profile name from server.aws.profiles |
-| `--project` |  | gitlab: project path, like group/project |
-| `--region` |  | aws: region |
-| `--role-arn` |  | aws role mode: role ARN |
-| `--secret-access-key` |  | aws role mode: base secret access key as - or @file |
-| `--servers` |  | aws: servers to add, comma separated (cloudwatch, docs; default cloudwatch) |
+| `--profile` |  | AWS: Profile |
+| `--project` |  | GitLab: Project |
+| `--region` |  | AWS: Region |
+| `--role-arn` |  | AWS: Role ARN |
+| `--secret` |  | Webhook: Secret as - (stdin) or @file |
+| `--secret-access-key` |  | AWS: Base secret access key as - (stdin) or @file |
+| `--servers` |  | AWS: Servers |
 | `--setup-token` |  | login claude: a setup token as - (stdin) or @file (kind token) |
-| `--token` |  | github, gitlab: API token as - (stdin) or @file |
+| `--signing-secret` |  | Linear: Webhook signing secret as - (stdin) or @file |
+| `--site` |  | Jira: Jira site URL |
+| `--timestamp` | `false` | Grafana: Sign with a timestamp (replay protection) |
+| `--token` |  | GitHub: Token as - (stdin) or @file |
+| `--topic` |  | ntfy: Topic |
 | `--url` |  | model: endpoint URL (default: the preset's) |
-| `--webhook` | `false` | github, gitlab, aws: also create a webhook source (its secret is shown once) |
+| `--value` |  | MCP server: Header value as - (stdin) or @file |
+| `--webhook` | `false` | GitHub: Also receive webhooks (pull requests, issues, pushes) |
 
 Example:
 
 ```sh
 siphon connect github --name gh --token @token.txt --webhook
+```
+
+### siphon catalog
+
+The services you can connect, by category, with what each needs on this install.
+
+```sh
+siphon catalog [--category c]
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--category` |  | only this category (code, issues, chat, monitoring, cloud, payments, home, generic) |
+
+Example:
+
+```sh
+siphon catalog --category code -o json
 ```
 
 ### siphon test
@@ -2100,6 +2147,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 | [`github-pr-review`](github-pr-review.yaml) | Review every new pull request with an agent | `siphon connect github --webhook`, `siphon connect login claude` |
 | [`gitlab-mr-review`](gitlab-mr-review.yaml) | Review GitLab merge requests | `siphon connect gitlab --webhook`, `siphon connect model ollama` |
 | [`gitlab-pipeline-failed`](gitlab-pipeline-failed.yaml) | Push a phone notification when a GitLab pipeline fails | `siphon connect gitlab --webhook` |
+| [`jira-new-issue-summary`](jira-new-issue-summary.yaml) | Summarise each new Jira issue with a local model | `siphon connect jira --webhook`, `siphon connect model ollama` |
 
 ## Ops & monitoring
 
@@ -2107,13 +2155,19 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 |---|---|---|
 | [`alertmanager-summary`](alertmanager-summary.yaml) | Summarise Prometheus alerts with a local model, then notify | `siphon connect model ollama` · webhook secret |
 | [`disk-full`](disk-full.yaml) | Warn when a disk is nearly full (and again every 6 hours) | — |
+| [`grafana-alert-explain`](grafana-alert-explain.yaml) | Explain a firing Grafana alert using Grafana's own tools (read-only) | `siphon connect grafana --webhook`, `siphon connect login claude` |
+| [`linear-issue-from-alert`](linear-issue-from-alert.yaml) | Open a Linear issue for each firing alert | `siphon connect alertmanager`, `siphon connect linear`, `siphon connect login claude` |
+| [`pagerduty-incident-summary`](pagerduty-incident-summary.yaml) | Summarise each triggered PagerDuty incident, then notify | `siphon connect model ollama`, `siphon connect pagerduty` |
+| [`sentry-new-issue`](sentry-new-issue.yaml) | Push a phone notification for each new Sentry issue | `siphon connect sentry` |
 | [`service-failed`](service-failed.yaml) | Get notified when a systemd service fails | — · webhook secret |
 | [`upstream-status`](upstream-status.yaml) | Know when a provider you depend on has an incident | — |
+| [`uptime-kuma-down`](uptime-kuma-down.yaml) | Push a notification when an Uptime Kuma monitor goes down | `siphon connect uptime-kuma` |
 
 ## Schedules
 
 | Template | What it does | Connect first |
 |---|---|---|
+| [`home-assistant-evening-check`](home-assistant-evening-check.yaml) | An evening house check on a schedule, with Home Assistant's tools | `siphon connect home-assistant`, `siphon connect model ollama` |
 | [`nightly-report`](nightly-report.yaml) | A nightly report on a schedule: fetch, summarise, notify | `siphon connect model ollama` |
 | [`weekday-standup`](weekday-standup.yaml) | A weekday reminder on a schedule (07:30, Monday to Friday) | — |
 | [`weekly-digest`](weekly-digest.yaml) | A weekly digest on a schedule: every Monday at 09:00 | `siphon connect model ollama` |
@@ -2122,7 +2176,9 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 
 | Template | What it does | Connect first |
 |---|---|---|
+| [`slack-mention-agent`](slack-mention-agent.yaml) | An agent that answers when someone @mentions your Slack app | `siphon connect model ollama`, `siphon connect slack` |
 | [`standard-webhooks`](standard-webhooks.yaml) | Receive Standard Webhooks (Svix, Clerk, Resend, …) | — · webhook secret |
+| [`stripe-dispute-notice`](stripe-dispute-notice.yaml) | Get notified when a Stripe dispute is opened | `siphon connect stripe --webhook` |
 | [`webhook-command`](webhook-command.yaml) | Run a command when a signed webhook arrives | — · webhook secret |
 | [`webhook-to-ntfy`](webhook-to-ntfy.yaml) | Forward any webhook to your phone | — · webhook secret |
 
@@ -2152,6 +2208,100 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 | Template | What it does | Connect first |
 |---|---|---|
 | [`homeassistant-event`](homeassistant-event.yaml) | React to a Home Assistant event | — · webhook secret |
+
+
+---
+
+<!-- file: docs/connections/README.md -->
+
+# Services you can connect
+
+<!-- Generated by `go generate ./docs` from internal/catalog/services.yaml. Do not edit by hand. -->
+
+Connect a service from the CLI or the portal's **Services** page. It creates the right
+sources (agent tools, polling, webhooks), stores tokens write-only, shows a webhook
+secret once, and tests the connection:
+
+```sh
+siphon catalog                     # what you can connect on this install
+siphon connect linear --token @linear.key --webhook
+```
+
+**Available** works now. **Needs package** works once the operator installs the pinned
+MCP server (`services.siphon.catalogPackages`); its webhooks work either way. **Not yet**
+lists what's missing. Models and subscription logins are on their own pages:
+[models](models.md), [logins](logins.md).
+
+## Code hosting
+
+| Service | Gives agents | Status | Connect | Templates |
+|---|---|---|---|---|
+| [GitHub](github.md) | tools, webhooks | available | `siphon connect github` | [`github-ci-failure`](../templates/github-ci-failure.yaml) [`github-issue-triage`](../templates/github-issue-triage.yaml) [`github-pr-review`](../templates/github-pr-review.yaml) |
+| [GitLab](gitlab.md) | polling, webhooks | available | `siphon connect gitlab` | [`gitlab-mr-review`](../templates/gitlab-mr-review.yaml) [`gitlab-pipeline-failed`](../templates/gitlab-pipeline-failed.yaml) |
+| Bitbucket | tools, webhooks | available | `siphon connect bitbucket` |  |
+| Gitea | tools, webhooks | needs package for tools (`catalogPackages = [ "gitea" ]`) | `siphon connect gitea` |  |
+| Forgejo | tools, webhooks | needs package for tools (`catalogPackages = [ "forgejo" ]`) | `siphon connect forgejo` |  |
+| Azure DevOps |  | not yet: service hooks use basic auth only, and the remote MCP is Entra OAuth only | — |  |
+
+## Issue tracking
+
+| Service | Gives agents | Status | Connect | Templates |
+|---|---|---|---|---|
+| Linear | tools, webhooks | available | `siphon connect linear` | [`linear-issue-from-alert`](../templates/linear-issue-from-alert.yaml) |
+| Jira | tools, webhooks | available | `siphon connect jira` | [`jira-new-issue-summary`](../templates/jira-new-issue-summary.yaml) |
+| Notion |  | not yet: needs the verification_token handshake; the remote MCP is OAuth only | — |  |
+
+## Chat
+
+| Service | Gives agents | Status | Connect | Templates |
+|---|---|---|---|---|
+| Slack | webhooks | available | `siphon connect slack` | [`slack-mention-agent`](../templates/slack-mention-agent.yaml) |
+| Discord |  | not yet: needs an ed25519 signature mode and the PING handshake, and does not cover channel messages | — |  |
+| Microsoft Teams |  | not yet: needs a teams-hmac signature mode with a synchronous reply within 5 seconds | — |  |
+| Mattermost |  | not yet: the token is in the request body: needs a body-token mode | — |  |
+| Matrix |  | not yet: needs PUT requests and a {} reply | — |  |
+
+## Monitoring & alerting
+
+| Service | Gives agents | Status | Connect | Templates |
+|---|---|---|---|---|
+| Sentry | webhooks | available | `siphon connect sentry` | [`sentry-new-issue`](../templates/sentry-new-issue.yaml) |
+| PagerDuty | webhooks | available | `siphon connect pagerduty` | [`pagerduty-incident-summary`](../templates/pagerduty-incident-summary.yaml) |
+| Grafana | tools, webhooks | needs package for tools (`catalogPackages = [ "grafana" ]`) | `siphon connect grafana` | [`grafana-alert-explain`](../templates/grafana-alert-explain.yaml) |
+| Alertmanager | webhooks | available | `siphon connect alertmanager` | [`linear-issue-from-alert`](../templates/linear-issue-from-alert.yaml) |
+| Datadog | webhooks | available | `siphon connect datadog` |  |
+| Uptime Kuma | webhooks | available | `siphon connect uptime-kuma` | [`uptime-kuma-down`](../templates/uptime-kuma-down.yaml) |
+| Opsgenie |  | not yet: end of support 2027-04-05 | — |  |
+
+## Cloud
+
+| Service | Gives agents | Status | Connect | Templates |
+|---|---|---|---|---|
+| [AWS](aws.md) | tools, webhooks | needs package: enable `services.siphon.aws` in your NixOS config | `siphon connect aws` | [`aws-cloudwatch-alarm`](../templates/aws-cloudwatch-alarm.yaml) |
+| Cloudflare | tools, webhooks | available | `siphon connect cloudflare` |  |
+| Kubernetes |  | not yet: needs kubeconfig wiring: coming in a later release | — |  |
+| Google Pub/Sub |  | not yet: needs a Google OIDC (RS256 JWT) push-authentication mode | — |  |
+| Azure Event Grid |  | not yet: needs the subscription validation handshake | — |  |
+
+## Payments
+
+| Service | Gives agents | Status | Connect | Templates |
+|---|---|---|---|---|
+| Stripe | tools, webhooks | available | `siphon connect stripe` | [`stripe-dispute-notice`](../templates/stripe-dispute-notice.yaml) |
+
+## Home & IoT
+
+| Service | Gives agents | Status | Connect | Templates |
+|---|---|---|---|---|
+| Home Assistant | tools, webhooks | available | `siphon connect home-assistant` | [`home-assistant-evening-check`](../templates/home-assistant-evening-check.yaml) |
+| ntfy | polling | available | `siphon connect ntfy` |  |
+
+## Generic
+
+| Service | Gives agents | Status | Connect | Templates |
+|---|---|---|---|---|
+| Webhook | webhooks | available | `siphon connect webhook` |  |
+| MCP server | tools | available | `siphon connect mcp` |  |
 
 
 ---
@@ -2559,6 +2709,85 @@ rules:
 
 ---
 
+<!-- file: docs/templates/grafana-alert-explain.yaml -->
+
+```yaml
+# title:    Explain a firing Grafana alert using Grafana's own tools (read-only)
+# category: Ops & monitoring
+# needs:    sources/grafana, sources/grafana-hooks (siphon connect grafana --webhook; services.siphon.catalogPackages = [ "grafana" ])
+#           credentials/claude-max                 (siphon connect login claude)
+# apply:    siphon apply -f grafana-alert-explain.yaml
+# The Grafana MCP server runs with --disable-write: dashboards and queries, no changes.
+agents:
+  grafana-explainer:
+    kind: claude
+    credential: claude-max
+    prompt: |
+      Grafana alert "{{.event.title}}" is {{.event.status}}: {{.event.message}}
+      Use the dashboards and queries to find what changed around the alert time,
+      and explain the likely cause in five lines.
+    mcp: [grafana]
+    allowed_tools: [mcp__grafana]
+    max_turns: 20
+    max_budget_usd: 1
+    timeout: 15m
+rules:
+  - name: grafana-firing
+    source: grafana-hooks
+    when: 'event.status == "firing"'
+    on: each
+    id: event.groupKey
+    cooldown: 10m
+    action: { agent: grafana-explainer }
+```
+
+
+---
+
+<!-- file: docs/templates/home-assistant-evening-check.yaml -->
+
+```yaml
+# title:    An evening house check on a schedule, with Home Assistant's tools
+# category: Schedules
+# needs:    sources/home-assistant                 (siphon connect home-assistant)
+#           credentials/ollama-local               (siphon connect model ollama)
+# apply:    siphon apply -f home-assistant-evening-check.yaml
+# Every evening at 22:00 the agent asks Home Assistant whether doors and windows
+# are closed and lights are off, and pushes a short report.
+sources:
+  evening:
+    type: schedule
+    at: "0 22 * * *"
+    timezone: Europe/London
+agents:
+  house-check:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: "Check whether any door or window is open and whether lights are still on. Reply in one or two short lines."
+    mcp: [home-assistant]
+    allowed_tools: [mcp__home-assistant]
+    max_turns: 6
+    timeout: 5m
+    approve: false                  # read-only questions to Home Assistant
+routines:
+  evening-check:
+    steps:
+      - { id: check, agent: house-check, timeout: 5m }
+      - { id: notify, if: 'steps.check.exit == 0', cmd: [curl, -fsS, -H, "Title: House check", -d, "{{.steps.check.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+rules:
+  - name: evening-check
+    source: evening
+    when: 'true'
+    on: each
+    id: event.scheduled_at
+    cooldown: 1h
+    action: { routine: evening-check }
+```
+
+
+---
+
 <!-- file: docs/templates/homeassistant-event.yaml -->
 
 ```yaml
@@ -2584,6 +2813,76 @@ rules:
     id: event.entity + string(now().Unix() / 300)
     action:
       cmd: [curl, -fsS, -H, "Title: Front door", -d, "Opened late at night", https://ntfy.sh/siphon-CHANGE-ME]
+```
+
+
+---
+
+<!-- file: docs/templates/jira-new-issue-summary.yaml -->
+
+```yaml
+# title:    Summarise each new Jira issue with a local model
+# category: Code review & CI
+# needs:    sources/jira-hooks                     (siphon connect jira --webhook)
+#           credentials/ollama-local               (siphon connect model ollama)
+# apply:    siphon apply -f jira-new-issue-summary.yaml
+agents:
+  jira-summary:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: |
+      New Jira issue {{.event.issue.key}}: {{.event.issue.fields.summary}}
+      {{.event.issue.fields.description}}
+      Summarise it in two lines and suggest a priority (low, medium, high).
+    max_turns: 2
+    timeout: 5m
+rules:
+  - name: jira-new-issue
+    source: jira-hooks
+    when: 'event.webhookEvent == "jira:issue_created"'
+    on: each
+    id: event.issue.id
+    cooldown: 30s
+    action: { agent: jira-summary }
+```
+
+
+---
+
+<!-- file: docs/templates/linear-issue-from-alert.yaml -->
+
+```yaml
+# title:    Open a Linear issue for each firing alert
+# category: Ops & monitoring
+# needs:    sources/alertmanager                   (siphon connect alertmanager)
+#           sources/linear                         (siphon connect linear)
+#           credentials/claude-max                 (siphon connect login claude)
+# apply:    siphon apply -f linear-issue-from-alert.yaml
+# The agent can use the Linear MCP server's tools; narrow allowed_tools to the
+# exact ones you want once you've seen the list (siphon why / the Services page).
+agents:
+  alert-to-linear:
+    kind: claude
+    credential: claude-max
+    prompt: |
+      Alert group {{.event.groupKey}} is firing: {{.event.alerts}}
+      Search Linear for an open issue about the same alert. If none exists, create
+      one in the Ops team with a short title, the affected service and the alert
+      summary. Reply with the issue identifier.
+    mcp: [linear]
+    allowed_tools: [mcp__linear]
+    max_turns: 15
+    max_budget_usd: 1
+    timeout: 10m
+rules:
+  - name: alert-to-linear
+    source: alertmanager
+    when: 'event.status == "firing"'
+    on: each
+    id: event.groupKey
+    cooldown: 10m
+    action: { agent: alert-to-linear }
 ```
 
 
@@ -2731,6 +3030,62 @@ rules:
 
 ---
 
+<!-- file: docs/templates/pagerduty-incident-summary.yaml -->
+
+```yaml
+# title:    Summarise each triggered PagerDuty incident, then notify
+# category: Ops & monitoring
+# needs:    sources/pagerduty                      (siphon connect pagerduty)
+#           credentials/ollama-local               (siphon connect model ollama)
+# apply:    siphon apply -f pagerduty-incident-summary.yaml
+agents:
+  incident-summary:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: "Summarise this PagerDuty incident for the on-call engineer in three lines: {{.event.event.data}}"
+    max_turns: 2
+    timeout: 5m
+    approve: false                  # a read-only summary
+routines:
+  incident-to-phone:
+    steps:
+      - { id: summary, agent: incident-summary, timeout: 5m }
+      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: Incident", -d, "{{.steps.summary.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+rules:
+  - name: incident-triggered
+    source: pagerduty
+    when: 'event.event.event_type == "incident.triggered"'
+    on: each
+    id: event.event.id
+    cooldown: 1m
+    action: { routine: incident-to-phone }
+```
+
+
+---
+
+<!-- file: docs/templates/sentry-new-issue.yaml -->
+
+```yaml
+# title:    Push a phone notification for each new Sentry issue
+# category: Ops & monitoring
+# needs:    sources/sentry                         (siphon connect sentry)
+# apply:    siphon apply -f sentry-new-issue.yaml
+# In Sentry: the internal integration's webhook, with "issue" resources enabled.
+rules:
+  - name: sentry-new-issue
+    source: sentry
+    when: 'headers["sentry-hook-resource"] == "issue" && event.action == "created"'
+    on: each
+    id: event.data.issue.id
+    action:
+      cmd: [curl, -fsS, -H, "Title: Sentry: {{.event.data.issue.title}}", -d, "{{.event.data.issue.culprit}}", https://ntfy.sh/siphon-CHANGE-ME]
+```
+
+
+---
+
 <!-- file: docs/templates/service-failed.yaml -->
 
 ```yaml
@@ -2760,6 +3115,37 @@ rules:
 
 ---
 
+<!-- file: docs/templates/slack-mention-agent.yaml -->
+
+```yaml
+# title:    An agent that answers when someone @mentions your Slack app
+# category: Notifications & glue
+# needs:    sources/slack                          (siphon connect slack)
+#           credentials/ollama-local               (siphon connect model ollama)
+# apply:    siphon apply -f slack-mention-agent.yaml
+# Subscribe the app to the app_mention event (Event Subscriptions). The answer
+# lands in the job output; posting it back needs a Slack bot token in a cmd step.
+agents:
+  slack-helper:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: "Answer this message from a colleague briefly and helpfully: {{.event.event.text}}"
+    max_turns: 2
+    timeout: 5m
+rules:
+  - name: slack-mention
+    source: slack
+    when: 'event.type == "event_callback" && event.event.type == "app_mention"'
+    on: each
+    id: event.event_id
+    cooldown: 10s
+    action: { agent: slack-helper }
+```
+
+
+---
+
 <!-- file: docs/templates/standard-webhooks.yaml -->
 
 ```yaml
@@ -2778,6 +3164,26 @@ rules:
     on: each
     id: event.data.id
     action: { cmd: [echo, "new user {{.event.data.id}}"] }
+```
+
+
+---
+
+<!-- file: docs/templates/stripe-dispute-notice.yaml -->
+
+```yaml
+# title:    Get notified when a Stripe dispute is opened
+# category: Notifications & glue
+# needs:    sources/stripe-hooks                   (siphon connect stripe --webhook)
+# apply:    siphon apply -f stripe-dispute-notice.yaml
+rules:
+  - name: stripe-dispute
+    source: stripe-hooks
+    when: 'event.type == "charge.dispute.created"'
+    on: each
+    id: event.id
+    action:
+      cmd: [curl, -fsS, -H, "Title: Stripe dispute", -d, "Dispute {{.event.data.object.id}} for {{.event.data.object.amount}} {{.event.data.object.currency}}", https://ntfy.sh/siphon-CHANGE-ME]
 ```
 
 
@@ -2837,6 +3243,26 @@ rules:
     on: edge
     action:
       cmd: [curl, -fsS, -H, "Title: GitHub incident", -d, "{{.event.status.description}}", https://ntfy.sh/siphon-CHANGE-ME]
+```
+
+
+---
+
+<!-- file: docs/templates/uptime-kuma-down.yaml -->
+
+```yaml
+# title:    Push a notification when an Uptime Kuma monitor goes down
+# category: Ops & monitoring
+# needs:    sources/uptime-kuma                    (siphon connect uptime-kuma)
+# apply:    siphon apply -f uptime-kuma-down.yaml
+rules:
+  - name: monitor-down
+    source: uptime-kuma
+    when: 'event.heartbeat != nil && event.heartbeat.status == 0'
+    on: each
+    id: string(event.monitor.id) + "/" + event.heartbeat.time
+    action:
+      cmd: [curl, -fsS, -H, "Title: {{.event.monitor.name}} is down", -d, "{{.event.msg}}", https://ntfy.sh/siphon-CHANGE-ME]
 ```
 
 

@@ -91,6 +91,9 @@
           "concurrency": {
             "type": "integer"
           },
+          "connection": {
+            "type": "string"
+          },
           "external_id": {
             "type": "string"
           },
@@ -111,6 +114,9 @@
           },
           "secret_access_key": {
             "description": "env:NAME, file:/path, or (where allowed) a literal",
+            "type": "string"
+          },
+          "service": {
             "type": "string"
           },
           "url": {
@@ -357,6 +363,12 @@
                   "type": "string"
                 },
                 "type": "array"
+              },
+              "url_env": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               }
             },
             "type": "object"
@@ -438,6 +450,9 @@
             },
             "type": "array"
           },
+          "connection": {
+            "type": "string"
+          },
           "data": {},
           "env": {
             "additionalProperties": {
@@ -483,13 +498,22 @@
             "description": "env:NAME, file:/path, or (where allowed) a literal",
             "type": "string"
           },
+          "service": {
+            "type": "string"
+          },
           "signature": {
             "type": "string"
           },
           "signature_header": {
             "type": "string"
           },
+          "signature_prefix": {
+            "type": "string"
+          },
           "timestamp_header": {
+            "type": "string"
+          },
+          "timestamp_separator": {
             "type": "string"
           },
           "timezone": {

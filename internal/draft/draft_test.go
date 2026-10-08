@@ -84,6 +84,15 @@ func TestMatchTemplatesAndPrompt(t *testing.T) {
 	}
 }
 
+func TestPromptListsCatalogueServices(t *testing.T) {
+	sys := Prompt("tell me about prs", map[string]any{})[0].Content
+	for _, want := range []string{"siphon connect <id>", "- github (tools, webhooks): sources/<name>, sources/<name>-hooks (optional)", "- aws (", "credentials/<name>"} {
+		if !strings.Contains(sys, want) {
+			t.Errorf("prompt lacks %q", want)
+		}
+	}
+}
+
 func TestSchedulePrompt(t *testing.T) {
 	for _, r := range []string{"summarise the news every morning", "run a backup weekly", "weekdays at 7 post the standup", "every 15m check disk"} {
 		if !wantsSchedule(r) {

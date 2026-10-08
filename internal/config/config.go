@@ -122,6 +122,9 @@ type MCPPackage struct {
 	Command []string `yaml:"command"`
 	Env     []string `yaml:"env"`
 	Hosts   []string `yaml:"hosts"`
+	// URLEnv names env entries whose value is the URL of the user's own server
+	// (GITEA_HOST): its host:port is added to the bridge's egress allowlist.
+	URLEnv []string `yaml:"url_env"`
 }
 
 // ModelsServer holds model-endpoint settings that only siphon.yaml may set.
@@ -209,14 +212,18 @@ type Source struct {
 	Headers      map[string]Secret `yaml:"headers"` // values may be env:/file: refs or plain literals
 	Body         string            `yaml:"body"`
 	Secret       Secret            `yaml:"secret"`           // webhook HMAC key
-	Signature    string            `yaml:"signature"`        // github|sha256|token|standard-webhooks
+	Signature    string            `yaml:"signature"`        // github|sha256|token|standard-webhooks|slack|stripe
 	SigHeader    string            `yaml:"signature_header"` // sha256 preset
 	TokenHeader  string            `yaml:"token_header"`     // token preset
 	TimestampHdr string            `yaml:"timestamp_header"`
-	ID           string            `yaml:"id"`      // delivery id, e.g. header.X-GitHub-Delivery
-	Env          map[string]Secret `yaml:"env"`     // stdio MCP child env; values are env:/file: refs
-	Package      string            `yaml:"package"` // name in server.mcp_packages; fills Command
-	AWS          string            `yaml:"aws"`     // provider: aws credential; the daemon injects short-lived keys
+	SigPrefix    string            `yaml:"signature_prefix"`    // sha256: e.g. "v1="; the header may list several
+	TimestampSep string            `yaml:"timestamp_separator"` // sha256 with timestamp_header: "." (default) or ":"
+	ID           string            `yaml:"id"`                  // delivery id, e.g. header.X-GitHub-Delivery
+	Env          map[string]Secret `yaml:"env"`                 // stdio MCP child env; values are env:/file: refs
+	Package      string            `yaml:"package"`             // name in server.mcp_packages; fills Command
+	AWS          string            `yaml:"aws"`                 // provider: aws credential; the daemon injects short-lived keys
+	Connection   string            `yaml:"connection"`          // metadata: the Services connection this item belongs to
+	Service      string            `yaml:"service"`             // metadata: the catalogue service that made it
 
 	// schedule: fires at moments, no polling.
 	At       string         `yaml:"at"`       // 5-field cron, @hourly|@daily|@weekly|@monthly, or "every <d>" (d >= 1m)
@@ -274,7 +281,16 @@ type Credential struct {
 	ExternalID      string `yaml:"external_id"`
 	AccessKeyID     Secret `yaml:"access_key_id"`
 	SecretAccessKey Secret `yaml:"secret_access_key"`
+
+	Connection string `yaml:"connection"` // metadata: the Services connection this item belongs to
+	Service    string `yaml:"service"`    // metadata: the catalogue service that made it
 }
+
+// serviceID is the shape of a catalogue service id.
+var serviceID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,40}$`)
+
+// connectionName is the shape of a `connection:` label (an item name).
+var connectionName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 
 var (
 	awsRegion  = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-\d$`)
@@ -850,6 +866,15 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	for _, name := range sortedKeys(c.Credentials) {
+		if cr := c.Credentials[name]; cr != nil && cr.Connection != "" && !connectionName.MatchString(cr.Connection) {
+			add("credentials.%s.connection: must match %s", name, connectionName)
+		}
+		if cr := c.Credentials[name]; cr != nil && cr.Service != "" && !serviceID.MatchString(cr.Service) {
+			add("credentials.%s.service: must match %s", name, serviceID)
+		}
+	}
+
 	for _, name := range sortedKeys(c.Sources) {
 		if src := c.Sources[name]; src != nil {
 			for _, h := range sortedKeys(src.Headers) {
@@ -882,6 +907,11 @@ func (c *Config) Validate() error {
 		for _, k := range pkg.Env {
 			if !envName.MatchString(k) || envDenied.MatchString(k) {
 				add("server.mcp_packages.%s: env name %q is not allowed", name, k)
+			}
+		}
+		for _, k := range pkg.URLEnv {
+			if !slices.Contains(pkg.Env, k) {
+				add("server.mcp_packages.%s: url_env %q must also be listed in env", name, k)
 			}
 		}
 		for _, h := range pkg.Hosts {
@@ -1129,6 +1159,12 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 		add("%s: empty", p)
 		return
 	}
+	if s.Connection != "" && !connectionName.MatchString(s.Connection) {
+		add("%s.connection: must match %s", p, connectionName)
+	}
+	if s.Service != "" && !serviceID.MatchString(s.Service) {
+		add("%s.service: must match %s", p, serviceID)
+	}
 	if s.Poll < 0 || (s.Polled() && s.Poll == 0) {
 		add("%s: poll must be > 0", p)
 	}
@@ -1193,12 +1229,18 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 			if s.TokenHeader == "" {
 				add("%s: signature token needs token_header", p)
 			}
-		case "standard-webhooks":
+		case "standard-webhooks", "slack", "stripe":
 			if s.SigHeader != "" || s.TimestampHdr != "" {
-				add("%s: signature_header and timestamp_header are not allowed with signature standard-webhooks", p)
+				add("%s: signature_header and timestamp_header are not allowed with signature %s", p, s.Signature)
 			}
 		default:
-			add("%s: signature must be github, sha256, token or standard-webhooks, got %q", p, s.Signature)
+			add("%s: signature must be github, sha256, token, standard-webhooks, slack or stripe, got %q", p, s.Signature)
+		}
+		if s.SigPrefix != "" && s.Signature != "sha256" {
+			add("%s: signature_prefix is only for signature sha256", p)
+		}
+		if s.TimestampSep != "" && (s.Signature != "sha256" || s.TimestampHdr == "") {
+			add("%s: timestamp_separator needs signature sha256 and a timestamp_header", p)
 		}
 	case "schedule":
 		c.validateSchedule(p, s, add)
@@ -1513,6 +1555,7 @@ func (c *Config) AgentEgress(a *Agent) (allow []HostPort, enabled bool) {
 }
 
 func (c *Config) packageHosts(src *Source) (out []HostPort) {
+	out, _ = c.urlEnvHosts(src)
 	if src.Package != "" {
 		for _, h := range c.Server.MCPPackages[src.Package].Hosts {
 			if cr := c.Credentials[src.AWS]; cr != nil {
@@ -1524,6 +1567,57 @@ func (c *Config) packageHosts(src *Source) (out []HostPort) {
 		}
 	}
 	return
+}
+
+// PrivateHost reports whether a literal host is localhost or a private,
+// loopback, link-local or unspecified IP. Names are not resolved here.
+func PrivateHost(h string) bool {
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && (ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified())
+}
+
+// urlEnvHosts are the user's own servers a package's url_env values point at.
+// A private or loopback host is only reachable when listed in
+// server.services.private_endpoints (the same rule as other sources); an
+// unlisted one is an error and gets no entry.
+func (c *Config) urlEnvHosts(src *Source) (out []HostPort, err error) {
+	if src.Package == "" {
+		return nil, nil
+	}
+	for _, k := range c.Server.MCPPackages[src.Package].URLEnv {
+		v := src.Env[k].Value
+		if v == "" {
+			continue
+		}
+		u, perr := url.Parse(v)
+		if perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
+			err = errors.Join(err, fmt.Errorf("env %s must be an http(s) URL", k))
+			continue
+		}
+		port := 443
+		if u.Scheme == "http" {
+			port = 80
+		}
+		if p, perr := strconv.Atoi(u.Port()); perr == nil {
+			port = p
+		}
+		listed := c.ServiceEndpoint(v)
+		if PrivateHost(u.Hostname()) && !listed {
+			err = errors.Join(err, fmt.Errorf("env %s: %s is a private address: list it in server.services.private_endpoints", k, strings.ToLower(u.Host)))
+			continue
+		}
+		out = append(out, HostPort{Host: strings.ToLower(u.Hostname()), Port: port, AllowPrivate: listed, NoLinkLocal: listed})
+	}
+	return out, err
+}
+
+// BridgeCheck refuses a bridged source whose own-server URL is not allowed.
+func (c *Config) BridgeCheck(src *Source) error {
+	_, err := c.urlEnvHosts(src)
+	return err
 }
 
 // BridgeEgress is the allowlist of the MCP bridge unit that runs a stdio

@@ -1,0 +1,12 @@
+# title:    Get notified when a Stripe dispute is opened
+# category: Notifications & glue
+# needs:    sources/stripe-hooks                   (siphon connect stripe --webhook)
+# apply:    siphon apply -f stripe-dispute-notice.yaml
+rules:
+  - name: stripe-dispute
+    source: stripe-hooks
+    when: 'event.type == "charge.dispute.created"'
+    on: each
+    id: event.id
+    action:
+      cmd: [curl, -fsS, -H, "Title: Stripe dispute", -d, "Dispute {{.event.data.object.id}} for {{.event.data.object.amount}} {{.event.data.object.currency}}", https://ntfy.sh/siphon-CHANGE-ME]

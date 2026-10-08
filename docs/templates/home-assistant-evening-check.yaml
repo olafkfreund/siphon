@@ -1,0 +1,36 @@
+# title:    An evening house check on a schedule, with Home Assistant's tools
+# category: Schedules
+# needs:    sources/home-assistant                 (siphon connect home-assistant)
+#           credentials/ollama-local               (siphon connect model ollama)
+# apply:    siphon apply -f home-assistant-evening-check.yaml
+# Every evening at 22:00 the agent asks Home Assistant whether doors and windows
+# are closed and lights are off, and pushes a short report.
+sources:
+  evening:
+    type: schedule
+    at: "0 22 * * *"
+    timezone: Europe/London
+agents:
+  house-check:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: "Check whether any door or window is open and whether lights are still on. Reply in one or two short lines."
+    mcp: [home-assistant]
+    allowed_tools: [mcp__home-assistant]
+    max_turns: 6
+    timeout: 5m
+    approve: false                  # read-only questions to Home Assistant
+routines:
+  evening-check:
+    steps:
+      - { id: check, agent: house-check, timeout: 5m }
+      - { id: notify, if: 'steps.check.exit == 0', cmd: [curl, -fsS, -H, "Title: House check", -d, "{{.steps.check.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+rules:
+  - name: evening-check
+    source: evening
+    when: 'true'
+    on: each
+    id: event.scheduled_at
+    cooldown: 1h
+    action: { routine: evening-check }

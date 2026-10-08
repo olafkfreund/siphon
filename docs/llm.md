@@ -44,10 +44,14 @@ connections for you.
 
 Always follow this order. Every step has `-o json`.
 
-1. `siphon inventory -o json`: the names that exist (sources, agents,
+1. `siphon catalog -o json`: the services that can be connected on this
+   install (and why some can't). If the task needs one that isn't
+   connected yet, ask the user to run `siphon connect <id>`, since it needs
+   their token.
+2. `siphon inventory -o json`: the names that exist (sources, agents,
    routines, connections, MCP packages, allowlists). Reuse them; never
    invent a connection or a secret.
-2. `siphon template`: list the ready-made templates (about 20, by
+3. `siphon template`: list the ready-made templates (about 30, by
    category), then `siphon template <name>` to start from the closest one,
    for example:
    - `github-pr-review`, `github-ci-failure`;
@@ -60,16 +64,16 @@ Always follow this order. Every step has `-o json`.
 
    `siphon explain <kind>` lists every field of a source, rule, agent,
    routine or credential.
-3. **Write one apply file** (YAML shaped like `siphon.yaml`: `sources:`,
+4. **Write one apply file** (YAML shaped like `siphon.yaml`: `sources:`,
    `rules:`, `agents:`, `routines:`, `credentials:`).
-4. `siphon apply -f task.yaml --dry-run -o json` returns the diff, `errors`
+5. `siphon apply -f task.yaml --dry-run -o json` returns the diff, `errors`
    and `warnings`. Fix every error and run it again.
-5. **Show the user the diff**, then `siphon apply -f task.yaml --yes`.
-6. `siphon test <rule> --last` (or `siphon test <rule> event.json`) checks
+6. **Show the user the diff**, then `siphon apply -f task.yaml --yes`.
+7. `siphon test <rule> --last` (or `siphon test <rule> event.json`) checks
    the rule against a real or sample event.
-7. If it doesn't fire later: `siphon why <rule> -o json`.
+8. If it doesn't fire later: `siphon why <rule> -o json`.
 
-Instead of steps 2–4, `siphon draft "<what the user wants>"` asks a model
+Instead of steps 3–5, `siphon draft "<what the user wants>"` asks a model
 connection to write the apply file and validates it. Review its output the
 same way.
 

@@ -1,0 +1,24 @@
+# title:    Summarise each new Jira issue with a local model
+# category: Code review & CI
+# needs:    sources/jira-hooks                     (siphon connect jira --webhook)
+#           credentials/ollama-local               (siphon connect model ollama)
+# apply:    siphon apply -f jira-new-issue-summary.yaml
+agents:
+  jira-summary:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: |
+      New Jira issue {{.event.issue.key}}: {{.event.issue.fields.summary}}
+      {{.event.issue.fields.description}}
+      Summarise it in two lines and suggest a priority (low, medium, high).
+    max_turns: 2
+    timeout: 5m
+rules:
+  - name: jira-new-issue
+    source: jira-hooks
+    when: 'event.webhookEvent == "jira:issue_created"'
+    on: each
+    id: event.issue.id
+    cooldown: 30s
+    action: { agent: jira-summary }

@@ -1,0 +1,27 @@
+# title:    Explain a firing Grafana alert using Grafana's own tools (read-only)
+# category: Ops & monitoring
+# needs:    sources/grafana, sources/grafana-hooks (siphon connect grafana --webhook; services.siphon.catalogPackages = [ "grafana" ])
+#           credentials/claude-max                 (siphon connect login claude)
+# apply:    siphon apply -f grafana-alert-explain.yaml
+# The Grafana MCP server runs with --disable-write: dashboards and queries, no changes.
+agents:
+  grafana-explainer:
+    kind: claude
+    credential: claude-max
+    prompt: |
+      Grafana alert "{{.event.title}}" is {{.event.status}}: {{.event.message}}
+      Use the dashboards and queries to find what changed around the alert time,
+      and explain the likely cause in five lines.
+    mcp: [grafana]
+    allowed_tools: [mcp__grafana]
+    max_turns: 20
+    max_budget_usd: 1
+    timeout: 15m
+rules:
+  - name: grafana-firing
+    source: grafana-hooks
+    when: 'event.status == "firing"'
+    on: each
+    id: event.groupKey
+    cooldown: 10m
+    action: { agent: grafana-explainer }

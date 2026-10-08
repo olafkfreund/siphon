@@ -32,9 +32,9 @@ type view struct {
 	Models      []modelConnView
 	Presets     []modelPreset
 	ModelForm   *modelForm
-	Services    []serviceRow
-	ServiceForm *serviceForm
 	ServiceDone *serviceDone
+	Svc         *servicesView
+	Connect     *connectView
 	Cfg         *cfgView  // config item list / editor
 	Hist        *histView // revision history
 	Help        *helpView
@@ -109,11 +109,6 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 			v.Approvals, err = store.PendingApprovals(s.Store.DB)
 		}
 		return true, err
-	})
-	page("/services", "services", func(_ *http.Request, v *view) (bool, error) {
-		v.Services = s.serviceRows()
-		v.ServiceForm = s.serviceForm()
-		return true, nil
 	})
 	page("/connections", "logins", func(r *http.Request, v *view) (bool, error) {
 		*v = s.connectionsView(r, v.CSRF)

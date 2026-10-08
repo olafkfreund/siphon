@@ -739,6 +739,9 @@ func awsEnv(region string, k awscred.Creds) map[string]string {
 // credential: its egress allowlist and env (plus fresh AWS keys). Their values
 // are added to *secrets. fin releases the egress registration.
 func (p *Pipeline) bridgeServer(ctx context.Context, cfg *config.Config, jobID int64, name string, s *config.Source, timeout time.Duration, keys *awscred.Creds, secrets *[]string) (action.MCPServer, func() string, error) {
+	if err := cfg.BridgeCheck(s); err != nil {
+		return action.MCPServer{}, nil, fmt.Errorf("source %s: %w", name, err)
+	}
 	eg, fin, err := p.egressFor(cfg, jobID, cfg.BridgeEgress(s), true)
 	if err != nil {
 		return action.MCPServer{}, nil, err

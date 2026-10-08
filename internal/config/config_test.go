@@ -848,6 +848,76 @@ rules:
 	}
 }
 
+func TestWebhookSignatureOptionsValidate(t *testing.T) {
+	for name, tc := range map[string]struct{ extra, want string }{
+		"slack ok":            {"signature: slack", ""},
+		"stripe ok":           {"signature: stripe", ""},
+		"prefix ok":           {"signature: sha256\n    signature_header: X-S\n    signature_prefix: v1=", ""},
+		"prefix needs sha256": {"signature: slack\n    signature_prefix: v1=", "signature_prefix is only for"},
+		"slack no header":     {"signature: slack\n    signature_header: X-S", "not allowed with signature slack"},
+		"separator ok":        {"signature: sha256\n    signature_header: X-S\n    timestamp_header: X-T\n    timestamp_separator: ':'", ""},
+		"separator needs ts":  {"signature: sha256\n    signature_header: X-S\n    timestamp_separator: ':'", "timestamp_separator needs"},
+	} {
+		y := "server: { sandbox: none }\nsources:\n  w:\n    type: webhook\n    secret: env:K\n    " + tc.extra + "\n"
+		t.Setenv("K", "k")
+		cfg, err := Parse([]byte(y))
+		if err == nil {
+			err = cfg.Validate()
+		}
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// A package that talks to the user's own server (url_env): the bridge may
+// reach that host:port, and a private one only when it is listed.
+func TestBridgeEgressURLEnv(t *testing.T) {
+	const pkgs = "mcp_packages: {gitea: {command: [gitea-mcp], env: [GITEA_ACCESS_TOKEN, GITEA_HOST], url_env: [GITEA_HOST]}}"
+	build := func(host, extra string) *Config {
+		t.Setenv("T_TOK", "tok")
+		t.Setenv("T_HOST", host)
+		c, err := Parse([]byte("server: {" + pkgs + extra + "}\nsources: {g: {type: mcp, package: gitea, env: {GITEA_ACCESS_TOKEN: 'env:T_TOK', GITEA_HOST: 'env:T_HOST'}}}\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	// a public host, default port from the scheme
+	c := build("https://git.example.org", "")
+	if err := c.BridgeCheck(c.Sources["g"]); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.BridgeEgress(c.Sources["g"]); len(got) != 1 || got[0].Host != "git.example.org" || got[0].Port != 443 || got[0].AllowPrivate {
+		t.Errorf("public: %v", got)
+	}
+	if got := build("http://git.example.org:3000", "").BridgeEgress(build("http://git.example.org:3000", "").Sources["g"]); len(got) != 1 || got[0].Port != 3000 {
+		t.Errorf("explicit port: %v", got)
+	}
+	// a private host is refused, and not allowed through, unless listed
+	c = build("http://10.0.0.5:3000", "")
+	if err := c.BridgeCheck(c.Sources["g"]); err == nil || !strings.Contains(err.Error(), "private_endpoints") {
+		t.Errorf("private unlisted: %v", err)
+	}
+	if got := c.BridgeEgress(c.Sources["g"]); len(got) != 0 {
+		t.Errorf("private unlisted leaked into egress: %v", got)
+	}
+	c = build("http://10.0.0.5:3000", ", services: {private_endpoints: ['10.0.0.5:3000']}")
+	if err := c.BridgeCheck(c.Sources["g"]); err != nil {
+		t.Fatalf("listed: %v", err)
+	}
+	if got := c.BridgeEgress(c.Sources["g"]); len(got) != 1 || !got[0].AllowPrivate || !got[0].NoLinkLocal || got[0].Host != "10.0.0.5" {
+		t.Errorf("listed: %v", got)
+	}
+	// url_env must be one of env
+	if _, err := Parse([]byte("server: {mcp_packages: {x: {command: [x], env: [A], url_env: [B]}}}\n")); err == nil {
+		c, _ := Parse([]byte("server: {mcp_packages: {x: {command: [x], env: [A], url_env: [B]}}}\n"))
+		if c.Validate() == nil {
+			t.Error("url_env outside env accepted")
+		}
+	}
+}
+
 func TestScheduleSource(t *testing.T) {
 	base := "agents:\n  a: { prompt: hi }\nsources:\n  s: "
 	cases := []struct{ name, src, want string }{

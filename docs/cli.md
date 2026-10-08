@@ -284,37 +284,64 @@ siphon deny 42
 
 ### siphon connect
 
-Connect a service or model: flags for the fields, prompts for the rest, secrets only via - or @file.
+Connect a service (see `siphon catalog`) or model: a flag per field, prompts for the rest, secrets only via - or @file.
 
 ```sh
-siphon connect github|gitlab|aws|model|login [flags]
+siphon connect <service>|model|login [--<field> value ...]
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--access-key-id` |  | aws role mode: base access key id as - or @file (with --secret-access-key) |
+| `--access-key-id` |  | AWS: Base access key ID as - (stdin) or @file |
 | `--api-key` |  | model, login: API key as - (stdin) or @file |
-| `--base` |  | gitlab: base URL (default https://gitlab.com) |
-| `--external-id` |  | aws role mode: external id |
+| `--base` |  | GitLab: GitLab URL |
+| `--client-secret` |  | Sentry: Client secret as - (stdin) or @file |
+| `--email` |  | Bitbucket: Atlassian account email |
+| `--external-id` |  | AWS: External ID |
 | `--file` |  | login: a login file (kind login), or - for stdin |
-| `--mode` |  | github: remote or local; aws: role or profile |
-| `--name` |  | name of the source, credential or connection (default: the service or preset) |
+| `--header` |  | Webhook: Header |
+| `--mode` |  | GitHub: MCP server |
+| `--name` |  | name of the connection (default: the service or preset) |
 | `--no-test` | `false` | skip the connection test |
-| `--profile` |  | aws profile mode: profile name from server.aws.profiles |
-| `--project` |  | gitlab: project path, like group/project |
-| `--region` |  | aws: region |
-| `--role-arn` |  | aws role mode: role ARN |
-| `--secret-access-key` |  | aws role mode: base secret access key as - or @file |
-| `--servers` |  | aws: servers to add, comma separated (cloudwatch, docs; default cloudwatch) |
+| `--profile` |  | AWS: Profile |
+| `--project` |  | GitLab: Project |
+| `--region` |  | AWS: Region |
+| `--role-arn` |  | AWS: Role ARN |
+| `--secret` |  | Webhook: Secret as - (stdin) or @file |
+| `--secret-access-key` |  | AWS: Base secret access key as - (stdin) or @file |
+| `--servers` |  | AWS: Servers |
 | `--setup-token` |  | login claude: a setup token as - (stdin) or @file (kind token) |
-| `--token` |  | github, gitlab: API token as - (stdin) or @file |
+| `--signing-secret` |  | Linear: Webhook signing secret as - (stdin) or @file |
+| `--site` |  | Jira: Jira site URL |
+| `--timestamp` | `false` | Grafana: Sign with a timestamp (replay protection) |
+| `--token` |  | GitHub: Token as - (stdin) or @file |
+| `--topic` |  | ntfy: Topic |
 | `--url` |  | model: endpoint URL (default: the preset's) |
-| `--webhook` | `false` | github, gitlab, aws: also create a webhook source (its secret is shown once) |
+| `--value` |  | MCP server: Header value as - (stdin) or @file |
+| `--webhook` | `false` | GitHub: Also receive webhooks (pull requests, issues, pushes) |
 
 Example:
 
 ```sh
 siphon connect github --name gh --token @token.txt --webhook
+```
+
+### siphon catalog
+
+The services you can connect, by category, with what each needs on this install.
+
+```sh
+siphon catalog [--category c]
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--category` |  | only this category (code, issues, chat, monitoring, cloud, payments, home, generic) |
+
+Example:
+
+```sh
+siphon catalog --category code -o json
 ```
 
 ### siphon test

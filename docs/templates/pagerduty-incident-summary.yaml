@@ -1,0 +1,27 @@
+# title:    Summarise each triggered PagerDuty incident, then notify
+# category: Ops & monitoring
+# needs:    sources/pagerduty                      (siphon connect pagerduty)
+#           credentials/ollama-local               (siphon connect model ollama)
+# apply:    siphon apply -f pagerduty-incident-summary.yaml
+agents:
+  incident-summary:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: "Summarise this PagerDuty incident for the on-call engineer in three lines: {{.event.event.data}}"
+    max_turns: 2
+    timeout: 5m
+    approve: false                  # a read-only summary
+routines:
+  incident-to-phone:
+    steps:
+      - { id: summary, agent: incident-summary, timeout: 5m }
+      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: Incident", -d, "{{.steps.summary.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+rules:
+  - name: incident-triggered
+    source: pagerduty
+    when: 'event.event.event_type == "incident.triggered"'
+    on: each
+    id: event.event.id
+    cooldown: 1m
+    action: { routine: incident-to-phone }

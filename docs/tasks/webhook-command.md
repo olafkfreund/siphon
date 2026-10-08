@@ -35,9 +35,22 @@ siphon apply -f deploy.yaml --secret sources/deploy-hook.secret=@hook.key
 | `sha256` | signs with HMAC-SHA256 (hex) in a header you name | most custom senders |
 | `standard-webhooks` | signs per the Standard Webhooks spec (`whsec_…`) | Svix, Clerk, Resend, … |
 | `token` | sends the secret itself in a header you name | GitLab, EventBridge, Alertmanager, Home Assistant, scripts |
+| `slack` | signs `v0:<timestamp>:<body>` (HMAC-SHA256, `X-Slack-Signature`, ±5 min); Siphon also answers Slack's signed `url_verification` with its challenge | Slack (paste the app's Signing Secret) |
+| `stripe` | signs `<t>.<body>` in `Stripe-Signature` (`t=…,v1=…`; any `v1` may match, so rotation works; ±5 min) | Stripe (paste the endpoint's signing secret) |
 
 `token` is the easiest to set up, but weaker: a captured delivery can be
 replayed. Prefer an HMAC signature when the sender supports one.
+
+**`sha256` options** for providers that vary the format:
+- `signature_prefix: v1=`: the header may hold a comma-separated list of
+  `v1=<hex>` signatures, and any one may match (PagerDuty, during secret
+  rotation).
+- `timestamp_header` plus `timestamp_separator: ":"`: the signed text is
+  `<timestamp>:<body>` instead of the default `<timestamp>.<body>`
+  (Grafana).
+
+For a known service, `siphon connect <service>` sets all of this for you
+(see [all services](../connections/README.md)).
 
 ## Commands, safely
 

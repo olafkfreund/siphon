@@ -173,11 +173,11 @@ func (s *server) job(id int64) (store.JobDetail, bool, error) {
 // Page titles and which nav entry each page lights up.
 var (
 	titles = map[string]string{"dashboard": "Dashboard", "jobs": "Jobs", "job": "Job", "approvals": "Approvals",
-		"rules": "Rules", "sources": "Sources", "audit": "Audit", "logins": "Connections", "egress": "Egress", "services": "Services", "servicedone": "Services",
+		"rules": "Rules", "sources": "Sources", "audit": "Audit", "logins": "Connections", "egress": "Egress", "services": "Services", "servicedone": "Services", "serviceconnect": "Services",
 		"cfglist": "Config", "cfgedit": "Edit", "history": "History", "historyitem": "Revision",
 		"help": "Help & Docs", "helppage": "Help & Docs", "helptemplates": "Templates"}
 	active = map[string]string{"dashboard": "dash", "jobs": "jobs", "job": "jobs", "approvals": "approvals",
-		"rules": "rules", "sources": "sources", "audit": "audit", "logins": "logins", "egress": "egress", "services": "services", "servicedone": "services",
+		"rules": "rules", "sources": "sources", "audit": "audit", "logins": "logins", "egress": "egress", "services": "services", "servicedone": "services", "serviceconnect": "services",
 		"cfglist": "rules", "cfgedit": "rules", "history": "history", "historyitem": "history",
 		"help": "help", "helppage": "help", "helptemplates": "help"}
 	// Config kinds as people read them, and the nav entry each lights up.

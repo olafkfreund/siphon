@@ -40,7 +40,7 @@ portal, then the YAML.
 | | |
 |---|---|
 | [Getting started](docs/getting-started.md) | 10 minutes: login, connect a model, a webhook task, an agent task |
-| [Templates](docs/templates/README.md) | ~20 ready-made tasks: PR review, CI failures, alerts, uptime, AWS, Home Assistant, … |
+| [Templates](docs/templates/README.md) | ~30 ready-made tasks: PR review, CI failures, alerts, uptime, AWS, Home Assistant, … |
 | [Concepts](docs/concepts.md) | source → rule → action, agents, connections, approvals, sandboxing |
 | [Connections](docs/README.md#connections) | models (Ollama, OpenAI-compatible), logins (Claude, Codex, agy), GitHub, GitLab, AWS |
 | [Troubleshooting](docs/troubleshooting.md) | `siphon why`, testing against the last event, common errors |

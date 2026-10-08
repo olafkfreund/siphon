@@ -8,6 +8,8 @@ self:
 
 let
   cfg = config.services.siphon;
+  # Generated from internal/catalog (go generate ./internal/catalog); keyed by service id.
+  catalogPackages = lib.importJSON ./catalog-packages.json;
   yaml = pkgs.formats.yaml { };
   stateDir = "/var/lib/siphon";
   # Shared with siphon-action@ instances through group siphon-io (setgid).
@@ -32,7 +34,7 @@ let
           server.mcp_packages = lib.mapAttrs (_: p: {
             command = [ (lib.getExe p.package) ] ++ p.args;
             inherit (p) env hosts;
-          }) cfg.mcpPackages;
+          } // lib.optionalAttrs (p.urlEnv != [ ]) { url_env = p.urlEnv; }) cfg.mcpPackages;
         })
       )
     )
@@ -263,6 +265,11 @@ in
               default = [ ];
               description = "Hosts agents using this server may reach (port 443).";
             };
+            urlEnv = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              description = "Env names holding the server's own URL (e.g. GITEA_HOST); its host joins the bridge's allowlist at run time.";
+            };
           };
         }
       );
@@ -295,6 +302,17 @@ in
       default = null;
       example = "https://siphon.example.com";
       description = "SIPHON_URL for the CLI; default http://127.0.0.1:<port of server.listen>.";
+    };
+
+    catalogPackages = lib.mkOption {
+      type = lib.types.listOf (lib.types.enum (lib.attrNames catalogPackages));
+      default = [ ];
+      example = [ "grafana" "gitea" ];
+      description = ''
+        Catalogue services whose Nix-pinned MCP servers to install, so the
+        Services page can offer their agent tools (otherwise they show as
+        "needs package"; their webhooks work either way).
+      '';
     };
 
     aws.enable = lib.mkEnableOption ''
@@ -360,8 +378,19 @@ in
         "services.siphon: configFile is set, so services.siphon.settings is ignored (except settings.units, the polkit allowlist)"
       ++ lib.optional (cfg.aws.enable && !(cfg.mcpPackages ? aws-cloudwatch))
         "services.siphon.aws.enable: mcpPackages is set explicitly, so the AWS servers were not added; add aws-cloudwatch and aws-docs to it";
-    # mkOptionDefault: merge with the default (github) instead of replacing it.
-    services.siphon.mcpPackages = lib.mkIf cfg.aws.enable (lib.mkOptionDefault {
+    # Pinned MCP servers for catalogue services (internal/catalog -> nix/catalog-packages.json).
+    services.siphon.mcpPackages = lib.mkMerge [
+      (lib.mkIf (cfg.catalogPackages != [ ]) (lib.mkOptionDefault (lib.genAttrs cfg.catalogPackages (id:
+        let
+          e = catalogPackages.${id};
+        in
+        {
+          package = pkgs.${e.package};
+          inherit (e) args env hosts;
+          urlEnv = e.url_env or [ ];
+        }))))
+      # mkOptionDefault: merge with the default (github) instead of replacing it.
+      (lib.mkIf cfg.aws.enable (lib.mkOptionDefault {
       aws-cloudwatch = {
         package = self.packages.${pkgs.stdenv.hostPlatform.system}.aws-cloudwatch-mcp-server;
         args = [ ]; # stdio by default
@@ -381,7 +410,8 @@ in
           "api.contentrecs.docs.aws.com"
         ];
       };
-    });
+    }))
+    ];
 
     assertions =
       let

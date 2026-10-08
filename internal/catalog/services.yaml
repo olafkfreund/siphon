@@ -1,0 +1,752 @@
+# The service catalogue: one entry per service. See render.go for the
+# template functions (secret, basic, generated, q, pathesc, has, package,
+# private, fail). A field's raw value reaches the YAML only as validated
+# one-line text (use q) or through those functions.
+defs:
+  name: &f_name {key: name, label: Name, type: text, required: true, pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}', pattern_error: 'a name is required (letters, digits, . _ -)'}
+  webhook: &f_webhook {key: webhook, label: 'Also receive webhooks', type: bool, default: on}
+  token: &f_token {key: token, label: Token, type: secret, required: true}
+services:
+  - id: github
+    name: GitHub
+    mark: GH
+    category: code
+    summary: Agent tools through GitHub's MCP server, and pull request or issue events by webhook.
+    capabilities: [tools, webhooks]
+    status: available
+    fields:
+      - {key: name, label: Name, type: text, default: github, required: true, pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}', pattern_error: 'a name is required (letters, digits, . _ -)', help: 'Agents list it in mcp:; tools are named mcp__<name>__…'}
+      - {key: token, label: Token, type: secret, required: true, help: 'A fine-grained token for only the repos agents need: Contents, Pull requests, Issues: read (write only if agents should comment). Metadata: read.'}
+      - {key: mode, label: MCP server, type: choice, choices: [remote, local], default: remote, help: 'Local runs github-mcp-server in its own sandbox; needed for GitHub Enterprise.'}
+      - {key: webhook, label: 'Also receive webhooks (pull requests, issues, pushes)', type: bool, default: on}
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          {{if eq .mode "local"}}{{if not (package "github")}}{{fail "the local GitHub MCP server isn't installed: add it to server.mcp_packages (services.siphon.mcpPackages on NixOS)"}}{{end -}}
+          type: mcp
+          package: github
+          env:
+            GITHUB_PERSONAL_ACCESS_TOKEN: {{secret "token" "env.GITHUB_PERSONAL_ACCESS_TOKEN"}}
+          {{else -}}
+          type: mcp
+          url: https://api.githubcopilot.com/mcp/
+          auth:
+            bearer: {{secret "token" "auth.bearer"}}
+          {{end -}}
+          read: { tool: get_me }
+          poll: 24h
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: '{{.webhook}}'
+        yaml: |
+          type: webhook
+          signature: github
+          secret: {{generated "secret"}}
+          id: header.X-GitHub-Delivery
+    setup: |
+      Repository → Settings → Webhooks → Add webhook.
+      Payload URL as above, content type application/json, Secret as above.
+      Choose the events (e.g. Pull requests, Issues) and save.
+    read_tools: [get_me, get_pull_request, get_pull_request_files, get_pull_request_diff, list_pull_requests, get_issue, list_issues, search_code, get_file_contents, list_commits]
+    write_tools: [create_pull_request_review, add_issue_comment, create_issue, update_issue]
+    test: {method: GET, url: 'https://api.github.com/user', header: 'Authorization: Bearer {token}', identity: login}
+    templates: [github-pr-review, github-ci-failure, github-issue-triage]
+
+  - id: gitlab
+    name: GitLab
+    mark: GL
+    category: code
+    summary: Open merge requests polled from a project, and events by webhook. gitlab.com or self-hosted.
+    capabilities: [polling, webhooks]
+    status: available
+    fields:
+      - {key: name, label: Name, type: text, default: gitlab, required: true, pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}', pattern_error: 'a name is required (letters, digits, . _ -)'}
+      - {key: base, label: GitLab URL, type: url, default: 'https://gitlab.com', secure: true, help: 'Self-hosted on your LAN? List its host:port once in server.services.private_endpoints.'}
+      - {key: project, label: Project, type: text, required: true, help: group/project}
+      - {key: token, label: Token, type: secret, required: true, help: 'A project access token with read_api.'}
+      - {key: webhook, label: 'Also receive webhooks (merge requests, pipelines)', type: bool, default: on}
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          type: http
+          url: {{q (printf "%s/api/v4/projects/%s/merge_requests?state=opened&per_page=20" .base (pathesc .project))}}
+          headers:
+            PRIVATE-TOKEN: {{secret "token" "headers.PRIVATE-TOKEN"}}
+          poll: 5m
+          {{if private "base" -}}
+          allow_private: true
+          {{end -}}
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: '{{.webhook}}'
+        hook_header: X-Gitlab-Token
+        yaml: |
+          type: webhook
+          signature: token
+          token_header: X-Gitlab-Token
+          secret: {{generated "secret"}}
+          id: header.X-Gitlab-Event-UUID
+    setup: |
+      Project → Settings → Webhooks → Add new webhook.
+      URL as above, Secret token as above.
+      Tick Merge request events (and Pipeline events) and save.
+    test: {method: GET, url: '{base}/api/v4/user', header: 'PRIVATE-TOKEN: {token}', identity: username}
+    templates: [gitlab-mr-review, gitlab-pipeline-failed]
+
+  - id: aws
+    name: AWS
+    mark: AW
+    category: cloud
+    summary: CloudWatch and AWS documentation as agent tools, with short-lived credentials (never stored keys), and EventBridge events by webhook.
+    capabilities: [tools, webhooks]
+    status: available
+    needs_package: [aws-cloudwatch, aws-docs]
+    reason: 'enable `services.siphon.aws` in your NixOS config'
+    hooks: aws
+    fields:
+      - {key: name, label: Name, type: text, default: aws, required: true, pattern: '[a-z0-9][a-z0-9_-]{0,40}', pattern_error: 'a lowercase name (a-z, 0-9, - _) is required', help: 'Sources are named <name>-cloudwatch and <name>-docs.'}
+      - {key: region, label: Region, type: text, required: true, help: 'For example eu-west-1.'}
+      - {key: mode, section: 2, label: Credentials, type: choice, choices: [profile, role], default: profile, help: 'Profile: a named profile of the siphon user (SSO, a role or credential_process). Role: a read-only role, see examples/aws.'}
+      - {key: profile, section: 2, label: Profile, type: text, help: 'Profile mode: one of server.aws.profiles.'}
+      - {key: role_arn, section: 2, label: Role ARN, type: text, help: "Other ARNs need this credential's own access keys."}
+      - {key: external_id, section: 2, label: External ID, type: text, help: 'Optional, role mode.'}
+      - {key: access_key_id, section: 2, label: Base access key ID, type: secret, help: "Optional, role mode: otherwise the siphon user's own login assumes the role. Stored write-only."}
+      - {key: secret_access_key, section: 2, label: Base secret access key, type: secret}
+      - {key: servers, label: Servers, type: multi, choices: [cloudwatch, docs], default: cloudwatch, help: 'CloudWatch (logs, metrics, alarms) and AWS documentation.'}
+      - {key: webhook, label: 'Also receive EventBridge events (API destination)', type: bool}
+    creates:
+      - kind: credentials
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          provider: aws
+          region: {{q .region}}
+          {{if eq .mode "role" -}}
+          role_arn: {{q .role_arn}}
+          {{if .external_id -}}
+          external_id: {{q .external_id}}
+          {{end -}}
+          {{if has "access_key_id" -}}
+          access_key_id: {{secret "access_key_id" "access_key_id"}}
+          secret_access_key: {{secret "secret_access_key" "secret_access_key"}}
+          {{end -}}
+          {{else -}}
+          profile: {{q .profile}}
+          {{end -}}
+      - kind: sources
+        name: '{{.name}}-cloudwatch'
+        when: '{{.cloudwatch}}'
+        yaml: |
+          type: mcp
+          package: aws-cloudwatch
+          aws: {{q .name}}
+      - kind: sources
+        name: '{{.name}}-docs'
+        when: '{{.docs}}'
+        yaml: |
+          type: mcp
+          package: aws-docs
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: '{{.webhook}}'
+        hook_header: X-Siphon-Key
+        yaml: |
+          type: webhook
+          signature: token
+          token_header: X-Siphon-Key
+          secret: {{generated "secret"}}
+    setup: |
+      EventBridge → API destinations → Connections → Create: authorization type API key, API key name X-Siphon-Key, value = the secret above.
+      API destinations → Create: endpoint = the URL above, method POST, and that connection.
+      Add the destination as the target of a rule for the events you want.
+    templates: [aws-cloudwatch-alarm]
+
+  # ---- code
+  - id: bitbucket
+    name: Bitbucket
+    mark: BB
+    category: code
+    summary: Bitbucket Cloud through Atlassian's Rovo MCP server, and repository events by webhook.
+    capabilities: [tools, webhooks]
+    status: available
+    fields:
+      - {<<: *f_name, default: bitbucket}
+      - {key: email, label: Atlassian account email, type: text, required: true}
+      - {<<: *f_token, label: Scoped API token, help: 'An Atlassian API token with Bitbucket scopes (read). An Atlassian admin must enable API-token access for the Rovo MCP server.'}
+      - *f_webhook
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          type: mcp
+          url: https://mcp.atlassian.com/v2/mcp
+          headers:
+            Authorization: {{basic "email" "token" "headers.Authorization"}}
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: '{{.webhook}}'
+        yaml: |
+          type: webhook
+          signature: sha256
+          signature_header: X-Hub-Signature
+          secret: {{generated "secret"}}
+    setup: |
+      Repository settings → Webhooks → Add webhook.
+      URL as above, Secret as above (Bitbucket signs with it in X-Hub-Signature).
+      Choose the triggers (for example Pull request created, Repository push) and save.
+    test: {method: GET, url: 'https://api.bitbucket.org/2.0/user', header: 'Authorization: {token}', identity: display_name}
+
+  - id: gitea
+    name: Gitea
+    mark: GT
+    category: code
+    summary: Repository tools through the local gitea-mcp server, and events by webhook.
+    capabilities: [tools, webhooks]
+    status: available
+    needs_package: [gitea]
+    reason: 'add `gitea` to `server.mcp_packages` (`services.siphon.catalogPackages = [ "gitea" ]` on NixOS)'
+    nix: {attr: gitea-mcp-server, args: [-t, stdio, -r], env: [GITEA_ACCESS_TOKEN, GITEA_HOST], url_env: [GITEA_HOST]}
+    fields:
+      - {<<: *f_name, default: gitea}
+      - {key: base, label: Gitea URL, type: url, required: true, secure: true, private_listed: true, help: 'For example https://git.example.org. A LAN host must be listed in server.services.private_endpoints.'}
+      - {<<: *f_token, help: 'A scoped access token: read:repository and read:issue (add write scopes only if agents should comment).'}
+      - *f_webhook
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          type: mcp
+          package: gitea
+          env:
+            GITEA_ACCESS_TOKEN: {{secret "token" "env.GITEA_ACCESS_TOKEN"}}
+            GITEA_HOST: {{secret "base" "env.GITEA_HOST"}}
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: '{{.webhook}}'
+        yaml: |
+          type: webhook
+          signature: github
+          secret: {{generated "secret"}}
+    setup: |
+      Repository → Settings → Webhooks → Add webhook → Gitea.
+      Target URL as above, content type application/json, Secret as above.
+      Choose the events and save.
+    test: {method: GET, url: '{base}/api/v1/user', header: 'Authorization: token {token}', identity: login, token_from: env.GITEA_ACCESS_TOKEN, base_from: env.GITEA_HOST}
+
+  - id: forgejo
+    name: Forgejo
+    mark: FJ
+    category: code
+    summary: Repository tools through the local forgejo-mcp server, and events by webhook.
+    capabilities: [tools, webhooks]
+    status: available
+    needs_package: [forgejo]
+    reason: 'add `forgejo` to `server.mcp_packages` (`services.siphon.catalogPackages = [ "forgejo" ]` on NixOS)'
+    nix: {attr: forgejo-mcp, args: [--transport, stdio], env: [FORGEJO_ACCESS_TOKEN, FORGEJO_URL], url_env: [FORGEJO_URL]}
+    fields:
+      - {<<: *f_name, default: forgejo}
+      - {key: base, label: Forgejo URL, type: url, required: true, secure: true, private_listed: true, help: 'For example https://codeberg.org. A LAN host must be listed in server.services.private_endpoints.'}
+      - {<<: *f_token, help: 'A scoped access token: read:repository and read:issue (add write scopes only if agents should comment).'}
+      - *f_webhook
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          type: mcp
+          package: forgejo
+          env:
+            FORGEJO_ACCESS_TOKEN: {{secret "token" "env.FORGEJO_ACCESS_TOKEN"}}
+            FORGEJO_URL: {{secret "base" "env.FORGEJO_URL"}}
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: '{{.webhook}}'
+        yaml: |
+          type: webhook
+          signature: github
+          secret: {{generated "secret"}}
+    setup: |
+      Repository → Settings → Webhooks → Add webhook → Forgejo.
+      Target URL as above, content type application/json, Secret as above.
+      Choose the events and save.
+    test: {method: GET, url: '{base}/api/v1/user', header: 'Authorization: token {token}', identity: login, token_from: env.FORGEJO_ACCESS_TOKEN, base_from: env.FORGEJO_URL}
+
+  # ---- issues
+  - id: linear
+    name: Linear
+    mark: LN
+    category: issues
+    summary: Linear's remote MCP server for agents, and issue events by webhook.
+    capabilities: [tools, webhooks]
+    status: available
+    fields:
+      - {<<: *f_name, default: linear}
+      - {<<: *f_token, label: API key, help: 'A personal API key (Settings → Security & access → Personal API keys).'}
+      - *f_webhook
+      - {key: signing_secret, label: Webhook signing secret, type: secret, help: 'Needed with webhooks. Create the webhook in Linear first (URL: your public URL + /hook/<name>-hooks), then paste the signing secret it shows.', section: 3}
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          type: mcp
+          url: https://mcp.linear.app/mcp
+          auth:
+            bearer: {{secret "token" "auth.bearer"}}
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: '{{.webhook}}'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: sha256
+          signature_header: Linear-Signature
+          secret: {{if has "signing_secret"}}{{secret "signing_secret" "secret"}}{{else}}{{fail "the webhook signing secret is required for webhooks"}}{{end}}
+    setup: |
+      Linear → Settings → API → Webhooks → New webhook.
+      URL as above; choose the resources (for example Issues, Comments) and save.
+      Linear shows the signing secret: it is the secret you pasted here.
+    test: {method: POST, url: 'https://api.linear.app/graphql', header: 'Authorization: {token}', body: '{"query":"{ viewer { name } }"}', identity: data.viewer.name}
+
+  - id: jira
+    name: Jira
+    mark: JR
+    category: issues
+    summary: Jira Cloud through Atlassian's Rovo MCP server, and issue events by webhook.
+    capabilities: [tools, webhooks]
+    status: available
+    fields:
+      - {<<: *f_name, default: jira}
+      - {key: site, label: Jira site URL, type: url, required: true, secure: true, pattern: 'https://[a-z0-9-]+\.atlassian\.net/?', pattern_error: 'the Jira site is https://yourteam.atlassian.net', help: 'For example https://yourteam.atlassian.net.'}
+      - {key: email, label: Atlassian account email, type: text, required: true}
+      - {<<: *f_token, label: Scoped API token, help: 'An Atlassian API token with Jira scopes (read). An Atlassian admin must enable API-token access for the Rovo MCP server.'}
+      - *f_webhook
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          type: mcp
+          url: https://mcp.atlassian.com/v2/mcp
+          headers:
+            Authorization: {{basic "email" "token" "headers.Authorization"}}
+            X-Siphon-Site: {{q .site}}
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: '{{.webhook}}'
+        yaml: |
+          type: webhook
+          signature: sha256
+          signature_header: X-Hub-Signature
+          secret: {{generated "secret"}}
+    setup: |
+      Jira settings → System → WebHooks → Create a WebHook.
+      URL as above, Secret as above (Jira signs with it in X-Hub-Signature).
+      Choose the events (for example issue created, issue updated) and save.
+    test: {method: GET, url: '{base}/rest/api/3/myself', header: 'Authorization: {token}', identity: displayName, base_from: headers.X-Siphon-Site}
+
+  # ---- chat
+  - id: slack
+    name: Slack
+    mark: SL
+    category: chat
+    summary: Slack events and slash commands by signed webhook. Agent tools are not available yet; Slack's MCP server needs OAuth.
+    capabilities: [webhooks]
+    status: available
+    fields:
+      - {<<: *f_name, default: slack}
+      - {key: signing_secret, label: Signing secret, type: secret, required: true, help: 'Slack app → Basic Information → Signing Secret.'}
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: slack
+          secret: {{secret "signing_secret" "secret"}}
+    setup: |
+      Slack app → Event Subscriptions (or Slash Commands) → Request URL = the URL above.
+      Slack signs each request with your signing secret; Siphon rejects anything older than five minutes.
+      Subscribe to the events you want and save.
+
+  # ---- monitoring
+  - id: sentry
+    name: Sentry
+    mark: SN
+    category: monitoring
+    summary: Sentry issue and alert events by signed webhook. Agent tools are not available yet; the Sentry MCP needs packaging.
+    capabilities: [webhooks]
+    status: available
+    fields:
+      - {<<: *f_name, default: sentry}
+      - {key: client_secret, label: Client secret, type: secret, required: true, help: 'Sentry → Settings → Developer Settings → your internal integration → Client Secret.'}
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: sha256
+          signature_header: Sentry-Hook-Signature
+          secret: {{secret "client_secret" "secret"}}
+    setup: |
+      Sentry → Settings → Developer Settings → your internal integration → Webhook URL = the URL above.
+      Tick the resources to send (for example issue, error) and save.
+
+  - id: pagerduty
+    name: PagerDuty
+    mark: PD
+    category: monitoring
+    summary: "PagerDuty incident events by signed webhook. Agent tools are not available yet: PagerDuty's MCP authentication is unverified."
+    capabilities: [webhooks]
+    status: available
+    fields:
+      - {<<: *f_name, default: pagerduty}
+      - {key: signing_secret, label: Signing secret, type: secret, required: true, help: 'The secret PagerDuty shows when you create the v3 webhook subscription (create it first, with this source''s URL).'}
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: sha256
+          signature_header: X-PagerDuty-Signature
+          signature_prefix: "v1="
+          secret: {{secret "signing_secret" "secret"}}
+    setup: |
+      PagerDuty → Integrations → Generic Webhooks (v3) → New Webhook.
+      Webhook URL = the URL above; choose the events and save.
+      PagerDuty shows the signing secret once: it is the secret you pasted here.
+
+  - id: grafana
+    name: Grafana
+    mark: GF
+    category: monitoring
+    summary: Dashboards and alert rules through the local mcp-grafana server (read-only), and alert notifications by webhook.
+    capabilities: [tools, webhooks]
+    status: available
+    needs_package: [grafana]
+    reason: 'add `grafana` to `server.mcp_packages` (`services.siphon.catalogPackages = [ "grafana" ]` on NixOS)'
+    nix: {attr: mcp-grafana, args: [--disable-write], env: [GRAFANA_URL, GRAFANA_SERVICE_ACCOUNT_TOKEN], url_env: [GRAFANA_URL]}
+    fields:
+      - {<<: *f_name, default: grafana}
+      - {key: base, label: Grafana URL, type: url, required: true, secure: true, private_listed: true, help: 'For example https://yourstack.grafana.net. A LAN host must be listed in server.services.private_endpoints.'}
+      - {<<: *f_token, label: Service account token, help: 'A service account token with the Viewer role.'}
+      - *f_webhook
+      - {key: timestamp, label: 'Sign with a timestamp (replay protection)', type: bool, section: 3}
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          type: mcp
+          package: grafana
+          env:
+            GRAFANA_URL: {{secret "base" "env.GRAFANA_URL"}}
+            GRAFANA_SERVICE_ACCOUNT_TOKEN: {{secret "token" "env.GRAFANA_SERVICE_ACCOUNT_TOKEN"}}
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: '{{.webhook}}'
+        yaml: |
+          type: webhook
+          signature: sha256
+          signature_header: X-Grafana-Alerting-Signature
+          {{if .timestamp -}}
+          timestamp_header: X-Grafana-Alerting-Timestamp
+          timestamp_separator: ":"
+          {{end -}}
+          secret: {{generated "secret"}}
+    setup: |
+      Grafana → Alerting → Contact points → Add contact point → Webhook.
+      URL as above. Under optional settings set the HMAC signature secret to the Secret above.
+      If you chose a timestamp, also set the timestamp header to X-Grafana-Alerting-Timestamp.
+    test: {method: GET, url: '{base}/api/user', header: 'Authorization: Bearer {token}', identity: login, token_from: env.GRAFANA_SERVICE_ACCOUNT_TOKEN, base_from: env.GRAFANA_URL}
+
+  - id: alertmanager
+    name: Alertmanager
+    mark: AM
+    category: monitoring
+    summary: Prometheus Alertmanager notifications by webhook, authenticated with a bearer secret.
+    capabilities: [webhooks]
+    status: available
+    fields:
+      - {<<: *f_name, default: alertmanager}
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        hook_header: Authorization
+        yaml: |
+          type: webhook
+          signature: token
+          token_header: Authorization
+          secret: {{generated "secret" "Bearer "}}
+    setup: |
+      In alertmanager.yml, under your receiver's webhook_configs, set url to the URL above.
+      Add http_config.authorization with type Bearer and credentials = the secret above.
+      Reload Alertmanager.
+
+  - id: datadog
+    name: Datadog
+    mark: DD
+    category: monitoring
+    summary: "Datadog monitor notifications by webhook with a custom header. Agent tools are not available yet: the MCP URL is unverified."
+    capabilities: [webhooks]
+    status: available
+    fields:
+      - {<<: *f_name, default: datadog}
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        hook_header: X-Siphon-Key
+        yaml: |
+          type: webhook
+          signature: token
+          token_header: X-Siphon-Key
+          secret: {{generated "secret"}}
+    setup: |
+      Datadog → Integrations → Webhooks → New webhook; URL = the URL above.
+      Custom headers: {"X-Siphon-Key": "<the secret above>"}.
+      Mention @webhook-<name> in a monitor's notification message.
+
+  - id: uptime-kuma
+    name: Uptime Kuma
+    mark: UK
+    category: monitoring
+    summary: Uptime Kuma status notifications by webhook with an additional header.
+    capabilities: [webhooks]
+    status: available
+    fields:
+      - {<<: *f_name, default: uptime-kuma}
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        hook_header: X-Siphon-Key
+        yaml: |
+          type: webhook
+          signature: token
+          token_header: X-Siphon-Key
+          secret: {{generated "secret"}}
+    setup: |
+      Uptime Kuma → Settings → Notifications → Setup Notification → Webhook.
+      Post URL = the URL above, request body JSON.
+      Turn on additional headers: {"X-Siphon-Key": "<the secret above>"}.
+
+  # ---- cloud
+  - id: cloudflare
+    name: Cloudflare
+    mark: CF
+    category: cloud
+    summary: Cloudflare's remote MCP server for agents, and notification events by webhook.
+    capabilities: [tools, webhooks]
+    status: available
+    fields:
+      - {<<: *f_name, default: cloudflare}
+      - {<<: *f_token, label: API token, help: 'An account API token with the minimum permissions the agents need (read).'}
+      - *f_webhook
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          type: mcp
+          url: https://mcp.cloudflare.com/mcp
+          auth:
+            bearer: {{secret "token" "auth.bearer"}}
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: '{{.webhook}}'
+        hook_header: cf-webhook-auth
+        yaml: |
+          type: webhook
+          signature: token
+          token_header: cf-webhook-auth
+          secret: {{generated "secret"}}
+    setup: |
+      Cloudflare → Notifications → Destinations → Webhooks → Create.
+      URL as above, Secret = the secret above (Cloudflare sends it in cf-webhook-auth).
+      Attach the destination to the notifications you want.
+    test: {method: GET, url: 'https://api.cloudflare.com/client/v4/user/tokens/verify', header: 'Authorization: Bearer {token}', identity: result.status}
+
+  - {id: kubernetes, name: Kubernetes, mark: K8, category: cloud, summary: Cluster tools through a read-only MCP server., status: not-yet, reason: 'needs kubeconfig wiring: coming in a later release'}
+
+  # ---- payments
+  - id: stripe
+    name: Stripe
+    mark: ST
+    category: payments
+    summary: Stripe's remote MCP server for agents, and payment events by signed webhook.
+    capabilities: [tools, webhooks]
+    status: available
+    fields:
+      - {<<: *f_name, default: stripe}
+      - {<<: *f_token, label: Agent API key, help: 'A Stripe Agent API key with the least permissions needed. From 2026-10-31 Stripe rejects other key types on the MCP server.'}
+      - *f_webhook
+      - {key: signing_secret, label: Webhook signing secret, type: secret, help: 'Needed with webhooks (whsec_…). Create the endpoint in Stripe first (URL: your public URL + /hook/<name>-hooks), then paste its signing secret.', section: 3}
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          type: mcp
+          url: https://mcp.stripe.com
+          auth:
+            bearer: {{secret "token" "auth.bearer"}}
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: '{{.webhook}}'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: stripe
+          secret: {{if has "signing_secret"}}{{secret "signing_secret" "secret"}}{{else}}{{fail "the webhook signing secret is required for webhooks"}}{{end}}
+    setup: |
+      Stripe → Developers → Webhooks → Add endpoint; URL as above.
+      Choose the events and save; the signing secret is the one you pasted here.
+    test: {method: GET, url: 'https://api.stripe.com/v1/balance', header: 'Authorization: Bearer {token}', identity: object}
+
+  # ---- home
+  - id: home-assistant
+    name: Home Assistant
+    mark: HA
+    category: home
+    summary: Home Assistant's built-in MCP server for agents, and automation events by webhook.
+    capabilities: [tools, webhooks]
+    status: available
+    fields:
+      - {<<: *f_name, default: home-assistant}
+      - {key: base, label: Home Assistant URL, type: url, required: true, secure: true, help: 'For example https://ha.example.org. A LAN address (http or https) must be listed in server.services.private_endpoints.'}
+      - {<<: *f_token, label: Long-lived access token, help: 'Profile → Security → Long-lived access tokens. Use a non-admin user. The MCP Server integration must be enabled.'}
+      - *f_webhook
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          type: mcp
+          url: {{q (printf "%s/api/mcp" .base)}}
+          auth:
+            bearer: {{secret "token" "auth.bearer"}}
+          {{if private "base" -}}
+          allow_private: true
+          {{end -}}
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: '{{.webhook}}'
+        hook_header: X-Siphon-Key
+        yaml: |
+          type: webhook
+          signature: token
+          token_header: X-Siphon-Key
+          secret: {{generated "secret"}}
+    setup: |
+      In configuration.yaml add a rest_command that POSTs to the URL above with the header X-Siphon-Key = the secret above.
+      Call it from an automation for the events you care about.
+    test: {method: GET, url: '{base}/api/', header: 'Authorization: Bearer {token}', identity: message}
+
+  - id: ntfy
+    name: ntfy
+    mark: NT
+    category: home
+    summary: Messages from an ntfy topic, polled.
+    capabilities: [polling]
+    status: available
+    fields:
+      - {<<: *f_name, default: ntfy}
+      - {key: base, label: ntfy URL, type: url, default: 'https://ntfy.sh', secure: true, help: 'A LAN server must be listed in server.services.private_endpoints.'}
+      - {key: topic, label: Topic, type: text, required: true, pattern: '[A-Za-z0-9_-]{1,64}', pattern_error: 'the topic is letters, digits, _ and -'}
+      - {key: token, label: Access token, type: secret, help: 'Optional: a read-only token for a protected topic.'}
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          type: http
+          url: {{q (printf "%s/%s/json?poll=1" .base .topic)}}
+          poll: 1m
+          {{if has "token" -}}
+          headers:
+            Authorization: {{secret "token" "headers.Authorization" "Bearer "}}
+          {{end -}}
+          {{if private "base" -}}
+          allow_private: true
+          {{end -}}
+    test: {method: GET, url: '{base}/v1/account', header: 'Authorization: {token}', identity: username}
+
+  # ---- generic
+  - id: webhook
+    name: Webhook
+    mark: WH
+    category: generic
+    summary: Any service that can send a signed or token-authenticated webhook.
+    capabilities: [webhooks]
+    status: available
+    fields:
+      - {<<: *f_name, default: webhook}
+      - {key: mode, label: How deliveries are verified, type: choice, choices: [github, sha256, standard-webhooks, token, slack, stripe], default: sha256, help: 'sha256 and token need the header below. slack and stripe need the provider''s signing secret.'}
+      - {key: header, label: Header, type: text, pattern: '[A-Za-z][A-Za-z0-9-]*', pattern_error: 'the header is a name like X-Signature', help: 'sha256: the header carrying the signature. token: the header carrying the token.'}
+      - {key: secret, label: Secret, type: secret, help: 'Leave empty to generate one (shown once). Slack and Stripe: paste the provider''s signing secret.', section: 2}
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: {{.mode}}
+          {{if eq .mode "sha256" -}}
+          {{if not .header}}{{fail "a header is required for sha256"}}{{end -}}
+          signature_header: {{.header}}
+          {{end -}}
+          {{if eq .mode "token" -}}
+          {{if not .header}}{{fail "a header is required for token"}}{{end -}}
+          token_header: {{.header}}
+          {{end -}}
+          secret: {{if has "secret"}}{{secret "secret" "secret"}}{{else if or (eq .mode "slack") (eq .mode "stripe")}}{{fail "Slack/Stripe issue their own signing secret: paste it"}}{{else}}{{generated "secret"}}{{end}}
+
+  - id: mcp
+    name: MCP server
+    mark: MC
+    category: generic
+    summary: Any remote MCP server that authenticates with one header.
+    capabilities: [tools]
+    status: available
+    fields:
+      - {<<: *f_name, default: mcp}
+      - {key: url, label: Server URL, type: url, required: true, secure: true, help: 'The remote MCP endpoint, https. A LAN address must be listed in server.services.private_endpoints.'}
+      - {key: header, label: Header name, type: text, default: Authorization, required: true, pattern: '[A-Za-z][A-Za-z0-9-]*', pattern_error: 'the header is a name like Authorization'}
+      - {key: value, label: Header value, type: secret, required: true, help: 'The whole value, for example "Bearer abc" or "Token token=abc". Stored write-only.'}
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          type: mcp
+          url: {{q .url}}
+          headers:
+            {{.header}}: {{secret "value" (printf "headers.%s" .header)}}
+          {{if private "url" -}}
+          allow_private: true
+          {{end -}}
+
+  # ---- not yet: listed so people know, with the reason
+  - {id: discord, name: Discord, mark: DC, category: chat, summary: Discord interactions and bot events., status: not-yet, reason: 'needs an ed25519 signature mode and the PING handshake, and does not cover channel messages'}
+  - {id: teams, name: Microsoft Teams, mark: MT, category: chat, summary: Microsoft Teams outgoing webhooks., status: not-yet, reason: 'needs a teams-hmac signature mode with a synchronous reply within 5 seconds'}
+  - {id: mattermost, name: Mattermost, mark: MM, category: chat, summary: Mattermost outgoing webhooks and slash commands., status: not-yet, reason: 'the token is in the request body: needs a body-token mode'}
+  - {id: matrix, name: Matrix, mark: MX, category: chat, summary: Matrix application-service events., status: not-yet, reason: 'needs PUT requests and a {} reply'}
+  - {id: notion, name: Notion, mark: NO, category: issues, summary: Notion page and database events., status: not-yet, reason: 'needs the verification_token handshake; the remote MCP is OAuth only'}
+  - {id: google-pubsub, name: Google Pub/Sub, mark: GP, category: cloud, summary: Google Cloud Pub/Sub push subscriptions., status: not-yet, reason: 'needs a Google OIDC (RS256 JWT) push-authentication mode'}
+  - {id: azure-eventgrid, name: Azure Event Grid, mark: EG, category: cloud, summary: Azure Event Grid event subscriptions., status: not-yet, reason: 'needs the subscription validation handshake'}
+  - {id: azure-devops, name: Azure DevOps, mark: AD, category: code, summary: Azure DevOps service hooks and work items., status: not-yet, reason: 'service hooks use basic auth only, and the remote MCP is Entra OAuth only'}
+  - {id: opsgenie, name: Opsgenie, mark: OG, category: monitoring, summary: Opsgenie alert callbacks., status: not-yet, reason: 'end of support 2027-04-05'}

@@ -1,0 +1,13 @@
+# title:    Push a phone notification for each new Sentry issue
+# category: Ops & monitoring
+# needs:    sources/sentry                         (siphon connect sentry)
+# apply:    siphon apply -f sentry-new-issue.yaml
+# In Sentry: the internal integration's webhook, with "issue" resources enabled.
+rules:
+  - name: sentry-new-issue
+    source: sentry
+    when: 'headers["sentry-hook-resource"] == "issue" && event.action == "created"'
+    on: each
+    id: event.data.issue.id
+    action:
+      cmd: [curl, -fsS, -H, "Title: Sentry: {{.event.data.issue.title}}", -d, "{{.event.data.issue.culprit}}", https://ntfy.sh/siphon-CHANGE-ME]

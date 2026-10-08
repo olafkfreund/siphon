@@ -3,6 +3,7 @@
 package docs
 
 //go:generate sh -c "go run ../cmd/siphon help --json | go run ./internal/gencli > cli.md"
+//go:generate sh -c "go run ./internal/gencatalog > connections/README.md"
 //go:generate sh -c "go run ./internal/genllms > ../llms-full.txt"
 
 import (

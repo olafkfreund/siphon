@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/olafkfreund/siphon/internal/catalog"
 	"log/slog"
 	"os"
 	"regexp"
@@ -150,6 +151,16 @@ func (s *server) prepare(cur []store.ConfigItem, mutate func(map[itemKey]store.C
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, errInvalid{err.Error()}
+	}
+	for n, src := range cfg.Sources {
+		if src.Service != "" && catalog.Get(src.Service) == nil {
+			return nil, errInvalid{"sources." + n + ".service: unknown catalogue service " + src.Service}
+		}
+	}
+	for n, cr := range cfg.Credentials {
+		if cr.Service != "" && catalog.Get(cr.Service) == nil {
+			return nil, errInvalid{"credentials." + n + ".service: unknown catalogue service " + cr.Service}
+		}
 	}
 	after, _, err := config.Effective(file, toItems(next))
 	if err != nil {

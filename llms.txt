@@ -19,7 +19,7 @@ Key facts for an assistant:
 
 ## Templates
 
-- [Template index](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/templates/README.md): ~20 ready-made apply files by category, each with what to connect first and which secrets to pass. `siphon template` lists them; `siphon template <name>` prints one.
+- [Template index](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/templates/README.md): ~30 ready-made apply files by category, each with what to connect first and which secrets to pass. `siphon template` lists them; `siphon template <name>` prints one.
 
 ## How-to
 
@@ -34,6 +34,7 @@ Key facts for an assistant:
 
 ## Connections
 
+- [All connectable services](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/connections/README.md): the catalogue by category with status, the `siphon connect <id>` command and templates (`siphon catalog` lists them on a live install).
 - [Model endpoints](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/connections/models.md): Ollama, LM Studio, OpenRouter, Groq, Mistral, any OpenAI-compatible API.
 - [Logins](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/connections/logins.md): Claude, Codex, agy subscriptions and API keys.
 - [GitHub](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/connections/github.md): MCP tools and webhooks.

@@ -24,6 +24,17 @@ sources:
   gitlab-hooks: { type: webhook, signature: token, token_header: X-Gitlab-Token, secret: env:AGW_HOOK }
   aws-cloudwatch: { type: mcp, package: aws-cloudwatch, aws: aws }
   aws-hooks: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK }
+  alertmanager: { type: webhook, signature: token, token_header: Authorization, secret: env:AGW_HOOK }
+  linear: { type: mcp, url: "https://mcp.linear.app/mcp", headers: { Authorization: env:AGW_HOOK } }
+  jira-hooks: { type: webhook, signature: sha256, signature_header: X-Hub-Signature, secret: env:AGW_HOOK }
+  slack: { type: webhook, signature: slack, secret: env:AGW_HOOK }
+  sentry: { type: webhook, signature: sha256, signature_header: Sentry-Hook-Signature, secret: env:AGW_HOOK }
+  pagerduty: { type: webhook, signature: sha256, signature_header: X-PagerDuty-Signature, signature_prefix: v1=, secret: env:AGW_HOOK }
+  grafana: { type: mcp, url: "https://grafana.example.com/mcp", headers: { Authorization: env:AGW_HOOK } }
+  grafana-hooks: { type: webhook, signature: sha256, signature_header: X-Grafana-Alerting-Signature, secret: env:AGW_HOOK }
+  stripe-hooks: { type: webhook, signature: stripe, secret: env:AGW_HOOK }
+  home-assistant: { type: mcp, url: "https://ha.example.com/api/mcp", headers: { Authorization: env:AGW_HOOK } }
+  uptime-kuma: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK }
 rules:
   - { name: r1, source: github-hooks, when: "true", action: { cmd: [echo, one] } }
 `
@@ -104,7 +115,7 @@ func TestExplainCommand(t *testing.T) {
 			t.Errorf("explain rules lacks %q:\n%s", want, out)
 		}
 	}
-	if out = e.ok("explain", "source"); !strings.Contains(out, "read.tool") || !strings.Contains(out, "[github|sha256|token|standard-webhooks]") {
+	if out = e.ok("explain", "source"); !strings.Contains(out, "read.tool") || !strings.Contains(out, "[github|sha256|token|standard-webhooks|slack|stripe]") {
 		t.Errorf("explain source:\n%s", out)
 	}
 	if out = e.ok("explain", "routine"); !strings.Contains(out, "steps[].retry.attempts") {

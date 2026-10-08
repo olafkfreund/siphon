@@ -1,95 +1,84 @@
-{{define "services"}}<div class="top"><div><h1>Services</h1><div class="muted">Connect GitHub, GitLab and AWS: Siphon draws their events in and gives your agents their tools. Tokens are stored write-only.</div></div></div>
-{{with .ServiceForm}}{{if .Err}}<div class="banner" role="alert">{{.Err}}</div>{{end}}{{end}}
-
-<div class="grid g2e mb">
-<section class="card svc" aria-labelledby="gh-h">
-  <div class="acct-head"><span class="svc-mark gh" aria-hidden="true">{{template "icon" "src"}}</span><h2 id="gh-h">GitHub</h2></div>
-  <p class="muted small">Agent tools through GitHub's MCP server, and pull request or issue events by webhook.</p>
-  <form method="post" action="/services/github" class="login-add">
-    <input type="hidden" name="csrf" value="{{$.CSRF}}">
-    <label class="f">Name<input name="name" value="github" required pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}" autocomplete="off"><span class="hint">Agents list it in <code>mcp:</code>; tools are named <code>mcp__&lt;name&gt;__…</code>.</span></label>
-    <label class="f">Token<input type="password" name="token" required autocomplete="off" spellcheck="false"><span class="hint">A <b>fine-grained</b> token for only the repos agents need: Contents, Pull requests, Issues: read (write only if agents should comment). Metadata: read.</span></label>
-    <fieldset class="f"><legend>MCP server</legend><span class="seg">
-      <label><input type="radio" name="mode" value="remote" checked><span>Remote (GitHub-hosted)</span></label>
-      <label><input type="radio" name="mode" value="local"><span>Local (Nix-pinned)</span></label></span>
-      <span class="hint">Local runs <code>github-mcp-server</code> in its own sandbox; needed for GitHub Enterprise.</span></fieldset>
-    <label class="check"><input type="checkbox" name="webhook" value="on" checked> Also receive webhooks (pull requests, issues, pushes)</label>
-    <div class="row-actions"><button class="btn primary">{{template "icon" "check"}}Connect GitHub</button></div>
-  </form>
+{{define "services"}}<div class="top"><div><h1>Services</h1><div class="muted">What is connected, and what you can connect. Siphon draws their events in and gives your agents their tools. Tokens are stored write-only.</div></div></div>
+{{with .Svc}}
+<section class="services-connected" aria-labelledby="connected-h">
+  <h2 id="connected-h" class="section-h">Connected <span class="muted">{{len .Connected}}</span></h2>
+  {{if .Connected}}<div class="card connection-list">
+  {{range .Connected}}<article class="connection-row" aria-label="{{.ServiceName}} connection {{.Name}}">
+    <span class="service-mark" aria-hidden="true">{{.Mark}}</span>
+    <div class="connection-main">
+      <h3>{{.ServiceName}} · {{.Name}}</h3>
+      <div class="service-capabilities">{{range .Caps}}<span class="pill tag">{{.}}</span>{{end}}</div>
+    </div>
+    <span class="pill status-{{.Status}}"{{if .StatusTitle}} title="{{.StatusTitle}}"{{end}}>{{if eq .Status "working"}}{{template "icon" "check"}}{{else if eq .Status "attention"}}{{template "icon" "x"}}{{end}}{{.StatusLabel}}</span>
+    <span class="muted small connection-event">Last event: {{.LastEvent}}</span>
+    <div class="connection-actions">
+      {{if .Hint}}<span class="muted small">{{.Hint}}</span>{{end}}
+      {{if .CanTest}}<form method="post" action="/services/c/{{pe .Name}}/test" hx-post="/services/c/{{pe .Name}}/test" hx-target="next .connection-result"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{template "icon" "play"}}Test</button></form>{{end}}
+      <details class="connection-edit"><summary class="btn sm">Edit</summary><ul>{{range .Items}}<li><a href="{{.Href}}">{{.Name}}</a> <span class="muted tiny">{{.Kind}}</span></li>{{end}}</ul></details>
+    </div>
+    <div class="connection-result" aria-live="polite"></div>
+  </article>{{end}}
+  </div>{{else}}<section class="card empty">Nothing connected yet. Pick a service below.</section>{{end}}
 </section>
 
-<section class="card svc" aria-labelledby="gl-h">
-  <div class="acct-head"><span class="svc-mark gl" aria-hidden="true">{{template "icon" "src"}}</span><h2 id="gl-h">GitLab</h2></div>
-  <p class="muted small">Open merge requests polled from a project, and events by webhook. gitlab.com or self-hosted.</p>
-  <form method="post" action="/services/gitlab" class="login-add">
-    <input type="hidden" name="csrf" value="{{$.CSRF}}">
-    <label class="f">Name<input name="name" value="gitlab" required pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}" autocomplete="off"></label>
-    <label class="f">GitLab URL<input name="base" placeholder="https://gitlab.com" spellcheck="false" autocomplete="off"><span class="hint">Self-hosted on your LAN? List its <code>host:port</code> once in <code>server.services.private_endpoints</code>.</span></label>
-    <label class="f">Project<input name="project" required placeholder="group/project" spellcheck="false" autocomplete="off"></label>
-    <label class="f">Token<input type="password" name="token" required autocomplete="off" spellcheck="false"><span class="hint">A <b>project access token</b> with <code>read_api</code>.</span></label>
-    <label class="check"><input type="checkbox" name="webhook" value="on" checked> Also receive webhooks (merge requests, pipelines)</label>
-    <div class="row-actions"><button class="btn primary">{{template "icon" "check"}}Connect GitLab</button></div>
+<section class="services-catalog" aria-labelledby="catalog-h">
+  <h2 id="catalog-h" class="section-h">Explore services</h2>
+  <form method="get" action="/services" role="search" class="service-search" hx-get="/services" hx-target="#service-results" hx-select="#service-results" hx-swap="outerHTML" hx-trigger="input changed delay:250ms, submit" hx-push-url="true">
+    {{if .Cat}}<input type="hidden" name="cat" value="{{.Cat}}">{{end}}
+    <label class="f">Search services<input type="search" name="q" value="{{.Q}}" placeholder="Search by name or capability" autocomplete="off"></label>
+    <button class="btn">Search</button>
   </form>
-</section>
-
-<section class="card svc" aria-labelledby="aws-h">
-  <div class="acct-head"><span class="svc-mark aws" aria-hidden="true">{{template "icon" "src"}}</span><h2 id="aws-h">AWS</h2></div>
-  <p class="muted small">CloudWatch and AWS documentation as agent tools, with short-lived credentials (never stored keys), and EventBridge events by webhook.</p>
-  {{with .ServiceForm}}{{if or .AWSCloudWatch .AWSDocs}}
-  <form method="post" action="/services/aws" class="login-add">
-    <input type="hidden" name="csrf" value="{{$.CSRF}}">
-    <label class="f">Name<input name="name" value="aws" required pattern="[a-z0-9][a-z0-9_\-]{0,40}" autocomplete="off"><span class="hint">Sources are named <code>&lt;name&gt;-cloudwatch</code> and <code>&lt;name&gt;-docs</code>.</span></label>
-    <label class="f">Region<input name="region" value="eu-west-1" required pattern="[a-z]{2}(-[a-z]+)+-[0-9]" autocomplete="off" spellcheck="false"></label>
-    <fieldset class="f"><legend>Credentials</legend><span class="seg">
-      <label><input type="radio" name="mode" value="profile"{{if .Profiles}} checked{{else}} disabled{{end}}><span>Profile / SSO (recommended)</span></label>
-      <label><input type="radio" name="mode" value="role"{{if not .Profiles}} checked{{end}}><span>Assume role</span></label></span>
-      <span class="hint">Profile: a named profile of the siphon user (SSO, a role or credential_process). Role: a read-only role, see <code>examples/aws</code>.</span></fieldset>
-    <label class="f">Profile<select name="profile"{{if not .Profiles}} disabled{{end}}>{{range .Profiles}}<option>{{.}}</option>{{end}}</select><span class="hint">{{if .Profiles}}Profile mode: one of <code>server.aws.profiles</code>.{{else}}List profiles in <code>server.aws.profiles</code> in siphon.yaml.{{end}}</span></label>
-    <label class="f">Role ARN<input name="role_arn" list="aws-roles" placeholder="arn:aws:iam::123456789012:role/siphon-readonly" autocomplete="off" spellcheck="false"><datalist id="aws-roles">{{range .RoleARNs}}<option value="{{.}}">{{end}}</datalist><span class="hint">Other ARNs need this credential's own access keys.</span></label>
-    <label class="f">External ID<input name="external_id" autocomplete="off" spellcheck="false"><span class="hint">Optional, role mode.</span></label>
-    <label class="f">Base access key ID<input name="access_key_id" autocomplete="off" spellcheck="false"><span class="hint">Optional, role mode: otherwise the siphon user's own login assumes the role. Stored write-only.</span></label>
-    <label class="f">Base secret access key<input type="password" name="secret_access_key" autocomplete="off" spellcheck="false"></label>
-    <fieldset class="f"><legend>Servers</legend>
-      {{if .AWSCloudWatch}}<label class="check"><input type="checkbox" name="servers" value="cloudwatch" checked> CloudWatch (logs, metrics, alarms)</label>{{end}}
-      {{if .AWSDocs}}<label class="check"><input type="checkbox" name="servers" value="docs"> AWS documentation</label>{{end}}</fieldset>
-    <label class="check"><input type="checkbox" name="webhook" value="on"> Also receive EventBridge events (API destination)</label>
-    <div class="row-actions"><button class="btn primary">{{template "icon" "check"}}Connect AWS</button></div>
-  </form>
-  {{else}}<p class="small">The AWS servers aren't installed: enable <code>services.siphon.aws</code> in your NixOS config.</p>{{end}}{{end}}
-</section>
-</div>
-
-<h2 class="section-h">{{template "icon" "webhook"}} Connected</h2>
-<div class="grid g3">
-{{range .Services}}<article class="card acct" aria-label="{{.Service}} source {{.Name}}">
-  <div class="acct-head"><span class="pill tag">{{if eq .Service "github"}}GitHub{{else if eq .Service "aws"}}AWS{{else}}GitLab{{end}}</span><span class="sp"></span><span class="muted small">{{.Detail}}</span></div>
-  <h2 class="acct-name">{{.Name}}</h2>
-  <div id="svc-{{.Name}}"></div>
-  <div class="row-actions">
-    {{if ne .Kind "webhook"}}<form method="post" action="/services/{{pe .Name}}/test" hx-post="/services/{{pe .Name}}/test" hx-target="#svc-{{.Name}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{template "icon" "play"}}Test</button></form>{{end}}
-    <a class="btn sm" href="/config/sources/{{pe .Name}}">Edit</a>
+  <div id="service-results">
+    <nav class="category-filters" aria-label="Service categories">{{range .Cats}}<a class="pill tag" href="{{.Href}}" hx-get="{{.Href}}" hx-target="#service-results" hx-select="#service-results" hx-swap="outerHTML" hx-push-url="true"{{if .Selected}} aria-current="true"{{end}}>{{.Label}}</a>{{end}}</nav>
+    <div class="grid service-grid">
+    {{range .Tiles}}<article class="card service-tile{{if ne .Avail "available"}} unavailable{{end}}" aria-label="{{.Name}}">
+      <div class="tile-head"><span class="service-mark" aria-hidden="true">{{.Mark}}</span><h3>{{.Name}}</h3><span class="sp"></span><span class="pill avail-{{.Avail}}">{{.AvailLabel}}</span></div>
+      <p class="muted small">{{.Summary}}</p>
+      <div class="service-capabilities">{{range .Caps}}<span class="pill tag">{{.}}</span>{{end}}</div>
+      <div class="tile-action">{{if eq .Avail "available"}}<a class="btn sm primary" href="/services/{{pe .ID}}">Connect</a>{{else}}<span class="muted small">{{ticks .Why}}</span>{{end}}</div>
+    </article>{{else}}<section class="card empty">No services match. Clear the search or pick another category.</section>{{end}}
+    </div>
   </div>
-</article>
-{{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>Nothing connected yet.</section>{{end}}
-</div>{{end}}
+</section>
+{{end}}{{end}}
+
+{{define "svcfield"}}{{$f := .}}{{if eq .Type "secret"}}<label class="f">{{.Label}}<input type="password" name="{{.Key}}"{{if .Required}} required{{end}} autocomplete="off" spellcheck="false"{{if .Err}} aria-invalid="true"{{end}}>{{if .Help}}<span class="hint">{{.Help}}</span>{{end}}{{if .Err}}<span class="err small" role="alert">{{.Err}}</span>{{end}}</label>
+{{else if eq .Type "bool"}}<label class="check toggle-row"><input type="checkbox" name="{{.Key}}" value="on"{{if .Checked}} checked{{end}}><span>{{.Label}}</span></label>
+{{else if eq .Type "choice"}}<fieldset class="f"><legend>{{.Label}}</legend><span class="seg">{{range .Choices}}<label><input type="radio" name="{{$f.Key}}" value="{{.}}"{{if eq . $f.Value}} checked{{end}}{{if index $f.Disabled .}} disabled{{end}}><span>{{.}}</span></label>{{end}}</span>{{if .Help}}<span class="hint">{{.Help}}</span>{{end}}{{if .Err}}<span class="err small" role="alert">{{.Err}}</span>{{end}}</fieldset>
+{{else if eq .Type "multi"}}<fieldset class="f"><legend>{{.Label}}</legend>{{range .Choices}}<label class="check"><input type="checkbox" name="{{$f.Key}}" value="{{.}}"{{if index $f.Selected .}} checked{{end}}><span>{{.}}</span></label>{{end}}{{if .Help}}<span class="hint">{{.Help}}</span>{{end}}{{if .Err}}<span class="err small" role="alert">{{.Err}}</span>{{end}}</fieldset>
+{{else if .Options}}<label class="f">{{.Label}}<select name="{{.Key}}">{{range .Options}}<option{{if eq . $f.Value}} selected{{end}}>{{.}}</option>{{end}}</select>{{if .Help}}<span class="hint">{{.Help}}</span>{{end}}{{if .Err}}<span class="err small" role="alert">{{.Err}}</span>{{end}}</label>
+{{else if eq .Key "profile"}}<label class="f">{{.Label}}<select name="{{.Key}}" disabled></select><span class="hint">{{.Note}}</span></label>
+{{else}}<label class="f">{{.Label}}<input name="{{.Key}}" value="{{.Value}}"{{if .Required}} required{{end}}{{if .Pattern}} pattern="{{.Pattern}}"{{end}}{{if .List}} list="{{.Key}}-list"{{end}} autocomplete="off" spellcheck="false"{{if .Err}} aria-invalid="true"{{end}}>{{if .List}}<datalist id="{{.Key}}-list">{{range .List}}<option value="{{.}}">{{end}}</datalist>{{end}}{{if .Help}}<span class="hint">{{.Help}}</span>{{end}}{{if .Err}}<span class="err small" role="alert">{{.Err}}</span>{{end}}</label>
+{{end}}{{end}}
+
+{{define "serviceconnect"}}{{with .Connect}}<div class="connect-page">
+<div class="top"><span class="service-mark" aria-hidden="true">{{.Mark}}</span><div><h1>Connect {{.Name}}</h1><div class="muted">{{.Summary}}</div></div></div>
+{{if .Err}}<div class="banner" role="alert">{{.Err}}</div>{{end}}
+{{if not .Available}}<div class="card"><p>{{.Name}} can't be connected on this install: {{ticks .Why}}</p><a class="btn" href="/services">Back</a></div>
+{{else}}<form method="post" action="/services/{{pe .ID}}" class="connect-form">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+  {{range .Sections}}<section class="connect-section" aria-labelledby="sec-{{.N}}"><h2 id="sec-{{.N}}"><span class="step-n" aria-hidden="true">{{.N}}</span>{{.Title}}</h2>
+    {{range .Fields}}{{template "svcfield" .}}{{end}}
+  </section>{{end}}
+  <div class="row-actions form-end"><a class="btn" href="/services">Back</a><button class="btn primary">{{template "icon" "check"}}Connect {{.Name}}</button></div>
+</form>{{end}}
+</div>{{end}}{{end}}
 
 {{define "servicedone"}}{{with .ServiceDone}}<div class="top"><div><h1>{{.Service}} connected</h1><div class="muted">Source <b>{{.Name}}</b> is saved and live. This page is shown <b>once</b>.</div></div></div>
 {{if .ApplyErr}}<div class="banner" role="alert">Saved, but applying it live failed: {{.ApplyErr}}. Fix it on the Config page, or restart.</div>{{end}}
 {{if .Hook}}<section class="card mb" aria-labelledby="hook-h"><h2 id="hook-h">{{template "icon" "webhook"}} Finish the webhook in {{.Service}}</h2>
-  <div class="banner" role="alert"><b>Copy the secret now.</b> It is stored write-only and won't be shown again.</div>
+  {{if .HookSecret}}<div class="banner" role="alert"><b>Copy the secret now.</b> It is stored write-only and won't be shown again.</div>{{end}}
   <dl>
     <dt>Payload URL</dt><dd><code id="hook-url" class="wrap">{{.HookURL}}</code> <button type="button" class="btn sm" data-action="copy" data-target="hook-url">{{template "icon" "copy"}}Copy</button></dd>
-    <dt>{{if eq .Service "AWS"}}API key value{{else if .HookHeader}}Secret token{{else}}Secret{{end}}</dt><dd><code id="hook-secret" class="wrap">{{.HookSecret}}</code> <button type="button" class="btn sm" data-action="copy" data-target="hook-secret">{{template "icon" "copy"}}Copy</button></dd>
+    {{if .HookSecret}}<dt>{{if .HookHeader}}Secret token{{else}}Secret{{end}}</dt><dd><code id="hook-secret" class="wrap">{{.HookSecret}}</code> <button type="button" class="btn sm" data-action="copy" data-target="hook-secret">{{template "icon" "copy"}}Copy</button></dd>{{end}}
   </dl>
-  {{if eq .Service "AWS"}}<ol class="small"><li>EventBridge → <b>API destinations → Connections → Create</b>: authorization type <b>API key</b>, API key name <code>{{.HookHeader}}</code>, value = the secret above.</li><li><b>API destinations → Create</b>: endpoint = the URL above, method <code>POST</code>, and that connection.</li><li>Add the destination as the <b>target</b> of a rule for the events you want.</li></ol>
-  {{else if eq .Service "GitHub"}}<ol class="small"><li>Repository → <b>Settings → Webhooks → Add webhook</b>.</li><li>Payload URL as above, content type <code>application/json</code>, Secret as above.</li><li>Choose the events (e.g. Pull requests, Issues) and save.</li></ol>
-  {{else}}<ol class="small"><li>Project → <b>Settings → Webhooks → Add new webhook</b>.</li><li>URL as above, <b>Secret token</b> as above.</li><li>Choose triggers (e.g. Merge request events, Pipeline events) and save.</li></ol>{{end}}
+  {{if .Setup}}<ol class="small">{{range lines .Setup}}<li>{{.}}</li>{{end}}</ol>{{end}}
   {{if not (hasprefix .HookURL "http")}}<p class="muted small">Set <code>server.public_url</code> in <code>siphon.yaml</code> to show the full address. The provider must reach Siphon over HTTPS, usually through a reverse proxy; for local testing use <code>gh webhook forward</code>.</p>{{end}}
 </section>{{end}}
-{{if and .ReadTools (eq .Service "AWS")}}<section class="card mb" aria-labelledby="tools-h"><h2 id="tools-h">{{template "icon" "agent"}} Give agents these tools</h2>
+{{if and .ReadTools (not .WriteTools)}}<section class="card mb" aria-labelledby="tools-h"><h2 id="tools-h">{{template "icon" "agent"}} Give agents these tools</h2>
   <p class="small">Add the sources to an agent's <code>mcp:</code> (with a timeout of 55 minutes or less) and this as its <code>allowed_tools</code>. What they can do is set by the IAM role.</p>
   <pre id="tools-ro">{{.ReadTools}}</pre>
-  <p class="small">Press <b>Test</b> on the CloudWatch source to check the credentials.</p>
+  <p class="small">Press <b>Test</b> on the connection to check it.</p>
 </section>
 {{else if .ReadTools}}<section class="card mb" aria-labelledby="tools-h"><h2 id="tools-h">{{template "icon" "agent"}} Give agents these tools</h2>
   <p class="small">Add <code>mcp: [{{.Name}}]</code> to an agent and one of these as its <code>allowed_tools</code>:</p>

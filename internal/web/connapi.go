@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 
+	"github.com/olafkfreund/siphon/internal/catalog"
 	"github.com/olafkfreund/siphon/internal/config"
 )
 
@@ -37,47 +39,44 @@ func (s *server) connectionAPI(mux *http.ServeMux) {
 		}
 		return nil
 	}
-	// done is a setup reply: the result, or the refusal.
-	done := func(d *serviceDone, err error) (any, int, error) {
+	// GET /api/catalog: the entries (no templates) and what this install can do.
+	route("GET /api/catalog", func(*http.Request, string) (any, int, error) {
+		type item struct {
+			*catalog.Entry
+			Availability string `json:"availability"`
+			Why          string `json:"availability_reason,omitempty"`
+		}
+		out := []item{}
+		for _, e := range catalog.All() {
+			st, why := e.Availability(s.Config())
+			out = append(out, item{e, st, why})
+		}
+		return map[string]any{"services": out}, 200, nil
+	})
+	// POST /api/services/{id}: connect any catalogue entry. The body is
+	// {"fields": {...}} or the fields flat (the shape of the old per-service
+	// endpoints, which this also serves).
+	route("POST /api/services/{id}", func(r *http.Request, actor string) (any, int, error) {
+		id := r.PathValue("id")
+		if catalog.Get(id) == nil {
+			return nil, 404, errMsg("no such service")
+		}
+		var b map[string]any
+		if err := decode(r, &b); err != nil {
+			return nil, 400, err
+		}
+		if f, ok := b["fields"].(map[string]any); ok {
+			b = f
+		}
+		d, err := s.connect(actor, id, jsonValues(b))
 		if err != nil {
 			return nil, 0, err
 		}
 		return d, 200, nil
-	}
-	route("POST /api/services/github", func(r *http.Request, actor string) (any, int, error) {
-		var b struct {
-			Name, Token, Mode string
-			Webhook           bool
-		}
-		if err := decode(r, &b); err != nil {
-			return nil, 400, err
-		}
-		return done(s.addGitHub(actor, b.Name, b.Token, b.Mode, b.Webhook))
 	})
-	route("POST /api/services/gitlab", func(r *http.Request, actor string) (any, int, error) {
-		var b struct {
-			Name, Base, Project, Token string
-			Webhook                    bool
-		}
-		if err := decode(r, &b); err != nil {
-			return nil, 400, err
-		}
-		return done(s.addGitLab(actor, b.Name, b.Base, b.Project, b.Token, b.Webhook))
-	})
-	route("POST /api/services/aws", func(r *http.Request, actor string) (any, int, error) {
-		var b struct {
-			Name, Region, Mode, Profile string
-			RoleARN                     string `json:"role_arn"`
-			ExternalID                  string `json:"external_id"`
-			AccessKeyID                 string `json:"access_key_id"`
-			SecretAccessKey             string `json:"secret_access_key"`
-			Servers                     []string
-			Webhook                     bool
-		}
-		if err := decode(r, &b); err != nil {
-			return nil, 400, err
-		}
-		return done(s.addAWS(actor, b.Name, b.Region, b.Mode, b.Profile, b.RoleARN, b.ExternalID, b.AccessKeyID, b.SecretAccessKey, b.Servers, b.Webhook))
+	route("POST /api/connections/{name}/test", func(r *http.Request, _ string) (any, int, error) {
+		res, code, err := s.testConnection(r.Context(), r.PathValue("name"))
+		return res, code, err
 	})
 	route("POST /api/services/{name}/test", func(r *http.Request, _ string) (any, int, error) {
 		if s.Config().Sources[r.PathValue("name")] == nil {
@@ -161,4 +160,30 @@ func redactURL(c *config.Credential) string {
 	}
 	u.User = nil
 	return u.String()
+}
+
+// jsonValues flattens a JSON body to catalogue field values: a bool is "on"
+// when true, a list is comma-joined, keys are case-insensitive.
+func jsonValues(b map[string]any) map[string]string {
+	out := map[string]string{}
+	for k, v := range b {
+		k = strings.ToLower(k)
+		switch x := v.(type) {
+		case string:
+			out[k] = x
+		case bool:
+			if x {
+				out[k] = "on"
+			}
+		case []any:
+			var p []string
+			for _, e := range x {
+				if s, ok := e.(string); ok {
+					p = append(p, s)
+				}
+			}
+			out[k] = strings.Join(p, ",")
+		}
+	}
+	return out
 }

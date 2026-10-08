@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/olafkfreund/siphon/internal/catalog"
 	"github.com/olafkfreund/siphon/internal/client"
 )
 
@@ -123,95 +125,152 @@ func (c *cli) secretValue(f secField) (string, error) {
 // ---------------------------------------------------------------- connect
 
 type connectOpts struct {
-	name, token, mode, base, project, region, profile, roleARN, externalID string
-	keyID, secretKey, servers, url, apiKey, file, setupToken               string
-	webhook, noTest                                                        bool
+	name, url, apiKey, file, setupToken string
+	noTest                              bool
 }
+
+// flagName is a catalogue field key as a flag: role_arn becomes --role-arn.
+func flagName(key string) string { return strings.ReplaceAll(key, "_", "-") }
 
 func buildConnect(fs *flag.FlagSet) func(*cli, []string) error {
 	o := &connectOpts{}
-	fs.StringVar(&o.name, "name", "", "name of the source, credential or connection (default: the service or preset)")
-	fs.StringVar(&o.token, "token", "", "github, gitlab: API token as - (stdin) or @file")
-	fs.StringVar(&o.mode, "mode", "", "github: remote or local; aws: role or profile")
-	fs.BoolVar(&o.webhook, "webhook", false, "github, gitlab, aws: also create a webhook source (its secret is shown once)")
-	fs.StringVar(&o.base, "base", "", "gitlab: base URL (default https://gitlab.com)")
-	fs.StringVar(&o.project, "project", "", "gitlab: project path, like group/project")
-	fs.StringVar(&o.region, "region", "", "aws: region")
-	fs.StringVar(&o.profile, "profile", "", "aws profile mode: profile name from server.aws.profiles")
-	fs.StringVar(&o.roleARN, "role-arn", "", "aws role mode: role ARN")
-	fs.StringVar(&o.externalID, "external-id", "", "aws role mode: external id")
-	fs.StringVar(&o.keyID, "access-key-id", "", "aws role mode: base access key id as - or @file (with --secret-access-key)")
-	fs.StringVar(&o.secretKey, "secret-access-key", "", "aws role mode: base secret access key as - or @file")
-	fs.StringVar(&o.servers, "servers", "", "aws: servers to add, comma separated (cloudwatch, docs; default cloudwatch)")
+	fs.StringVar(&o.name, "name", "", "name of the connection (default: the service or preset)")
 	fs.StringVar(&o.url, "url", "", "model: endpoint URL (default: the preset's)")
 	fs.StringVar(&o.apiKey, "api-key", "", "model, login: API key as - (stdin) or @file")
 	fs.StringVar(&o.file, "file", "", "login: a login file (kind login), or - for stdin")
 	fs.StringVar(&o.setupToken, "setup-token", "", "login claude: a setup token as - (stdin) or @file (kind token)")
 	fs.BoolVar(&o.noTest, "no-test", false, "skip the connection test")
+	// One flag per catalogue field (the first service to use a key describes it).
+	for _, e := range catalog.All() {
+		for _, f := range e.Fields {
+			n := flagName(f.Key)
+			if fs.Lookup(n) != nil {
+				continue
+			}
+			doc := e.Name + ": " + f.Label
+			if f.Type == "secret" {
+				doc += " as - (stdin) or @file"
+			}
+			if f.Type == "bool" {
+				fs.Bool(n, false, doc)
+			} else {
+				fs.String(n, "", doc)
+			}
+		}
+	}
 	return func(c *cli, args []string) error {
 		if len(args) < 1 {
-			return usageErr("usage: siphon connect github|gitlab|aws|model|login [flags]", "for a model: `siphon connect model ollama --url http://host:11434`")
+			return usageErr("usage: siphon connect <service>|model|login [--<field> value ...]", "list the services with `siphon catalog`; for a model: `siphon connect model ollama --url http://host:11434`")
 		}
 		switch args[0] {
-		case "github", "gitlab", "aws":
-			if len(args) != 1 {
-				return usageErr("usage: siphon connect "+args[0]+" [flags]", "")
-			}
-			return c.connectService(args[0], o)
 		case "model":
 			return c.connectModel(args[1:], o)
 		case "login":
 			return c.connectLogin(args[1:], o)
 		}
-		return usageErr("unknown thing to connect: "+args[0], "choose github, gitlab, aws, model or login")
+		if len(args) != 1 {
+			return usageErr("usage: siphon connect "+args[0]+" [--<field> value ...]", "")
+		}
+		return c.connectService(args[0], fs, o)
 	}
 }
 
-func (c *cli) connectService(kind string, o *connectOpts) error {
-	body := map[string]any{"webhook": o.webhook}
-	strs := []strField{{"name", "Name", &o.name, kind, true}}
-	var secs []secField
-	switch kind {
-	case "github":
-		strs = append(strs, strField{"mode", "Mode (remote or local)", &o.mode, "remote", false})
-		secs = []secField{{"token", "GitHub token", &o.token, true}}
-	case "gitlab":
-		strs = append(strs, strField{"project", "Project path (group/project)", &o.project, "", true}, strField{"base", "Base URL", &o.base, "https://gitlab.com", false})
-		secs = []secField{{"token", "GitLab token", &o.token, true}}
-	case "aws":
-		if o.mode == "" {
-			o.mode = map[bool]string{true: "role", false: "profile"}[o.roleARN != ""]
+// catalogEntry is a service as /api/catalog describes it.
+type catalogEntry struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Category     string `json:"category"`
+	Availability string `json:"availability"`
+	Reason       string `json:"availability_reason"`
+	Status       string `json:"status"`
+	Capabilities []string
+	Fields       []struct {
+		Key, Label, Type, Default, Help string
+		Required                        bool
+		Choices                         []string
+	}
+}
+
+func (c *cli) catalog() ([]catalogEntry, error) {
+	var out struct {
+		Services []catalogEntry `json:"services"`
+	}
+	if err := c.call("GET", "/api/catalog", nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Services, nil
+}
+
+// connectService connects any catalogue service: its fields come from the
+// server's catalogue, each is a flag (or a prompt on a terminal), secrets only
+// via - or @file.
+func (c *cli) connectService(id string, fs *flag.FlagSet, o *connectOpts) error {
+	all, err := c.catalog()
+	if err != nil {
+		return err
+	}
+	var e *catalogEntry
+	for i := range all {
+		if all[i].ID == id {
+			e = &all[i]
 		}
-		strs = append(strs, strField{"region", "Region", &o.region, "", true}, strField{"servers", "Servers (cloudwatch, docs)", &o.servers, "cloudwatch", false})
-		if o.mode == "role" {
-			strs = append(strs, strField{"role-arn", "Role ARN", &o.roleARN, "", true})
-			secs = []secField{{"access-key-id", "Access key id", &o.keyID, false}, {"secret-access-key", "Secret access key", &o.secretKey, false}}
-		} else {
-			strs = append(strs, strField{"profile", "Profile", &o.profile, "", true})
+	}
+	if e == nil {
+		return usageErr("unknown thing to connect: "+id, "list the services with `siphon catalog`; or connect model or login")
+	}
+	if e.Availability != "available" {
+		return &client.Error{Status: 422, Msg: e.Name + " can't be connected here: " + strings.ReplaceAll(e.Reason, "`", ""), Hint: "see `siphon catalog`"}
+	}
+	given := map[string]string{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = f.Value.String() })
+	if id == "aws" && given["mode"] == "" && given["role-arn"] != "" {
+		given["mode"] = "role" // the old shorthand: a role ARN means role mode
+	}
+	vals := make([]string, len(e.Fields))
+	var strs []strField
+	var secs []secField
+	for i, f := range e.Fields {
+		n := flagName(f.Key)
+		switch f.Type {
+		case "bool":
+			continue // off unless the flag is given
+		case "secret":
+			vals[i] = given[n]
+			secs = append(secs, secField{n, f.Label, &vals[i], f.Required})
+		default:
+			label := f.Label
+			if len(f.Choices) > 0 {
+				label += " (" + strings.Join(f.Choices, ", ") + ")"
+			}
+			vals[i] = given[n]
+			def := f.Default
+			if f.Key == "name" {
+				if o.name == "" {
+					def = id
+				}
+				vals[i] = o.name
+			}
+			strs = append(strs, strField{n, label, &vals[i], def, f.Required})
 		}
 	}
 	if err := c.gather(strs, secs); err != nil {
 		return err
 	}
-	body["name"] = o.name
-	testName := o.name
-	switch kind {
-	case "github":
-		body["token"], body["mode"] = o.token, o.mode
-	case "gitlab":
-		body["token"], body["project"], body["base"] = o.token, o.project, o.base
-	case "aws":
-		srv := strings.Split(strings.ReplaceAll(o.servers, " ", ""), ",")
-		body["region"], body["mode"], body["servers"] = o.region, o.mode, srv
-		body["role_arn"], body["external_id"], body["profile"] = o.roleARN, o.externalID, o.profile
-		body["access_key_id"], body["secret_access_key"] = o.keyID, o.secretKey
-		testName = ""
-		if slices.Contains(srv, "cloudwatch") {
-			testName = o.name + "-cloudwatch"
+	fields := map[string]any{}
+	name := id
+	for i, f := range e.Fields {
+		switch {
+		case f.Type == "bool":
+			fields[f.Key] = given[flagName(f.Key)] == "true"
+		case vals[i] != "":
+			fields[f.Key] = vals[i]
+			if f.Key == "name" {
+				name = vals[i]
+			}
 		}
 	}
 	var done map[string]any
-	if err := c.call("POST", "/api/services/"+kind, body, &done); err != nil {
+	if err := c.call("POST", "/api/services/"+url.PathEscape(id), map[string]any{"fields": fields}, &done); err != nil {
 		return err
 	}
 	if !c.json() {
@@ -229,10 +288,59 @@ func (c *cli) connectService(kind string, o *connectOpts) error {
 	}
 	var test map[string]any
 	var terr error
-	if !o.noTest && testName != "" {
-		terr = c.call("POST", "/api/services/"+url.PathEscape(testName)+"/test", nil, &test)
+	if !o.noTest {
+		terr = c.call("POST", "/api/connections/"+url.PathEscape(name)+"/test", nil, &test)
+		var ce *client.Error
+		if errors.As(terr, &ce) && ce.Status == 422 {
+			terr = nil // nothing to test for this service
+		}
 	}
-	return c.finishConnect(done, test, terr, "test", testName)
+	return c.finishConnect(done, test, terr, "test", name)
+}
+
+// ---------------------------------------------------------------- catalog
+
+func buildCatalog(fs *flag.FlagSet) func(*cli, []string) error {
+	cat := fs.String("category", "", "only this category (code, issues, chat, monitoring, cloud, payments, home, generic)")
+	return func(c *cli, args []string) error {
+		if len(args) != 0 {
+			return usageErr("usage: siphon catalog [--category c]", "")
+		}
+		all, err := c.catalog()
+		if err != nil {
+			return err
+		}
+		var rows [][]string
+		var shown []catalogEntry
+		var why []string
+		for _, e := range all {
+			if *cat != "" && e.Category != *cat {
+				continue
+			}
+			shown = append(shown, e)
+			rows = append(rows, []string{e.ID, e.Name, e.Category, e.Availability, strings.Join(e.Capabilities, ",")})
+			if e.Availability != "available" && e.Reason != "" {
+				why = append(why, e.ID+": "+strings.ReplaceAll(e.Reason, "`", ""))
+			}
+		}
+		if c.json() {
+			return c.jsonOut(map[string]any{"services": nonNilEntries(shown)})
+		}
+		if err := c.table([]string{"ID", "NAME", "CATEGORY", "STATUS", "CAPABILITIES"}, rows); err != nil {
+			return err
+		}
+		for _, w := range why {
+			fmt.Fprintln(c.out, w)
+		}
+		return nil
+	}
+}
+
+func nonNilEntries(e []catalogEntry) []catalogEntry {
+	if e == nil {
+		return []catalogEntry{}
+	}
+	return e
 }
 
 // finishConnect prints the test result (JSON: with the setup reply) and fails
@@ -475,7 +583,17 @@ func (c *cli) testConnection(kind, name string) error {
 		path = "/api/connections/models/" + url.PathEscape(name) + "/test"
 	}
 	var t map[string]any
-	if err := c.call("POST", path, nil, &t); err != nil {
+	err := error(nil)
+	if kind == "service" { // a connection name first, else a source
+		err = c.call("POST", "/api/connections/"+url.PathEscape(name)+"/test", nil, &t)
+		var ce *client.Error
+		if errors.As(err, &ce) && ce.Status == 404 {
+			err = c.call("POST", path, nil, &t)
+		}
+	} else {
+		err = c.call("POST", path, nil, &t)
+	}
+	if err != nil {
 		return err
 	}
 	if c.json() {
