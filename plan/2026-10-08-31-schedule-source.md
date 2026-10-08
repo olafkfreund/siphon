@@ -169,3 +169,11 @@ are unchanged.
   - The robfig dependency and the `vendorHash` landed in step 1, not step 2 as the table says.
   - Exported helpers for step 2: `config.ParseSchedule`, `(*Source).Location()`, `ScheduleReserved`, `MinScheduleEvery`.
   - `at`, `timezone`, `catch_up` and `data` are rejected on other source types.
+- **Step 2 (coder):**
+  - **Dedupe key:** for cron schedules the `seenID` is the **local wall time** in the zone (`2006-01-02T15:04:05`), because robfig fires a repeated DST hour twice (two UTC instants) and the approved behaviour is "a repeated hour fires once". `every <d>` keeps the UTC RFC3339 id.
+  - **DST test:** the spring-forward test uses `30 1 * * *`, since London's skipped hour is 01:xx (the brief's `30 2` was a typo).
+  - **Wait chain:** waits chain from `Next(last handled)`, so `every` schedules keep a stable chain across restarts.
+  - **Catch-up scan:** capped at 100000 moments.
+  - **Fixed in step 3:**
+    - schedule rules default to `on: each` with `id: event.scheduled_at` (the `edge` default would fire once), and an explicit `edge` warns;
+    - a source whose state row comes from an earlier non-schedule type is treated as new.

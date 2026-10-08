@@ -39,6 +39,8 @@ type Pipeline struct {
 	cfg   atomic.Pointer[config.Config] // read via Config(); swapped by Apply
 	Store *store.Store
 	Now   func() time.Time
+	// After is the timer seam for schedule sources (tests); nil means time.After.
+	After func(time.Duration) <-chan time.Time
 	nudge chan struct{} // set by Serve; wakes idle workers after enqueues
 	// MCPTransport, if set, supplies the transport for an mcp source (tests).
 	MCPTransport func(source string) mcp.Transport

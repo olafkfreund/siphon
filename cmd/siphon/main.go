@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"text/tabwriter"
 	"time"
+	_ "time/tzdata" // zone names work without host zoneinfo
 
 	"golang.org/x/term"
 

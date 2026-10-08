@@ -84,7 +84,10 @@ func (p *Pipeline) startPollers(ctx context.Context, cfg *config.Config) (stop f
 	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	for _, name := range sortedSources(cfg) {
-		if s := cfg.Sources[name]; s.Polled() {
+		if s := cfg.Sources[name]; s.Type == "schedule" {
+			wg.Add(1)
+			go func() { defer wg.Done(); p.scheduleLoop(ctx, cfg, name) }()
+		} else if s.Polled() {
 			hint := make(chan struct{}, 1)
 			wg.Add(2)
 			go func() { defer wg.Done(); p.listen(ctx, cfg, name, hint) }()
