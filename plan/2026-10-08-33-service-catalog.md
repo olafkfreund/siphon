@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 33
 spec: spec/2026-10-08-33-service-catalog.md
 ---
