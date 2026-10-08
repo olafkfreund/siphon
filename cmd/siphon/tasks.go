@@ -26,7 +26,7 @@ type taskSpec struct {
 	NewAgent                       *agentSpec
 }
 
-type srcSpec struct{ Name, Type, URL, Every, Tool string }
+type srcSpec struct{ Name, Type, URL, Every, Tool, At, Timezone string }
 
 type agentSpec struct {
 	Name, Kind, Credential, Model, Prompt string
@@ -71,6 +71,8 @@ func (t taskSpec) yaml() (string, error) {
 		switch s.Type {
 		case "webhook":
 			body = mp("type", "webhook", "signature", "token", "token_header", "X-Siphon-Key")
+		case "schedule":
+			body = mp("type", "schedule", "at", s.At, "timezone", s.Timezone)
 		case "http":
 			body = mp("type", "http", "url", s.URL, "poll", s.Every)
 		case "mcp":
@@ -108,12 +110,14 @@ func (t taskSpec) yaml() (string, error) {
 
 func buildNew(fs *flag.FlagSet) func(*cli, []string) error {
 	var t taskSpec
-	var webhook, poll, cmdJSON, every, srcURL string
+	var webhook, poll, cmdJSON, every, srcURL, schedule, timezone string
 	fs.StringVar(&t.Name, "name", "", "the rule's name")
 	fs.StringVar(&t.Source, "source", "", "use this existing source")
 	fs.StringVar(&webhook, "webhook", "", "create a webhook source with this name (a secret is generated and shown once)")
 	fs.StringVar(&poll, "poll", "", "create an http polling source with this name (needs --url)")
 	fs.StringVar(&srcURL, "url", "", "the polled URL, with --poll")
+	fs.StringVar(&schedule, "schedule", "", `create a schedule source with this "at": a cron line, @daily, or "every 15m"; the source takes the task's name`)
+	fs.StringVar(&timezone, "timezone", "", "with --schedule: an IANA zone like Europe/London (default: the server's local zone)")
 	fs.StringVar(&every, "every", "5m", "poll interval, with --poll")
 	fs.StringVar(&t.When, "when", "", "the condition, an expression over event, headers and item")
 	fs.StringVar(&t.On, "on", "", "each (once per --id) or edge (when the condition turns true; the default)")
@@ -130,12 +134,12 @@ func buildNew(fs *flag.FlagSet) func(*cli, []string) error {
 		if len(args) != 1 || args[0] != "task" {
 			return usageErr("usage: siphon new task [flags]", "run `siphon help new` for the flags")
 		}
-		flagOnly := t.Name != "" || t.Source != "" || webhook != "" || poll != "" || t.When != "" || cmdJSON != "" || t.Agent != "" || t.Routine != ""
+		flagOnly := t.Name != "" || t.Source != "" || webhook != "" || poll != "" || schedule != "" || t.When != "" || cmdJSON != "" || t.Agent != "" || t.Routine != ""
 		if !flagOnly && !c.isTTY {
 			return usageErr("no terminal for the wizard, and no flags given", "needs --name, one of --source/--webhook/--poll, --when and one of --cmd/--agent/--routine; or run on a terminal")
 		}
 		if flagOnly {
-			if err := specFromFlags(&t, webhook, poll, srcURL, every, cmdJSON); err != nil {
+			if err := specFromFlags(&t, webhook, poll, srcURL, every, cmdJSON, schedule, timezone); err != nil {
 				return err
 			}
 		} else if err := c.wizard(&t); err != nil {
@@ -193,16 +197,27 @@ func buildNew(fs *flag.FlagSet) func(*cli, []string) error {
 }
 
 // specFromFlags validates the flag-only form and fills in the defaults.
-func specFromFlags(t *taskSpec, webhook, poll, srcURL, every, cmdJSON string) error {
+func specFromFlags(t *taskSpec, webhook, poll, srcURL, every, cmdJSON, schedule, timezone string) error {
 	var missing []string
 	if t.Name == "" {
 		missing = append(missing, "--name")
 	}
-	switch n := btoi(t.Source != "") + btoi(webhook != "") + btoi(poll != ""); {
+	switch n := btoi(t.Source != "") + btoi(webhook != "") + btoi(poll != "") + btoi(schedule != ""); {
 	case n == 0:
-		missing = append(missing, "--source (or --webhook <name>, or --poll <name> --url <u>)")
+		missing = append(missing, "--source (or --webhook <name>, or --poll <name> --url <u>, or --schedule <at>)")
 	case n > 1:
-		return usageErr("give only one of --source, --webhook and --poll", "")
+		return usageErr("give only one of --source, --webhook, --poll and --schedule", "")
+	}
+	if timezone != "" && schedule == "" {
+		return usageErr("--timezone is for --schedule", "")
+	}
+	if schedule != "" { // every moment is a new event: fire on each, with no condition
+		if t.When == "" {
+			t.When = "true"
+		}
+		if t.On == "" {
+			t.On, t.ID = "each", "event.scheduled_at"
+		}
 	}
 	if poll != "" && srcURL == "" {
 		missing = append(missing, "--url")
@@ -248,6 +263,8 @@ func specFromFlags(t *taskSpec, webhook, poll, srcURL, every, cmdJSON string) er
 		t.NewSource = &srcSpec{Name: webhook, Type: "webhook"}
 	case poll != "":
 		t.NewSource = &srcSpec{Name: poll, Type: "http", URL: srcURL, Every: every}
+	case schedule != "":
+		t.NewSource = &srcSpec{Name: t.Name, Type: "schedule", At: schedule, Timezone: timezone}
 	}
 	return nil
 }
@@ -346,18 +363,23 @@ func (c *cli) wizard(t *taskSpec) error {
 		t.Source = ans
 	} else {
 		s := &srcSpec{}
-		if s.Type, err = c.need("New source type (webhook, http, mcp)", "webhook"); err != nil {
+		if s.Type, err = c.need("New source type (webhook, http, mcp, or schedule = on a schedule)", "webhook"); err != nil {
 			return err
 		}
-		if !slices.Contains([]string{"webhook", "http", "mcp"}, s.Type) {
-			return usageErr("the source type must be webhook, http or mcp", "")
+		if !slices.Contains([]string{"webhook", "http", "mcp", "schedule"}, s.Type) {
+			return usageErr("the source type must be webhook, http, mcp or schedule", "")
 		}
 		if ans != "new" {
 			s.Name = ans
 		} else if s.Name, err = c.need("New source name", ""); err != nil {
 			return err
 		}
-		if s.Type != "webhook" {
+		if s.Type == "schedule" {
+			if s.At, err = c.need(`When (cron like "0 9 * * 1-5", @daily, or "every 15m")`, "0 9 * * 1-5"); err != nil {
+				return err
+			}
+			s.Timezone, _ = c.ask("Time zone (empty: the server's local zone)", "")
+		} else if s.Type != "webhook" {
 			if s.URL, err = c.need("URL", ""); err != nil {
 				return err
 			}
@@ -370,18 +392,22 @@ func (c *cli) wizard(t *taskSpec) error {
 		}
 		t.NewSource, typ = s, s.Type
 	}
-	if t.When, err = c.need("Fire when (expression)", starterWhen[typ]); err != nil {
-		return err
-	}
-	if t.On, err = c.need("Fire on each (once per event id) or edge (when the condition turns true)", "edge"); err != nil {
-		return err
-	}
-	if t.On == "each" {
-		if t.ID, err = c.need("Event id expression", "event.id"); err != nil {
+	if typ == "schedule" { // every moment is its own event
+		t.When, t.On, t.ID = "true", "each", "event.scheduled_at"
+	} else {
+		if t.When, err = c.need("Fire when (expression)", starterWhen[typ]); err != nil {
 			return err
 		}
-	} else {
-		t.Repeat, _ = c.ask("Repeat while still true after (empty: never)", "")
+		if t.On, err = c.need("Fire on each (once per event id) or edge (when the condition turns true)", "edge"); err != nil {
+			return err
+		}
+		if t.On == "each" {
+			if t.ID, err = c.need("Event id expression", "event.id"); err != nil {
+				return err
+			}
+		} else {
+			t.Repeat, _ = c.ask("Repeat while still true after (empty: never)", "")
+		}
 	}
 	kind, err := c.need("Action: cmd, agent, new-agent or routine", "cmd")
 	if err != nil {

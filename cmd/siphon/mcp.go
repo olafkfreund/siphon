@@ -83,6 +83,7 @@ type testIn struct {
 	Event   map[string]any    `json:"event,omitempty" jsonschema:"a JSON event to run the rule against"`
 	Headers map[string]string `json:"headers,omitempty"`
 	UseLast bool              `json:"use_last,omitempty" jsonschema:"use the last event the rule's source produced"`
+	At      string            `json:"at,omitempty" jsonschema:"schedule rules: build the event for this moment, like 2026-03-02 06:00 in the source's zone"`
 }
 type whyIn struct {
 	Rule string `json:"rule"`
@@ -169,6 +170,9 @@ func newMCPServer(c *cli, allowWrite, allowSecrets, allowUnapproved bool) *mcp.S
 			body := map[string]any{"use_last": in.UseLast}
 			if in.Event != nil {
 				body["event"] = in.Event
+			}
+			if in.At != "" {
+				body["at"] = in.At
 			}
 			if len(in.Headers) > 0 {
 				body["headers"] = in.Headers

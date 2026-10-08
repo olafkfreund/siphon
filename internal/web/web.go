@@ -112,6 +112,16 @@ func New(o Options) http.Handler {
 			return time.Duration(d).String() + " timeout"
 		},
 		"ago": func(t time.Time) string { return ago(o.Now(), t) },
+		// zoned shows a time in an IANA zone: "2026-03-01 06:00 Europe/London".
+		"zoned": func(t *time.Time, zone string) string {
+			if t == nil {
+				return "-"
+			}
+			if loc, err := time.LoadLocation(zone); err == nil {
+				return t.In(loc).Format("2006-01-02 15:04") + " " + zone
+			}
+			return t.Format("2006-01-02 15:04 MST")
+		},
 		"agop": func(t *time.Time) string {
 			if t == nil {
 				return "never"

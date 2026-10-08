@@ -25,6 +25,7 @@ Key facts for an assistant:
 
 - [Run a command on a webhook](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/webhook-command.md): signature modes (github, sha256, standard-webhooks, token), argv safety.
 - [React to a threshold](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/poll-threshold.md): polling JSON, on: edge with repeat.
+- [Run a task on a schedule](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/schedule.md): type: schedule (cron, @daily, every 15m), time zones, missed runs, test --at.
 - [An agent that reviews pull requests](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/github-pr-agent.md): GitHub tools, allowed_tools, approvals.
 - [Watch an MCP server](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/mcp-watch.md): read a resource or tool, for_each over lists.
 - [Routines](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/routine.md): ordered steps, retries, steps.<id>.output, schedules via a timer.

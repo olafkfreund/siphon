@@ -430,3 +430,51 @@ func TestConnectAWSTestLine(t *testing.T) {
 		t.Fatalf("test service: %s", out)
 	}
 }
+
+func TestNewTaskSchedule(t *testing.T) {
+	e := newCLIEnv(t)
+	printed := e.ok("new", "task", "--name", "morning", "--schedule", "0 9 * * 1-5", "--timezone", "Europe/London", "--cmd", `["echo","hi"]`, "--print")
+	for _, want := range []string{"type: schedule", "at: 0 9 * * 1-5", "timezone: Europe/London", "on: each", "id: event.scheduled_at", "when: \"true\""} {
+		if !strings.Contains(printed, want) {
+			t.Fatalf("missing %q in:\n%s", want, printed)
+		}
+	}
+	if code, _, errOut := e.do("new", "task", "--name", "x", "--schedule", "@daily", "--webhook", "w", "--cmd", `["a"]`, "--print"); code == 0 || !strings.Contains(errOut, "only one of") {
+		t.Errorf("schedule with webhook: %d %s", code, errOut)
+	}
+	if code, _, errOut := e.do("new", "task", "--name", "x", "--source", "gh", "--when", "true", "--timezone", "UTC", "--cmd", `["a"]`, "--print"); code == 0 || !strings.Contains(errOut, "--timezone is for --schedule") {
+		t.Errorf("timezone alone: %d %s", code, errOut)
+	}
+	e.ok("new", "task", "--name", "tick", "--schedule", "every 1m", "--cmd", `["echo","tick"]`, "--yes")
+	if o := e.ok("get", "sources"); !strings.Contains(o, "NEXT") || !regexp.MustCompile(`tick\s+\S+\s+20\d\d-`).MatchString(o) {
+		t.Errorf("get sources has no NEXT for tick:\n%s", o)
+	}
+	// a bad schedule is refused by validation, not stored
+	if code, _, _ := e.do("new", "task", "--name", "bad", "--schedule", "every 5s", "--cmd", `["a"]`, "--yes"); code == 0 {
+		t.Error("every 5s accepted")
+	}
+	// test --at builds the schedule event
+	o := e.ok("test", "tick", "--at", "2027-03-02 06:00")
+	if !strings.Contains(o, "echo tick") {
+		t.Errorf("test --at: %s", o)
+	}
+	if code, _, _ := e.do("test", "r1", "--at", "2027-03-02 06:00"); code == 0 {
+		t.Error("--at on a webhook rule accepted")
+	}
+	if w := e.ok("why", "tick"); !strings.Contains(w, "next run") {
+		t.Errorf("why: %s", w)
+	}
+}
+
+func TestNewTaskWizardSchedule(t *testing.T) {
+	e := newCLIEnv(t)
+	e.tty = true
+	// name, source (new), type, source name, at, zone, action, command, cooldown
+	e.stdin = "wiz2\nnew\nschedule\nwiz2\n@daily\nEurope/London\ncmd\necho hi\n\n"
+	wiz := e.ok("new", "task", "--print")
+	e.tty = false
+	flag := e.ok("new", "task", "--name", "wiz2", "--schedule", "@daily", "--timezone", "Europe/London", "--cmd", `["echo","hi"]`, "--print")
+	if wiz != flag {
+		t.Fatalf("wizard and flags differ:\n%s\n---\n%s", wiz, flag)
+	}
+}

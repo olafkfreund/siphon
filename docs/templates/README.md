@@ -33,6 +33,14 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 | [`service-failed`](service-failed.yaml) | Get notified when a systemd service fails | — · webhook secret |
 | [`upstream-status`](upstream-status.yaml) | Know when a provider you depend on has an incident | — |
 
+## Schedules
+
+| Template | What it does | Connect first |
+|---|---|---|
+| [`nightly-report`](nightly-report.yaml) | A nightly report on a schedule: fetch, summarise, notify | `siphon connect model ollama` |
+| [`weekday-standup`](weekday-standup.yaml) | A weekday reminder on a schedule (07:30, Monday to Friday) | — |
+| [`weekly-digest`](weekly-digest.yaml) | A weekly digest on a schedule: every Monday at 09:00 | `siphon connect model ollama` |
+
 ## Notifications & glue
 
 | Template | What it does | Connect first |
@@ -67,4 +75,3 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 | Template | What it does | Connect first |
 |---|---|---|
 | [`homeassistant-event`](homeassistant-event.yaml) | React to a Home Assistant event | — · webhook secret |
-| [`nightly-report`](nightly-report.yaml) | A nightly report: fetch, summarise, notify | `siphon connect model ollama` · webhook secret |

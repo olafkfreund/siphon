@@ -1,0 +1,19 @@
+# title:    A weekday reminder on a schedule (07:30, Monday to Friday)
+# category: Schedules
+# apply:    siphon apply -f weekday-standup.yaml
+# The simplest schedule: a command at set times. Swap the action for an
+# agent or a routine once it works. Test it without waiting:
+#   siphon test standup-reminder --at "2026-10-12 07:30"
+sources:
+  weekdays:
+    type: schedule
+    at: "30 7 * * 1-5"
+    timezone: Europe/London
+rules:
+  - name: standup-reminder
+    source: weekdays
+    when: 'true'
+    on: each
+    id: event.scheduled_at
+    action:
+      cmd: [curl, -fsS, -H, "Title: Standup in 30 minutes", -d, "Notes: https://wiki.example.com/standup", https://ntfy.sh/siphon-CHANGE-ME]

@@ -3,6 +3,7 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/expr-lang/expr"
+	"github.com/robfig/cron/v3"
 	"gopkg.in/yaml.v3"
 )
 
@@ -196,7 +198,7 @@ type Limits struct {
 }
 
 type Source struct {
-	Type         string            `yaml:"type"` // mcp|http|webhook
+	Type         string            `yaml:"type"` // mcp|http|webhook|schedule
 	URL          string            `yaml:"url"`
 	Command      []string          `yaml:"command"`
 	Read         *Read             `yaml:"read"`
@@ -215,6 +217,12 @@ type Source struct {
 	Env          map[string]Secret `yaml:"env"`     // stdio MCP child env; values are env:/file: refs
 	Package      string            `yaml:"package"` // name in server.mcp_packages; fills Command
 	AWS          string            `yaml:"aws"`     // provider: aws credential; the daemon injects short-lived keys
+
+	// schedule: fires at moments, no polling.
+	At       string         `yaml:"at"`       // 5-field cron, @hourly|@daily|@weekly|@monthly, or "every <d>" (d >= 1m)
+	Timezone string         `yaml:"timezone"` // IANA name; default is the host's local zone
+	CatchUp  string         `yaml:"catch_up"` // latest (default) | none
+	Data     map[string]any `yaml:"data"`     // merged at the top level of each event
 
 	cmdFromPkg bool // Command was filled from Package, not written in the item
 }
@@ -276,13 +284,91 @@ var (
 		"AWS_DEFAULT_REGION", "AWS_EC2_METADATA_DISABLED", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE"}
 )
 
+// ScheduleReserved are the event fields a schedule source sets itself.
+var ScheduleReserved = []string{"schedule", "timezone", "scheduled_at", "fired_at", "catch_up"}
+
+// MinScheduleEvery is the shortest "every <d>" interval.
+const MinScheduleEvery = time.Minute
+
+// ParseSchedule parses a schedule's at: cron, @descriptor, or "every <d>".
+func ParseSchedule(at string) (cron.Schedule, error) {
+	at = strings.TrimSpace(at)
+	if strings.HasPrefix(at, "TZ=") || strings.HasPrefix(at, "CRON_TZ=") {
+		return nil, errors.New("use timezone:, not TZ= in at")
+	}
+	if d, ok := strings.CutPrefix(at, "every "); ok {
+		dur, err := time.ParseDuration(strings.TrimSpace(d))
+		if err != nil {
+			return nil, fmt.Errorf("bad interval %q: %w", d, err)
+		}
+		if dur < MinScheduleEvery {
+			return nil, fmt.Errorf("every must be at least %s, got %s", MinScheduleEvery, dur)
+		}
+		at = "@every " + dur.String()
+	}
+	if strings.HasPrefix(at, "@every") && !strings.HasPrefix(at, "@every ") {
+		return nil, errors.New("use \"every <duration>\"")
+	}
+	sc, err := cron.ParseStandard(at)
+	if cd, ok := sc.(cron.ConstantDelaySchedule); ok && err == nil && cd.Delay < MinScheduleEvery {
+		return nil, fmt.Errorf("every must be at least %s, got %s", MinScheduleEvery, cd.Delay)
+	}
+	return sc, err
+}
+
+// ScheduleKeyedByInstant reports whether every real moment of sc must run
+// (intervals and cron more often than hourly), so its dedupe key is the UTC
+// instant. Hourly or rarer cron is keyed by zone and wall time instead, so the
+// repeated hour of a DST fall-back fires once.
+func ScheduleKeyedByInstant(sc cron.Schedule) bool {
+	if _, ok := sc.(cron.ConstantDelaySchedule); ok {
+		return true
+	}
+	return minScheduleGap(sc) < time.Hour
+}
+
+// ScheduleEvent is the event a schedule source emits for the moment at.
+func (s *Source) ScheduleEvent(loc *time.Location, at, firedAt time.Time, catchUp bool) map[string]any {
+	ev := map[string]any{}
+	maps.Copy(ev, s.Data)
+	ev["schedule"], ev["timezone"], ev["catch_up"] = s.At, loc.String(), catchUp
+	ev["scheduled_at"] = at.In(loc).Format(time.RFC3339)
+	ev["fired_at"] = firedAt.In(loc).Format(time.RFC3339)
+	return ev
+}
+
+// Location is the schedule's time zone (time.Local when unset).
+func (s *Source) Location() (*time.Location, error) {
+	if s.Timezone == "" {
+		return time.Local, nil
+	}
+	return time.LoadLocation(s.Timezone)
+}
+
+// minScheduleGap is the smallest gap between the next 10 runs.
+func minScheduleGap(sc cron.Schedule) time.Duration {
+	t := time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC) // fixed reference, so the result is stable
+	gap := time.Duration(1<<63 - 1)
+	for i := 0; i < 10; i++ {
+		n := sc.Next(t)
+		if n.IsZero() {
+			break
+		}
+		if i > 0 {
+			gap = min(gap, n.Sub(t))
+		}
+		t = n
+	}
+	return gap
+}
+
 // MaxAWSAgentTimeout keeps an agent inside the 1 h session cap (timeout + 5 min).
 const MaxAWSAgentTimeout = 55 * time.Minute
 
-// Polled reports whether the poller runs the source. Webhooks, AWS sources and
-// mcp sources without read are agent tools only.
+// Polled reports whether the poller runs the source. Webhooks, schedules (the
+// scheduler drives them), AWS sources and mcp sources without read are not polled.
 func (s *Source) Polled() bool {
-	return s.Type != "webhook" && s.AWS == "" && (s.Type != "mcp" || s.Read != nil)
+	return s.Type != "webhook" && s.Type != "schedule" && s.AWS == "" && (s.Type != "mcp" || s.Read != nil)
 }
 
 const implicitPrefix = "_apikey_" // credentials made from api_key_file
@@ -423,6 +509,15 @@ func parse(b []byte, stub map[string]string) (*Config, error) {
 		if s != nil && s.Package != "" && len(s.Command) == 0 {
 			if pkg, ok := c.Server.MCPPackages[s.Package]; ok {
 				s.Command, s.cmdFromPkg = slices.Clone(pkg.Command), true
+			}
+		}
+	}
+	for i := range c.Rules {
+		// Every scheduled moment is a new event: edge would fire once, then never.
+		if r := &c.Rules[i]; r.On == "" && c.Sources[r.Source] != nil && c.Sources[r.Source].Type == "schedule" {
+			r.On = "each"
+			if r.ID == "" {
+				r.ID = "event.scheduled_at"
 			}
 		}
 	}
@@ -628,8 +723,16 @@ func (c *Config) Warnings() []string {
 		}
 	}
 	for _, r := range c.Rules {
+		if s := c.Sources[r.Source]; s != nil && s.Type == "schedule" && (r.Action.Agent != "" || c.RoutineHasAgent(r.Action.Routine)) {
+			if sc, err := ParseSchedule(s.At); err == nil && minScheduleGap(sc) < 15*time.Minute {
+				w = append(w, fmt.Sprintf("rule %s: runs an agent on schedule %s (more often than every 15m): watch limits.agent_runs_per_day (%d)", r.Name, r.Source, c.Limits.AgentRunsPerDay))
+			}
+		}
 		if s := c.Sources[r.Source]; s != nil && s.Type == "mcp" && !s.Polled() {
 			w = append(w, fmt.Sprintf("rule %s: source %s is agent tools only and never produces events", r.Name, r.Source))
+		}
+		if s := c.Sources[r.Source]; s != nil && s.Type == "schedule" && r.On == "edge" {
+			w = append(w, fmt.Sprintf("rule %s: on: edge on schedule source %s fires once and then only when the condition changes; schedule rules usually want on: each (the default)", r.Name, r.Source))
 		}
 		if m := providerMismatch(r, c.Sources[r.Source]); m != "" {
 			w = append(w, m)
@@ -1097,8 +1200,13 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 		default:
 			add("%s: signature must be github, sha256, token or standard-webhooks, got %q", p, s.Signature)
 		}
+	case "schedule":
+		c.validateSchedule(p, s, add)
 	default:
-		add("%s: type must be mcp, http or webhook, got %q", p, s.Type)
+		add("%s: type must be mcp, http, webhook or schedule, got %q", p, s.Type)
+	}
+	if s.Type != "schedule" && (s.At != "" || s.Timezone != "" || s.CatchUp != "" || len(s.Data) > 0) {
+		add("%s: at, timezone, catch_up and data are only for type schedule", p)
 	}
 	if s.Package != "" && s.Type != "mcp" {
 		add("%s: package is only for type mcp", p)
@@ -1115,6 +1223,33 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 	}
 	if name == AgentResultSource {
 		add("%s: name is reserved", p)
+	}
+}
+
+func (c *Config) validateSchedule(p string, s *Source, add func(string, ...any)) {
+	if s.At == "" {
+		add("%s: at is required", p)
+	} else if _, err := ParseSchedule(s.At); err != nil {
+		add("%s: bad at %q: %v", p, s.At, err)
+	}
+	if _, err := s.Location(); err != nil {
+		add("%s: bad timezone %q", p, s.Timezone)
+	}
+	if s.CatchUp != "" && s.CatchUp != "latest" && s.CatchUp != "none" {
+		add("%s: catch_up must be latest or none, got %q", p, s.CatchUp)
+	}
+	for _, k := range ScheduleReserved {
+		if _, ok := s.Data[k]; ok {
+			add("%s: data key %q is reserved", p, k)
+		}
+	}
+	if b, err := json.Marshal(s.Data); err != nil {
+		add("%s: data cannot be encoded as JSON: %v", p, err)
+	} else if len(b) > 16<<10 {
+		add("%s: data is %d bytes; the limit is 16 KiB", p, len(b))
+	}
+	if s.URL != "" || s.Read != nil || s.Poll != 0 || s.Secret.isSet() || len(s.Command) > 0 {
+		add("%s: a schedule has no url, read, poll, secret or command", p)
 	}
 }
 

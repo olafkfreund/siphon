@@ -45,7 +45,7 @@ func TestBadListsAll(t *testing.T) {
 		"inline secret", "unknown source \"nope\"", "bad expression", "cooldown is mandatory",
 		"not in the units allowlist", "unknown routine", "mcp references unknown source",
 		"units: \"{{.x}}.service\" must not be templated", "on: each requires id",
-		"type must be mcp, http or webhook", "signature must be github, sha256",
+		"type must be mcp, http, webhook or schedule", "signature must be github, sha256",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("missing %q in:\n%s", want, msg)
@@ -844,6 +844,91 @@ rules:
 		}
 		if !found {
 			t.Errorf("no warning for %s: %v", rule, got)
+		}
+	}
+}
+
+func TestScheduleSource(t *testing.T) {
+	base := "agents:\n  a: { prompt: hi }\nsources:\n  s: "
+	cases := []struct{ name, src, want string }{
+		{"cron", `{type: schedule, at: "0 6 * * *"}`, ""},
+		{"descriptor", `{type: schedule, at: "@daily", timezone: Europe/London, catch_up: none, data: {x: 1}}`, ""},
+		{"every", `{type: schedule, at: "every 5m"}`, ""},
+		{"every too short", `{type: schedule, at: "every 30s"}`, "at least"},
+		{"@every 1s", `{type: schedule, at: "@every 1s"}`, "at least"},
+		{"@every 1ms", `{type: schedule, at: "@every 1ms"}`, "at least"},
+		{"@every padded", `{type: schedule, at: "  @every 1s"}`, "at least"},
+		{"TZ in at", `{type: schedule, at: "TZ=Europe/London 0 6 * * *"}`, "use timezone:"},
+		{"CRON_TZ in at", `{type: schedule, at: "CRON_TZ=Asia/Tokyo 0 6 * * *"}`, "use timezone:"},
+		{"data not JSON", `{type: schedule, at: "@daily", data: {x: .inf}}`, "cannot be encoded"},
+		{"data too big", `{type: schedule, at: "@daily", data: {x: "` + strings.Repeat("a", 17<<10) + `"}}`, "16 KiB"},
+		{"every bad", `{type: schedule, at: "every soon"}`, "bad interval"},
+		{"at missing", `{type: schedule}`, "at is required"},
+		{"bad cron", `{type: schedule, at: "61 * * * *"}`, "bad at"},
+		{"bad zone", `{type: schedule, at: "@daily", timezone: Mars/Base}`, "bad timezone"},
+		{"bad catch_up", `{type: schedule, at: "@daily", catch_up: all}`, "catch_up must be"},
+		{"reserved data", `{type: schedule, at: "@daily", data: {fired_at: x}}`, "reserved"},
+		{"url", `{type: schedule, at: "@daily", url: "http://x"}`, "no url, read, poll"},
+		{"poll", `{type: schedule, at: "@daily", poll: 1m}`, "no url, read, poll"},
+		{"secret", `{type: schedule, at: "@daily", secret: "env:X"}`, "no url, read, poll"},
+		{"at on http", `{type: http, url: "http://x", at: "@daily"}`, "only for type schedule"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := Parse([]byte(base + tc.src))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = c.Validate()
+			if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+				t.Fatalf("want %q, got %v", tc.want, err)
+			}
+			if s := c.Sources["s"]; s.Type == "schedule" && (s.Polled() || (tc.want == "" && s.Poll != 0)) {
+				t.Fatal("schedule must not be polled")
+			}
+		})
+	}
+}
+
+func TestScheduleAgentWarning(t *testing.T) {
+	for at, want := range map[string]bool{"every 5m": true, "*/10 * * * *": true, "0 * * * *": false, "@daily": false} {
+		c, err := Parse([]byte("agents:\n  a: { prompt: hi }\nsources:\n  s: { type: schedule, at: \"" + at + "\" }\nrules:\n  - { name: r, source: s, when: \"true\", cooldown: 1m, action: { agent: a } }\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := slices.ContainsFunc(c.Warnings(), func(w string) bool { return strings.Contains(w, "agent_runs_per_day") })
+		if got != want {
+			t.Errorf("%s: warning=%v want %v", at, got, want)
+		}
+	}
+}
+
+func TestScheduleRuleDefaultsToEach(t *testing.T) {
+	y := "sources:\n  s: { type: schedule, at: \"@daily\" }\nrules:\n  - { name: a, source: s, when: \"true\", action: { cmd: [x] } }\n  - { name: b, source: s, when: \"true\", on: edge, action: { cmd: [x] } }\n"
+	c, err := Parse([]byte(y))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if r := c.Rules[0]; r.On != "each" || r.ID != "event.scheduled_at" {
+		t.Errorf("default: %+v", r)
+	}
+	w := strings.Join(c.Warnings(), "\n")
+	if !strings.Contains(w, "rule b: on: edge on schedule source s") || strings.Contains(w, "rule a:") {
+		t.Errorf("warnings: %s", w)
+	}
+}
+
+func TestScheduleKeyedByInstant(t *testing.T) {
+	for at, want := range map[string]bool{"@every 5m": true, "every 2h": true, "*/5 * * * *": true, "30 1 * * *": false, "0 * * * *": false, "@daily": false} {
+		sc, err := ParseSchedule(at)
+		if err != nil {
+			t.Fatal(at, err)
+		}
+		if got := ScheduleKeyedByInstant(sc); got != want {
+			t.Errorf("%s: %v want %v", at, got, want)
 		}
 	}
 }

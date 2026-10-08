@@ -29,6 +29,7 @@ baseline in **`siphon.yaml`**.
 |---|---|---|
 | run something when a webhook arrives | [webhook-command](tasks/webhook-command.md) | `webhook-command`, `webhook-to-ntfy`, `service-failed`, `homeassistant-event`, `standard-webhooks` |
 | act when a value crosses a threshold | [poll-threshold](tasks/poll-threshold.md) | `disk-full`, `upstream-status` |
+| run something at set times | [schedule](tasks/schedule.md) | `weekday-standup`, `weekly-digest`, `nightly-report` |
 | have an agent review pull requests | [github-pr-agent](tasks/github-pr-agent.md) | `github-pr-review`, `github-ci-failure`, `github-issue-triage`, `gitlab-mr-review` |
 | watch an MCP server | [mcp-watch](tasks/mcp-watch.md) | `mcp-build-watch`, `mcp-task-triage` |
 | chain steps (fetch → summarise → notify) | [routines](tasks/routine.md) | `nightly-report`, `alertmanager-summary` |
@@ -287,6 +288,7 @@ each rule as that flow, and `siphon new task` creates all three at once.
 | `webhook` | when something POSTs to `/hook/<source>`, signed | GitHub, GitLab, EventBridge, any service that calls you |
 | `http` | each `poll:` interval, from a JSON URL | metrics, status pages, REST APIs |
 | `mcp` | each `poll:` interval, from an MCP resource or one read-only tool | CI, task trackers, anything with an MCP server |
+| `schedule` | at set times (`at: "30 7 * * 1-5"`, `@daily`, `every 15m`), in a time zone | reports, reminders, periodic agent checks |
 
 An `mcp` source **without** `read` is never polled. It only gives agents
 tools (for example GitHub's MCP server). An event is JSON. Rules see it as
@@ -393,7 +395,10 @@ source  ──event──▶  rule (when: …)  ──fires──▶  action
 - **Source.** Where events come from:
   - `webhook`: POSTed to `/hook/<name>`, signed;
   - `http`: a polled JSON URL;
-  - `mcp`: a polled MCP resource or read-only tool.
+  - `mcp`: a polled MCP resource or read-only tool;
+  - `schedule`: fires at set times (`at:` cron, `@daily`, `every 15m`,
+    with a `timezone`). Rules on it default to `on: each` with
+    `id: event.scheduled_at`. Test one with `siphon test <rule> --at "<time>"`.
 
   An `mcp` source with no `read` is not polled: it only gives agents tools.
 - **Rule.** `when:` is an expression over `event` (and `item` with
@@ -1723,14 +1728,15 @@ siphon connect github --name gh --token @token.txt --webhook
 
 ### siphon test
 
-Dry-run a rule on an event or the last stored one; or check a service or model connection.
+Dry-run a rule on an event, the last stored one, or (schedule rules) the event for a moment with --at; or check a service or model connection.
 
 ```sh
-siphon test <rule> [event.json|-] [--last] | test service|model <name>
+siphon test <rule> [event.json|-] [--last] [--at <time>] | test service|model <name>
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
+| `--at` |  | schedule rules: test the event for this moment, like "2026-03-02 06:00" (in the source's zone) |
 | `--header` |  | an event header as name=value (repeatable) |
 | `--last` | `false` | use the last event the source produced |
 
@@ -1759,7 +1765,7 @@ siphon why disk-full
 Build a rule (and its source) with a wizard or flags, then dry-run, confirm and apply.
 
 ```sh
-siphon new task [--name n --source s|--webhook w|--poll p --url u ...] [--print]
+siphon new task [--name n --source s|--webhook w|--poll p --url u|--schedule at [--timezone Z] ...] [--print]
 ```
 
 | Flag | Default | Meaning |
@@ -1776,7 +1782,9 @@ siphon new task [--name n --source s|--webhook w|--poll p --url u ...] [--print]
 | `--print` | `false` | only print the YAML, change nothing (pipe it to `siphon apply -f -`) |
 | `--repeat` |  | with --on edge: fire again while true after this long |
 | `--routine` |  | run this existing routine |
+| `--schedule` |  | create a schedule source with this "at": a cron line, @daily, or "every 15m"; the source takes the task's name |
 | `--source` |  | use this existing source |
+| `--timezone` |  | with --schedule: an IANA zone like Europe/London (default: the server's local zone) |
 | `--url` |  | the polled URL, with --poll |
 | `--webhook` |  | create a webhook source with this name (a secret is generated and shown once) |
 | `--when` |  | the condition, an expression over event, headers and item |
@@ -2102,6 +2110,14 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 | [`service-failed`](service-failed.yaml) | Get notified when a systemd service fails | — · webhook secret |
 | [`upstream-status`](upstream-status.yaml) | Know when a provider you depend on has an incident | — |
 
+## Schedules
+
+| Template | What it does | Connect first |
+|---|---|---|
+| [`nightly-report`](nightly-report.yaml) | A nightly report on a schedule: fetch, summarise, notify | `siphon connect model ollama` |
+| [`weekday-standup`](weekday-standup.yaml) | A weekday reminder on a schedule (07:30, Monday to Friday) | — |
+| [`weekly-digest`](weekly-digest.yaml) | A weekly digest on a schedule: every Monday at 09:00 | `siphon connect model ollama` |
+
 ## Notifications & glue
 
 | Template | What it does | Connect first |
@@ -2136,7 +2152,136 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 | Template | What it does | Connect first |
 |---|---|---|
 | [`homeassistant-event`](homeassistant-event.yaml) | React to a Home Assistant event | — · webhook secret |
-| [`nightly-report`](nightly-report.yaml) | A nightly report: fetch, summarise, notify | `siphon connect model ollama` · webhook secret |
+
+
+---
+
+<!-- file: docs/tasks/schedule.md -->
+
+# Run a task on a schedule
+
+**Goal:** run a command, a routine or an agent at set times (every weekday
+at 07:30, every Monday at 09:00, every 15 minutes) without a host timer.
+
+## CLI
+
+```sh
+siphon new task --name standup --schedule "30 7 * * 1-5" --timezone Europe/London \
+  --cmd '["curl","-fsS","-d","Standup in 30 minutes","https://ntfy.sh/your-topic"]' --yes
+```
+
+Or start from a template:
+
+```sh
+siphon template weekday-standup     # 07:30 on weekdays, a command
+siphon template weekly-digest       # Mondays 09:00: fetch → local-model summary → phone
+siphon template nightly-report      # every day 06:00, a routine
+```
+
+**Test without waiting** for the clock:
+
+```sh
+siphon test standup --at "2026-10-12 07:30"     # builds the event for that moment, runs nothing
+siphon why standup                               # shows the next and last run
+```
+
+## Writing `at:`
+
+| `at:` | Runs |
+|---|---|
+| `"30 7 * * 1-5"` | 07:30, Monday to Friday |
+| `"0 9 * * 1"` | 09:00 every Monday |
+| `"0 6 * * *"` | 06:00 every day |
+| `"0 */4 * * *"` | every 4 hours, on the hour |
+| `"0 0 1 * *"` | midnight on the 1st of each month |
+| `"@daily"`, `"@hourly"`, `"@weekly"`, `"@monthly"` | the usual shortcuts |
+| `"every 15m"` | every 15 minutes, from when the source started (at least 1m, including `@every …`) |
+
+The five fields are *minute hour day-of-month month day-of-week*
+(standard cron, no seconds field). Set the zone with `timezone:`; a
+`TZ=`/`CRON_TZ=` prefix in `at` is refused.
+
+## The source
+
+```yaml
+sources:
+  weekly:
+    type: schedule
+    at: "0 9 * * 1"
+    timezone: Europe/London       # IANA name; default: the host's zone
+    catch_up: latest              # latest (default) | none
+    data: { kind: weekly-digest } # optional, merged into the event
+```
+
+The event a rule sees:
+
+```json
+{"schedule": "0 9 * * 1", "timezone": "Europe/London", "scheduled_at": "2026-10-12T09:00:00+01:00",
+ "fired_at": "2026-10-12T09:00:00.04+01:00", "catch_up": false, "kind": "weekly-digest"}
+```
+
+A rule on a schedule source defaults to `on: each` with
+`id: event.scheduled_at`: each scheduled moment fires **once**, even if
+Siphon restarts. `event.schedule` is the `at` expression.
+
+**`data`:**
+- It lets one schedule feed several rules
+  (`when: 'event.kind == "weekly-digest"'`).
+- It's plain text, stored with the event and shown in the portal, so never
+  put a token in it.
+- It's capped at 16 KiB.
+
+## Missed runs
+
+If Siphon was down at a scheduled time:
+
+- **`catch_up: latest`** (the default) runs the **most recent** missed time
+  once, when Siphon starts, with `event.catch_up: true`. Older missed
+  times are skipped, and recorded in the audit (`schedule_skipped`).
+- **`catch_up: none`** skips them all, and records that too. A moment
+  that's less than 2 minutes late at start-up still runs; that's a
+  restart, not an outage.
+
+A new schedule never fires for times before it existed. That includes its
+first moment, if Siphon was down when it came round. After a suspend or a
+clock jump, Siphon notices within a minute, and handles the missed moment
+by the same rule.
+
+## Time zones and daylight saving
+
+Times are in the source's `timezone`. Around clock changes:
+
+- **In spring,** a time inside the skipped hour doesn't run that day.
+  For example `30 1 * * *` in Europe/London on the last Sunday of March.
+- **In autumn,** a schedule that runs hourly or less often runs **once** in
+  the repeated hour. One that runs more often (for example `*/5 * * * *`
+  or `every 10m`) keeps every real interval, so it runs through both
+  passes of the hour.
+
+If a job must run every day without exception, use `timezone: UTC`, or a
+time outside 01:00–03:00.
+
+## Agents on a schedule
+
+Agents cost money or local compute. Siphon warns when an agent would run
+more often than every 15 minutes. `limits.agent_runs_per_day`,
+`cooldown` and approvals (on by default) still apply.
+
+## Verify
+
+- **Portal:** **Sources** shows each schedule's **next run** and last run,
+  in its time zone. **Jobs** shows each run.
+- **CLI:** `siphon get sources` (the NEXT column) and `siphon why <rule>`
+  (schedule, next run, last run, and whether a run was missed).
+
+## Troubleshooting
+
+- **It didn't run at the expected time:** check `timezone` in `siphon
+  why`. The default is the host's zone.
+- **It ran once and never again:** the rule has an explicit `on: edge`.
+  Remove it (schedule rules default to `on: each`).
+- **It ran late after a restart:** that's `catch_up: latest` doing its
+  job. Set `catch_up: none` if a late run is worse than no run.
 
 
 ---
@@ -2546,20 +2691,18 @@ credentials:
 <!-- file: docs/templates/nightly-report.yaml -->
 
 ```yaml
-# title:    A nightly report: fetch, summarise, notify
-# category: Homelab
+# title:    A nightly report on a schedule: fetch, summarise, notify
+# category: Schedules
 # needs:    credentials/ollama-local               (siphon connect model ollama)
-# secrets:  sources/timer.secret
-# apply:    siphon apply -f nightly-report.yaml --secret sources/timer.secret=-
-# Siphon has no clock source; a systemd timer posts the webhook (NixOS):
-#   systemd.timers.siphon-nightly = { wantedBy = ["timers.target"]; timerConfig.OnCalendar = "06:00"; };
-#   systemd.services.siphon-nightly.script = ''${pkgs.curl}/bin/curl -fsS -H "X-Siphon-Key: $(cat /run/secrets/siphon-timer)"
-#     -d "{"kind":"nightly","day":"$(date +%F)"}" https://<siphon>/hook/timer'';
+# apply:    siphon apply -f nightly-report.yaml
+# Runs every day at 06:00 in the given time zone; no host timer needed. If
+# Siphon was down at 06:00, the missed run fires once when it starts
+# (catch_up: latest).
 sources:
-  timer:
-    type: webhook
-    signature: token
-    token_header: X-Siphon-Key
+  nightly:
+    type: schedule
+    at: "0 6 * * *"
+    timezone: Europe/London
 agents:
   reporter:
     kind: model
@@ -2568,7 +2711,7 @@ agents:
     prompt: "Summarise these numbers for a morning report, in three lines."
     max_turns: 2
     timeout: 5m
-    approve: false
+    approve: false                  # a read-only summary; nothing acts on it
 routines:
   nightly:
     steps:
@@ -2577,10 +2720,10 @@ routines:
       - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: Morning report", -d, "{{.steps.summary.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
 rules:
   - name: nightly
-    source: timer
-    when: 'event.kind == "nightly"'
+    source: nightly
+    when: 'true'
     on: each
-    id: event.day                   # once per day, even if the timer fires twice
+    id: event.scheduled_at          # one run per scheduled moment, even across restarts
     cooldown: 1h
     action: { routine: nightly }
 ```
@@ -2747,4 +2890,74 @@ rules:
     id: event.title + event.message
     action:
       cmd: [curl, -fsS, -H, "Title: {{.event.title}}", -d, "{{.event.message}}", https://ntfy.sh/siphon-CHANGE-ME]
+```
+
+
+---
+
+<!-- file: docs/templates/weekday-standup.yaml -->
+
+```yaml
+# title:    A weekday reminder on a schedule (07:30, Monday to Friday)
+# category: Schedules
+# apply:    siphon apply -f weekday-standup.yaml
+# The simplest schedule: a command at set times. Swap the action for an
+# agent or a routine once it works. Test it without waiting:
+#   siphon test standup-reminder --at "2026-10-12 07:30"
+sources:
+  weekdays:
+    type: schedule
+    at: "30 7 * * 1-5"
+    timezone: Europe/London
+rules:
+  - name: standup-reminder
+    source: weekdays
+    when: 'true'
+    on: each
+    id: event.scheduled_at
+    action:
+      cmd: [curl, -fsS, -H, "Title: Standup in 30 minutes", -d, "Notes: https://wiki.example.com/standup", https://ntfy.sh/siphon-CHANGE-ME]
+```
+
+
+---
+
+<!-- file: docs/templates/weekly-digest.yaml -->
+
+```yaml
+# title:    A weekly digest on a schedule: every Monday at 09:00
+# category: Schedules
+# needs:    credentials/ollama-local               (siphon connect model ollama)
+# apply:    siphon apply -f weekly-digest.yaml
+# The URL should return JSON for last week (for example a metrics or
+# ticket-count endpoint). The summary is pushed to your phone with ntfy.
+sources:
+  weekly:
+    type: schedule
+    at: "0 9 * * 1"
+    timezone: Europe/London
+    data: { kind: weekly-digest }
+agents:
+  digest-writer:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: "Write a five-bullet weekly digest from this data. Lead with what changed."
+    max_turns: 2
+    timeout: 5m
+    approve: false                  # a read-only summary
+routines:
+  weekly-digest:
+    steps:
+      - { id: fetch, cmd: [curl, -fsS, https://metrics.example.com/api/last-week], retry: { attempts: 3, base: 10s, factor: 2 } }
+      - { id: digest, agent: digest-writer, if: 'steps.fetch.exit == 0', timeout: 5m }
+      - { id: notify, if: 'steps.digest.exit == 0', cmd: [curl, -fsS, -H, "Title: Weekly digest", -d, "{{.steps.digest.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+rules:
+  - name: weekly-digest
+    source: weekly
+    when: 'event.kind == "weekly-digest"'
+    on: each
+    id: event.scheduled_at
+    cooldown: 1h
+    action: { routine: weekly-digest }
 ```
