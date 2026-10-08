@@ -226,3 +226,6 @@ Revert the merge.
   - `docs/connections/README.md` is **generated** from the catalogue (`docs/internal/gencatalog`), with a freshness check in `TestGeneratedFilesFresh`.
   - `llm.md`'s workflow starts with `siphon catalog`; the index, AGENTS.md, README and `llms.txt` are updated.
   - **Draft matching:** a word that matches a template's name or title now counts double, so the best template wins over ones that only mention the word in their notes.
+- **Step 8 (Opus):**
+  - The VM subtest connects **Uptime Kuma** (generated token webhook → a real delivery → a done job) and **Slack** (the signing secret from a file; `url_verification` answered with the challenge; a signed `app_mention` → a done job), and checks `/services` lists both.
+  - **The plan's Linear stub was replaced:** faking Linear's HTTPS MCP inside the VM would mostly test the fake, and Linear's connect and test are covered by unit tests against a fake server.

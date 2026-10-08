@@ -803,6 +803,32 @@ pkgs.testers.runNixOSTest {
         why = json.loads(alice("siphon why tick -o json"))
         assert why["source"]["schedule"]["next_run_at"], why
 
+    with subtest("catalogue services: connect from the CLI, verified deliveries (docs/connections)"):
+        import json, hashlib, hmac, time as _t
+        # Uptime Kuma: a token webhook; the generated secret is shown once
+        up = json.loads(alice("siphon connect uptime-kuma --name kuma --no-test -o json"))["connected"]
+        assert up["hook_secret"] and up["hook_url"].endswith("/hook/kuma"), up
+        alice("""siphon new task --name kuma-down --source kuma --when 'event.heartbeat.status == 0' --on each --id 'event.monitor.name' --cmd '["echo","down {{.event.monitor.name}}"]' --yes""")
+        machine.succeed(f"""curl -sf -H 'X-Siphon-Key: {up["hook_secret"]}' -d '{{"heartbeat":{{"status":0}},"monitor":{{"name":"web"}}}}' http://127.0.0.1:8080/hook/kuma""")
+        wait_job("kuma-down", "done")
+        # Slack: the signing secret on stdin; url_verification answered; a signed event fires
+        sec = "slack-signing-secret-vm"
+        machine.succeed(f"printf '%s' {sec} > /tmp/slack.sec && chmod 644 /tmp/slack.sec")
+        alice("siphon connect slack --name slack --signing-secret @/tmp/slack.sec --no-test")
+        def slack_post(body):
+            ts = str(int(_t.time()))
+            sig = "v0=" + hmac.new(sec.encode(), f"v0:{ts}:{body}".encode(), hashlib.sha256).hexdigest()
+            machine.succeed(f"printf '%s' '{body}' > /tmp/slack.body")
+            return machine.succeed(f"curl -s -w ' %{{http_code}}' -H 'X-Slack-Request-Timestamp: {ts}' -H 'X-Slack-Signature: {sig}' --data-binary @/tmp/slack.body http://127.0.0.1:8080/hook/slack").strip()
+        assert slack_post('{"type":"url_verification","challenge":"vm-chal"}') == "vm-chal 200"
+        alice("""siphon new task --name slack-mention --source slack --when 'event.event.type == "app_mention"' --on each --id event.event_id --cmd '["echo","mention"]' --yes""")
+        assert slack_post('{"type":"event_callback","event_id":"Ev1","event":{"type":"app_mention","text":"hi"}}').endswith("202")
+        wait_job("slack-mention", "done")
+        # the portal groups both connections
+        machine.succeed(f"curl -s -c /tmp/svc.jar -o /dev/null --data-urlencode token={TOKEN} http://127.0.0.1:8080/login")
+        page = machine.succeed("curl -sf -b /tmp/svc.jar http://127.0.0.1:8080/services")
+        assert "Uptime Kuma" in page and "Slack" in page and "Explore services" in page
+
     with subtest("a rule created over the config API fires without a restart"):
         import json
         auth = f"-H 'Authorization: Bearer {TOKEN}'"
