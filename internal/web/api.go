@@ -5,8 +5,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/olafkfreund/siphon/internal/store"
 )
@@ -18,6 +20,11 @@ func (s *server) apiRoutes(mux *http.ServeMux) {
 	post := func(path string, f func(r *http.Request) (any, int, error)) {
 		mux.HandleFunc("POST "+path, s.api(func(w http.ResponseWriter, r *http.Request) { s.reply(w, r, f) }))
 	}
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) { jsonErr(w, http.StatusNotFound, "not found") })
+	s.connectionAPI(mux)
+	s.diagAPI(mux)
+	s.inventoryAPI(mux)
+	s.draftAPI(mux)
 	get("/api/sources", func(*http.Request) (any, int, error) { v, err := s.sources(); return v, 200, err })
 	get("/api/rules", func(*http.Request) (any, int, error) { v, err := s.rules(); return v, 200, err })
 	get("/api/jobs", func(r *http.Request) (any, int, error) {
@@ -46,7 +53,18 @@ func (s *server) apiRoutes(mux *http.ServeMux) {
 		return v, 200, err
 	})
 	get("/api/audit", func(r *http.Request) (any, int, error) {
-		v, err := store.ListAudit(s.Store.DB, limit(r))
+		q := r.URL.Query()
+		f := store.AuditFilter{Rule: q.Get("rule"), Event: q.Get("event"), Limit: limit(r)}
+		if v := q.Get("since"); v != "" { // a time (RFC 3339) or how long ago (1h)
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				f.Since = t
+			} else if d, err := time.ParseDuration(v); err == nil && d > 0 {
+				f.Since = s.Now().Add(-d)
+			} else {
+				return nil, 400, errMsg("bad since: want a time like 2026-01-02T15:04:05Z or a duration like 1h")
+			}
+		}
+		v, err := store.QueryAudit(s.Store.DB, f)
 		if v == nil {
 			v = []store.AuditRow{}
 		}
@@ -58,7 +76,11 @@ func (s *server) apiRoutes(mux *http.ServeMux) {
 		if err != nil || (verb != "approve" && verb != "deny") {
 			return nil, 404, errMsg("not found")
 		}
-		if err := s.Decide(id, verb == "approve", "api"); err != nil {
+		actor, aerr := apiActor(r)
+		if aerr != nil {
+			return nil, 400, aerr
+		}
+		if err := s.Decide(id, verb == "approve", actor); err != nil {
 			code, msg := decisionError(err)
 			return nil, code, errMsg(msg)
 		}
@@ -69,7 +91,11 @@ func (s *server) apiRoutes(mux *http.ServeMux) {
 		if (verb != "enable" && verb != "disable") || !s.hasRule(name) {
 			return nil, 404, errMsg("not found")
 		}
-		err := store.SetRuleOverride(s.Store.DB, name, verb == "enable", "api", s.Now())
+		actor, aerr := apiActor(r)
+		if aerr != nil {
+			return nil, 400, aerr
+		}
+		err := store.SetRuleOverride(s.Store.DB, name, verb == "enable", actor, s.Now())
 		return map[string]bool{"ok": true}, 200, err
 	})
 }
@@ -104,23 +130,50 @@ func (s *server) api(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
 		if s.lim.blocked(ip) {
-			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
+			jsonErr(w, http.StatusTooManyRequests, "too many failed attempts")
 			return
 		}
 		tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if !ok || !s.tokenOK(tok) {
 			s.lim.fail(ip)
 			w.Header().Set("WWW-Authenticate", `Bearer realm="siphon"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			jsonErr(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		h(w, r)
 	}
 }
 
+func jsonErr(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// actorLabel is what a caller may call itself in the audit trail.
+var actorLabel = regexp.MustCompile(`^[\w.@:-]{1,64}$`)
+
+// apiActor is "api", or "api:<label>" from X-Siphon-Actor.
+func apiActor(r *http.Request) (string, error) {
+	l := r.Header.Get("X-Siphon-Actor")
+	if l == "" {
+		return "api", nil
+	}
+	if !actorLabel.MatchString(l) {
+		return "", errMsg("bad X-Siphon-Actor")
+	}
+	return "api:" + l, nil
+}
+
 func (s *server) reply(w http.ResponseWriter, r *http.Request, f func(*http.Request) (any, int, error)) {
 	v, code, err := f(r)
 	w.Header().Set("Content-Type", "application/json")
+	var inv errInvalid
+	if errors.As(err, &inv) { // a config the checks refuse: every problem, as a list
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		json.NewEncoder(w).Encode(map[string]any{"error": inv.msg, "errors": inv.list(), "warnings": []string{}})
+		return
+	}
 	if err != nil {
 		msg, ok := err.(errMsg) // only our fixed messages reach clients
 		if !ok {

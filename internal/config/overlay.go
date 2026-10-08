@@ -126,12 +126,14 @@ func Effective(file []byte, items []Item) ([]byte, map[Key]Provenance, error) {
 // LoadWithOverlay is Load with items applied to the file first. Items may only
 // change what the sandbox already bounds (see checkOverlay).
 func LoadWithOverlay(path string, items []Item) (*Config, map[Key]Provenance, error) {
-	return LoadWithOverlayStub(path, items, nil)
+	return LoadWithOverlayStub(path, items, nil, items)
 }
 
 // LoadWithOverlayStub is LoadWithOverlay where stub maps secret refs to
 // stand-in values, for validating items whose secret files are not written yet.
-func LoadWithOverlayStub(path string, items []Item, stub map[string]string) (*Config, map[Key]Provenance, error) {
+// prior is the stored overlay before this change: a legacy-named secret ref
+// stays valid only where the item already had exactly that ref.
+func LoadWithOverlayStub(path string, items []Item, stub map[string]string, prior []Item) (*Config, map[Key]Provenance, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, err
@@ -145,7 +147,7 @@ func LoadWithOverlayStub(path string, items []Item, stub map[string]string) (*Co
 		return nil, nil, err
 	}
 	fileCfg.resolveDB(path)
-	if err := checkOverlay(fileCfg, items, filepath.Join(filepath.Dir(fileCfg.Server.DB), "secrets")); err != nil {
+	if err := checkOverlay(fileCfg, items, prior, filepath.Join(filepath.Dir(fileCfg.Server.DB), "secrets")); err != nil {
 		return nil, nil, err
 	}
 	c, err := parse(eff, stub)
@@ -185,12 +187,22 @@ func hasAnchorOrAlias(n *yaml.Node) bool {
 // set a stdio MCP command, allow private addresses, turn agent egress
 // restriction off, or point a secret at anything but its own stored secret.
 // Each is allowed only if the file's same item already has the same value.
-func checkOverlay(file *Config, items []Item, secretsDir string) error {
+func checkOverlay(file *Config, items, prior []Item, secretsDir string) error {
 	dir := filepath.Clean(secretsDir)
+	priorRefs := map[string]map[string]string{}
+	for _, p := range prior {
+		if !p.Deleted {
+			priorRefs[p.Kind+"/"+p.Name] = itemRefs(p.Kind, p.YAML)
+		}
+	}
+	var errs []error // every problem, not just the first
+	var at string    // the item being checked: each message names it
+	add := func(e error) { errs = append(errs, fmt.Errorf("%s: %w", at, e)) }
 	for _, it := range items {
 		if it.Deleted {
 			continue
 		}
+		at = it.Kind + "/" + it.Name
 		var refs, fileRefs map[string]string
 		moved := false // the item now talks to a different provider or URL than the file's
 		switch it.Kind {
@@ -204,22 +216,22 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 				fs = &Source{}
 			}
 			if len(s.Command) > 0 && !slices.Equal(s.Command, fs.Command) {
-				return errors.New("command (stdio MCP) can only be set in siphon.yaml")
+				add(errors.New("command (stdio MCP) can only be set in siphon.yaml"))
 			}
 			if _, ok := file.Server.MCPPackages[s.Package]; s.Package != "" && !ok {
-				return errors.New("package must be one listed in server.mcp_packages in siphon.yaml")
+				add(errors.New("package must be one listed in server.mcp_packages in siphon.yaml"))
 			}
 			// A package source's keys are bounded by the package; others must match the file's.
 			for _, k := range sortedKeys(s.Env) {
 				if s.Package != "" && !slices.Contains(file.Server.MCPPackages[s.Package].Env, k) {
-					return fmt.Errorf("env name %q is not one of package %q's env", k, s.Package)
+					add(fmt.Errorf("env name %q is not one of package %q's env", k, s.Package))
 				}
 			}
 			if s.Package == "" && !slices.Equal(sortedKeys(s.Env), sortedKeys(fs.Env)) {
-				return errors.New("env names (stdio MCP) can only be set in siphon.yaml; the portal may change their values")
+				add(errors.New("env names (stdio MCP) can only be set in siphon.yaml; the portal may change their values"))
 			}
 			if s.AllowPrivate && !fs.AllowPrivate && !file.ServiceEndpoint(s.URL) {
-				return errors.New("allow_private can only be set in siphon.yaml, or for a host:port listed in server.services.private_endpoints")
+				add(errors.New("allow_private can only be set in siphon.yaml, or for a host:port listed in server.services.private_endpoints"))
 			}
 			moved = !sameEndpoint(s.URL, fs.URL) || s.Package != fs.Package || (len(fs.Command) > 0 && !fs.cmdFromPkg && s.Package != "")
 			refs, fileRefs = sourceRefs(&s), sourceRefs(fs)
@@ -235,11 +247,11 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 			if c.Provider == "aws" {
 				// The daemon's own login is the portal's to spend only on the operator's list.
 				if c.Profile != "" && c.Profile != fc.Profile && !slices.Contains(file.Server.AWS.Profiles, c.Profile) {
-					return fmt.Errorf("profile %s is not in server.aws.profiles in siphon.yaml", c.Profile)
+					add(fmt.Errorf("profile %s is not in server.aws.profiles in siphon.yaml", c.Profile))
 				}
 				ownKeys := c.AccessKeyID.isSet() && c.SecretAccessKey.isSet()
 				if c.RoleARN != "" && c.RoleARN != fc.RoleARN && !ownKeys && !slices.Contains(file.Server.AWS.RoleARNs, c.RoleARN) {
-					return fmt.Errorf("role_arn %s is not in server.aws.role_arns in siphon.yaml; add it there, or give this credential its own access keys", c.RoleARN)
+					add(fmt.Errorf("role_arn %s is not in server.aws.role_arns in siphon.yaml; add it there, or give this credential its own access keys", c.RoleARN))
 				}
 			}
 			moved = c.Provider != fc.Provider || !sameEndpoint(c.URL, fc.URL) ||
@@ -256,24 +268,26 @@ func checkOverlay(file *Config, items []Item, secretsDir string) error {
 				fa = &Agent{}
 			}
 			if a.Egress.Enabled != nil && !*a.Egress.Enabled && (fa.Egress.Enabled == nil || *fa.Egress.Enabled) {
-				return errors.New("egress.enabled: false can only be set in siphon.yaml")
+				add(errors.New("egress.enabled: false can only be set in siphon.yaml"))
 			}
 			// api_key_file is a path the runner reads: treat it as a file ref.
 			refs, fileRefs = map[string]string{"api_key_file": fileRef(a.APIKeyFile)}, map[string]string{"api_key_file": fileRef(fa.APIKeyFile)}
 		default:
 			continue
 		}
-		for path, ref := range refs {
+		for _, path := range sortedKeys(refs) {
+			ref := refs[path]
 			if moved && ref != "" && ref == fileRefs[path] {
 				// Keeping the file's secret is fine, sending it somewhere new is not.
-				return errors.New("this key comes from siphon.yaml and can't be moved to another provider or URL")
+				add(errors.New("this key comes from siphon.yaml and can't be moved to another provider or URL"))
+				continue
 			}
-			if !refAllowed(ref, fileRefs[path], it.Kind, it.Name, dir) {
-				return errors.New("secret refs can only point at this item's stored secrets or keep the value from siphon.yaml")
+			if !refAllowed(ref, fileRefs[path], priorRefs[it.Kind+"/"+it.Name][path], it.Kind, it.Name, path, dir) {
+				add(errors.New("secret refs can only point at this item's stored secrets or keep the value from siphon.yaml"))
 			}
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // lookupHost resolves model endpoint hosts; tests replace it.
@@ -349,9 +363,49 @@ func sourceRefs(s *Source) map[string]string {
 	return m
 }
 
+// itemRefs are an item's secret refs by field path (as checkOverlay sees them).
+func itemRefs(kind, y string) map[string]string {
+	switch kind {
+	case "sources":
+		var s Source
+		if yaml.Unmarshal([]byte(y), &s) == nil {
+			return sourceRefs(&s)
+		}
+	case "credentials":
+		var c Credential
+		if yaml.Unmarshal([]byte(y), &c) == nil {
+			return map[string]string{"api_key": c.APIKey.Ref, "access_key_id": c.AccessKeyID.Ref, "secret_access_key": c.SecretAccessKey.Ref}
+		}
+	case "agents":
+		var a Agent
+		if yaml.Unmarshal([]byte(y), &a) == nil {
+			return map[string]string{"api_key_file": fileRef(a.APIKeyFile)}
+		}
+	}
+	return nil
+}
+
+// SecretFileName is the file name of a pasted secret. It is injective: kinds
+// have no "-", item names have no "+", and the field path is escaped to
+// [A-Za-z0-9_.-] plus %XX, so no item can name another item's file.
+func SecretFileName(kind, name, field string) string {
+	var b strings.Builder
+	for i := 0; i < len(field); i++ {
+		c := field[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '.' || c == '-' {
+			b.WriteByte(c)
+		} else {
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return kind + "--" + name + "+" + b.String()
+}
+
 // refAllowed: not a ref at all (Validate rejects inline values), the same ref
-// the file has at this path, or a file in dir named <kind>-<name>-*.
-func refAllowed(ref, fileRef, kind, name, dir string) bool {
+// the file has at this path, exactly this item's stored secret for this field,
+// or (legacy) the very ref the item already had, if it is an old-scheme
+// <kind>-<name>-* file in dir.
+func refAllowed(ref, fileRef, priorRef, kind, name, field, dir string) bool {
 	if !strings.HasPrefix(ref, "env:") && !strings.HasPrefix(ref, "file:") {
 		return true
 	}
@@ -359,7 +413,13 @@ func refAllowed(ref, fileRef, kind, name, dir string) bool {
 		return true
 	}
 	p, ok := strings.CutPrefix(ref, "file:")
-	return ok && p == filepath.Clean(p) && filepath.Dir(p) == dir && strings.HasPrefix(filepath.Base(p), kind+"-"+name+"-")
+	if !ok || p != filepath.Clean(p) || filepath.Dir(p) != dir {
+		return false
+	}
+	if filepath.Base(p) == SecretFileName(kind, name, field) {
+		return true
+	}
+	return ref == priorRef && strings.HasPrefix(filepath.Base(p), kind+"-"+name+"-")
 }
 
 func mapGet(m *yaml.Node, key string) *yaml.Node {

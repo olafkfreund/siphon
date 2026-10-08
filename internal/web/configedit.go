@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -27,6 +28,9 @@ var (
 type errInvalid struct{ msg string }
 
 func (e errInvalid) Error() string { return e.msg }
+
+// list is every problem: errors.Join separates them with newlines.
+func (e errInvalid) list() []string { return strings.Split(e.msg, "\n") }
 
 type itemKey = config.Key
 
@@ -140,7 +144,7 @@ func (s *server) prepare(cur []store.ConfigItem, mutate func(map[itemKey]store.C
 	for _, p := range pending {
 		stub["file:"+p.path(secretsDir(s.Config().Server.DB))] = "placeholder"
 	}
-	cfg, _, err := config.LoadWithOverlayStub(s.ConfigPath, toItems(next), stub)
+	cfg, _, err := config.LoadWithOverlayStub(s.ConfigPath, toItems(next), stub, toItems(cur))
 	if err != nil {
 		return nil, errInvalid{err.Error()}
 	}
@@ -152,6 +156,52 @@ func (s *server) prepare(cur []store.ConfigItem, mutate func(map[itemKey]store.C
 		return nil, err
 	}
 	return &edit{items: next, diff: unifiedDiff(string(before), string(after)), cfg: cfg}, nil
+}
+
+// dryRun is prepare under the edit lock with the same stale check as commit:
+// nothing is stored, written or applied.
+func (s *server) dryRun(rev *int64, mutate func(map[itemKey]store.ConfigItem), pending []pendingSecret) (*edit, error) {
+	s.editMu.Lock()
+	defer s.editMu.Unlock()
+	cur, latest, err := s.overlay()
+	if err != nil {
+		return nil, err
+	}
+	if rev != nil && *rev != latest {
+		return nil, errStale
+	}
+	e, err := s.prepare(cur, mutate, pending)
+	if err == nil {
+		_, err = s.credsCheck(cur, e.items)
+	}
+	return e, err
+}
+
+// credsCheck reports whether a credentials item changed. Items a save changes
+// are checked for private model endpoints (DNS); loading never does, so a name
+// that later turns private can't break startup.
+func (s *server) credsCheck(cur, next []store.ConfigItem) (changed bool, err error) {
+	for _, c := range next {
+		if c.Kind != "credentials" {
+			continue
+		}
+		var prev *store.ConfigItem
+		for i := range cur {
+			if cur[i].Kind == c.Kind && cur[i].Name == c.Name {
+				prev = &cur[i]
+			}
+		}
+		if prev != nil && prev.YAML == c.YAML && prev.Deleted == c.Deleted {
+			continue
+		}
+		changed = true
+		if !c.Deleted {
+			if cerr := s.Config().CheckModelEndpoint(c.YAML); cerr != nil {
+				return changed, errInvalid{cerr.Error()}
+			}
+		}
+	}
+	return changed, nil
 }
 
 // commit validates, then stores the changed overlay rows, a revision and an
@@ -171,39 +221,36 @@ func (s *server) commit(actor, summary string, rev *int64, mutate func(map[itemK
 	if e, err = s.prepare(cur, mutate, pending); err != nil {
 		return 0, nil, nil, err
 	}
-	// Items this save changes are checked for private model endpoints (DNS);
-	// loading never does, so a name that later turns private can't break startup.
-	credsChanged := false
-	for _, c := range e.items {
-		if c.Kind != "credentials" {
-			continue
-		}
-		var prev *store.ConfigItem
-		for i := range cur {
-			if cur[i].Kind == c.Kind && cur[i].Name == c.Name {
-				prev = &cur[i]
-			}
-		}
-		if prev != nil && prev.YAML == c.YAML && prev.Deleted == c.Deleted {
-			continue
-		}
-		credsChanged = true
-		if !c.Deleted {
-			if cerr := s.Config().CheckModelEndpoint(c.YAML); cerr != nil {
-				return 0, nil, nil, errInvalid{cerr.Error()}
-			}
-		}
+	credsChanged, err := s.credsCheck(cur, e.items)
+	if err != nil {
+		return 0, nil, nil, err
 	}
-	// Only now, with the revision current and the candidate valid, touch disk.
+	// Only now, with the revision current and the candidate valid, touch disk:
+	// stage the secrets under temp names, publish them once the transaction
+	// has committed, and remove them on any failure before that.
+	type staged struct{ tmp, final string }
+	var stagedFiles []staged
+	published := false
+	defer func() {
+		if !published {
+			for _, f := range stagedFiles {
+				os.Remove(f.tmp)
+			}
+		}
+	}()
 	if len(pending) > 0 {
 		dir := secretsDir(s.Config().Server.DB)
+		real := map[string]string{}
 		for _, p := range pending {
-			if err = writeSecret(dir, p); err != nil {
-				return 0, nil, nil, err
+			tmp, serr := stageSecret(dir, p)
+			if serr != nil {
+				return 0, nil, nil, serr
 			}
+			stagedFiles = append(stagedFiles, staged{tmp, p.path(dir)})
+			real["file:"+p.path(dir)] = strings.TrimSpace(p.Value)
 		}
-		// Re-load for real: the candidate above resolved stand-in values.
-		cfg, _, lerr := config.LoadWithOverlay(s.ConfigPath, toItems(e.items))
+		// Re-load with the real values (not on disk until the commit).
+		cfg, _, lerr := config.LoadWithOverlayStub(s.ConfigPath, toItems(e.items), real, toItems(cur))
 		if lerr == nil {
 			lerr = cfg.Validate()
 		}
@@ -249,6 +296,12 @@ func (s *server) commit(actor, summary string, rev *int64, mutate func(map[itemK
 	}
 	if err = tx.Commit(); err != nil {
 		return 0, nil, nil, err
+	}
+	published = true
+	for _, f := range stagedFiles {
+		if err = publishSecret(f.tmp, f.final); err != nil {
+			return 0, nil, nil, err
+		}
 	}
 	if credsChanged || len(pending) > 0 { // a rotated key keeps its ref
 		modelCache.clear()

@@ -1,0 +1,29 @@
+# title:    Review every new pull request with an agent
+# category: Code review & CI
+# needs:    sources/github, sources/github-hooks   (siphon connect github --webhook)
+#           credentials/claude-max                 (siphon connect login claude)
+# apply:    siphon apply -f github-pr-review.yaml
+# The agent reads the PR through GitHub's MCP server (read-only tools) and
+# reports findings in the job output. Approval is on: you decide each run.
+agents:
+  pr-reviewer:
+    kind: claude
+    credential: claude-max
+    prompt: |
+      Review pull request #{{.event.number}} in {{.event.repository.full_name}}
+      ("{{.event.pull_request.title}}"). Read the diff, then reply with a short
+      list of concrete findings (bugs, missing tests, risky changes). Never push,
+      merge, comment or approve.
+    mcp: [github]
+    allowed_tools: [mcp__github__get_pull_request, mcp__github__get_pull_request_diff, mcp__github__get_pull_request_files]
+    max_turns: 15
+    max_budget_usd: 1
+    timeout: 15m
+rules:
+  - name: review-new-prs
+    source: github-hooks
+    when: 'headers["x-github-event"] == "pull_request" && event.action in ["opened", "ready_for_review"] && !event.pull_request.draft'
+    on: each
+    id: event.pull_request.id
+    cooldown: 1m
+    action: { agent: pr-reviewer }

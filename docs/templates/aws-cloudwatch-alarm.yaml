@@ -1,0 +1,29 @@
+# title:    Investigate CloudWatch alarms with an agent (EventBridge)
+# category: AWS
+# needs:    sources/aws-cloudwatch, sources/aws-hooks  (siphon connect aws --name aws --servers cloudwatch --webhook)
+#           credentials/claude-max                     (siphon connect login claude)
+# apply:    siphon apply -f aws-cloudwatch-alarm.yaml
+# In EventBridge: a rule on "CloudWatch Alarm State Change" targeting the API
+# destination that `siphon connect aws` printed (header X-Siphon-Key).
+agents:
+  alarm-investigator:
+    kind: claude
+    credential: claude-max
+    prompt: |
+      CloudWatch alarm "{{.event.detail.alarmName}}" went to ALARM in {{.event.region}}:
+      {{.event.detail.state.reason}}
+      Look at the alarm's history and the related log groups, then explain the likely
+      cause in five lines. Read only.
+    mcp: [aws-cloudwatch]
+    allowed_tools: [mcp__aws-cloudwatch__get_active_alarms, mcp__aws-cloudwatch__get_alarm_history, mcp__aws-cloudwatch__describe_log_groups, mcp__aws-cloudwatch__execute_log_insights_query, mcp__aws-cloudwatch__get_logs_insight_query_results]
+    max_turns: 20
+    max_budget_usd: 1
+    timeout: 20m                    # 55m at most with an AWS source
+rules:
+  - name: alarm-fired
+    source: aws-hooks
+    when: 'event["detail-type"] == "CloudWatch Alarm State Change" && event.detail.state.value == "ALARM"'
+    on: each
+    id: event.id
+    cooldown: 5m
+    action: { agent: alarm-investigator }

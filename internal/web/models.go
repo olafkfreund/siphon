@@ -83,11 +83,11 @@ func (s *server) addModelConn(actor, name, presetID, rawURL, key string) error {
 
 // connTest is the result of listing a connection's models.
 type connTest struct {
-	Name    string
-	Models  []string
-	Latency string
-	Err     string
-	At      time.Time
+	Name    string    `json:"name"`
+	Models  []string  `json:"models"`
+	Latency string    `json:"latency,omitempty"`
+	Err     string    `json:"error,omitempty"`
+	At      time.Time `json:"at"`
 }
 
 // modelCache keeps each connection's model list for a minute.

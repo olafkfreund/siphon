@@ -27,7 +27,7 @@
           pname = "siphon";
           version = self.shortRev or "dev";
           src = self;
-          vendorHash = "sha256-rmZZpQN3fAQtM4nMgRhrHD0xLcOjBdzLeGD8WwCI1Fs=";
+          vendorHash = "sha256-0OBGRYF/chtZqp/s5K0QMnw5fmpdVEDYnftdRuJC9tI=";
           env.CGO_ENABLED = 0;
           subPackages = [ "cmd/siphon" ];
           ldflags = [
@@ -82,6 +82,31 @@
           done
           touch $out
         '';
+        # cli.enable (default) puts siphon on PATH with SIPHON_URL at the daemon's port.
+        cli-module =
+          let
+            sys = nixpkgs.lib.nixosSystem {
+              inherit (pkgs.stdenv.hostPlatform) system;
+              modules = [
+                self.nixosModules.default
+                {
+                  boot.loader.grub.enable = false;
+                  fileSystems."/" = {
+                    device = "none";
+                    fsType = "tmpfs";
+                  };
+                  system.stateVersion = "26.05";
+                  services.siphon = {
+                    enable = true;
+                    settings.server.listen = "127.0.0.1:8099";
+                  };
+                }
+              ];
+            };
+          in
+          assert sys.config.environment.variables.SIPHON_URL == "http://127.0.0.1:8099";
+          assert builtins.elem sys.config.services.siphon.package sys.config.environment.systemPackages;
+          pkgs.runCommand "cli-module-ok" { } "touch $out";
         # aws.enable adds both AWS servers next to github, with {region} hosts,
         # and aws.configFile reaches the service.
         aws-module =

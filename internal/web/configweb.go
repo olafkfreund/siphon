@@ -351,7 +351,7 @@ func (s *server) histRestore(w http.ResponseWriter, r *http.Request, _ string) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	if err := s.restore(id, &cur); err != nil {
+	if err := s.restore("portal", id, &cur); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return
@@ -363,7 +363,7 @@ func (s *server) histRestore(w http.ResponseWriter, r *http.Request, _ string) {
 }
 
 // restore replaces the overlay with revision id's snapshot, as a new revision.
-func (s *server) restore(id int64, rev *int64) error {
+func (s *server) restore(actor string, id int64, rev *int64) error {
 	old, err := store.Revision(s.Store.DB, id)
 	if err != nil {
 		return err
@@ -372,7 +372,7 @@ func (s *server) restore(id int64, rev *int64) error {
 	if err := json.Unmarshal([]byte(old.ItemsJSON), &snap); err != nil {
 		return errInvalid{"revision snapshot is unreadable"}
 	}
-	_, _, _, err = s.commit("portal", fmt.Sprintf("restored revision %d", id), rev, func(m map[itemKey]store.ConfigItem) {
+	_, _, _, err = s.commit(actor, fmt.Sprintf("restored revision %d", id), rev, func(m map[itemKey]store.ConfigItem) {
 		clear(m)
 		for _, c := range snap {
 			m[itemKey{Kind: c.Kind, Name: c.Name}] = c

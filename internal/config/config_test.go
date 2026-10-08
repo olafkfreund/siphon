@@ -801,3 +801,49 @@ func TestBridgeEgressHosts(t *testing.T) {
 		t.Errorf("bridge hosts %v", hosts)
 	}
 }
+
+// A rule that reads a provider's header needs that provider's webhook.
+func TestProviderMismatchWarnings(t *testing.T) {
+	cfg, err := Parse([]byte(`
+server: { sandbox: none }
+sources:
+  github-hooks: { type: webhook, signature: github, secret: env:X }
+  gitlab-hooks: { type: webhook, signature: token, token_header: X-Gitlab-Token, secret: env:X }
+  hello-hook: { type: webhook, signature: token, token_header: X-Key, secret: env:X }
+  plain: { type: webhook, signature: sha256, secret: env:X }
+rules:
+  - { name: gh-ok, source: github-hooks, when: 'headers["x-github-event"] == "pull_request"', action: { cmd: [x] } }
+  - { name: gh-bad, source: hello-hook, when: 'headers["x-github-event"] == "pull_request"', action: { cmd: [x] } }
+  - { name: gl-ok, source: gitlab-hooks, when: 'headers["x-gitlab-event"] == "Merge Request Hook"', action: { cmd: [x] } }
+  - { name: gl-bad, source: github-hooks, when: 'headers["x-gitlab-event"] != ""', action: { cmd: [x] } }
+  - { name: aws-ok, source: hello-hook, when: 'event["detail-type"] == "CloudWatch Alarm State Change"', action: { cmd: [x] } }
+  - { name: aws-bad, source: plain, when: 'event["detail-type"] != ""', action: { cmd: [x] } }
+  - { name: fine, source: plain, when: 'true', action: { cmd: [x] } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, w := range cfg.Warnings() {
+		if strings.HasPrefix(w, "rules/") {
+			got = append(got, w)
+		}
+	}
+	want := map[string]string{
+		"gh-bad":  "reads GitHub's X-GitHub-Event header but source hello-hook is not a GitHub webhook (signature: github); run `siphon connect github --webhook` and use its github-hooks source",
+		"gl-bad":  "reads GitLab's X-Gitlab-Event header but source github-hooks is not a GitLab webhook",
+		"aws-bad": "reads EventBridge's detail-type but source plain is not a token webhook",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%d warnings: %v", len(got), got)
+	}
+	for rule, text := range want {
+		found := false
+		for _, g := range got {
+			found = found || g == "rules/"+rule+": "+text || strings.HasPrefix(g, "rules/"+rule+": ") && strings.Contains(g, text)
+		}
+		if !found {
+			t.Errorf("no warning for %s: %v", rule, got)
+		}
+	}
+}

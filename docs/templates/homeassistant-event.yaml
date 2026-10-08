@@ -1,0 +1,22 @@
+# title:    React to a Home Assistant event
+# category: Homelab
+# secrets:  sources/home.secret
+# apply:    siphon apply -f homeassistant-event.yaml --secret sources/home.secret=-
+# Home Assistant configuration.yaml:
+#   rest_command:
+#     siphon: { url: https://<siphon>/hook/home, method: POST, content_type: application/json,
+#               headers: { X-Siphon-Key: !secret siphon_key }, payload: '{"entity":"{{ entity }}","state":"{{ state }}"}' }
+# Then call rest_command.siphon from an automation.
+sources:
+  home:
+    type: webhook
+    signature: token
+    token_header: X-Siphon-Key
+rules:
+  - name: front-door-open-at-night
+    source: home
+    when: 'event.entity == "binary_sensor.front_door" && event.state == "on" && now().Hour() >= 23'
+    on: each
+    id: event.entity + string(now().Unix() / 300)
+    action:
+      cmd: [curl, -fsS, -H, "Title: Front door", -d, "Opened late at night", https://ntfy.sh/siphon-CHANGE-ME]

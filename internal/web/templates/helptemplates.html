@@ -1,0 +1,17 @@
+{{define "helptemplates"}}{{with .Gallery}}<div class="helplayout">
+{{template "helpnav" .Nav}}
+<div class="gallery"><div class="top"><div><h1>Templates</h1><div class="muted">{{.Total}} ready-made tasks. Copy one, or run <code>siphon template &lt;name&gt;</code>.</div></div></div>
+{{range .Groups}}<h2 id="cat-{{.Category}}">{{.Category}}</h2>
+<div class="stack">{{range .Items}}<section class="card tpl" id="{{.Name}}" aria-labelledby="h-{{.Name}}">
+  <div class="top tight"><h3 id="h-{{.Name}}">{{.Title}}</h3><span class="sp"></span><code class="chip">{{.Name}}</code></div>
+  {{if .Needs}}<div class="small"><span class="muted">Connect first:</span> {{range .Needs}}{{if .Href}}<a class="chip" href="{{.Href}}">{{.Ref}}</a>{{else}}<code class="chip">{{.Ref}}</code>{{end}} {{end}}</div>{{end}}
+  {{if .Secrets}}<div class="small"><span class="muted">Secrets to pass:</span> {{range .Secrets}}<code class="chip">{{.}}</code> {{end}}</div>{{end}}
+  {{if .Notes}}<pre class="notes">{{.Notes}}</pre>{{end}}
+  <div class="top tight"><b class="small">YAML</b><span class="sp"></span><button type="button" class="btn sm" data-action="copy" data-target="y-{{.Name}}">{{template "icon" "copy"}}Copy</button></div>
+  <pre class="yaml" id="y-{{.Name}}">{{.YAML}}</pre>
+  <div class="cmds">
+    <div><code id="p-{{.Name}}">{{.Print}}</code> <button type="button" class="btn sm" data-action="copy" data-target="p-{{.Name}}">{{template "icon" "copy"}}Copy</button></div>
+    <div><code id="a-{{.Name}}">{{.Apply}}</code> <button type="button" class="btn sm" data-action="copy" data-target="a-{{.Name}}">{{template "icon" "copy"}}Copy</button></div>
+  </div>
+</section>{{end}}</div>{{end}}
+</div></div>{{end}}{{end}}

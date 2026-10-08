@@ -121,16 +121,22 @@ func prettyJSON(raw string) string {
 // testView is the live tester's answer. The tester evaluates a candidate rule
 // against an event on a throwaway in-memory store: nothing is enqueued, run or applied.
 type testView struct {
-	Err      string
-	NoEvent  bool
-	Event    string
-	Fires    []testFire
-	Approval bool
+	Err      string     `json:"error,omitempty"`
+	NoEvent  bool       `json:"no_event,omitempty"`
+	Event    string     `json:"event,omitempty"` // redacted, as shown
+	Fires    []testFire `json:"fires"`
+	Approval bool       `json:"needs_approval"`
 }
 
 type testFire struct {
-	Key, Kind, Target, Info, Prompt, Err string
-	Argv                                 []string
+	Key    string   `json:"key"`
+	Item   any      `json:"item,omitempty"` // the for_each item, redacted
+	Kind   string   `json:"kind,omitempty"`
+	Target string   `json:"target,omitempty"`
+	Info   string   `json:"info,omitempty"`
+	Prompt string   `json:"prompt,omitempty"`
+	Err    string   `json:"error,omitempty"`
+	Argv   []string `json:"argv,omitempty"`
 }
 
 func (s *server) ruleTest(w http.ResponseWriter, r *http.Request, _ string) {
@@ -198,10 +204,17 @@ func (s *server) runRuleTest(r *http.Request) *testView {
 			return tv
 		}
 	}
+	return ruleTest(r.Context(), cfg, rl, data, headers)
+}
+
+// ruleTest evaluates rl against one event on a throwaway store and renders
+// what each fire would do. Nothing is enqueued, run or applied.
+func ruleTest(ctx context.Context, cfg *config.Config, rl config.Rule, data any, headers map[string]string) *testView {
+	tv := &testView{Fires: []testFire{}}
 	if b, err := json.MarshalIndent(store.RedactKeys(data), "", "  "); err == nil {
 		tv.Event = string(b)
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	fires, err := rule.DryRun(ctx, rl, rule.Event{Source: rl.Source, Headers: headers, Data: data})
 	if err != nil {
@@ -210,6 +223,9 @@ func (s *server) runRuleTest(r *http.Request) *testView {
 	tv.Approval = cfg.NeedsApproval(rl)
 	for _, f := range fires {
 		tf := testFire{Key: f.Key}
+		if f.Item != nil {
+			tf.Item = store.RedactKeys(f.Item)
+		}
 		switch a := rl.Action; {
 		case a.Agent != "":
 			tf.Kind, tf.Target = "agent", a.Agent

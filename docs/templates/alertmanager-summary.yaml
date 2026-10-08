@@ -1,0 +1,38 @@
+# title:    Summarise Prometheus alerts with a local model, then notify
+# category: Ops & monitoring
+# needs:    credentials/ollama-local               (siphon connect model ollama)
+# secrets:  sources/alertmanager.secret            (the value must be "Bearer <token>")
+# apply:    siphon apply -f alertmanager-summary.yaml --secret sources/alertmanager.secret=-
+# Alertmanager:
+#   receivers: [{ name: siphon, webhook_configs: [{ url: https://<siphon>/hook/alertmanager,
+#     http_config: { authorization: { credentials: <token> } } }] }]
+sources:
+  alertmanager:
+    type: webhook
+    signature: token                # Alertmanager sends Authorization: Bearer <token>
+    token_header: Authorization
+agents:
+  alert-summary:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: |
+      Alertmanager sent {{len .event.alerts}} alert(s), status {{.event.status}}, group {{.event.groupKey}}.
+      Alerts: {{.event.alerts}}
+      Summarise for an on-call engineer in at most three lines: what is wrong, where, how bad.
+    max_turns: 2
+    timeout: 5m
+    approve: false                  # a read-only summary; nothing acts on it
+routines:
+  alert-to-phone:
+    steps:
+      - { id: summary, agent: alert-summary, timeout: 5m }
+      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: Alert", -d, "{{.steps.summary.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+rules:
+  - name: alerts-firing
+    source: alertmanager
+    when: 'event.status == "firing"'
+    on: each
+    id: event.groupKey + "/" + string(len(event.alerts))
+    cooldown: 2m
+    action: { routine: alert-to-phone }

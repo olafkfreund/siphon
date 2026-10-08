@@ -19,6 +19,8 @@
     <a href="/services"{{if eq .Active "services"}} aria-current="page"{{end}}>{{template "icon" "webhook"}}Services</a>
     <a href="/connections"{{if eq .Active "logins"}} aria-current="page"{{end}}>{{template "icon" "key"}}Connections</a>
     <a href="/egress"{{if eq .Active "egress"}} aria-current="page"{{end}}>{{template "icon" "shield"}}Egress</a>
+    <div class="sep">Help</div>
+    <a href="/help"{{if eq .Active "help"}} aria-current="page"{{end}}>{{template "icon" "help"}}Help &amp; Docs</a>
     <div class="sep">Records</div>
     <a href="/audit"{{if eq .Active "audit"}} aria-current="page"{{end}}>{{template "icon" "audit"}}Audit</a>
     <a href="/history"{{if eq .Active "history"}} aria-current="page"{{end}}>{{template "icon" "hist"}}History</a>

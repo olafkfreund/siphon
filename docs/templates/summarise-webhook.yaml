@@ -1,0 +1,26 @@
+# title:    Summarise any incoming payload with a local model
+# category: Local LLM
+# needs:    credentials/ollama-local               (siphon connect model ollama)
+# secrets:  sources/digest.secret
+# apply:    siphon apply -f summarise-webhook.yaml --secret sources/digest.secret=-
+sources:
+  digest:
+    type: webhook
+    signature: token
+    token_header: X-Siphon-Key
+agents:
+  digest-agent:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: "Summarise this for a status update, in three bullet points: {{.event}}"
+    max_turns: 2
+    timeout: 5m
+rules:
+  - name: digest
+    source: digest
+    when: 'true'
+    on: each
+    id: string(event)
+    cooldown: 30s
+    action: { agent: digest-agent }

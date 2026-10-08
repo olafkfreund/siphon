@@ -1,0 +1,15 @@
+# title:    Watch a build status on an MCP server
+# category: MCP
+# apply:    siphon apply -f mcp-build-watch.yaml
+sources:
+  build-status:
+    type: mcp
+    url: https://ci.example.com/mcp
+    read: { resource: "ci://builds/main" }   # exactly what is polled; nothing else is called
+    poll: 2m
+rules:
+  - name: main-broke
+    source: build-status
+    when: 'event.status == "failed"'
+    on: edge
+    action: { cmd: [echo, "main is red: build {{.event.id}}"] }

@@ -53,6 +53,8 @@ pkgs.testers.runNixOSTest {
       environment.etc."siphon/hook".text = "hook-secret";
 
       environment.etc."siphon/stub-token".text = stubToken;
+      # A normal user for the CLI walkthrough (docs/getting-started.md).
+      users.users.alice.isNormalUser = true;
       # AWS: a base key pair for AssumeRole against a fake STS on loopback.
       environment.etc."siphon/aws-id".text = "AKIABASEVMTEST";
       environment.etc."siphon/aws-secret".text = "base-secret-NEVER-vm";
@@ -742,11 +744,65 @@ pkgs.testers.runNixOSTest {
         assert "base-secret-NEVER-vm" not in logs and "temp-secret-vm-test" not in logs, "an AWS secret is in the logs"
         machine.succeed("test -z \"$(ls -A /var/lib/siphon/bridge-secrets 2>/dev/null)\"")
 
+    with subtest("CLI walkthrough as a normal user (docs/getting-started.md)"):
+        import json, shlex, time
+        def alice(cmd):
+            # stdin from /dev/null: a stray prompt fails fast (exit 2 + hint) instead of hanging
+            return machine.succeed("su - alice -c " + shlex.quote(cmd) + " < /dev/null")
+        def wait_job(rule, state, timeout=120):
+            end = time.time() + timeout
+            while time.time() < end:
+                jobs = json.loads(alice("siphon jobs -o json"))
+                hit = [j for j in jobs if j["rule"] == rule and j["state"] == state]
+                if hit:
+                    return hit[0]
+                time.sleep(1)
+            raise Exception(f"{rule} never reached {state}: {jobs}")
+        # cli.enable: on PATH, SIPHON_URL points at the daemon
+        alice('command -v siphon && test "$SIPHON_URL" = http://127.0.0.1:8080')
+        alice('siphon login "$SIPHON_URL" < /etc/siphon/token')
+        assert alice("stat -c %a ~/.config/siphon/client.yaml").strip() == "600"
+        out = alice("siphon connect model openai --name vm-model --url http://external:8000/v1")
+        assert "test: ok" in out and "stub-model" in out, out
+        # first task: webhook -> command
+        t = json.loads(alice("""siphon new task --name vmhello --webhook vm-hook --when 'event.msg != nil' --on each --id event.msg --cmd '["echo","vm {{.event.msg}}"]' --yes -o json"""))
+        sec = t["webhook"]["secret"]
+        machine.succeed(f"""curl -sf -H 'X-Siphon-Key: {sec}' -d '{{"msg":"hi"}}' http://127.0.0.1:8080/hook/vm-hook""")
+        wait_job("vmhello", "done")
+        last = json.loads(alice("siphon test vmhello --last -o json"))
+        assert last["fires"][0]["argv"] == ["echo", "vm hi"], last
+        why = json.loads(alice("siphon why vmhello -o json"))
+        assert "fired" in [r["code"] for r in why["reasons"]], why
+        # a template validates against the live config
+        dry = json.loads(alice("siphon template disk-full > ~/disk.yaml && siphon apply -f ~/disk.yaml --dry-run -o json"))
+        assert dry["dry_run"] and not dry["errors"], dry
+        # an agent task: approved from the CLI, runs on the model connection
+        alice("""printf '%s\\n' 'agents:' '  vm-agent: { kind: model, credential: vm-model, model: stub-model, prompt: "say hi", max_turns: 2, timeout: 2m }' 'rules:' '  - { name: vm-agent-rule, source: vm-hook, when: "event.agent == true", on: each, id: event.n, cooldown: 1s, action: { agent: vm-agent } }' > ~/agent.yaml""")
+        alice("siphon apply -f ~/agent.yaml --yes")
+        machine.succeed(f"""curl -sf -H 'X-Siphon-Key: {sec}' -d '{{"agent":true,"n":1}}' http://127.0.0.1:8080/hook/vm-hook""")
+        job = wait_job("vm-agent-rule", "pending_approval")
+        alice(f"siphon approve {job['id']}")
+        wait_job("vm-agent-rule", "done")
+        hist = alice("siphon history -o json")
+        assert "api:cli:alice" in hist, hist
+        # siphon mcp: tools listed, none can approve
+        tools = alice("${pkgs.python3}/bin/python3 ${./mcp-probe.py} siphon mcp").split()
+        assert "why" in tools and "apply" in tools and "draft" in tools, tools
+        assert not any("approve" in t or "deny" in t for t in tools), tools
+        # the portal's Help & Docs and llms.txt
+        machine.succeed(f"curl -s -c /tmp/help.jar -o /dev/null --data-urlencode token={TOKEN} http://127.0.0.1:8080/login")
+        assert "Get started" in machine.succeed("curl -sf -b /tmp/help.jar http://127.0.0.1:8080/help")
+        assert "# Siphon" in machine.succeed("curl -sf -b /tmp/help.jar http://127.0.0.1:8080/llms.txt")
+
     with subtest("a rule created over the config API fires without a restart"):
         import json
         auth = f"-H 'Authorization: Bearer {TOKEN}'"
         api = "http://127.0.0.1:8080/api/config/rules"
         rev = json.loads(machine.succeed(f"curl -sf {auth} {api}/sandboxed-cmd"))["rev"]
+        # Earlier subtests (the CLI walkthrough) also change the config: count this one's effect.
+        count = lambda q: int(machine.succeed(f"sqlite3 /var/lib/siphon/state.db \"{q}\"").strip())
+        revs0 = count("select count(*) from config_revision")
+        changed0 = count("select count(*) from audit where event='config_changed'")
         def put(name, yaml_text, rev):
             body = json.dumps({"yaml": yaml_text, "rev": rev})
             machine.succeed(f"printf '%s' '{body}' > /tmp/put.json")
@@ -764,8 +820,8 @@ pkgs.testers.runNixOSTest {
         except Exception:
             dump()
             raise
-        assert machine.succeed("sqlite3 /var/lib/siphon/state.db \"select count(*) from config_revision\"").strip() == "1"
-        assert machine.succeed("sqlite3 /var/lib/siphon/state.db \"select count(*) from audit where event='config_changed'\"").strip() == "1"
+        assert count("select count(*) from config_revision") == revs0 + 1
+        assert count("select count(*) from audit where event='config_changed'") == changed0 + 1
 
     with subtest("stopping siphon leaves no orphaned action units (cmd and agent)"):
         assert hook('{"kind":"sleep","n":3}') == "202"

@@ -158,8 +158,8 @@ func SetSourceEvent(db *sql.DB, source string, data any) error {
 	if len(b) > maxEventBytes {
 		b = []byte(`{"_truncated":true}`)
 	}
-	_, err = db.Exec(`INSERT INTO source_state(source,json) VALUES (?,?)
-		ON CONFLICT(source) DO UPDATE SET json=excluded.json`, source, string(b))
+	_, err = db.Exec(`INSERT INTO source_state(source,json,event_at) VALUES (?,?,?)
+		ON CONFLICT(source) DO UPDATE SET json=excluded.json, event_at=excluded.event_at`, source, string(b), time.Now().UnixMilli())
 	return err
 }
 

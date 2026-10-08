@@ -269,7 +269,7 @@ func TestConfigSecretNeverLeaks(t *testing.T) {
 	if w := ce.post("/config/sources/new/save", form); w.Code != 303 {
 		t.Fatalf("save: %d %s", w.Code, w.Body.String())
 	}
-	p := filepath.Join(ce.dir, "secrets", "sources-s3-secret")
+	p := filepath.Join(ce.dir, "secrets", "sources--s3+secret")
 	st, err := os.Stat(p)
 	if err != nil || st.Mode().Perm() != 0o600 {
 		t.Fatalf("secret file: %v %v", st, err)
@@ -377,10 +377,10 @@ func TestConfigAPI(t *testing.T) {
 	if w := ce.api("PUT", "/api/config/rules/api2", `{"yaml":"source: gh\nwhen: \"true\"\naction: {cmd: [echo]}\n","rev":0}`); w.Code != 409 {
 		t.Fatalf("stale put: %d", w.Code)
 	}
-	if w := ce.api("PUT", "/api/config/rules/bad", `{"yaml":"source: nope\nwhen: \"true\"\naction: {cmd: [x]}\n"}`); w.Code != 400 || !strings.Contains(w.Body.String(), "unknown source") {
+	if w := ce.api("PUT", "/api/config/rules/bad", `{"yaml":"source: nope\nwhen: \"true\"\naction: {cmd: [x]}\n"}`); w.Code != 422 || !strings.Contains(w.Body.String(), "unknown source") {
 		t.Fatalf("invalid put: %d %s", w.Code, w.Body.String())
 	}
-	if w := ce.api("PUT", "/api/config/sources/inl", `{"yaml":"type: webhook\nsecret: inline-value\nsignature: github\n"}`); w.Code != 400 {
+	if w := ce.api("PUT", "/api/config/sources/inl", `{"yaml":"type: webhook\nsecret: inline-value\nsignature: github\n"}`); w.Code != 422 {
 		t.Fatalf("inline secret accepted by the API: %d", w.Code)
 	}
 	if w := ce.api("GET", "/api/config/rules/api1", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"portal"`) {

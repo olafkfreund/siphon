@@ -1,0 +1,18 @@
+# title:    Warn when a disk is nearly full (and again every 6 hours)
+# category: Ops & monitoring
+# apply:    siphon apply -f disk-full.yaml
+# The URL must return JSON like {"used_pct": 93}, e.g. a node exporter
+# sidecar or a tiny script behind your reverse proxy.
+sources:
+  disk:
+    type: http
+    url: https://metrics.example.com/api/disk
+    poll: 5m
+rules:
+  - name: disk-full
+    source: disk
+    when: 'event.used_pct > 90'
+    on: edge                        # fires on false -> true only
+    repeat: 6h                      # and again every 6 h while it stays true
+    action:
+      cmd: [curl, -fsS, -H, "Title: Disk {{.event.used_pct}}% full", -d, "Clean up or grow the volume", https://ntfy.sh/siphon-CHANGE-ME]

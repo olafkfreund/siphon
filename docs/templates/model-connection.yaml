@@ -1,0 +1,9 @@
+# title:    Connect a local Ollama
+# category: Local LLM
+# apply:    siphon apply -f model-connection.yaml   (or better: siphon connect model ollama)
+# A LAN or loopback URL must be listed in server.models.private_endpoints in
+# siphon.yaml (the NixOS module adds a local services.ollama automatically).
+credentials:
+  ollama-local:
+    provider: ollama
+    url: http://127.0.0.1:11434

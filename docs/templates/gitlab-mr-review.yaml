@@ -1,0 +1,26 @@
+# title:    Review GitLab merge requests
+# category: Code review & CI
+# needs:    sources/gitlab-hooks                   (siphon connect gitlab --webhook; tick "Merge request events")
+#           credentials/ollama-local               (siphon connect model ollama)
+# apply:    siphon apply -f gitlab-mr-review.yaml
+agents:
+  mr-reviewer:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: |
+      Merge request !{{.event.object_attributes.iid}} "{{.event.object_attributes.title}}"
+      in {{.event.project.path_with_namespace}} ({{.event.object_attributes.source_branch}} ->
+      {{.event.object_attributes.target_branch}}):
+      {{.event.object_attributes.description}}
+      Give a short risk assessment and questions a reviewer should ask.
+    max_turns: 2
+    timeout: 5m
+rules:
+  - name: review-new-mrs
+    source: gitlab-hooks
+    when: 'headers["x-gitlab-event"] == "Merge Request Hook" && event.object_attributes.action == "open"'
+    on: each
+    id: event.object_attributes.id
+    cooldown: 1m
+    action: { agent: mr-reviewer }

@@ -199,24 +199,5 @@ type AuditRow struct {
 }
 
 func ListAudit(db *sql.DB, limit int) ([]AuditRow, error) {
-	rows, err := db.Query(`SELECT id, at, actor, event, job_id, detail FROM audit ORDER BY id DESC LIMIT ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []AuditRow
-	for rows.Next() {
-		var a AuditRow
-		var at int64
-		var job sql.NullInt64
-		if err := rows.Scan(&a.ID, &at, &a.Actor, &a.Event, &job, &a.Detail); err != nil {
-			return nil, err
-		}
-		a.At = time.UnixMilli(at)
-		if job.Valid {
-			a.JobID = &job.Int64
-		}
-		out = append(out, a)
-	}
-	return out, rows.Err()
+	return QueryAudit(db, AuditFilter{Limit: limit})
 }

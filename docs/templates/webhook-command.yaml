@@ -1,0 +1,18 @@
+# title:    Run a command when a signed webhook arrives
+# category: Notifications & glue
+# secrets:  sources/deploy-hook.secret
+# apply:    siphon apply -f webhook-command.yaml --secret sources/deploy-hook.secret=-
+# The sender signs the body with HMAC-SHA256 (hex) in X-Signature and POSTs
+# to https://<siphon>/hook/deploy-hook.
+sources:
+  deploy-hook:
+    type: webhook
+    signature: sha256
+    signature_header: X-Signature
+rules:
+  - name: deploy-done
+    source: deploy-hook
+    when: 'event.status == "success"'
+    on: each
+    id: event.id
+    action: { cmd: [echo, "deploy {{.event.id}} finished"] }   # argv, never a shell

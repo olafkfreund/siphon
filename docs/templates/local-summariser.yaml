@@ -1,0 +1,13 @@
+# title:    A reusable agent on your local model
+# category: Local LLM
+# needs:    credentials/ollama-local               (siphon connect model ollama)
+# apply:    siphon apply -f local-summariser.yaml
+# Use it from any rule with  action: { agent: summarise }
+agents:
+  summarise:
+    kind: model                     # Siphon's own loop; no subscription needed
+    credential: ollama-local
+    model: llama3.2
+    prompt: "Summarise this event in one sentence for a busy engineer: {{.event}}"
+    max_turns: 2
+    timeout: 5m

@@ -134,6 +134,7 @@ func New(o Options) http.Handler {
 	s.apiRoutes(mux)
 	s.portalRoutes(mux)
 	s.configRoutes(mux)
+	s.helpRoutes(mux)
 	return secure(mux)
 }
 

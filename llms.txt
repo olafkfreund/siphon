@@ -1,0 +1,47 @@
+# Siphon
+
+> Siphon watches webhooks, HTTP APIs and MCP servers, and when a rule's condition holds it runs a sandboxed command, a multi-step routine, or an AI agent (Claude, Codex, agy, or any Ollama/OpenAI-compatible model), with approvals, per-run egress limits and short-lived credentials. Manage it with the `siphon` CLI (made for scripts and AI assistants: JSON output, dry-runs, exit codes, `siphon mcp`), verify in the web portal, keep the operator baseline in `siphon.yaml`.
+
+Key facts for an assistant:
+- A task is source → rule (`when:`, `on: each|edge`) → action (`cmd` argv list, `agent`, `routine`, or `unit`).
+- Workflow: `siphon inventory -o json` → `siphon template <name>` → write an apply file → `siphon apply -f f.yaml --dry-run -o json` → fix every error → show the user the diff → `siphon apply -f f.yaml --yes` → `siphon test <rule> --last` → `siphon why <rule>`.
+- Never put secret values in files or flags: `--secret <kind>/<name>.<field>=-` (stdin) or `=@file`. Never approve jobs unless the user says so for that job.
+- Exit codes: 0 ok, 1 error, 2 usage, 3 validation, 4 not found, 5 conflict. JSON errors: {"error", "errors", "hint"}.
+- The whole guide and every template in one file: [llms-full.txt](https://raw.githubusercontent.com/olafkfreund/siphon/main/llms-full.txt)
+
+## Start
+
+- [Siphon for AI assistants](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/llm.md): the workflow, the rules models get wrong, safety. Also printed by `siphon guide`.
+- [AGENTS.md](https://raw.githubusercontent.com/olafkfreund/siphon/main/AGENTS.md): instructions for agents operating Siphon and for agents working on its code.
+- [Getting started](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/getting-started.md): login, connect a model, a webhook task, an agent task, `why`, with real output.
+- [Concepts](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/concepts.md): sources, rules (each vs edge), actions, agents, connections, approvals, sandboxing, CLI vs portal vs siphon.yaml.
+- [Guide index](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/README.md): every page, by task.
+
+## Templates
+
+- [Template index](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/templates/README.md): ~20 ready-made apply files by category, each with what to connect first and which secrets to pass. `siphon template` lists them; `siphon template <name>` prints one.
+
+## How-to
+
+- [Run a command on a webhook](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/webhook-command.md): signature modes (github, sha256, standard-webhooks, token), argv safety.
+- [React to a threshold](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/poll-threshold.md): polling JSON, on: edge with repeat.
+- [An agent that reviews pull requests](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/github-pr-agent.md): GitHub tools, allowed_tools, approvals.
+- [Watch an MCP server](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/mcp-watch.md): read a resource or tool, for_each over lists.
+- [Routines](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/routine.md): ordered steps, retries, steps.<id>.output, schedules via a timer.
+- [Approvals](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/approvals.md): approve or deny from CLI or portal.
+- [Drafting tasks in plain language](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/drafting.md): `siphon draft` — a model connection writes the task, Siphon validates and repairs it, you review and apply.
+
+## Connections
+
+- [Model endpoints](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/connections/models.md): Ollama, LM Studio, OpenRouter, Groq, Mistral, any OpenAI-compatible API.
+- [Logins](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/connections/logins.md): Claude, Codex, agy subscriptions and API keys.
+- [GitHub](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/connections/github.md): MCP tools and webhooks.
+- [GitLab](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/connections/gitlab.md): merge request and pipeline webhooks.
+- [AWS](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/connections/aws.md): CloudWatch tools with per-run short-lived credentials, EventBridge.
+
+## Optional
+
+- [CLI reference](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/cli.md): every command and flag (generated from `siphon help --json`).
+- [Troubleshooting](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/troubleshooting.md): every `siphon why` reason and its fix, common errors, logs.
+- [README](https://raw.githubusercontent.com/olafkfreund/siphon/main/README.md): what Siphon is, ways to run it (NixOS, microVM, container), security notes.
+- [Example siphon.yaml](https://raw.githubusercontent.com/olafkfreund/siphon/main/examples/siphon.yaml) and [JSON schema](https://raw.githubusercontent.com/olafkfreund/siphon/main/schema/siphon.schema.json); `siphon explain <kind>` lists every field.

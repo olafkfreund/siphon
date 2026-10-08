@@ -135,10 +135,12 @@ func (s *server) job(id int64) (store.JobDetail, bool, error) {
 var (
 	titles = map[string]string{"dashboard": "Dashboard", "jobs": "Jobs", "job": "Job", "approvals": "Approvals",
 		"rules": "Rules", "sources": "Sources", "audit": "Audit", "logins": "Connections", "egress": "Egress", "services": "Services", "servicedone": "Services",
-		"cfglist": "Config", "cfgedit": "Edit", "history": "History", "historyitem": "Revision"}
+		"cfglist": "Config", "cfgedit": "Edit", "history": "History", "historyitem": "Revision",
+		"help": "Help & Docs", "helppage": "Help & Docs", "helptemplates": "Templates"}
 	active = map[string]string{"dashboard": "dash", "jobs": "jobs", "job": "jobs", "approvals": "approvals",
 		"rules": "rules", "sources": "sources", "audit": "audit", "logins": "logins", "egress": "egress", "services": "services", "servicedone": "services",
-		"cfglist": "rules", "cfgedit": "rules", "history": "history", "historyitem": "history"}
+		"cfglist": "rules", "cfgedit": "rules", "history": "history", "historyitem": "history",
+		"help": "help", "helppage": "help", "helptemplates": "help"}
 	// Config kinds as people read them, and the nav entry each lights up.
 	kindTitle = map[string]string{"rules": "Rules", "sources": "Sources", "agents": "Agents", "routines": "Routines", "credentials": "Connections"}
 	kindOne   = map[string]string{"rules": "rule", "sources": "source", "agents": "agent", "routines": "routine", "credentials": "connection"}

@@ -1,0 +1,30 @@
+# title:    Triage each failed task on an MCP server with an agent
+# category: MCP
+# needs:    credentials/claude-max                 (siphon connect login claude)
+# apply:    siphon apply -f mcp-task-triage.yaml
+# One poll returns a list; for_each turns every failed task into its own fire.
+sources:
+  tasks:
+    type: mcp
+    url: https://tasks.example.com/mcp
+    read: { resource: "tasks://running" }
+    poll: 1m
+agents:
+  task-triage:
+    kind: claude
+    credential: claude-max
+    prompt: "Task {{.item.id}} failed: {{.item.error}}. Use the task tools to read its logs and report the cause as JSON {cause, fix}."
+    mcp: [tasks]
+    allowed_tools: [mcp__tasks__task_get_logs, mcp__tasks__task_status]
+    max_turns: 15
+    max_budget_usd: 1
+    timeout: 10m
+rules:
+  - name: task-failed
+    source: tasks
+    for_each: event.tasks
+    id: item.id
+    when: 'item.status == "failed"'
+    on: each
+    cooldown: 10m
+    action: { agent: task-triage }
