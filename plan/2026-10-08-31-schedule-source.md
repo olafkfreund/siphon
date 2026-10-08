@@ -184,3 +184,4 @@ are unchanged.
   - `explain` reports `source.schedule {at, timezone, next_run_at, last_run_at, missed}`.
   - `new task --schedule` defaults to `when: "true"`.
   - The draft boosts templates whose name, title, category or notes contain "schedule".
+- **Step 5 (Opus):** the VM subtest checks the next run through `siphon get sources` (text NEXT column) and `why -o json`, because `get sources -o json` is the config item list, not the health view.

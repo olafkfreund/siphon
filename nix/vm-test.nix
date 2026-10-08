@@ -794,6 +794,15 @@ pkgs.testers.runNixOSTest {
         assert "Get started" in machine.succeed("curl -sf -b /tmp/help.jar http://127.0.0.1:8080/help")
         assert "# Siphon" in machine.succeed("curl -sf -b /tmp/help.jar http://127.0.0.1:8080/llms.txt")
 
+    with subtest("a schedule source fires on its own (docs/tasks/schedule.md)"):
+        import json
+        alice("""siphon new task --name tick --schedule 'every 1m' --cmd '["echo","tick"]' --yes""")
+        wait_job("tick", "done", timeout=150)
+        line = [l for l in alice("siphon get sources").splitlines() if l.startswith("tick ")]
+        assert line and "20" in line[0], f"no NEXT run for tick: {line}"   # a dated next run
+        why = json.loads(alice("siphon why tick -o json"))
+        assert why["source"]["schedule"]["next_run_at"], why
+
     with subtest("a rule created over the config API fires without a restart"):
         import json
         auth = f"-H 'Authorization: Bearer {TOKEN}'"
