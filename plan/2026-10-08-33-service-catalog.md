@@ -221,3 +221,8 @@ Revert the merge.
   - **Nix:** `services.siphon.catalogPackages` reads the generated `nix/catalog-packages.json` (with a freshness test) and passes `url_env` through. The `checks.catalog-module` eval check covers it.
   - The AWS `region` default was removed again.
 - **Fix (Opus, found before writing the Slack template):** the `slack` mode didn't answer Slack's `url_verification`. Slack sends it, signed, when you set a Request URL, and expects the `challenge` echoed back, so Slack would have refused the URL. A verified `url_verification` is now answered with its challenge and never delivered. Unsigned ones get 401. The research flagged handshakes for Event Grid, Notion and Discord, but missed Slack's.
+- **Step 7 (Opus):**
+  - 10 templates for the new services: Linear issue from alert, Jira new issue, Slack mention agent, Sentry new issue, PagerDuty incident summary, Grafana alert explain, Stripe dispute, a scheduled Home Assistant evening check, Uptime Kuma down, plus the existing ones (31 in total). The template base config gained the services they need.
+  - `docs/connections/README.md` is **generated** from the catalogue (`docs/internal/gencatalog`), with a freshness check in `TestGeneratedFilesFresh`.
+  - `llm.md`'s workflow starts with `siphon catalog`; the index, AGENTS.md, README and `llms.txt` are updated.
+  - **Draft matching:** a word that matches a template's name or title now counts double, so the best template wins over ones that only mention the word in their notes.

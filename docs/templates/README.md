@@ -23,6 +23,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 | [`github-pr-review`](github-pr-review.yaml) | Review every new pull request with an agent | `siphon connect github --webhook`, `siphon connect login claude` |
 | [`gitlab-mr-review`](gitlab-mr-review.yaml) | Review GitLab merge requests | `siphon connect gitlab --webhook`, `siphon connect model ollama` |
 | [`gitlab-pipeline-failed`](gitlab-pipeline-failed.yaml) | Push a phone notification when a GitLab pipeline fails | `siphon connect gitlab --webhook` |
+| [`jira-new-issue-summary`](jira-new-issue-summary.yaml) | Summarise each new Jira issue with a local model | `siphon connect jira --webhook`, `siphon connect model ollama` |
 
 ## Ops & monitoring
 
@@ -30,13 +31,19 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 |---|---|---|
 | [`alertmanager-summary`](alertmanager-summary.yaml) | Summarise Prometheus alerts with a local model, then notify | `siphon connect model ollama` · webhook secret |
 | [`disk-full`](disk-full.yaml) | Warn when a disk is nearly full (and again every 6 hours) | — |
+| [`grafana-alert-explain`](grafana-alert-explain.yaml) | Explain a firing Grafana alert using Grafana's own tools (read-only) | `siphon connect grafana --webhook`, `siphon connect login claude` |
+| [`linear-issue-from-alert`](linear-issue-from-alert.yaml) | Open a Linear issue for each firing alert | `siphon connect alertmanager`, `siphon connect linear`, `siphon connect login claude` |
+| [`pagerduty-incident-summary`](pagerduty-incident-summary.yaml) | Summarise each triggered PagerDuty incident, then notify | `siphon connect model ollama`, `siphon connect pagerduty` |
+| [`sentry-new-issue`](sentry-new-issue.yaml) | Push a phone notification for each new Sentry issue | `siphon connect sentry` |
 | [`service-failed`](service-failed.yaml) | Get notified when a systemd service fails | — · webhook secret |
 | [`upstream-status`](upstream-status.yaml) | Know when a provider you depend on has an incident | — |
+| [`uptime-kuma-down`](uptime-kuma-down.yaml) | Push a notification when an Uptime Kuma monitor goes down | `siphon connect uptime-kuma` |
 
 ## Schedules
 
 | Template | What it does | Connect first |
 |---|---|---|
+| [`home-assistant-evening-check`](home-assistant-evening-check.yaml) | An evening house check on a schedule, with Home Assistant's tools | `siphon connect home-assistant`, `siphon connect model ollama` |
 | [`nightly-report`](nightly-report.yaml) | A nightly report on a schedule: fetch, summarise, notify | `siphon connect model ollama` |
 | [`weekday-standup`](weekday-standup.yaml) | A weekday reminder on a schedule (07:30, Monday to Friday) | — |
 | [`weekly-digest`](weekly-digest.yaml) | A weekly digest on a schedule: every Monday at 09:00 | `siphon connect model ollama` |
@@ -45,7 +52,9 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 
 | Template | What it does | Connect first |
 |---|---|---|
+| [`slack-mention-agent`](slack-mention-agent.yaml) | An agent that answers when someone @mentions your Slack app | `siphon connect model ollama`, `siphon connect slack` |
 | [`standard-webhooks`](standard-webhooks.yaml) | Receive Standard Webhooks (Svix, Clerk, Resend, …) | — · webhook secret |
+| [`stripe-dispute-notice`](stripe-dispute-notice.yaml) | Get notified when a Stripe dispute is opened | `siphon connect stripe --webhook` |
 | [`webhook-command`](webhook-command.yaml) | Run a command when a signed webhook arrives | — · webhook secret |
 | [`webhook-to-ntfy`](webhook-to-ntfy.yaml) | Forward any webhook to your phone | — · webhook secret |
 

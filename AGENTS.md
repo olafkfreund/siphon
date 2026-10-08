@@ -14,7 +14,7 @@ only have the binary. The short version:
 
 ```sh
 siphon inventory -o json            # what exists: sources, agents, connections, allowlists
-siphon template                     # ~20 ready-made tasks by category
+siphon template                     # ~30 ready-made tasks by category
 siphon template github-pr-review    # print one; its header says what to connect and which secrets to pass
 siphon explain rule                 # every field of a rule (also: source, agent, routine, credential)
 siphon apply -f task.yaml --dry-run -o json   # validate + diff; fix every item in "errors"

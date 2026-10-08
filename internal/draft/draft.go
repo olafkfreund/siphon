@@ -176,10 +176,14 @@ func matchTemplates(request string, n int) []docs.Template {
 	var all []scored
 	for _, t := range docs.Templates() {
 		hay := strings.ToLower(t.Name + " " + t.Title + " " + t.Category + " " + t.Notes)
+		title := strings.ToLower(t.Name + " " + t.Title)
 		s := 0
 		for _, w := range words(request) {
 			if len(w) >= 4 && !stop[w] && strings.Contains(hay, w) {
 				s++
+				if strings.Contains(title, w) {
+					s++ // a word in the name or title says more than one in the notes
+				}
 			}
 		}
 		if wantsSchedule(request) && strings.Contains(hay, "schedule") {

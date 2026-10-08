@@ -11,7 +11,7 @@ baseline in **`siphon.yaml`**.
    working agent task.
 2. **[Concepts](concepts.md):** source → rule → action, agents,
    connections, approvals, and what's sandboxed.
-3. **[Templates](templates/README.md):** about 20 ready-made tasks you can
+3. **[Templates](templates/README.md):** about 30 ready-made tasks you can
    apply as-is.
 
 ## How-to, by task
@@ -29,6 +29,9 @@ baseline in **`siphon.yaml`**.
 
 ## Connections
 
+**[All services you can connect](connections/README.md)** (GitHub, GitLab,
+Bitbucket, Gitea, Linear, Jira, Slack, Sentry, PagerDuty, Grafana, Stripe,
+Home Assistant, Cloudflare, AWS, …) ·
 [Models (Ollama and OpenAI-compatible)](connections/models.md) ·
 [Logins (Claude, Codex, agy)](connections/logins.md) ·
 [GitHub](connections/github.md) · [GitLab](connections/gitlab.md) ·

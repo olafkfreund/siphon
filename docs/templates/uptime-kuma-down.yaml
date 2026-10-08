@@ -1,0 +1,12 @@
+# title:    Push a notification when an Uptime Kuma monitor goes down
+# category: Ops & monitoring
+# needs:    sources/uptime-kuma                    (siphon connect uptime-kuma)
+# apply:    siphon apply -f uptime-kuma-down.yaml
+rules:
+  - name: monitor-down
+    source: uptime-kuma
+    when: 'event.heartbeat != nil && event.heartbeat.status == 0'
+    on: each
+    id: string(event.monitor.id) + "/" + event.heartbeat.time
+    action:
+      cmd: [curl, -fsS, -H, "Title: {{.event.monitor.name}} is down", -d, "{{.event.msg}}", https://ntfy.sh/siphon-CHANGE-ME]

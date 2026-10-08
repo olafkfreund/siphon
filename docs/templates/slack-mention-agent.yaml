@@ -1,0 +1,23 @@
+# title:    An agent that answers when someone @mentions your Slack app
+# category: Notifications & glue
+# needs:    sources/slack                          (siphon connect slack)
+#           credentials/ollama-local               (siphon connect model ollama)
+# apply:    siphon apply -f slack-mention-agent.yaml
+# Subscribe the app to the app_mention event (Event Subscriptions). The answer
+# lands in the job output; posting it back needs a Slack bot token in a cmd step.
+agents:
+  slack-helper:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: "Answer this message from a colleague briefly and helpfully: {{.event.event.text}}"
+    max_turns: 2
+    timeout: 5m
+rules:
+  - name: slack-mention
+    source: slack
+    when: 'event.type == "event_callback" && event.event.type == "app_mention"'
+    on: each
+    id: event.event_id
+    cooldown: 10s
+    action: { agent: slack-helper }

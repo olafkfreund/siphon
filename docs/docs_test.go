@@ -74,6 +74,13 @@ func TestGeneratedFilesFresh(t *testing.T) {
 	if have, _ := os.ReadFile("../llms-full.txt"); !bytes.Equal(have, full) {
 		t.Error("llms-full.txt is stale: run `go generate ./docs`")
 	}
+	conns, err := exec.Command("go", "run", "./internal/gencatalog").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if have, _ := os.ReadFile("connections/README.md"); !bytes.Equal(have, conns) {
+		t.Error("connections/README.md is stale: run `go generate ./docs`")
+	}
 	help, err := exec.Command("go", "run", "../cmd/siphon", "help", "--json").Output()
 	if err != nil {
 		t.Fatal(err)

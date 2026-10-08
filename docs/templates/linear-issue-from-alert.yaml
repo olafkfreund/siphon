@@ -1,0 +1,30 @@
+# title:    Open a Linear issue for each firing alert
+# category: Ops & monitoring
+# needs:    sources/alertmanager                   (siphon connect alertmanager)
+#           sources/linear                         (siphon connect linear)
+#           credentials/claude-max                 (siphon connect login claude)
+# apply:    siphon apply -f linear-issue-from-alert.yaml
+# The agent can use the Linear MCP server's tools; narrow allowed_tools to the
+# exact ones you want once you've seen the list (siphon why / the Services page).
+agents:
+  alert-to-linear:
+    kind: claude
+    credential: claude-max
+    prompt: |
+      Alert group {{.event.groupKey}} is firing: {{.event.alerts}}
+      Search Linear for an open issue about the same alert. If none exists, create
+      one in the Ops team with a short title, the affected service and the alert
+      summary. Reply with the issue identifier.
+    mcp: [linear]
+    allowed_tools: [mcp__linear]
+    max_turns: 15
+    max_budget_usd: 1
+    timeout: 10m
+rules:
+  - name: alert-to-linear
+    source: alertmanager
+    when: 'event.status == "firing"'
+    on: each
+    id: event.groupKey
+    cooldown: 10m
+    action: { agent: alert-to-linear }
