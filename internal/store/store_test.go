@@ -16,7 +16,7 @@ func TestOpenTwiceIdempotent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, tbl := range []string{"jobs", "rule_state", "seen_event", "approvals", "audit", "rule_override", "source_state", "schema_migrations", "rule_error"} {
+		for _, tbl := range []string{"jobs", "rule_state", "seen_event", "approvals", "audit", "rule_override", "source_state", "schema_migrations", "rule_error", "connection_check"} {
 			var n int
 			if err := s.DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, tbl).Scan(&n); err != nil || n != 1 {
 				t.Fatalf("open %d: table %s missing (%v)", i, tbl, err)
@@ -24,7 +24,7 @@ func TestOpenTwiceIdempotent(t *testing.T) {
 		}
 		var m int
 		s.DB.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&m)
-		if m != 3 {
+		if m != 4 {
 			t.Fatalf("migrations recorded: %d", m)
 		}
 		var fk int
@@ -336,5 +336,41 @@ func TestMigration0003OnExistingDB(t *testing.T) {
 	}
 	if d, _ := SourceDiagnostics(s.DB, "old"); d.Reject != "bad (401)" || d.RejectAt == nil {
 		t.Fatalf("%+v", d)
+	}
+}
+
+// 0004 applies on top of a database from before it, keeping its rows.
+func TestMigration0004OnExistingDB(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", "file:"+p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Exec(`CREATE TABLE schema_migrations (version TEXT PRIMARY KEY)`)
+	for _, n := range []string{"0001_init.sql", "0002_config_overlay.sql", "0003_diagnostics.sql"} {
+		b, _ := migrationFS.ReadFile("migrations/" + n)
+		if _, err := db.Exec(string(b)); err != nil {
+			t.Fatal(err)
+		}
+		db.Exec(`INSERT INTO schema_migrations(version) VALUES (?)`, n)
+	}
+	db.Exec(`INSERT INTO source_state(source,json,last_error) VALUES ('old','{"a":1}','')`)
+	db.Close()
+	s, err := Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if j, _ := SourceEvent(s.DB, "old"); j != `{"a":1}` {
+		t.Fatalf("old row lost: %q", j)
+	}
+	if c, err := GetConnectionCheck(s.DB, "x"); c != nil || err != nil {
+		t.Fatalf("%v %v", c, err)
+	}
+	at := time.Unix(1700000000, 0)
+	SetConnectionCheck(s.DB, ConnectionCheck{"x", at, true, "olaf"})
+	SetConnectionCheck(s.DB, ConnectionCheck{"x", at.Add(time.Minute), false, "refused"})
+	if c, _ := GetConnectionCheck(s.DB, "x"); c == nil || c.OK || c.Detail != "refused" || !c.At.Equal(at.Add(time.Minute)) {
+		t.Fatalf("%+v", c)
 	}
 }

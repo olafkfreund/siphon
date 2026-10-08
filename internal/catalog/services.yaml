@@ -100,6 +100,8 @@ services:
     summary: CloudWatch and AWS documentation as agent tools, with short-lived credentials (never stored keys), and EventBridge events by webhook.
     capabilities: [tools, webhooks]
     status: available
+    needs_package: [aws-cloudwatch, aws-docs]
+    reason: 'enable services.siphon.aws in your NixOS config'
     hooks: aws
     fields:
       - {key: name, label: Name, type: text, default: aws, required: true, pattern: '[a-z0-9][a-z0-9_-]{0,40}', pattern_error: 'a lowercase name (a-z, 0-9, - _) is required', help: 'Sources are named <name>-cloudwatch and <name>-docs.'}

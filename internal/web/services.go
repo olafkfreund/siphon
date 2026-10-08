@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/olafkfreund/siphon/internal/catalog"
+	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/source"
 	"github.com/olafkfreund/siphon/internal/store"
 )
@@ -49,27 +50,33 @@ func (s *server) serviceForm() *serviceForm {
 	return &serviceForm{AWSCloudWatch: cw, AWSDocs: docs, Profiles: aws.Profiles, RoleARNs: aws.RoleARNs}
 }
 
+// serviceOf says which catalogue service made a source, from its shape.
+// ponytail: a heuristic for the three first entries; a service id on the item
+// would replace it once more entries need Test.
+func serviceOf(src *config.Source) (service, detail string) {
+	switch {
+	case src.Type == "mcp" && (strings.HasPrefix(src.URL, "https://api.githubcopilot.com/") || src.Package == "github"):
+		return "github", "MCP tools"
+	case src.Type == "webhook" && src.Signature == "github":
+		return "github", "webhook"
+	case src.Type == "mcp" && (src.AWS != "" || src.Package == "aws-docs"):
+		return "aws", "MCP tools"
+	case src.Type == "webhook" && src.Signature == "token" && strings.EqualFold(src.TokenHeader, awsHookHeader):
+		return "aws", "webhook"
+	case src.Type == "http" && strings.Contains(src.URL, "/api/v4/"):
+		return "gitlab", "REST polling"
+	case src.Type == "webhook" && src.Signature == "token" && strings.EqualFold(src.TokenHeader, "X-Gitlab-Token"):
+		return "gitlab", "webhook"
+	}
+	return "", ""
+}
+
 func (s *server) serviceRows() []serviceRow {
 	out := []serviceRow{}
 	for name, src := range s.Config().Sources {
-		r := serviceRow{Name: name, Kind: src.Type}
-		switch {
-		case src.Type == "mcp" && (strings.HasPrefix(src.URL, "https://api.githubcopilot.com/") || src.Package == "github"):
-			r.Service, r.Detail = "github", "MCP tools"
-		case src.Type == "webhook" && src.Signature == "github":
-			r.Service, r.Detail = "github", "webhook"
-		case src.Type == "mcp" && (src.AWS != "" || src.Package == "aws-docs"):
-			r.Service, r.Detail = "aws", "MCP tools"
-		case src.Type == "webhook" && src.Signature == "token" && strings.EqualFold(src.TokenHeader, awsHookHeader):
-			r.Service, r.Detail = "aws", "webhook"
-		case src.Type == "http" && strings.Contains(src.URL, "/api/v4/"):
-			r.Service, r.Detail = "gitlab", "REST polling"
-		case src.Type == "webhook" && src.Signature == "token" && strings.EqualFold(src.TokenHeader, "X-Gitlab-Token"):
-			r.Service, r.Detail = "gitlab", "webhook"
-		default:
-			continue
+		if svc, detail := serviceOf(src); svc != "" {
+			out = append(out, serviceRow{Name: name, Kind: src.Type, Service: svc, Detail: detail})
 		}
-		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -171,19 +178,30 @@ func (s *server) testService(ctx context.Context, name string) svcTest {
 		t.Err = "nothing to test: this server needs no credentials"
 		return t
 	}
-	var target, hdr, val string
+	var target, hdr, val, who string
 	switch {
 	case src.Type == "mcp" && src.Auth != nil && strings.HasPrefix(src.URL, "https://api.githubcopilot.com/"):
-		target, hdr, val = "https://api.github.com/user", "Authorization", "Bearer "+src.Auth.Bearer.Value
+		target, hdr, val, who = "https://api.github.com/user", "Authorization", "Bearer "+src.Auth.Bearer.Value, "login"
 	case src.Type == "mcp" && src.Package == "github":
-		target, hdr, val = "https://api.github.com/user", "Authorization", "Bearer "+src.Env["GITHUB_PERSONAL_ACCESS_TOKEN"].Value
+		target, hdr, val, who = "https://api.github.com/user", "Authorization", "Bearer "+src.Env["GITHUB_PERSONAL_ACCESS_TOKEN"].Value, "login"
 	case src.Type == "http" && strings.Contains(src.URL, "/api/v4/"):
 		base := src.URL[:strings.Index(src.URL, "/api/v4/")]
-		target, hdr, val = base+"/api/v4/user", "PRIVATE-TOKEN", src.Headers["PRIVATE-TOKEN"].Value
+		target, hdr, val, who = base+"/api/v4/user", "PRIVATE-TOKEN", src.Headers["PRIVATE-TOKEN"].Value, "username"
 	default:
 		t.Err = "not a GitHub or GitLab source"
 		return t
 	}
+	return s.runHTTPTest(ctx, t, "GET", target, hdr, val, "", who)
+}
+
+// runHTTPTest sends one authenticated request and reports who the token
+// belongs to (identity: a dotted JSON path). It runs in the daemon behind the
+// same guard as sources: public hosts only, unless listed in
+// server.services.private_endpoints. Redirects are not followed. The caller
+// owns the secret in val; nothing from the request or body is kept except
+// the identity.
+func (s *server) runHTTPTest(ctx context.Context, t svcTest, method, target, hdr, val, reqBody, identity string) svcTest {
+	cfg := s.Config()
 	u, err := url.Parse(target)
 	if err != nil {
 		t.Err = "bad URL"
@@ -220,7 +238,11 @@ func (s *server) testService(ctx context.Context, name string) svcTest {
 		return nil, last
 	}}
 	defer tr.CloseIdleConnections()
-	req, _ := http.NewRequestWithContext(ctx, "GET", target, nil)
+	req, err := http.NewRequestWithContext(ctx, method, target, strings.NewReader(reqBody))
+	if err != nil {
+		t.Err = "bad request"
+		return t
+	}
 	req.Header.Set(hdr, val)
 	req.Header.Set("User-Agent", "siphon")
 	start := time.Now()
@@ -239,16 +261,26 @@ func (s *server) testService(ctx context.Context, name string) svcTest {
 		t.Err = "the service answered " + resp.Status
 		return t
 	}
-	var who struct {
-		Login    string `json:"login"`
-		Username string `json:"username"`
-	}
-	_ = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&who)
-	t.User = who.Login + who.Username
+	var doc any
+	_ = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&doc)
+	t.User = jsonPath(doc, identity)
 	if t.User == "" {
 		t.User = "(token accepted)"
 	}
 	return t
+}
+
+// jsonPath reads a dotted path ("user.login") as a short string, or "".
+func jsonPath(v any, path string) string {
+	for _, k := range strings.Split(path, ".") {
+		m, ok := v.(map[string]any)
+		if !ok || k == "" {
+			return ""
+		}
+		v = m[k]
+	}
+	str, _ := v.(string)
+	return clip(str, 100)
 }
 
 func (s *server) testAWS(ctx context.Context, name string) svcTest {

@@ -193,3 +193,8 @@ Revert the merge.
   - **Extras:** more funcs (`q`, `pathesc`, `has`, `package`, `private`, `fail`, `tools`), a `multi` field type, field `pattern`/`secure`, and `hook_header`.
   - Required-field errors read "<label> is required".
   - Grouping by `connection:` is in step 4.
+- **Step 3 (coder):**
+  - Entries declare `needs_package`, and `Entry.Availability(cfg)` derives the status. `Render` refuses unavailable entries.
+  - Test templates use `{token}`/`{base}` substitution, in memory.
+  - The test runner (`runHTTPTest`) is shared by the old and new endpoints. `Err`, `User` and `ARN` are masked before they're stored or returned; the masking test caught a token echoed in `user`.
+  - **Decision (Opus):** items also get an additive `service: <catalogue id>` field next to `connection:`. The test lookup and the Connected grouping use it instead of the source-shape heuristic, which only knew github, gitlab and aws. Added in step 4.

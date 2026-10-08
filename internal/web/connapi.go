@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/olafkfreund/siphon/internal/catalog"
 	"github.com/olafkfreund/siphon/internal/config"
 )
 
@@ -38,21 +39,45 @@ func (s *server) connectionAPI(mux *http.ServeMux) {
 		}
 		return nil
 	}
-	// The setup replies: the result, or the refusal. One route per catalogue
-	// entry that had a dedicated endpoint before the catalogue.
-	for _, id := range []string{"github", "gitlab", "aws"} {
-		route("POST /api/services/"+id, func(r *http.Request, actor string) (any, int, error) {
-			var b map[string]any
-			if err := decode(r, &b); err != nil {
-				return nil, 400, err
-			}
-			d, err := s.connect(actor, id, jsonValues(b))
-			if err != nil {
-				return nil, 0, err
-			}
-			return d, 200, nil
-		})
-	}
+	// GET /api/catalog: the entries (no templates) and what this install can do.
+	route("GET /api/catalog", func(*http.Request, string) (any, int, error) {
+		type item struct {
+			*catalog.Entry
+			Availability string `json:"availability"`
+			Why          string `json:"availability_reason,omitempty"`
+		}
+		out := []item{}
+		for _, e := range catalog.All() {
+			st, why := e.Availability(s.Config())
+			out = append(out, item{e, st, why})
+		}
+		return map[string]any{"services": out}, 200, nil
+	})
+	// POST /api/services/{id}: connect any catalogue entry. The body is
+	// {"fields": {...}} or the fields flat (the shape of the old per-service
+	// endpoints, which this also serves).
+	route("POST /api/services/{id}", func(r *http.Request, actor string) (any, int, error) {
+		id := r.PathValue("id")
+		if catalog.Get(id) == nil {
+			return nil, 404, errMsg("no such service")
+		}
+		var b map[string]any
+		if err := decode(r, &b); err != nil {
+			return nil, 400, err
+		}
+		if f, ok := b["fields"].(map[string]any); ok {
+			b = f
+		}
+		d, err := s.connect(actor, id, jsonValues(b))
+		if err != nil {
+			return nil, 0, err
+		}
+		return d, 200, nil
+	})
+	route("POST /api/connections/{name}/test", func(r *http.Request, _ string) (any, int, error) {
+		res, code, err := s.testConnection(r.Context(), r.PathValue("name"))
+		return res, code, err
+	})
 	route("POST /api/services/{name}/test", func(r *http.Request, _ string) (any, int, error) {
 		if s.Config().Sources[r.PathValue("name")] == nil {
 			return nil, 404, errMsg("no such source")

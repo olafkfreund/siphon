@@ -112,8 +112,8 @@ var itemName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 // only as validated one-line text (and quoted with q); secrets only through
 // the secret, basic and generated functions. Nothing is stored here.
 func (e *Entry) Render(values map[string]string, env Env) (*Result, error) {
-	if e.Status != "available" {
-		return nil, bad("%s can't be connected here: %s", e.Name, e.Reason)
+	if st, why := e.Availability(env.Config); st != "available" {
+		return nil, bad("%s can't be connected here: %s", e.Name, why)
 	}
 	vals, err := e.clean(values, env.Config)
 	if err != nil {

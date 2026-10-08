@@ -14,6 +14,8 @@ import (
 	"text/template"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/olafkfreund/siphon/internal/config"
 )
 
 //go:embed services.yaml
@@ -35,7 +37,8 @@ type Entry struct {
 	WriteTools   []string `yaml:"write_tools" json:"-"`
 	Test         *Test    `yaml:"test" json:"-"`
 	Templates    []string `yaml:"templates" json:"templates,omitempty"`
-	Hook         string   `yaml:"hooks" json:"-"` // a registered Go hook (aws only)
+	Hook         string   `yaml:"hooks" json:"-"`                               // a registered Go hook (aws only)
+	NeedsPackage []string `yaml:"needs_package" json:"needs_package,omitempty"` // connectable once any one of these is in server.mcp_packages
 
 	tmpl map[string]*template.Template // by "create/<i>/name|when|yaml", "setup"
 }
@@ -138,7 +141,7 @@ func (e *Entry) check() error {
 	if !slices.Contains(statuses, e.Status) {
 		return fmt.Errorf("unknown status %q", e.Status)
 	}
-	if e.Status == "not-yet" && e.Reason == "" {
+	if (e.Status == "not-yet" || len(e.NeedsPackage) > 0) && e.Reason == "" {
 		return fmt.Errorf("a not-yet service needs a reason")
 	}
 	if e.Hook != "" && hooks[e.Hook] == nil {
@@ -179,4 +182,22 @@ func (e *Entry) check() error {
 		}
 	}
 	return nil
+}
+
+// Availability is the entry's status on this install: not-yet stays, and an
+// entry with needs_package is needs-package until one of them is installed.
+// The reason says what to do.
+func (e *Entry) Availability(cfg *config.Config) (status, reason string) {
+	if e.Status != "available" && e.Status != "needs-package" {
+		return e.Status, e.Reason
+	}
+	if len(e.NeedsPackage) > 0 && cfg != nil {
+		for _, p := range e.NeedsPackage {
+			if _, ok := cfg.Server.MCPPackages[p]; ok {
+				return "available", ""
+			}
+		}
+		return "needs-package", e.Reason
+	}
+	return "available", ""
 }

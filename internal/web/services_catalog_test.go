@@ -1,6 +1,9 @@
 package web
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -71,4 +74,97 @@ func TestCatalogSecretsNotInHistory(t *testing.T) {
 			t.Errorf("secret on %s", p)
 		}
 	}
+}
+
+func TestCatalogAPIAvailabilityAndGenericConnect(t *testing.T) {
+	ce := newCfgEnv(t) // no mcp_packages: aws needs a package
+	w := ce.api("GET", "/api/catalog", "")
+	var cat struct {
+		Services []struct {
+			ID, Availability, Reason string
+			AvailabilityReason       string `json:"availability_reason"`
+			Fields                   []struct{ Key string }
+		}
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &cat); err != nil || w.Code != 200 {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	got := map[string]string{}
+	for _, s := range cat.Services {
+		got[s.ID] = s.Availability
+		if s.ID == "aws" && !strings.Contains(s.AvailabilityReason, "services.siphon.aws") {
+			t.Errorf("aws reason: %q", s.AvailabilityReason)
+		}
+	}
+	if got["github"] != "available" || got["aws"] != "needs-package" {
+		t.Fatalf("availability %v", got)
+	}
+	if strings.Contains(w.Body.String(), "yaml") || strings.Contains(w.Body.String(), "{{") {
+		t.Error("templates leaked")
+	}
+
+	// Generic connect: {"fields": {...}}, no-store, one-time secret.
+	w = ce.api("POST", "/api/services/github", jbody(map[string]any{"fields": map[string]any{"name": "g1", "token": "ghp_GEN", "webhook": true}}))
+	var done serviceDone
+	json.Unmarshal(w.Body.Bytes(), &done)
+	if w.Code != 200 || w.Header().Get("Cache-Control") != "no-store" || len(done.HookSecret) != 64 || strings.Contains(w.Body.String(), "ghp_GEN") {
+		t.Fatalf("connect: %d %s", w.Code, w.Body.String())
+	}
+	if c := ce.cur.Load().Sources["g1"]; c == nil || c.Connection != "g1" {
+		t.Fatal("not connected / not labelled")
+	}
+	if w := ce.api("POST", "/api/services/nope", `{}`); w.Code != 404 {
+		t.Errorf("unknown: %d", w.Code)
+	}
+	if w := ce.api("POST", "/api/services/aws", jbody(map[string]any{"name": "aws", "region": "eu-west-1", "profile": "p", "servers": []string{"docs"}})); w.Code != 422 || !strings.Contains(w.Body.String(), "services.siphon.aws") {
+		t.Errorf("unavailable: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestConnectionTest(t *testing.T) {
+	const tok = "glpat-SECRET9"
+	mode := "ok"
+	gl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path != "/api/v4/user" || r.Header.Get("PRIVATE-TOKEN") != tok:
+			http.Error(w, "nope "+tok, 401)
+		case mode == "deny":
+			http.Error(w, "no", 401)
+		case mode == "echo":
+			w.Write([]byte(`{"username":"` + tok + `"}`))
+		default:
+			w.Write([]byte(`{"username":"olaf"}`))
+		}
+	}))
+	defer gl.Close()
+	u, _ := url.Parse(gl.URL)
+	ce := newCfgEnvFile(t, strings.Replace(cfgFile, "server: { sandbox: none, db: DIR/s.db }",
+		`server: { sandbox: none, db: DIR/s.db, services: { private_endpoints: ["`+u.Host+`"] } }`, 1))
+	if w := ce.api("POST", "/api/connections/gl/test", ""); w.Code != 404 {
+		t.Fatalf("unknown: %d", w.Code)
+	}
+	ce.api("POST", "/api/services/gitlab", jbody(map[string]any{"name": "gl", "base": gl.URL, "project": "g/p", "token": tok}))
+	check := func(wantOK bool, wantDetail string) {
+		t.Helper()
+		w := ce.api("POST", "/api/connections/gl/test", "")
+		var r struct {
+			OK     bool
+			Detail string
+		}
+		json.Unmarshal(w.Body.Bytes(), &r)
+		if w.Code != 200 || r.OK != wantOK || !strings.Contains(r.Detail, wantDetail) || strings.Contains(w.Body.String(), tok) {
+			t.Fatalf("%d %s", w.Code, w.Body.String())
+		}
+		var ok bool
+		var detail string
+		ce.st.DB.QueryRow(`SELECT ok, detail FROM connection_check WHERE connection='gl'`).Scan(&ok, &detail)
+		if ok != wantOK || strings.Contains(detail, tok) || !strings.Contains(detail, wantDetail) {
+			t.Fatalf("stored %v %q", ok, detail)
+		}
+	}
+	check(true, "olaf")
+	mode = "echo" // the identity is the token itself: it is masked
+	check(true, "***")
+	mode = "deny"
+	check(false, "refused")
 }
