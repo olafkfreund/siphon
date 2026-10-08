@@ -390,3 +390,16 @@ pre .add { color: #5ef0b4 } pre .del { color: #ff8fa0 }
 .tpl pre.yaml { max-height: 22rem }
 .tpl .cmds { display: flex; flex-direction: column; gap: .4rem }
 @media (max-width: 900px) { .helplayout { grid-template-columns: 1fr } .docnav { position: static } .g3 { grid-template-columns: 1fr } }
+/* egress: allowlists as rows of host chips; refused hosts as a table */
+.eg-row { padding: .7rem 0; border-top: 1px solid var(--line) }
+.eg-row:first-of-type { border-top: 0; padding-top: .2rem }
+.eg-head { display: flex; align-items: center; gap: .5rem; margin-bottom: .45rem }
+.eg-hosts { display: flex; flex-wrap: wrap; gap: .35rem }
+.eg-host { display: inline-block; max-width: 100%; font-size: .78rem; padding: .15rem .5rem; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line); overflow-wrap: anywhere }
+.eg-refused { margin-top: .2rem }
+.eg-refused td { padding: .45rem .6rem; border-top: 1px solid var(--line); vertical-align: middle }
+.eg-refused td:first-child { width: 100% }
+.eg-refused .num { text-align: right; font-variant-numeric: tabular-nums }
+.eg-refused td:not(:first-child), .eg-refused th { white-space: nowrap }
+.eg-refused .act { text-align: right }
+.eg-refused .eg-host { background: color-mix(in srgb, var(--coral) 10%, transparent); border-color: color-mix(in srgb, var(--coral) 25%, transparent) }
