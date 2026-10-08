@@ -216,10 +216,13 @@ func FinishJob(db *sql.DB, id int64, state string, exit int, output string, now 
 }
 
 // PutSourceState records the last poll time and error ("" on success).
+// failing_since marks where the current run of failures began, and clears on success.
 func PutSourceState(db *sql.DB, source string, now time.Time, pollErr string) error {
-	_, err := db.Exec(`INSERT INTO source_state(source,last_poll_at,last_error) VALUES (?,?,?)
-		ON CONFLICT(source) DO UPDATE SET last_poll_at=excluded.last_poll_at, last_error=excluded.last_error`,
-		source, ms(now), pollErr)
+	_, err := db.Exec(`INSERT INTO source_state(source,last_poll_at,last_error,failing_since)
+		VALUES (?,?,?,CASE WHEN ?='' THEN NULL ELSE ? END)
+		ON CONFLICT(source) DO UPDATE SET last_poll_at=excluded.last_poll_at, last_error=excluded.last_error,
+		failing_since=CASE WHEN excluded.last_error='' THEN NULL ELSE COALESCE(source_state.failing_since, excluded.last_poll_at) END`,
+		source, ms(now), pollErr, pollErr, ms(now))
 	return err
 }
 
@@ -297,6 +300,13 @@ func Cleanup(db *sql.DB, now time.Time) error {
 	}{
 		{`UPDATE jobs SET parent_id=NULL WHERE parent_id IN (` + old + `)`, []any{cut}},
 		{`DELETE FROM approvals WHERE job_id IN (` + old + `)`, []any{cut}},
+		// Job ids are reused once the newest is deleted, so a job's notifications go with it
+		// (else INSERT OR IGNORE would drop the next job's message). Old job-less rows go too,
+		// except a "source failing" row still awaiting its "recovered" row.
+		{`DELETE FROM notifications WHERE job_id IN (` + old + `)`, []any{cut}},
+		{`DELETE FROM notifications WHERE job_id IS NULL AND event='source' AND created_at < ? AND (state!='sent' OR EXISTS
+			(SELECT 1 FROM notifications o WHERE o.channel=notifications.channel AND o.event='source_ok' AND o.key=notifications.key))`, []any{cut}},
+		{`DELETE FROM notifications WHERE job_id IS NULL AND state!='pending' AND created_at < ? AND event!='source'`, []any{cut}},
 		{`DELETE FROM jobs WHERE id IN (` + old + `)`, []any{cut}},
 		{`DELETE FROM audit WHERE at < ?`, []any{cut}},
 		{`DELETE FROM seen_event WHERE seen_at < ?`, []any{ms(now.Add(-seenRetention))}},

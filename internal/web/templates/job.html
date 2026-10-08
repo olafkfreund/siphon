@@ -38,6 +38,9 @@
       {{if .ParentID}}<dt>Parent</dt><dd><a href="/jobs/{{.ParentID}}">{{.ParentID}}</a></dd>{{end}}
       {{if .Depth}}<dt>Depth</dt><dd>{{.Depth}}</dd>{{end}}
     </dl></section>
+    {{if .Notes}}<section class="card" aria-labelledby="nt"><h2 id="nt">Notifications</h2><ul class="plain">
+      {{range .Notes}}<li><b>{{.Channel}}</b> · {{.Event}} · {{template "pill" .State}}<div class="muted small">{{if .SentAt}}sent {{tp .SentAt}}{{else}}queued {{ago .CreatedAt}}{{end}}{{if .Error}} · {{.Error}}{{end}}</div></li>{{end}}
+    </ul></section>{{end}}
     {{if .Event}}<section class="card" aria-labelledby="ev"><h2 id="ev">Triggering event</h2><pre>{{.Event}}</pre></section>{{end}}
     {{if .Steps}}<section class="card" aria-labelledby="st"><h2 id="st">Routine steps</h2><ol class="timeline">
       {{range .Steps}}<li>{{template "pill" .State}}<div><b>{{.ID}}</b><div class="muted small">{{.Kind}} {{.Target}}</div></div></li>{{end}}

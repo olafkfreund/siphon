@@ -18,6 +18,7 @@ import (
 	"net/netip"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -100,6 +101,7 @@ func New(o Options) http.Handler {
 			return itoa(*e)
 		},
 		"pe":    url.PathEscape,
+		"has":   func(l []string, s string) bool { return slices.Contains(l, s) },
 		"ticks": ticks,
 		"lines": func(s string) []string {
 			var out []string

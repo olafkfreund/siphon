@@ -27,8 +27,9 @@ type jobView struct {
 	Blocked      []blockedHost
 	Steps        []stepView
 	Duration     string
-	Summary      string // failed jobs: the last meaningful output line
-	Connect      string // a login the job needed but which isn't connected
+	Summary      string               // failed jobs: the last meaningful output line
+	Connect      string               // a login the job needed but which isn't connected
+	Notes        []store.Notification // notifications about this job
 }
 
 var notImported = regexp.MustCompile(`credential (\S+) is not imported`)
@@ -142,6 +143,9 @@ func (s *server) jobDetail(id int64) (*jobView, bool, error) {
 			end = *j.FinishedAt
 		}
 		v.Duration = end.Sub(*j.StartedAt).Round(100 * time.Millisecond).String()
+	}
+	if v.Notes, err = store.ListNotifications(s.Store.DB, store.NotificationFilter{Job: id, Limit: 20}); err != nil {
+		return nil, false, err
 	}
 	return v, true, nil
 }

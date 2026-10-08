@@ -26,6 +26,8 @@ type view struct {
 	JobV        *jobView
 	Logins      []loginView
 	Egress      *egressView
+	Notify      *notifyView
+	JobNotes    []store.Notification
 	Counts      map[string]int
 	ActionOf    map[int64]store.JobAction
 	LoginForm   *loginForm
@@ -115,6 +117,14 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 		return true, nil
 	})
 	page("/egress", "egress", func(_ *http.Request, v *view) (ok bool, err error) { v.Egress, err = s.egress(); return true, err })
+	page("/notifications", "notify", func(r *http.Request, v *view) (ok bool, err error) {
+		notice := ""
+		if n := r.URL.Query().Get("added"); n != "" {
+			notice = n + " is saved. Send a test message to check it."
+		}
+		v.Notify, err = s.notifyPage(notice, notifyForm{})
+		return true, err
+	})
 	page("/audit", "audit", func(_ *http.Request, v *view) (ok bool, err error) {
 		v.Audit, err = store.ListAudit(s.Store.DB, 200)
 		return true, err

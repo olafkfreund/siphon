@@ -143,7 +143,7 @@ func (s *server) prepare(cur []store.ConfigItem, mutate func(map[itemKey]store.C
 	// Pasted secrets are not on disk yet: validate with stand-in values.
 	stub := map[string]string{}
 	for _, p := range pending {
-		stub["file:"+p.path(secretsDir(s.Config().Server.DB))] = "placeholder"
+		stub["file:"+p.path(secretsDir(s.Config().Server.DB))] = "https://placeholder.invalid/" // a valid url for notify; other secrets only need a value
 	}
 	cfg, _, err := config.LoadWithOverlayStub(s.ConfigPath, toItems(next), stub, toItems(cur))
 	if err != nil {
@@ -312,6 +312,13 @@ func (s *server) commit(actor, summary string, rev *int64, mutate func(map[itemK
 	for _, f := range stagedFiles {
 		if err = publishSecret(f.tmp, f.final); err != nil {
 			return 0, nil, nil, err
+		}
+	}
+	for k := range old { // a notify channel that is gone leaves no url/token file behind
+		if k.Kind == "notify" && e.cfg.Notify[k.Name] == nil {
+			for _, f := range []string{"url", "token"} {
+				os.Remove(secretsDir(s.Config().Server.DB) + "/" + config.SecretFileName("notify", k.Name, f))
+			}
 		}
 	}
 	if credsChanged || len(pending) > 0 { // a rotated key keeps its ref

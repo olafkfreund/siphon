@@ -156,6 +156,16 @@ output:
 **In the portal:** the run waits in **Approvals** (approve it there instead,
 if you like), then **Jobs** shows the summary.
 
+**Get told when a run waits:** nothing tells you an approval is waiting
+until you add a channel. One line sets up your phone (the app is ntfy):
+
+```sh
+printf %s https://ntfy.sh/<a-long-random-topic> | siphon notify add phone --type ntfy --url - --yes
+siphon notify test phone
+```
+
+More in [Notifications](tasks/notifications.md).
+
 ## 5. When something doesn't happen
 
 ```sh
@@ -185,6 +195,8 @@ ends with the likely one and the next command to run. More in [Troubleshooting](
 
 ## Where next
 
+- **Get told:** [Notifications](tasks/notifications.md) for approvals,
+  failed jobs and failing sources, on ntfy, Slack or a webhook.
 - **Ready-made tasks:** [the templates](templates/README.md): code review,
   CI failures, alerts, uptime, AWS, Home Assistant, nightly reports.
 - **How-tos by task:** [the guide index](README.md).

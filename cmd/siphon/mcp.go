@@ -69,11 +69,11 @@ func fail(err error) *mcp.CallToolResult {
 type none struct{}
 
 type getIn struct {
-	Kind string `json:"kind" jsonschema:"sources, rules, agents, routines, credentials, jobs, approvals, audit or connections"`
+	Kind string `json:"kind" jsonschema:"sources, rules, agents, routines, credentials, notify, jobs, approvals, audit or connections"`
 	Name string `json:"name,omitempty" jsonschema:"one item's name (for jobs: its id); omit to list"`
 }
 type explainIn struct {
-	Kind string `json:"kind" jsonschema:"source, rule, agent, routine or credential"`
+	Kind string `json:"kind" jsonschema:"source, rule, agent, routine, credential or notify"`
 }
 type templateIn struct {
 	Name string `json:"name,omitempty" jsonschema:"a template name; omit to list them"`
@@ -92,11 +92,14 @@ type jobsIn struct {
 	State string `json:"state,omitempty"`
 	Limit int    `json:"limit,omitempty"`
 }
+type notifyTestIn struct {
+	Name string `json:"name" jsonschema:"the notification channel to send a test message to"`
+}
 type jobIn struct {
 	ID int64 `json:"id"`
 }
 type applyIn struct {
-	YAML    string            `json:"yaml" jsonschema:"items in siphon.yaml shape: sections sources, agents, routines, credentials, rules"`
+	YAML    string            `json:"yaml" jsonschema:"items in siphon.yaml shape: sections sources, agents, routines, credentials, notify, rules"`
 	Secrets map[string]string `json:"secrets,omitempty" jsonschema:"<kind>/<name>.<field> to value; refused unless siphon mcp runs with --allow-write and --allow-secrets"`
 	DryRun  bool              `json:"dry_run,omitempty" jsonschema:"only check and show the diff"`
 }
@@ -124,7 +127,7 @@ func newMCPServer(c *cli, allowWrite, allowSecrets, allowUnapproved bool) *mcp.S
 		func(_ context.Context, _ *mcp.CallToolRequest, _ none) (*mcp.CallToolResult, any, error) {
 			return get("/api/inventory")
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "get", Description: "List config items of a kind, or show one item's YAML. Kinds: sources, rules, agents, routines, credentials; also jobs, approvals, audit, connections."},
+	mcp.AddTool(s, &mcp.Tool{Name: "get", Description: "List config items of a kind, or show one item's YAML. Kinds: sources, rules, agents, routines, credentials, notify; also jobs, approvals, audit, connections."},
 		func(_ context.Context, _ *mcp.CallToolRequest, in getIn) (*mcp.CallToolResult, any, error) {
 			n := url.PathEscape(in.Name)
 			switch {
@@ -260,6 +263,17 @@ func newMCPServer(c *cli, allowWrite, allowSecrets, allowUnapproved bool) *mcp.S
 			}
 			res["dry_run"], res["diff"] = false, check.Diff
 			return result(res, false), nil, nil
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "notify_test", Description: "Send one test message to a notification channel and report the HTTP status or the masked error. Without --allow-write on the server this does nothing; the result says so."},
+		func(_ context.Context, _ *mcp.CallToolRequest, in notifyTestIn) (*mcp.CallToolResult, any, error) {
+			if !allowWrite {
+				return result(map[string]any{"sent": false, "note": writesOff}, false), nil, nil
+			}
+			var v map[string]any
+			if err := c.call("POST", "/api/notify/"+url.PathEscape(in.Name)+"/test", nil, &v); err != nil {
+				return fail(err), nil, nil
+			}
+			return result(v, false), nil, nil
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "draft", Description: "Ask a model connection to draft an apply file from plain words. It is checked (diff, errors, a to-do list) but NEVER applied, even with --allow-write: review it, then call apply."},
 		func(_ context.Context, _ *mcp.CallToolRequest, in draftIn) (*mcp.CallToolResult, any, error) {

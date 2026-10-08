@@ -71,12 +71,12 @@ func TestMCPToolList(t *testing.T) {
 			t.Errorf("a deciding tool: %s", tool.Name)
 		}
 	}
-	for _, want := range []string{"inventory", "get", "explain", "template", "test", "why", "jobs", "job", "status", "apply", "delete", "guide", "draft"} {
+	for _, want := range []string{"inventory", "get", "explain", "template", "test", "why", "jobs", "job", "status", "apply", "delete", "guide", "draft", "notify_test"} {
 		if !have[want] {
 			t.Errorf("tool %s missing", want)
 		}
 	}
-	if len(res.Tools) != 13 {
+	if len(res.Tools) != 14 {
 		t.Errorf("%d tools: %v", len(res.Tools), have)
 	}
 }

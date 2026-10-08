@@ -12,7 +12,7 @@ import (
 	"github.com/olafkfreund/siphon/internal/store"
 )
 
-const approvalTTL = 24 * time.Hour
+const approvalTTL = store.ApprovalTTL // one value: the notifier derives when an approval opened from it
 
 // newApproval inserts the approvals row for a pending job and returns the
 // one-shot link path. The token exists only in that return value: callers

@@ -25,6 +25,7 @@ baseline in **`siphon.yaml`**.
 | watch an MCP server | [mcp-watch](tasks/mcp-watch.md) | `mcp-build-watch`, `mcp-task-triage` |
 | chain steps (fetch → summarise → notify) | [routines](tasks/routine.md) | `nightly-report`, `alertmanager-summary` |
 | approve or deny agent runs | [approvals](tasks/approvals.md) | |
+| get told when something needs me | [notifications](tasks/notifications.md) | |
 | investigate cloud alarms | [AWS](connections/aws.md) | `aws-cloudwatch-alarm` |
 
 ## Connections

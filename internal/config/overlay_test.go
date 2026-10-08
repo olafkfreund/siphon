@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -467,5 +468,88 @@ func TestSecretRefExactAndLegacy(t *testing.T) {
 	}
 	if _, _, err := LoadWithOverlayStub(path, []Item{src("web-auth", legacy)}, nil, []Item{src("web-auth", own)}); err == nil {
 		t.Error("legacy accepted over a different prior ref")
+	}
+}
+
+func TestNotifyKind(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.yaml")
+	os.WriteFile(path, []byte("server: { db: "+dir+"/s.db, services: {private_endpoints: ['127.0.0.1:18099']} }\n"), 0o600)
+	sec := dir + "/secrets"
+	os.MkdirAll(sec, 0o700)
+	ref := func(n, f, v string) string {
+		p := filepath.Join(sec, SecretFileName("notify", n, f))
+		os.WriteFile(p, []byte(v), 0o600)
+		return "file:" + p
+	}
+	it := func(y string) Item { return Item{Kind: "notify", Name: "hook", YAML: y} }
+	url := ref("hook", "url", "https://ntfy.example/topic")
+	tok := ref("hook", "token", "s3cret-token")
+
+	// Round trip: the item is in the effective config, with its refs and no secret text.
+	c, prov, err := LoadWithOverlay(path, []Item{it("{type: ntfy, url: '" + url + "', token: '" + tok + "', events: [failed]}")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	n := c.Notify["hook"]
+	if n == nil || n.Type != "ntfy" || n.URL.Value != "https://ntfy.example/topic" || n.Token.Value != "s3cret-token" || prov[Key{"notify", "hook"}] != FromPortal {
+		t.Fatalf("round trip: %+v %v", n, prov)
+	}
+	if got := c.Secrets(); !slices.Contains(got, "s3cret-token") || !slices.Contains(got, "https://ntfy.example/topic") {
+		t.Errorf("Secrets() misses the notify values: %d", len(got))
+	}
+	if r := itemRefs("notify", "{type: ntfy, url: '"+url+"', token: '"+tok+"'}"); r["url"] != url || r["token"] != tok {
+		t.Errorf("itemRefs: %v", r)
+	}
+
+	// Private http only when listed.
+	if c, _, err := LoadWithOverlay(path, []Item{it("{type: webhook, url: '" + ref("hook", "url", "http://127.0.0.1:18099/n") + "'}")}); err != nil || c.Validate() != nil {
+		t.Errorf("listed private endpoint: %v", err)
+	}
+	for name, y := range map[string]string{
+		"bad type":    "{type: sms, url: '" + url + "'}",
+		"no url":      "{type: ntfy}",
+		"bad event":   "{type: ntfy, url: '" + url + "', events: [boom]}",
+		"inline url":  "{type: ntfy, url: 'https://x.example/t'}",
+		"other file":  "{type: ntfy, url: 'file:/etc/passwd'}",
+		"unlisted":    "{type: webhook, url: '" + ref("hook", "url", "http://127.0.0.1:18100/n") + "'}",
+		"plain http":  "{type: slack, url: '" + ref("hook", "url", "http://hooks.example/x") + "'}",
+		"userinfo":    "{type: slack, url: '" + ref("hook", "url", "https://u:p@hooks.example/x") + "'}",
+		"unknown key": "{type: ntfy, url: '" + url + "', bogus: 1}",
+	} {
+		c, _, err := LoadWithOverlay(path, []Item{it(y)})
+		if err == nil {
+			err = c.Validate()
+		}
+		if err == nil {
+			t.Errorf("%s accepted", name)
+		} else if strings.Contains(err.Error(), "hooks.example") || strings.Contains(err.Error(), "127.0.0.1:18100") {
+			t.Errorf("%s: error repeats the url: %v", name, err)
+		}
+	}
+	// A bad name is refused too.
+	if c, _, err := LoadWithOverlay(path, []Item{{Kind: "notify", Name: "Bad", YAML: "{type: ntfy, url: '" + url + "'}"}}); err == nil && c.Validate() == nil {
+		t.Error("bad name accepted")
+	}
+
+	// The file's token must not be sent to a new url.
+	os.WriteFile(path, []byte("server: { db: "+dir+"/s.db }\nnotify:\n  fh: { type: ntfy, url: 'env:NURL', token: 'env:NTOK' }\n"), 0o600)
+	t.Setenv("NURL", "https://ntfy.example/t")
+	t.Setenv("NTOK", "tok")
+	mv := func(y string) error {
+		_, _, err := LoadWithOverlay(path, []Item{{Kind: "notify", Name: "fh", YAML: y}})
+		return err
+	}
+	if err := mv("{type: ntfy, url: '" + url + "', token: 'env:NTOK'}"); err == nil {
+		t.Error("file token moved to a new url")
+	}
+	if err := mv("{type: ntfy, url: 'env:NURL', token: 'env:NTOK', events: [failed]}"); err != nil {
+		t.Errorf("keeping the file's refs: %v", err)
+	}
+	if err := mv("{type: ntfy, url: '" + ref("fh", "url", "https://o.example/t") + "', token: '" + ref("fh", "token", "t2") + "'}"); err != nil {
+		t.Errorf("own url and token: %v", err)
 	}
 }

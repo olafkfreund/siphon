@@ -173,17 +173,17 @@ func (s *server) job(id int64) (store.JobDetail, bool, error) {
 // Page titles and which nav entry each page lights up.
 var (
 	titles = map[string]string{"dashboard": "Dashboard", "jobs": "Jobs", "job": "Job", "approvals": "Approvals",
-		"rules": "Rules", "sources": "Sources", "audit": "Audit", "logins": "Connections", "egress": "Egress", "services": "Services", "servicedone": "Services", "serviceconnect": "Services",
+		"rules": "Rules", "sources": "Sources", "audit": "Audit", "logins": "Connections", "egress": "Egress", "notify": "Notifications", "services": "Services", "servicedone": "Services", "serviceconnect": "Services",
 		"cfglist": "Config", "cfgedit": "Edit", "history": "History", "historyitem": "Revision",
 		"help": "Help & Docs", "helppage": "Help & Docs", "helptemplates": "Templates"}
 	active = map[string]string{"dashboard": "dash", "jobs": "jobs", "job": "jobs", "approvals": "approvals",
-		"rules": "rules", "sources": "sources", "audit": "audit", "logins": "logins", "egress": "egress", "services": "services", "servicedone": "services", "serviceconnect": "services",
+		"rules": "rules", "sources": "sources", "audit": "audit", "logins": "logins", "egress": "egress", "notify": "notify", "services": "services", "servicedone": "services", "serviceconnect": "services",
 		"cfglist": "rules", "cfgedit": "rules", "history": "history", "historyitem": "history",
 		"help": "help", "helppage": "help", "helptemplates": "help"}
 	// Config kinds as people read them, and the nav entry each lights up.
-	kindTitle = map[string]string{"rules": "Rules", "sources": "Sources", "agents": "Agents", "routines": "Routines", "credentials": "Connections"}
-	kindOne   = map[string]string{"rules": "rule", "sources": "source", "agents": "agent", "routines": "routine", "credentials": "connection"}
-	kindNav   = map[string]string{"rules": "rules", "sources": "sources", "agents": "agents", "routines": "routines", "credentials": "logins"}
+	kindTitle = map[string]string{"rules": "Rules", "sources": "Sources", "agents": "Agents", "routines": "Routines", "credentials": "Connections", "notify": "Notifications"}
+	kindOne   = map[string]string{"rules": "rule", "sources": "source", "agents": "agent", "routines": "routine", "credentials": "connection", "notify": "notification channel"}
+	kindNav   = map[string]string{"rules": "rules", "sources": "sources", "agents": "agents", "routines": "routines", "credentials": "logins", "notify": "notify"}
 	provLabel = map[string]string{"file": "from siphon.yaml", "portal": "added in the portal", "override": "overrides siphon.yaml", "deleted": "deleted in the portal"}
 	// Pages that refresh themselves every 5 s (job detail decides by state).
 	polls = map[string]bool{"dashboard": true, "jobs": true, "approvals": true, "sources": true, "audit": true}

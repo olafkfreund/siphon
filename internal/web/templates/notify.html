@@ -1,0 +1,50 @@
+{{define "notify"}}{{with .Notify}}<div class="top"><div><h1>Notifications</h1><div class="muted">Get told when an agent needs approval, a job fails or a source breaks. Messages carry names and ids only, never event data or output. The URL and token are stored write-only and never shown again.</div></div><span class="sp"></span>{{if .Editable}}<a class="btn primary" href="#add">{{template "icon" "plus"}}Channel</a>{{end}}</div>
+{{if .Notice}}<div class="banner ok" role="status">{{template "icon" "check"}} {{.Notice}}</div>{{end}}
+
+<div class="grid g3 mb">
+{{range .Channels}}<article class="card acct" aria-label="Channel {{.Name}}">
+  <div class="acct-head"><span class="pill tag">{{.Type}}</span><span class="sp"></span>{{with .Last}}{{template "pill" .State}}{{else}}<span class="pill cancelled">No messages yet</span>{{end}}</div>
+  <h2 class="acct-name">{{.Name}}</h2>
+  <p class="muted small">{{range $i, $e := .Events}}{{if $i}} · {{end}}{{$e}}{{end}}</p>
+  {{with .Last}}<p class="muted small">Last: {{.Event}} {{if .SentAt}}{{tp .SentAt}}{{else}}{{ago .CreatedAt}}{{end}}{{if .Error}} · {{.Error}}{{end}}</p>{{end}}
+  <div id="ntest-{{.Name}}"></div>
+  <div class="row-actions">
+    <form method="post" action="/notifications/{{pe .Name}}/test" hx-post="/notifications/{{pe .Name}}/test" hx-target="#ntest-{{.Name}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{template "icon" "play"}}Test</button></form>
+    {{if $.Notify.Editable}}<form method="post" action="/notifications/{{pe .Name}}/delete" data-confirm="Delete the channel {{.Name}}? It stops receiving messages."><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm no">Delete</button></form>{{end}}
+  </div>
+</article>
+{{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>No channels yet.{{if .Editable}} Add one below.{{end}}</section>{{end}}
+</div>
+
+{{if .Editable}}{{with .Form}}<section class="card login-add-card" id="add" aria-labelledby="add-h">
+<h2 id="add-h">Add a channel</h2>
+{{if .Err}}<div class="banner" role="alert">{{.Err}}</div>{{end}}
+<form method="post" action="/notifications" class="login-add">
+  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+  {{$sel := .Type}}<fieldset class="tiles"><legend>Type</legend>
+    <label class="tile"><input type="radio" name="type" value="ntfy"{{if eq $sel "ntfy"}} checked{{end}}><span><b>ntfy</b><small>Push to your phone</small></span></label>
+    <label class="tile"><input type="radio" name="type" value="slack"{{if eq $sel "slack"}} checked{{end}}><span><b>Slack</b><small>An incoming webhook</small></span></label>
+    <label class="tile"><input type="radio" name="type" value="webhook"{{if eq $sel "webhook"}} checked{{end}}><span><b>Webhook</b><small>JSON to your own URL</small></span></label>
+  </fieldset>
+  <label class="f">Name<input name="name" value="{{.Name}}" placeholder="e.g. phone" required pattern="[a-z0-9][a-z0-9_\-]{0,63}" autocomplete="off"><span class="hint">Lowercase letters, digits, <code>_</code> and <code>-</code>.</span></label>
+  <label class="f">URL<input type="password" name="url" required autocomplete="off" spellcheck="false"><span class="hint">Write-only. https, or http to a host:port listed in <code>server.services.private_endpoints</code>. For ntfy, the topic URL (it is the secret).</span></label>
+  <label class="f"><span>Token <span class="muted">(optional)</span></span><input type="password" name="token" autocomplete="off" spellcheck="false"><span class="hint">Write-only. An ntfy access token or a webhook bearer token. Slack needs none.</span></label>
+  {{$ev := .Events}}<fieldset class="f kinds"><legend>Send me</legend><span class="seg">
+    {{range $.Notify.AllEvents}}<label><input type="checkbox" name="events" value="{{.}}"{{if has $ev .}} checked{{end}}><span>{{.}}</span></label>{{end}}
+  </span></fieldset>
+  <div class="row-actions"><button class="btn primary">{{template "icon" "check"}}Add channel</button></div>
+</form>
+</section>{{end}}{{end}}
+
+<section class="card mt" aria-labelledby="rec"><h2 id="rec">Recent deliveries</h2>
+{{if .Recent}}<table>
+  <thead><tr><th scope="col">When</th><th scope="col">Channel</th><th scope="col">Event</th><th scope="col">Job</th><th scope="col">State</th><th scope="col">Tries</th><th scope="col">Error</th></tr></thead>
+  <tbody>{{range .Recent}}<tr>
+    <td class="muted">{{ago .CreatedAt}}</td><td>{{.Channel}}</td><td>{{.Event}}</td>
+    <td>{{if .JobID}}<a href="/jobs/{{.JobID}}">{{.JobID}}</a>{{else}}{{.Source}}{{end}}</td>
+    <td>{{template "pill" .State}}</td><td class="num">{{.Attempts}}</td><td class="muted small">{{.Error}}</td>
+  </tr>{{end}}</tbody>
+</table>{{else}}<div class="empty">Nothing sent yet.</div>{{end}}
+</section>{{end}}{{end}}
+
+{{define "notifytest"}}{{if .OK}}<p class="small ok-text">{{template "icon" "check"}} Sent (HTTP {{.Status}})</p>{{else}}<p class="err small">{{template "icon" "x"}} {{.Err}}</p>{{end}}{{end}}
