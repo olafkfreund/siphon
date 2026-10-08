@@ -130,12 +130,18 @@ func main() {
 		err = serve(ctx, args)
 	case "credentials":
 		err = credentials(args)
+	case "backup":
+		err = backup(args)
 	default:
 		fmt.Fprint(os.Stderr, usageText())
 		os.Exit(2)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "siphon:", err)
+		var ee exitError
+		if errors.As(err, &ee) {
+			os.Exit(ee.code)
+		}
 		os.Exit(1)
 	}
 }

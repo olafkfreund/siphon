@@ -20,7 +20,7 @@ import (
 // given -config). Client mode talks to a running siphon over its API.
 
 // localOnly never goes through the API.
-var localOnly = []string{"version", "exec-job", "agent-run", "mcp-bridge", "schema", "validate", "config", "rules", "run-once", "serve", "credentials"}
+var localOnly = []string{"version", "exec-job", "agent-run", "mcp-bridge", "schema", "validate", "config", "rules", "run-once", "serve", "credentials", "backup"}
 
 // clientMode reports whether cmd runs against a server: not a local-only
 // command, and not one of the old local commands given -config.
@@ -117,6 +117,10 @@ func commands() []command {
 		{Name: "serve", Usage: "serve [-config f]", Mode: "local", Summary: "run the daemon", Example: "siphon serve -config siphon.yaml", extra: []flagDoc{cfgFlag()}},
 		{Name: "credentials import", Usage: "credentials import [-config f] [-token-stdin] <name>", Mode: "local", Summary: "store a login read from stdin", Example: "siphon credentials import -config siphon.yaml -token-stdin claude-main", extra: []flagDoc{cfgFlag(), {"token-stdin", "bool", "false", "the input is a setup token, not a login file"}}},
 		{Name: "credentials ls", Usage: "credentials ls [-config f]", Mode: "local", Summary: "list stored logins (no secrets)", Example: "siphon credentials ls -config siphon.yaml", extra: []flagDoc{cfgFlag()}},
+		{Name: "backup create", Usage: "backup create [-config f | -db path] [--force] <file|->", Mode: "local", Summary: "write a tar.gz of the database, secrets and logins (sensitive: mode 0600; encrypt it)", Example: "siphon backup create -config siphon.yaml /var/backup/siphon.tar.gz",
+			extra: []flagDoc{cfgFlag(), {"db", "string", "", "database file (wins over -config)"}, {"force", "bool", "false", "replace an existing file"}}},
+		{Name: "backup restore", Usage: "backup restore [-config f | -db path] [--yes] <file|->", Mode: "local", Summary: "restore a backup into a stopped siphon's state directory; the old state is kept in pre-restore-*", Example: "siphon backup restore -config siphon.yaml --yes siphon.tar.gz",
+			extra: []flagDoc{cfgFlag(), {"db", "string", "", "database file (wins over -config)"}, {"yes", "bool", "false", "replace existing state without asking (required with -)"}}},
 		{Name: "schema", Usage: "schema", Mode: "local", Summary: "print the JSON Schema for siphon.yaml", Example: "siphon schema"},
 		{Name: "version", Usage: "version", Mode: "local", Summary: "print the version", Example: "siphon version"},
 	}

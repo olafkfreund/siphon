@@ -686,6 +686,46 @@ Example:
 siphon credentials ls -config siphon.yaml
 ```
 
+### siphon backup create
+
+Write a tar.gz of the database, secrets and logins (sensitive: mode 0600; encrypt it).
+
+```sh
+siphon backup create [-config f | -db path] [--force] <file|->
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--config` | `siphon.yaml` | config file (runs the command locally, without the API) |
+| `--db` |  | database file (wins over -config) |
+| `--force` | `false` | replace an existing file |
+
+Example:
+
+```sh
+siphon backup create -config siphon.yaml /var/backup/siphon.tar.gz
+```
+
+### siphon backup restore
+
+Restore a backup into a stopped siphon's state directory; the old state is kept in pre-restore-*.
+
+```sh
+siphon backup restore [-config f | -db path] [--yes] <file|->
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--config` | `siphon.yaml` | config file (runs the command locally, without the API) |
+| `--db` |  | database file (wins over -config) |
+| `--yes` | `false` | replace existing state without asking (required with -) |
+
+Example:
+
+```sh
+siphon backup restore -config siphon.yaml --yes siphon.tar.gz
+```
+
 ### siphon schema
 
 Print the JSON Schema for siphon.yaml.
