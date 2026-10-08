@@ -177,3 +177,10 @@ are unchanged.
   - **Fixed in step 3:**
     - schedule rules default to `on: each` with `id: event.scheduled_at` (the `edge` default would fire once), and an explicit `edge` warns;
     - a source whose state row comes from an earlier non-schedule type is treated as new.
+- **Step 3 (coder):**
+  - Schedule rules default to `on: each` with `id: event.scheduled_at`, and an explicit `edge` warns.
+  - A stored last event without `scheduled_at` (left over from an earlier source type) counts as a new source.
+  - `Source.ScheduleEvent` builds the event for both the scheduler and `test --at`.
+  - `explain` reports `source.schedule {at, timezone, next_run_at, last_run_at, missed}`.
+  - `new task --schedule` defaults to `when: "true"`.
+  - The draft boosts templates whose name, title, category or notes contain "schedule".

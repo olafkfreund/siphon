@@ -384,17 +384,20 @@ func (c *cli) connectLogin(args []string, o *connectOpts) error {
 
 func buildTest(fs *flag.FlagSet) func(*cli, []string) error {
 	last := fs.Bool("last", false, "use the last event the source produced")
+	at := fs.String("at", "", `schedule rules: test the event for this moment, like "2026-03-02 06:00" (in the source's zone)`)
 	var headers multi
 	fs.Var(&headers, "header", "an event header as name=value (repeatable)")
 	return func(c *cli, args []string) error {
 		if len(args) == 2 && (args[0] == "service" || args[0] == "model") {
 			return c.testConnection(args[0], args[1])
 		}
-		if len(args) < 1 || len(args) > 2 || (*last && len(args) == 2) || (!*last && len(args) == 1) {
-			return usageErr("usage: siphon test <rule> <event.json|-> | siphon test <rule> --last | siphon test service|model <name>", "an event is a JSON file, or - for stdin; --last uses the stored one")
+		if len(args) < 1 || len(args) > 2 || (*last && len(args) == 2) || (*at != "" && (*last || len(args) == 2)) || (!*last && *at == "" && len(args) == 1) {
+			return usageErr("usage: siphon test <rule> <event.json|-> | siphon test <rule> --last | siphon test <rule> --at <time> | siphon test service|model <name>", "an event is a JSON file, or - for stdin; --last uses the stored one; --at builds a schedule event")
 		}
 		body := map[string]any{}
-		if *last {
+		if *at != "" {
+			body["at"] = *at
+		} else if *last {
 			body["use_last"] = true
 		} else {
 			var b []byte
@@ -530,7 +533,16 @@ func (c *cli) renderWhy(rule string, x map[string]any) {
 	line(x["enabled"] != false, "%s", map[bool]string{true: "enabled", false: "disabled (turned off at runtime)"}[x["enabled"] != false])
 	health := str(src, "health")
 	line(health != "error" && health != "stale", "source %s (%s) is %s%s", str(src, "name"), str(src, "type"), health, map[bool]string{true: ": " + str(src, "last_error"), false: ""}[str(src, "last_error") != ""])
-	line(x["last_event_at"] != nil, "%s", map[bool]string{true: "last event at " + humanTime(str(x, "last_event_at")), false: "the source has not produced an event yet"}[x["last_event_at"] != nil])
+	if sch := sub(src, "schedule"); sch != nil {
+		tz := str(sch, "timezone")
+		line(true, "schedule %s (%s): next run %s", str(sch, "at"), tz, humanTime(str(sch, "next_run_at")))
+		line(sch["last_run_at"] != nil, "last run %s", map[bool]string{true: humanTime(str(sch, "last_run_at")), false: "never"}[sch["last_run_at"] != nil])
+		if m := sub(sch, "missed"); m != nil {
+			line(false, "missed while Siphon was down: %v run(s) between %s and %s (%s)", m["count"], humanTime(str(m, "from")), humanTime(str(m, "to")), "audit schedule_skipped")
+		}
+	} else {
+		line(x["last_event_at"] != nil, "%s", map[bool]string{true: "last event at " + humanTime(str(x, "last_event_at")), false: "the source has not produced an event yet"}[x["last_event_at"] != nil])
+	}
 	if m, ok := x["last_event_matches"].(bool); ok {
 		line(m, "%s", map[bool]string{true: "the last event satisfies the condition", false: "the last event does not satisfy the condition"}[m])
 	}

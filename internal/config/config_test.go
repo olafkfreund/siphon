@@ -895,3 +895,21 @@ func TestScheduleAgentWarning(t *testing.T) {
 		}
 	}
 }
+
+func TestScheduleRuleDefaultsToEach(t *testing.T) {
+	y := "sources:\n  s: { type: schedule, at: \"@daily\" }\nrules:\n  - { name: a, source: s, when: \"true\", action: { cmd: [x] } }\n  - { name: b, source: s, when: \"true\", on: edge, action: { cmd: [x] } }\n"
+	c, err := Parse([]byte(y))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if r := c.Rules[0]; r.On != "each" || r.ID != "event.scheduled_at" {
+		t.Errorf("default: %+v", r)
+	}
+	w := strings.Join(c.Warnings(), "\n")
+	if !strings.Contains(w, "rules/b: on: edge on schedule source s") || strings.Contains(w, "rules/a") {
+		t.Errorf("warnings: %s", w)
+	}
+}

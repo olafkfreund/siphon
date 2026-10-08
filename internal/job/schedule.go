@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"maps"
 	"strings"
 	"time"
 
@@ -66,7 +65,7 @@ func (p *Pipeline) scheduleSync(ctx context.Context, cfg *config.Config, name st
 		return time.Time{}, err
 	}
 	st, ok := states[name]
-	if !ok || st.LastPollAt == nil {
+	if !ok || st.LastPollAt == nil || !p.hasScheduleEvent(name) {
 		return now, store.PutSourceState(p.Store.DB, name, now, "")
 	}
 	last := *st.LastPollAt
@@ -121,11 +120,7 @@ func (p *Pipeline) auditSystem(event, detail string) error {
 // recorded with the jobs, so a moment fires at most once, even across restarts.
 func (p *Pipeline) scheduleFire(ctx context.Context, cfg *config.Config, name string, loc *time.Location, at time.Time, catchUp bool) error {
 	s := cfg.Sources[name]
-	data := map[string]any{}
-	maps.Copy(data, s.Data)
-	data["schedule"], data["timezone"], data["catch_up"] = name, loc.String(), catchUp
-	data["scheduled_at"] = at.In(loc).Format(time.RFC3339)
-	data["fired_at"] = p.Now().In(loc).Format(time.RFC3339)
+	data := s.ScheduleEvent(name, loc, at, p.Now(), catchUp)
 	ev := rule.Event{Source: name, Data: data}
 	// The dedupe id is the UTC instant, except for cron: its wall-clock time, so
 	// the repeated hour of a DST fall-back fires once, not twice.
@@ -150,4 +145,12 @@ func (p *Pipeline) scheduleFire(ctx context.Context, cfg *config.Config, name st
 		slog.Warn("schedule rule failed", "source", name, "err", ruleErr)
 	}
 	return nil
+}
+
+// hasScheduleEvent is false for state left by an earlier non-schedule source
+// of the same name (it has a last event without scheduled_at): a new source.
+// No event at all is fine: a schedule that has not fired yet.
+func (p *Pipeline) hasScheduleEvent(name string) bool {
+	j, _ := store.SourceEvent(p.Store.DB, name)
+	return j == "" || strings.Contains(j, `"scheduled_at"`)
 }

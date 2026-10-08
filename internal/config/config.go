@@ -308,6 +308,16 @@ func ParseSchedule(at string) (cron.Schedule, error) {
 	return cron.ParseStandard(at)
 }
 
+// ScheduleEvent is the event a schedule source emits for the moment at.
+func (s *Source) ScheduleEvent(name string, loc *time.Location, at, firedAt time.Time, catchUp bool) map[string]any {
+	ev := map[string]any{}
+	maps.Copy(ev, s.Data)
+	ev["schedule"], ev["timezone"], ev["catch_up"] = name, loc.String(), catchUp
+	ev["scheduled_at"] = at.In(loc).Format(time.RFC3339)
+	ev["fired_at"] = firedAt.In(loc).Format(time.RFC3339)
+	return ev
+}
+
 // Location is the schedule's time zone (time.Local when unset).
 func (s *Source) Location() (*time.Location, error) {
 	if s.Timezone == "" {
@@ -480,6 +490,15 @@ func parse(b []byte, stub map[string]string) (*Config, error) {
 		if s != nil && s.Package != "" && len(s.Command) == 0 {
 			if pkg, ok := c.Server.MCPPackages[s.Package]; ok {
 				s.Command, s.cmdFromPkg = slices.Clone(pkg.Command), true
+			}
+		}
+	}
+	for i := range c.Rules {
+		// Every scheduled moment is a new event: edge would fire once, then never.
+		if r := &c.Rules[i]; r.On == "" && c.Sources[r.Source] != nil && c.Sources[r.Source].Type == "schedule" {
+			r.On = "each"
+			if r.ID == "" {
+				r.ID = "event.scheduled_at"
 			}
 		}
 	}
@@ -692,6 +711,9 @@ func (c *Config) Warnings() []string {
 		}
 		if s := c.Sources[r.Source]; s != nil && s.Type == "mcp" && !s.Polled() {
 			w = append(w, fmt.Sprintf("rule %s: source %s is agent tools only and never produces events", r.Name, r.Source))
+		}
+		if s := c.Sources[r.Source]; s != nil && s.Type == "schedule" && r.On == "edge" {
+			w = append(w, fmt.Sprintf("rules/%s: on: edge on schedule source %s fires once and then only when the condition changes; schedule rules usually want on: each (the default)", r.Name, r.Source))
 		}
 		if m := providerMismatch(r, c.Sources[r.Source]); m != "" {
 			w = append(w, m)

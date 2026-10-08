@@ -281,3 +281,16 @@ func TestScheduleReloadKeepsNextMoment(t *testing.T) {
 		t.Fatalf("reload fired %d jobs", n)
 	}
 }
+
+func TestScheduleStateFromOldSourceIsNew(t *testing.T) {
+	clk := newClock(utc("2026-03-04T07:00:00Z"))
+	p, cfg := schedPipeline(t, schedYAML("0 6 * * *", "UTC", ""), clk)
+	store.PutSourceState(p.Store.DB, "tick", utc("2026-03-01T06:00:00Z"), "")
+	store.SetSourceEvent(p.Store.DB, "tick", map[string]any{"title": "old http event"})
+	stop := startLoop(p, cfg)
+	defer stop()
+	clk.wait(t)
+	if n := rowCount(t, p, `SELECT COUNT(*) FROM jobs`); n != 0 {
+		t.Fatalf("fired %d for the past", n)
+	}
+}

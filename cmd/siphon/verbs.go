@@ -296,6 +296,21 @@ func (c *cli) getConfig(kind, name string) error {
 				r["provenance"] = "live"
 			}
 		}
+		if kind == "sources" { // the NEXT column: a schedule's next run
+			var live []map[string]any
+			if c.call("GET", "/api/sources", nil, &live) == nil {
+				next := map[string]any{}
+				for _, l := range live {
+					next[str(l, "name")] = l["next_run_at"]
+				}
+				for _, r := range rows {
+					if n, ok := next[str(r, "name")]; ok && n != nil {
+						r["next"] = n
+					}
+				}
+			}
+			return c.table([]string{"NAME", "ORIGIN", "NEXT"}, mapRows(rows, "name", "provenance", "next"))
+		}
 		return c.table([]string{"NAME", "ORIGIN"}, mapRows(rows, "name", "provenance"))
 	}
 	var item map[string]any

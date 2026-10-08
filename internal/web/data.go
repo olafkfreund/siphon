@@ -2,6 +2,7 @@ package web
 
 import (
 	"database/sql"
+	"encoding/json"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,6 +21,41 @@ type sourceView struct {
 	LastPollAt *time.Time `json:"last_poll_at"`
 	LastError  string     `json:"last_error"`
 	Health     string     `json:"health"` // ok | stale | error | idle
+
+	// schedule sources only
+	At        string     `json:"at,omitempty"`
+	Timezone  string     `json:"timezone,omitempty"`
+	NextRunAt *time.Time `json:"next_run_at,omitempty"`
+	LastRunAt *time.Time `json:"last_run_at,omitempty"`
+}
+
+// fillSchedule sets a schedule source's next and last run. The next moment
+// follows the last one handled (source_state), as the scheduler computes it.
+func (s *server) fillSchedule(v *sourceView, src *config.Source) {
+	v.At = src.At
+	sched, err := config.ParseSchedule(src.At)
+	loc, lerr := src.Location()
+	if err != nil || lerr != nil {
+		return
+	}
+	v.Timezone = loc.String()
+	base := s.Now()
+	if v.LastPollAt != nil {
+		base = *v.LastPollAt
+	}
+	if n := sched.Next(base.In(loc)); !n.IsZero() {
+		v.NextRunAt = &n
+	}
+	if raw, _ := store.SourceEvent(s.Store.DB, v.Name); raw != "" {
+		var ev struct {
+			ScheduledAt string `json:"scheduled_at"`
+		}
+		if json.Unmarshal([]byte(raw), &ev) == nil {
+			if t, err := time.Parse(time.RFC3339, ev.ScheduledAt); err == nil {
+				v.LastRunAt = &t
+			}
+		}
+	}
 }
 
 type ruleView struct {
@@ -50,6 +86,9 @@ func (s *server) sources() ([]sourceView, error) {
 		}
 		if st, ok := states[name]; ok {
 			v.LastPollAt, v.LastError = st.LastPollAt, st.LastError
+		}
+		if src.Type == "schedule" {
+			s.fillSchedule(&v, src)
 		}
 		switch {
 		case v.LastError != "":
