@@ -159,6 +159,14 @@ func words(s string) []string {
 	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9') })
 }
 
+var atTime = regexp.MustCompile(`\bat \d`)
+
+// wantsSchedule is whether the request is about time ("every morning", "daily",
+// "weekdays at 7"), so a schedule source fits and a schedule template helps.
+func wantsSchedule(request string) bool {
+	return atTime.MatchString(strings.ToLower(request)) || hasAny(request, "every ", "daily", "weekly", "weekday", "hourly", "nightly", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "morning", "night", "cron", "schedule")
+}
+
 // matchTemplates are the templates that share the most words with the request.
 func matchTemplates(request string, n int) []docs.Template {
 	type scored struct {
@@ -173,6 +181,9 @@ func matchTemplates(request string, n int) []docs.Template {
 			if len(w) >= 4 && !stop[w] && strings.Contains(hay, w) {
 				s++
 			}
+		}
+		if wantsSchedule(request) && strings.Contains(hay, "schedule") {
+			s += 3 // schedule templates lead when the request is about time
 		}
 		all = append(all, scored{t, s})
 	}
@@ -244,6 +255,9 @@ func Prompt(request string, inv map[string]any) []Message {
 	sys.WriteString("Conventional source names: GitHub events arrive on a webhook source named github-hooks (signature: github) and GitHub tools for agents come from an mcp source named github; GitLab events use gitlab-hooks; AWS events use aws-hooks and AWS tools aws-cloudwatch. Use those names for those services even when they are not in the inventory yet (the user connects them). Never reuse an unrelated existing source for a service: read each existing source's type and signature in the inventory; a generic token webhook such as hello-hook is not GitHub.\n")
 	sys.WriteString(servicesPrompt())
 	sys.WriteString("Sections allowed: sources, agents, routines, credentials (each a map of name to settings) and rules (a list, each with a name). Use names from the inventory for things that exist; create anything else in the same file. Never write secret values: a webhook source needs no secret in the file. Never write approve: false unless the request asks for no approval.\n\n")
+	if wantsSchedule(request) {
+		sys.WriteString("The request is about time: use a source of type schedule (at: a cron line, @daily, or \"every 15m\"; timezone: an IANA zone). Its events have schedule, timezone, scheduled_at, fired_at, catch_up and the source's data. Write the rule with when: \"true\"; rules on a schedule source fire on each moment by default. An agent action needs a cooldown.\n\n")
+	}
 	if g, ok := docs.Page("llm"); ok {
 		sys.WriteString("## Guide\n" + string(g) + "\n\n")
 	}

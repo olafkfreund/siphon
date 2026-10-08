@@ -20,6 +20,7 @@ baseline in **`siphon.yaml`**.
 |---|---|---|
 | run something when a webhook arrives | [webhook-command](tasks/webhook-command.md) | `webhook-command`, `webhook-to-ntfy`, `service-failed`, `homeassistant-event`, `standard-webhooks` |
 | act when a value crosses a threshold | [poll-threshold](tasks/poll-threshold.md) | `disk-full`, `upstream-status` |
+| run something at set times | [schedule](tasks/schedule.md) | `weekday-standup`, `weekly-digest`, `nightly-report` |
 | have an agent review pull requests | [github-pr-agent](tasks/github-pr-agent.md) | `github-pr-review`, `github-ci-failure`, `github-issue-triage`, `gitlab-mr-review` |
 | watch an MCP server | [mcp-watch](tasks/mcp-watch.md) | `mcp-build-watch`, `mcp-task-triage` |
 | chain steps (fetch → summarise → notify) | [routines](tasks/routine.md) | `nightly-report`, `alertmanager-summary` |

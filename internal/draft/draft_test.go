@@ -92,3 +92,21 @@ func TestPromptListsCatalogueServices(t *testing.T) {
 		}
 	}
 }
+
+func TestSchedulePrompt(t *testing.T) {
+	for _, r := range []string{"summarise the news every morning", "run a backup weekly", "weekdays at 7 post the standup", "every 15m check disk"} {
+		if !wantsSchedule(r) {
+			t.Errorf("%q not seen as a schedule request", r)
+		}
+	}
+	if wantsSchedule("review each github pull request") {
+		t.Error("false positive")
+	}
+	msgs := Prompt("post a digest every monday at 9", map[string]any{})
+	if !strings.Contains(msgs[0].Content, "type schedule") || !strings.Contains(msgs[0].Content, "- catch_up (string)") {
+		t.Errorf("schedule guidance or fields missing")
+	}
+	if strings.Contains(Prompt("review each pull request", map[string]any{})[0].Content, "type schedule") {
+		t.Error("schedule guidance on a non-schedule request")
+	}
+}

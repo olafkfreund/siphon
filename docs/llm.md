@@ -16,7 +16,10 @@ source  ──event──▶  rule (when: …)  ──fires──▶  action
 - **Source.** Where events come from:
   - `webhook`: POSTed to `/hook/<name>`, signed;
   - `http`: a polled JSON URL;
-  - `mcp`: a polled MCP resource or read-only tool.
+  - `mcp`: a polled MCP resource or read-only tool;
+  - `schedule`: fires at set times (`at:` cron, `@daily`, `every 15m`,
+    with a `timezone`). Rules on it default to `on: each` with
+    `id: event.scheduled_at`. Test one with `siphon test <rule> --at "<time>"`.
 
   An `mcp` source with no `read` is not polled: it only gives agents tools.
 - **Rule.** `when:` is an expression over `event` (and `item` with

@@ -45,7 +45,7 @@ type Template struct {
 }
 
 // Categories is the display order; unknown ones sort after these.
-var Categories = []string{"Code review & CI", "Ops & monitoring", "Notifications & glue", "Local LLM", "AWS", "MCP", "Homelab"}
+var Categories = []string{"Code review & CI", "Ops & monitoring", "Schedules", "Notifications & glue", "Local LLM", "AWS", "MCP", "Homelab"}
 
 var (
 	header = regexp.MustCompile(`^\s*(title|category|needs|secrets|apply):\s*(.*)$`)

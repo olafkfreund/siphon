@@ -2,7 +2,9 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,12 +27,23 @@ func (s *server) diagAPI(mux *http.ServeMux) {
 			Event   json.RawMessage   `json:"event"`
 			Headers map[string]string `json:"headers"`
 			UseLast bool              `json:"use_last"`
+			At      string            `json:"at"` // schedule source: test the event for this moment
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(&body); err != nil {
 			return nil, 400, errMsg("bad JSON body")
 		}
 		var raw string
-		if body.UseLast {
+		if body.At != "" {
+			ev, err := s.scheduleTestEvent(rl, body.At)
+			if err != nil {
+				return nil, 400, errMsg(err.Error())
+			}
+			b, err := json.Marshal(ev)
+			if err != nil {
+				return nil, 400, errMsg("event data: " + err.Error())
+			}
+			raw = string(b)
+		} else if body.UseLast {
 			var err error
 			if raw, err = store.SourceEvent(s.Store.DB, rl.Source); err != nil {
 				return nil, 0, err
@@ -79,6 +92,52 @@ func (s *server) diagAPI(mux *http.ServeMux) {
 		v, err := s.explain(r, rl)
 		return v, 200, err
 	})
+}
+
+// scheduleTestEvent is the event rl's schedule source would emit at at: a
+// time like "2026-03-02 06:00" in the source's zone, or RFC 3339.
+func (s *server) scheduleTestEvent(rl config.Rule, at string) (map[string]any, error) {
+	src := s.Config().Sources[rl.Source]
+	if src == nil || src.Type != "schedule" {
+		return nil, errors.New("--at needs a rule on a schedule source; " + rl.Source + " is not one")
+	}
+	loc, err := src.Location()
+	if err != nil {
+		return nil, err
+	}
+	var t time.Time
+	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04", "2006-01-02T15:04", "2006-01-02 15:04:05"} {
+		if t, err = time.ParseInLocation(layout, at, loc); err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return nil, errors.New("bad time " + strconv.Quote(at) + `: use "2026-03-02 06:00" (in ` + loc.String() + ") or RFC 3339")
+	}
+	return src.ScheduleEvent(loc, t, s.Now(), false), nil
+}
+
+// scheduleFacts are next/last run and a missed-run note for a schedule source.
+func (s *server) scheduleFacts(src *sourceView) (map[string]any, error) {
+	f := map[string]any{"at": src.At, "timezone": src.Timezone, "next_run_at": src.NextRunAt, "last_run_at": src.LastRunAt}
+	rows, err := store.QueryAudit(s.Store.DB, store.AuditFilter{Event: "schedule_skipped", Limit: 50})
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows { // newest first
+		var d struct {
+			Source, From, To string
+			Count            int
+		}
+		if json.Unmarshal([]byte(r.Detail), &d) != nil || d.Source != src.Name {
+			continue
+		}
+		if src.LastRunAt == nil || r.At.After(*src.LastRunAt) || r.At.Equal(*src.LastRunAt) {
+			f["missed"] = map[string]any{"at": r.At, "count": d.Count, "from": d.From, "to": d.To}
+		}
+		break
+	}
+	return f, nil
 }
 
 func (s *server) rule(name string) (config.Rule, bool) {
@@ -161,6 +220,13 @@ func (s *server) explain(r *http.Request, rl config.Rule) (map[string]any, error
 	srcOut := map[string]any{"name": rl.Source}
 	if src != nil {
 		srcOut["type"], srcOut["health"], srcOut["last_error"], srcOut["last_poll_at"] = src.Type, src.Health, src.LastError, src.LastPollAt
+	}
+	if src != nil && src.Type == "schedule" {
+		facts, err := s.scheduleFacts(src)
+		if err != nil {
+			return nil, err
+		}
+		srcOut["schedule"] = facts
 	}
 	out["source"] = srcOut
 	var lastFired *time.Time
