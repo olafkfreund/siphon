@@ -22,6 +22,7 @@ import (
 
 	"github.com/olafkfreund/siphon/docs"
 	"github.com/olafkfreund/siphon/internal/applyfile"
+	"github.com/olafkfreund/siphon/internal/catalog"
 	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/source"
 )
@@ -220,12 +221,28 @@ func fieldTable(kind string) string {
 	return b.String()
 }
 
+// servicesPrompt lists the catalogue services a user can connect, so the
+// model's to-do list says `siphon connect <id>` and names sources correctly.
+func servicesPrompt() string {
+	var b strings.Builder
+	b.WriteString("Services the user can connect with `siphon connect <id> --name <name> ...` (they create these items; use these names in the file):\n")
+	for _, e := range catalog.All() {
+		if e.Status == "not-yet" {
+			continue
+		}
+		b.WriteString("- " + e.ID + " (" + strings.Join(e.Capabilities, ", ") + "): " + strings.Join(e.CreatedNames(), ", ") + "\n")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
 // Prompt is the system and user message for a request. It holds the guide,
 // field tables, matching templates and the inventory of names: no secrets.
 func Prompt(request string, inv map[string]any) []Message {
 	var sys strings.Builder
 	sys.WriteString("You write Siphon apply files. Reply with ONE fenced ```yaml block containing the apply file, and nothing else: no explanation.\n")
 	sys.WriteString("Conventional source names: GitHub events arrive on a webhook source named github-hooks (signature: github) and GitHub tools for agents come from an mcp source named github; GitLab events use gitlab-hooks; AWS events use aws-hooks and AWS tools aws-cloudwatch. Use those names for those services even when they are not in the inventory yet (the user connects them). Never reuse an unrelated existing source for a service: read each existing source's type and signature in the inventory; a generic token webhook such as hello-hook is not GitHub.\n")
+	sys.WriteString(servicesPrompt())
 	sys.WriteString("Sections allowed: sources, agents, routines, credentials (each a map of name to settings) and rules (a list, each with a name). Use names from the inventory for things that exist; create anything else in the same file. Never write secret values: a webhook source needs no secret in the file. Never write approve: false unless the request asks for no approval.\n\n")
 	if g, ok := docs.Page("llm"); ok {
 		sys.WriteString("## Guide\n" + string(g) + "\n\n")

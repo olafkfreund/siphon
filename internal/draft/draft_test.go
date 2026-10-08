@@ -83,3 +83,12 @@ func TestMatchTemplatesAndPrompt(t *testing.T) {
 		t.Error("routine table for a request that has no routine")
 	}
 }
+
+func TestPromptListsCatalogueServices(t *testing.T) {
+	sys := Prompt("tell me about prs", map[string]any{})[0].Content
+	for _, want := range []string{"siphon connect <id>", "- github (tools, webhooks): sources/<name>, sources/<name>-hooks (optional)", "- aws (", "credentials/<name>"} {
+		if !strings.Contains(sys, want) {
+			t.Errorf("prompt lacks %q", want)
+		}
+	}
+}

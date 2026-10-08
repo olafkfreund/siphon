@@ -268,3 +268,17 @@ func TestServiceConnectPageErrorsKeepValues(t *testing.T) {
 		t.Error("webhook choice lost")
 	}
 }
+
+func TestWebhookOnlyConnectionHasNoTest(t *testing.T) {
+	ce := newCfgEnv(t)
+	ce.post("/services/github", url.Values{"name": {"wk"}, "token": {"t"}, "webhook": {"on"}})
+	// Keep only the webhook half: the connection then has no token to test with.
+	ce.api("DELETE", "/api/config/sources/wk", "")
+	page := ce.get("/services").Body.String()
+	if !strings.Contains(page, "GitHub · wk") || strings.Contains(page, "/services/c/wk/test") || !strings.Contains(page, "send an event to check") {
+		t.Errorf("webhook-only row: test offered or hint missing")
+	}
+	if !strings.Contains(ce.get("/services").Body.String(), "<code>services.siphon.aws</code>") {
+		t.Error("reason not rendered as code")
+	}
+}

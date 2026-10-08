@@ -86,7 +86,7 @@ const awsServer = `, aws: {profiles: [p1]}, mcp_packages: {aws-cloudwatch: {comm
 
 func TestConnectAWS(t *testing.T) {
 	e := newCLIEnvCfg(t, awsServer, "")
-	if code, _, er := e.do("connect", "aws", "--name", "prod", "--no-test"); code != 2 || !strings.Contains(er, "--region") || !strings.Contains(er, "--profile") {
+	if code, _, er := e.do("connect", "aws", "--name", "prod", "--no-test"); code != 3 || !strings.Contains(er, "profile name is required") {
 		t.Fatalf("missing: %d %s", code, er)
 	}
 	if code, _, er := e.do("connect", "aws", "--name", "prod", "--region", "eu-west-1", "--role-arn", "arn:aws:iam::123456789012:role/x", "--secret-access-key", "plain", "--no-test"); code != 2 || strings.Contains(er, "plain\n") {
@@ -428,5 +428,61 @@ func TestConnectAWSTestLine(t *testing.T) {
 	}
 	if out := e.ok("test", "service", "prod-cloudwatch"); !strings.Contains(out, "keys expire 15:47, 19 tools") {
 		t.Fatalf("test service: %s", out)
+	}
+}
+
+func TestCatalogCommand(t *testing.T) {
+	e := newCLIEnvCfg(t, "", "") // no AWS packages: aws needs a package
+	out := e.ok("catalog")
+	for _, want := range []string{"ID", "github", "GitHub", "code", "available", "tools,webhooks", "aws: enable services.siphon.aws in your NixOS config"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("catalog lacks %q:\n%s", want, out)
+		}
+	}
+	var j struct {
+		Services []struct {
+			ID, Category, Availability string
+			Fields                     []struct{ Key string }
+		}
+	}
+	if err := json.Unmarshal([]byte(e.ok("catalog", "--category", "cloud", "-o", "json")), &j); err != nil || len(j.Services) != 1 || j.Services[0].ID != "aws" || j.Services[0].Availability != "needs-package" || len(j.Services[0].Fields) == 0 {
+		t.Fatalf("json: %+v %v", j, err)
+	}
+	if o := e.ok("catalog", "--category", "payments", "-o", "json"); !strings.Contains(o, `"services": []`) && !strings.Contains(o, `"services":[]`) {
+		t.Errorf("empty category: %s", o)
+	}
+	// an unavailable service is refused with its reason; an unknown one is a usage error
+	if code, _, er := e.do("connect", "aws", "--name", "a", "--profile", "p", "--no-test"); code != 3 || !strings.Contains(er, "services.siphon.aws") {
+		t.Errorf("unavailable: %d %s", code, er)
+	}
+	if code, _, er := e.do("connect", "nope"); code != 2 || !strings.Contains(er, "siphon catalog") {
+		t.Errorf("unknown: %d %s", code, er)
+	}
+}
+
+// The generic path end to end: fields from the server's catalogue, the secret
+// from stdin, the test through the connection route, the one-time secret once.
+func TestConnectGenericGitLabFlow(t *testing.T) {
+	gl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("PRIVATE-TOKEN") == "glpat-GEN" {
+			w.Write([]byte(`{"username":"olaf"}`))
+			return
+		}
+		http.Error(w, "no", 401)
+	}))
+	defer gl.Close()
+	u, _ := url.Parse(gl.URL)
+	e := newCLIEnvCfg(t, `, services: { private_endpoints: ["`+u.Host+`"] }`, "")
+	e.stdin = "glpat-GEN\n"
+	out := e.ok("connect", "gitlab", "--name", "gen", "--base", gl.URL, "--project", "g/p", "--token", "-", "--webhook")
+	if !strings.Contains(out, `connected GitLab: "gen"`) || !strings.Contains(out, "test: ok (olaf") || strings.Count(out, "secret: ") != 1 {
+		t.Fatalf("%s", out)
+	}
+	if o := e.ok("get", "sources", "gen"); !strings.Contains(o, "connection:") || !strings.Contains(o, "service: gitlab") || strings.Contains(o, "glpat-GEN") {
+		t.Errorf("source: %s", o)
+	}
+	// a required field without a terminal is listed, not guessed
+	if code, _, er := e.do("connect", "gitlab", "--name", "g2", "--no-test"); code != 2 || !strings.Contains(er, "--project") || !strings.Contains(er, "--token") {
+		t.Errorf("missing: %d %s", code, er)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strings"
 	"sync"
 	"text/template"
 
@@ -201,4 +202,18 @@ func (e *Entry) Availability(cfg *config.Config) (status, reason string) {
 		return "needs-package", e.Reason
 	}
 	return "available", ""
+}
+
+// CreatedNames lists what connecting creates, with <name> for the chosen
+// name: "sources/<name>-hooks (optional)". For prompts and docs.
+func (e *Entry) CreatedNames() []string {
+	var out []string
+	for _, c := range e.Creates {
+		n := c.Kind + "/" + strings.ReplaceAll(c.Name, "{{.name}}", "<name>")
+		if c.When != "true" {
+			n += " (optional)"
+		}
+		out = append(out, n)
+	}
+	return out
 }

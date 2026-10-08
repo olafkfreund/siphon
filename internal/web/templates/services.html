@@ -9,9 +9,10 @@
       <h3>{{.ServiceName}} · {{.Name}}</h3>
       <div class="service-capabilities">{{range .Caps}}<span class="pill tag">{{.}}</span>{{end}}</div>
     </div>
-    <span class="pill status-{{.Status}}"{{if .StatusTitle}} title="{{.StatusTitle}}"{{end}}>{{if eq .Status "working"}}{{template "icon" "check"}}{{else if eq .Status "attention"}}{{template "icon" "x"}}{{else}}{{template "icon" "when"}}{{end}}{{.StatusLabel}}</span>
+    <span class="pill status-{{.Status}}"{{if .StatusTitle}} title="{{.StatusTitle}}"{{end}}>{{if eq .Status "working"}}{{template "icon" "check"}}{{else if eq .Status "attention"}}{{template "icon" "x"}}{{end}}{{.StatusLabel}}</span>
     <span class="muted small connection-event">Last event: {{.LastEvent}}</span>
     <div class="connection-actions">
+      {{if .Hint}}<span class="muted small">{{.Hint}}</span>{{end}}
       {{if .CanTest}}<form method="post" action="/services/c/{{pe .Name}}/test" hx-post="/services/c/{{pe .Name}}/test" hx-target="#conn-{{.Name}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{template "icon" "play"}}Test</button></form>{{end}}
       <details class="connection-edit"><summary class="btn sm">Edit</summary><ul>{{range .Items}}<li><a href="{{.Href}}">{{.Name}}</a> <span class="muted tiny">{{.Kind}}</span></li>{{end}}</ul></details>
     </div>
@@ -34,7 +35,7 @@
       <div class="tile-head"><span class="service-mark" aria-hidden="true">{{.Mark}}</span><h3>{{.Name}}</h3><span class="sp"></span><span class="pill avail-{{.Avail}}">{{.AvailLabel}}</span></div>
       <p class="muted small">{{.Summary}}</p>
       <div class="service-capabilities">{{range .Caps}}<span class="pill tag">{{.}}</span>{{end}}</div>
-      <div class="tile-action">{{if eq .Avail "available"}}<a class="btn sm primary" href="/services/{{pe .ID}}">Connect</a>{{else}}<span class="muted small">{{.Why}}</span>{{end}}</div>
+      <div class="tile-action">{{if eq .Avail "available"}}<a class="btn sm primary" href="/services/{{pe .ID}}">Connect</a>{{else}}<span class="muted small">{{ticks .Why}}</span>{{end}}</div>
     </article>{{else}}<section class="card empty">No services match. Clear the search or pick another category.</section>{{end}}
     </div>
   </div>
@@ -53,7 +54,7 @@
 {{define "serviceconnect"}}{{with .Connect}}<div class="connect-page">
 <div class="top"><span class="service-mark" aria-hidden="true">{{.Mark}}</span><div><h1>Connect {{.Name}}</h1><div class="muted">{{.Summary}}</div></div></div>
 {{if .Err}}<div class="banner" role="alert">{{.Err}}</div>{{end}}
-{{if not .Available}}<div class="card"><p>{{.Name}} can't be connected on this install: {{.Why}}</p><a class="btn" href="/services">Back</a></div>
+{{if not .Available}}<div class="card"><p>{{.Name}} can't be connected on this install: {{ticks .Why}}</p><a class="btn" href="/services">Back</a></div>
 {{else}}<form method="post" action="/services/{{pe .ID}}" class="connect-form">
   <input type="hidden" name="csrf" value="{{$.CSRF}}">
   {{range .Sections}}<section class="connect-section" aria-labelledby="sec-{{.N}}"><h2 id="sec-{{.N}}"><span class="step-n" aria-hidden="true">{{.N}}</span>{{.Title}}</h2>

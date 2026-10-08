@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -98,7 +99,8 @@ func New(o Options) http.Handler {
 			}
 			return itoa(*e)
 		},
-		"pe": url.PathEscape,
+		"pe":    url.PathEscape,
+		"ticks": ticks,
 		"lines": func(s string) []string {
 			var out []string
 			for _, l := range strings.Split(s, "\n") {
@@ -280,4 +282,11 @@ func (s *server) hook(name string) http.Handler {
 		return nil
 	}
 	return s.Hooks(name)
+}
+
+var tickRe = regexp.MustCompile("`([^`]+)`")
+
+// ticks escapes text and renders `code` spans.
+func ticks(s string) template.HTML {
+	return template.HTML(tickRe.ReplaceAllString(template.HTMLEscapeString(s), "<code>$1</code>"))
 }

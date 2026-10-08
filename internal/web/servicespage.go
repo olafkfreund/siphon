@@ -33,6 +33,7 @@ type connRow struct {
 	Status, StatusLabel, StatusTitle string // unchecked | working | attention
 	LastEvent                        string
 	CanTest                          bool
+	Hint                             string // why there is no Test
 	Items                            []connItem
 }
 
@@ -123,6 +124,7 @@ func (s *server) connectedRows() []connRow {
 		}
 		caps := map[string]bool{}
 		var newest *store.SourceDiag
+		hasToken := false // a source that carries credentials to test with
 		for _, n := range g.srcs {
 			src := cfg.Sources[n]
 			switch src.Type {
@@ -135,6 +137,9 @@ func (s *server) connectedRows() []connRow {
 			}
 			if src.AWS != "" {
 				r.CanTest = true
+			}
+			if src.Type != "webhook" {
+				hasToken = true
 			}
 			r.Items = append(r.Items, connItem{"sources", n, "/config/sources/" + url.PathEscape(n)})
 			if d, err := store.SourceDiagnostics(s.Store.DB, n); err == nil && d.EventAt != nil && (newest == nil || d.EventAt.After(*newest.EventAt)) {
@@ -149,7 +154,10 @@ func (s *server) connectedRows() []connRow {
 				r.Caps = append(r.Caps, capLabels[c])
 			}
 		}
-		r.CanTest = r.CanTest || (e != nil && e.Test != nil)
+		r.CanTest = r.CanTest || (e != nil && e.Test != nil && hasToken)
+		if !r.CanTest && caps["webhooks"] {
+			r.Hint = "Webhooks: send an event to check"
+		}
 		r.LastEvent = "No events yet"
 		if newest != nil {
 			r.LastEvent = newest.EventAt.Local().Format("2006-01-02 15:04")

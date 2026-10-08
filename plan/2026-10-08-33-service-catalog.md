@@ -205,3 +205,9 @@ Revert the merge.
   - `serviceRows`, `serviceForm` and the `.svc-*` CSS were removed.
   - The portal POSTs to one `/services/{id}`.
   - **Reviewed in light and dark on a copy of the dev data:** the design follows the Codex review. Three nits go to step 5: hide or explain Test for webhook-only connections, a neutral icon for "Not checked", and show the AWS hint as code.
+- **Step 5 (coder):**
+  - `connect` registers one flag per catalogue field from the embedded catalogue, so the old flag names work unchanged. The fields themselves come from `/api/catalog`.
+  - `test service` tries the connection route first.
+  - Unavailable gives exit 3; unknown gives exit 2.
+  - Step 4's nits are fixed: Test only where testable, a "send an event" hint otherwise; no icon on Not checked; backticks in reasons render as `<code>`.
+  - **Rejected (Opus):** the coder gave AWS `region` a default (`eu-west-1`). A wrong default region fails confusingly, so it's made required again in step 6.
