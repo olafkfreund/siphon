@@ -319,14 +319,15 @@ siphon connect github --name gh --token @token.txt --webhook
 
 ### siphon test
 
-Dry-run a rule on an event or the last stored one; or check a service or model connection.
+Dry-run a rule on an event, the last stored one, or (schedule rules) the event for a moment with --at; or check a service or model connection.
 
 ```sh
-siphon test <rule> [event.json|-] [--last] | test service|model <name>
+siphon test <rule> [event.json|-] [--last] [--at <time>] | test service|model <name>
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
+| `--at` |  | schedule rules: test the event for this moment, like "2026-03-02 06:00" (in the source's zone) |
 | `--header` |  | an event header as name=value (repeatable) |
 | `--last` | `false` | use the last event the source produced |
 
@@ -355,7 +356,7 @@ siphon why disk-full
 Build a rule (and its source) with a wizard or flags, then dry-run, confirm and apply.
 
 ```sh
-siphon new task [--name n --source s|--webhook w|--poll p --url u ...] [--print]
+siphon new task [--name n --source s|--webhook w|--poll p --url u|--schedule at [--timezone Z] ...] [--print]
 ```
 
 | Flag | Default | Meaning |
@@ -372,7 +373,9 @@ siphon new task [--name n --source s|--webhook w|--poll p --url u ...] [--print]
 | `--print` | `false` | only print the YAML, change nothing (pipe it to `siphon apply -f -`) |
 | `--repeat` |  | with --on edge: fire again while true after this long |
 | `--routine` |  | run this existing routine |
+| `--schedule` |  | create a schedule source with this "at": a cron line, @daily, or "every 15m"; the source takes the task's name |
 | `--source` |  | use this existing source |
+| `--timezone` |  | with --schedule: an IANA zone like Europe/London (default: the server's local zone) |
 | `--url` |  | the polled URL, with --poll |
 | `--webhook` |  | create a webhook source with this name (a secret is generated and shown once) |
 | `--when` |  | the condition, an expression over event, headers and item |

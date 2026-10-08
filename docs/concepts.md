@@ -21,6 +21,7 @@ each rule as that flow, and `siphon new task` creates all three at once.
 | `webhook` | when something POSTs to `/hook/<source>`, signed | GitHub, GitLab, EventBridge, any service that calls you |
 | `http` | each `poll:` interval, from a JSON URL | metrics, status pages, REST APIs |
 | `mcp` | each `poll:` interval, from an MCP resource or one read-only tool | CI, task trackers, anything with an MCP server |
+| `schedule` | at set times (`at: "30 7 * * 1-5"`, `@daily`, `every 15m`), in a time zone | reports, reminders, periodic agent checks |
 
 An `mcp` source **without** `read` is never polled. It only gives agents
 tools (for example GitHub's MCP server). An event is JSON. Rules see it as

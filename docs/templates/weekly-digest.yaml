@@ -1,0 +1,35 @@
+# title:    A weekly digest on a schedule: every Monday at 09:00
+# category: Schedules
+# needs:    credentials/ollama-local               (siphon connect model ollama)
+# apply:    siphon apply -f weekly-digest.yaml
+# The URL should return JSON for last week (for example a metrics or
+# ticket-count endpoint). The summary is pushed to your phone with ntfy.
+sources:
+  weekly:
+    type: schedule
+    at: "0 9 * * 1"
+    timezone: Europe/London
+    data: { kind: weekly-digest }
+agents:
+  digest-writer:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: "Write a five-bullet weekly digest from this data. Lead with what changed."
+    max_turns: 2
+    timeout: 5m
+    approve: false                  # a read-only summary
+routines:
+  weekly-digest:
+    steps:
+      - { id: fetch, cmd: [curl, -fsS, https://metrics.example.com/api/last-week], retry: { attempts: 3, base: 10s, factor: 2 } }
+      - { id: digest, agent: digest-writer, if: 'steps.fetch.exit == 0', timeout: 5m }
+      - { id: notify, if: 'steps.digest.exit == 0', cmd: [curl, -fsS, -H, "Title: Weekly digest", -d, "{{.steps.digest.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+rules:
+  - name: weekly-digest
+    source: weekly
+    when: 'event.kind == "weekly-digest"'
+    on: each
+    id: event.scheduled_at
+    cooldown: 1h
+    action: { routine: weekly-digest }
