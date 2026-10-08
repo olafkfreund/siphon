@@ -83,27 +83,31 @@ func (p *Proxy) Start(ctx context.Context) error {
 // ServeUnix serves the proxy on a unix socket (0660, group of the parent
 // directory) and removes it when ctx is done.
 func (p *Proxy) ServeUnix(ctx context.Context, path string) error {
-	os.Remove(path)
-	listener, err := net.Listen("unix", path)
+	// Listen on a temporary name and rename into place once the mode and
+	// group are set, so the socket never appears with the default mode.
+	tmp := path + ".tmp"
+	os.Remove(tmp)
+	listener, err := net.Listen("unix", tmp)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(path)
-	if err := os.Chmod(path, 0o660); err != nil {
-		listener.Close()
-		return err
+	fail := func(err error) error { listener.Close(); os.Remove(tmp); return err }
+	if err := os.Chmod(tmp, 0o660); err != nil {
+		return fail(err)
 	}
 	fi, err := os.Stat(filepath.Dir(path))
 	if err != nil {
-		listener.Close()
-		return err
+		return fail(err)
 	}
 	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-		if err := os.Chown(path, -1, int(st.Gid)); err != nil && !errors.Is(err, syscall.EPERM) {
-			listener.Close()
-			return err
+		if err := os.Chown(tmp, -1, int(st.Gid)); err != nil && !errors.Is(err, syscall.EPERM) {
+			return fail(err)
 		}
 	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fail(err)
+	}
+	defer os.Remove(path)
 	return p.serve(ctx, listener)
 }
 
