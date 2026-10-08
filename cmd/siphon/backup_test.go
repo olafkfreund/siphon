@@ -188,6 +188,21 @@ func TestRestoreRejectsBadArchives(t *testing.T) {
 		return ent{name: manifestName, body: `{"format":1,"version":"x","schema":"` + schema + `"}`}
 	}
 	db := ent{name: "state.db", body: string(good)}
+	// altered is the good db after one statement: what a hand-made archive could carry
+	altered := func(stmt string) ent {
+		dir := mkState(t, 1)
+		st, err := store.Open(filepath.Join(dir, "state.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.DB.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+		st.DB.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+		st.Close()
+		b, _ := os.ReadFile(filepath.Join(dir, "state.db"))
+		return ent{name: "state.db", body: string(b)}
+	}
 	cases := map[string][]ent{
 		"dotdot":    {man("0001_init.sql"), db, {name: "secrets/../x", body: "x"}},
 		"abs":       {man("0001_init.sql"), db, {name: "/abs", body: "x"}},
@@ -199,14 +214,21 @@ func TestRestoreRejectsBadArchives(t *testing.T) {
 		"corrupt":   {man("0001_init.sql"), {name: "state.db", body: strings.Repeat("not a database ", 500)}},
 		"no db":     {man("0001_init.sql")},
 		"no manif.": {db},
+		// the manifest understates the db's schema, or names none: the db's own schema decides
+		"db newer":  {man("0001_init.sql"), altered(`INSERT INTO schema_migrations VALUES ('9999_x.sql')`)},
+		"no schema": {man(""), altered(`DELETE FROM schema_migrations`)},
+		"trigger":   {man("0001_init.sql"), altered(`CREATE TRIGGER t AFTER INSERT ON audit BEGIN DELETE FROM audit; END`)},
+		"view":      {man("0001_init.sql"), altered(`CREATE VIEW v AS SELECT 1`)},
 	}
 	for name, ents := range cases {
 		t.Run(name, func(t *testing.T) {
 			dir := mkState(t, 2)
 			before := snapshot(t, dir)
-			if _, err := restore(dir, archive(ents), false, "--yes", "-"); err == nil {
+			_, err := restore(dir, archive(ents), false, "--yes", "-")
+			if err == nil {
 				t.Fatal("accepted")
 			}
+			t.Log(err)
 			if after := snapshot(t, dir); after != before {
 				t.Fatalf("dir changed:\n%s\n--\n%s", before, after)
 			}

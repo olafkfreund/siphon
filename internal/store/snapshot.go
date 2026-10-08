@@ -45,21 +45,36 @@ func schemaOf(path string) (string, error) {
 	return v.String, nil
 }
 
-// Integrity checks a db file with PRAGMA integrity_check.
-func Integrity(path string) error {
+// Verify checks a db file about to be restored: PRAGMA integrity_check, no triggers or views
+// (the migrations create none; one would run on the daemon's later writes), and a schema
+// this binary knows. It returns that schema, read from the db itself, not a manifest.
+func Verify(path string) (schema string, err error) {
 	db, err := openRO(url.PathEscape(path))
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer db.Close()
 	var res string
 	if err := db.QueryRow(`PRAGMA integrity_check`).Scan(&res); err != nil {
-		return err
+		return "", err
 	}
 	if res != "ok" {
-		return errors.New("integrity_check: " + res)
+		return "", errors.New("integrity_check: " + res)
 	}
-	return nil
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type IN ('trigger','view')`).Scan(&n); err != nil {
+		return "", err
+	}
+	if n > 0 {
+		return "", errors.New("the database has triggers or views, which siphon never creates")
+	}
+	if schema, err = schemaOf(path); err != nil || schema == "" {
+		return "", errors.New("not a siphon database (no schema_migrations)")
+	}
+	if schema > NewestMigration() {
+		return "", fmt.Errorf("the database is from a newer siphon (schema %s)", schema)
+	}
+	return schema, nil
 }
 
 // JobCount is count(*) FROM jobs of a db file, read-only.

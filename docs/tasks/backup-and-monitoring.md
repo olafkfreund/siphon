@@ -69,6 +69,9 @@ This adds `siphon-backup.timer`, which writes
 `siphon-<UTC time>.tar.gz` into `dir` (mode 0700, owned by `siphon`) and
 deletes all but the newest `keep`. Run one now with
 `systemctl start siphon-backup`. Point your offsite backup at `dir`.
+A failed run shows as a failed `siphon-backup.service`. To hear about it,
+add `systemd.services.siphon-backup.unitConfig.OnFailure` pointing at your
+alerting unit (the `service-failed` template does this through Siphon).
 
 ## Restore
 
@@ -95,6 +98,11 @@ siphon validate -config /etc/siphon/siphon.yaml
   - **As the wrong user** (root on NixOS, for example): refused with the
     user to use.
   - **A backup from a newer Siphon:** refused. Upgrade first.
+- **Only restore archives you made.** An archive holds tasks, commands
+  and secrets, so restoring one is the same as being allowed to change
+  Siphon's config. Siphon checks that it's a Siphon database (its schema, and
+  that it has no triggers or views), but it can't tell your tasks from
+  someone else's.
 - **Older backups** are fine. Siphon updates the database when it starts.
 - **From stdin** (`… | siphon backup restore … -`): pass `--yes`, because
   stdin can't also answer the question. Without a terminal, `--yes` is
@@ -141,6 +149,10 @@ scrape_configs:
 | `siphon_rule_error` | `rule` | 1 when a rule has an error (see `siphon why`) |
 | `siphon_notifications` | `channel`, `state` | notification deliveries by state (`pending` = retrying) |
 
+- **The token is the admin token.** Siphon has one login token, and
+  Prometheus needs it to scrape. Anyone who can read the scrape config can
+  also use the API. Keep the token in a file only Prometheus can read
+  (`credentials_file`), not inline in `prometheus.yml`.
 - **Labels** are only names from your config. Metrics never include job
   contents, errors, URLs or secrets.
 - **Computed per scrape:** every value is read from the database when

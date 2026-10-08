@@ -36,6 +36,8 @@ func (e exitError) Unwrap() error { return e.err }
 const (
 	manifestName   = "siphon-backup.json"
 	restoreMaxSize = 1 << 30
+	// restoreMaxEntries caps files and dirs in an archive.
+	restoreMaxEntries = 100_000
 )
 
 type manifest struct {
@@ -152,7 +154,12 @@ func backupCreate(args []string, stdout, stderr io.Writer, stdoutTTY bool) (err 
 		if err = tmpFile.Close(); err != nil {
 			return err
 		}
-		if err = os.Rename(tmpName, target); err != nil {
+		if *force {
+			err = os.Rename(tmpName, target)
+		} else if err = os.Link(tmpName, target); err == nil { // fails if a file appeared meanwhile
+			os.Remove(tmpName)
+		}
+		if err != nil {
 			os.Remove(tmpName)
 			return err
 		}
@@ -261,10 +268,16 @@ func backupRestore(args []string, in io.Reader, stderr io.Writer, stdinTTY bool)
 		return err
 	}
 	dir := filepath.Dir(db)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
 	fi, err := os.Stat(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		// A new host: create it as the caller, but never as root, or the daemon's user could not read it.
+		if os.Getuid() == 0 {
+			return fmt.Errorf("%s does not exist: create it owned by the daemon's user, or run as that user", dir)
+		}
+		if err = os.MkdirAll(dir, 0o700); err == nil {
+			fi, err = os.Stat(dir)
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -342,7 +355,7 @@ func backupRestore(args []string, in io.Reader, stderr io.Writer, stdinTTY bool)
 	}
 	for _, m := range [][2]string{{filepath.Join(tmp, "state.db"), db}, {filepath.Join(tmp, "secrets"), secretsDir}, {filepath.Join(tmp, "credentials"), credsDir}} {
 		if err := os.Rename(m[0], m[1]); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("installing %s (previous state is in %s): %w", m[1], pre, err)
+			return fmt.Errorf("installing %s: %w; the state is now mixed: move the files in %s back", m[1], err, pre)
 		}
 	}
 	if !exists {
@@ -392,6 +405,10 @@ func extractBackup(r io.Reader, dest string) error {
 			}
 		}
 		seen[name] = true
+		// each header counts too, so empty files and dirs can't flood the inode table
+		if left -= 512; left < 0 || len(seen) > restoreMaxEntries {
+			return errors.New("archive is larger than 1 GiB or has too many entries")
+		}
 		isDir := h.Typeflag == tar.TypeDir
 		switch {
 		case name == manifestName || name == "state.db":
@@ -443,5 +460,6 @@ func extractBackup(r io.Reader, dest string) error {
 	if _, err := os.Stat(filepath.Join(dest, "state.db")); err != nil {
 		return errors.New("no state.db")
 	}
-	return store.Integrity(filepath.Join(dest, "state.db"))
+	_, err = store.Verify(filepath.Join(dest, "state.db")) // the db's own schema, not just the manifest's
+	return err
 }
