@@ -1,7 +1,10 @@
 package web
 
 import (
+	"time"
+
 	"encoding/json"
+	"github.com/olafkfreund/siphon/internal/store"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -167,4 +170,101 @@ func TestConnectionTest(t *testing.T) {
 	check(true, "***")
 	mode = "deny"
 	check(false, "refused")
+}
+
+func TestServicesPageConnectedGroupingAndStatus(t *testing.T) {
+	ce := newCfgEnvFile(t, awsWebCfg) // gh: a legacy, unlabelled GitHub webhook
+	ce.post("/services/github", url.Values{"name": {"work"}, "token": {"ghp_X"}, "webhook": {"on"}})
+	ce.post("/services/aws", url.Values{"name": {"prod"}, "region": {"eu-west-1"}, "mode": {"profile"}, "profile": {"p"}, "servers": {"cloudwatch", "docs"}, "webhook": {"on"}})
+	page := ce.get("/services").Body.String()
+	for _, want := range []string{"GitHub · work", "GitHub · gh", "AWS · prod"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	// One row per connection, not per source.
+	if n := strings.Count(page, `class="connection-row"`); n != 3 {
+		t.Errorf("rows: %d", n)
+	}
+	for _, link := range []string{"/config/sources/work-hooks", "/config/sources/prod-docs", "/config/credentials/prod"} {
+		if !strings.Contains(page, link) {
+			t.Errorf("no edit link %s", link)
+		}
+	}
+	if strings.Count(page, "status-unchecked") != 3 || !strings.Contains(page, "Last event: No events yet") {
+		t.Error("expected Not checked everywhere")
+	}
+	store.SetConnectionCheck(ce.st.DB, store.ConnectionCheck{Connection: "work", At: time.Now(), OK: true, Detail: "olaf"})
+	store.SetConnectionCheck(ce.st.DB, store.ConnectionCheck{Connection: "prod", At: time.Now(), OK: false, Detail: "keys refused"})
+	page = ce.get("/services").Body.String()
+	if !strings.Contains(page, "status-working") || !strings.Contains(page, "status-attention") || !strings.Contains(page, "keys refused") || strings.Count(page, "status-unchecked") != 1 {
+		t.Errorf("status pills wrong")
+	}
+	// Test is offered where the service has one (GitHub, AWS), not elsewhere.
+	if !strings.Contains(page, "/services/c/work/test") || !strings.Contains(page, "/services/c/prod/test") {
+		t.Error("Test missing")
+	}
+}
+
+func TestServicesExploreSearchAndFilter(t *testing.T) {
+	ce := newCfgEnv(t)
+	full := ce.get("/services").Body.String()
+	for _, want := range []string{`id="service-results"`, "<html", "Explore services", `href="/services/github"`} {
+		if !strings.Contains(full, want) {
+			t.Errorf("full page lacks %q", want)
+		}
+	}
+	// aws is unavailable here: its reason shows and it has no Connect.
+	if strings.Contains(full, `href="/services/aws"`) || !strings.Contains(full, "services.siphon.aws") {
+		t.Error("unavailable tile offers Connect or hides its reason")
+	}
+	q := ce.get("/services?q=merge").Body.String()
+	if !strings.Contains(q, "GitLab") || strings.Contains(q, `href="/services/github"`) {
+		t.Error("search")
+	}
+	c := ce.get("/services?cat=cloud").Body.String()
+	if !strings.Contains(c, `aria-current="true"`) || strings.Contains(c, `href="/services/gitlab"`) {
+		t.Error("category filter")
+	}
+	if none := ce.get("/services?q=zzzz").Body.String(); !strings.Contains(none, "No services match") {
+		t.Error("empty state")
+	}
+	// htmx gets the page without the layout; the grid is inside it.
+	req := httptest.NewRequest("GET", "/services?q=merge", nil)
+	req.Header.Set("HX-Request", "true")
+	req.AddCookie(ce.c)
+	rec := httptest.NewRecorder()
+	ce.h.ServeHTTP(rec, req)
+	if b := rec.Body.String(); rec.Code != 200 || strings.Contains(b, "<html") || !strings.Contains(b, `id="service-results"`) || !strings.Contains(b, "GitLab") {
+		t.Errorf("htmx: %d", rec.Code)
+	}
+}
+
+func TestServiceConnectPageErrorsKeepValues(t *testing.T) {
+	ce := newCfgEnv(t)
+	form := ce.get("/services/gitlab").Body.String()
+	for _, want := range []string{"1</span>What to connect", "2</span>Access", "3</span>Events", `class="check toggle-row"`, `type="password"`} {
+		if !strings.Contains(form, want) {
+			t.Errorf("connect page lacks %q", want)
+		}
+	}
+	if ce.get("/services/nope").Code != 404 {
+		t.Error("unknown service")
+	}
+	w := ce.post("/services/gitlab", url.Values{"name": {"mygl"}, "base": {"http://gitlab.lan"}, "project": {"grp/proj"}, "token": {"glpat-NEVER"}, "webhook": {"on"}})
+	b := w.Body.String()
+	if w.Code != 422 || !strings.Contains(b, "must be https") || !strings.Contains(b, `value="mygl"`) || !strings.Contains(b, `value="grp/proj"`) || !strings.Contains(b, `value="http://gitlab.lan"`) {
+		t.Fatalf("%d %s", w.Code, b)
+	}
+	if strings.Contains(b, "glpat-NEVER") {
+		t.Error("secret echoed")
+	}
+	// The error sits inside the field it belongs to.
+	i := strings.Index(b, "must be https")
+	if j := strings.LastIndex(b[:i], "<label"); j < 0 || !strings.Contains(b[j:i], `name="base"`) {
+		t.Error("error not inline with the URL field")
+	}
+	if !strings.Contains(b, "checked") {
+		t.Error("webhook choice lost")
+	}
 }

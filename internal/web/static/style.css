@@ -295,10 +295,56 @@ form:has(input[name="event_src"][value="last"]:checked) .paste { display: none }
 .prov.oai i { background: #0F766E; font-size: .55rem }
 
 /* services */
-.svc h2 { margin: 0 }
-.svc-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: #fff }
-.svc-mark.gh { background: #24292F } .svc-mark.gl { background: #E24329 } .svc-mark.aws { background: #232F3E }
-.svc .ico { width: 18px; height: 18px }
+.service-mark { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); color: var(--text); font-size: .8rem; font-weight: 700; letter-spacing: .02em }
+.service-capabilities { display: flex; flex-wrap: wrap; gap: .3rem }
+.connection-list { padding: 0 }
+.connection-row { display: grid; grid-template-columns: 36px minmax(10rem, 1.4fr) auto minmax(9rem, 1fr) auto; align-items: center; gap: .6rem 1rem; padding: .9rem 1.2rem; min-height: 72px; border-top: 1px solid var(--line) }
+.connection-row:first-child { border-top: 0 }
+.connection-main h3 { margin: 0 0 .2rem; font-size: 1rem }
+.connection-actions { display: flex; align-items: center; gap: .5rem; justify-self: end }
+.connection-actions form { display: flex }
+.connection-result { grid-column: 2 / -1 }
+.connection-result:empty { display: none }
+.connection-edit { position: relative }
+.connection-edit summary { list-style: none; cursor: pointer }
+.connection-edit summary::-webkit-details-marker { display: none }
+.connection-edit[open] summary { border-color: var(--current) }
+.connection-edit ul { position: absolute; right: 0; z-index: 5; margin: .3rem 0 0; padding: .5rem .8rem; list-style: none; min-width: 12rem; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow) }
+.connection-edit li { padding: .25rem 0 }
+.status-unchecked { background: var(--surface-2); color: var(--muted); border: 1px solid var(--line) }
+.status-working { background: color-mix(in srgb, var(--kelp) 20%, transparent); color: var(--ok-text); border: 1px solid color-mix(in srgb, var(--kelp) 50%, transparent) }
+.status-attention { background: color-mix(in srgb, var(--coral) 16%, transparent); color: var(--bad-text); border: 1px solid color-mix(in srgb, var(--coral) 50%, transparent) }
+.pill .ico { width: 14px; height: 14px }
+.service-search { display: flex; align-items: flex-end; gap: .6rem; max-width: 32rem; margin-bottom: .8rem }
+.service-search label.f { flex: 1; margin-bottom: 0 }
+.category-filters { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: 1rem }
+.category-filters a { border: 1px solid var(--line); text-decoration: none; padding: .3rem .8rem }
+.category-filters a:hover { border-color: var(--current) }
+.category-filters a:focus-visible { outline: 2px solid var(--current); outline-offset: 2px }
+.category-filters a[aria-current=true] { border: 2px solid var(--current); padding: calc(.3rem - 1px) calc(.8rem - 1px) }
+.category-filters a[aria-current=true]::before { content: "\2713"; margin-right: .3rem }
+.service-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)) }
+.service-tile { display: flex; flex-direction: column; gap: .5rem; min-height: 160px; padding: 1rem }
+.service-tile:hover { border-color: var(--current) }
+.service-tile.unavailable { background: var(--surface-2); border-style: dashed }
+.service-tile p { margin: 0 }
+.tile-head { display: flex; align-items: center; gap: .6rem }
+.tile-head h3 { margin: 0; font-size: 1rem }
+.tile-action { margin-top: auto; padding-top: .4rem }
+.avail-available { background: color-mix(in srgb, var(--kelp) 20%, transparent); color: var(--ok-text) }
+.avail-needs-package { background: color-mix(in srgb, var(--amber) 24%, transparent); color: var(--wait-text) }
+.avail-not-yet { background: var(--surface-2); color: var(--muted); border: 1px solid var(--line) }
+.connect-page { max-width: 640px }
+.connect-page .top { display: flex; gap: .9rem; align-items: center }
+.connect-page .top h1 { margin: 0 }
+.connect-section { margin-bottom: 1.5rem }
+.connect-section h2 { display: flex; align-items: center; gap: .6rem; font-size: 1.05rem; margin: 0 0 .8rem }
+.step-n { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; border: 1.5px solid var(--current); font-size: .8rem }
+.connect-form input:not([type=radio]):not([type=checkbox]), .connect-form select { width: 100% }
+.connect-form [aria-invalid=true] { border-color: var(--coral) }
+.toggle-row { display: flex; align-items: center; gap: .6rem; flex-wrap: nowrap }
+.toggle-row input { flex: none; margin: 0 }
+.connect-form .row-actions.form-end { justify-content: flex-start; align-items: center }
 
 /* motion off on request */
 @media (prefers-reduced-motion: reduce) { *, *::after { animation: none !important; transition: none !important } }
@@ -326,6 +372,14 @@ form:has(input[name="event_src"][value="last"]:checked) .paste { display: none }
   table.cards td[data-label]::before { content: attr(data-label); display: block; font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted) }
   table.cards td.hide-sm { display: none }
   .tiles { grid-template-columns: 1fr }
+  .connection-row { grid-template-columns: 36px 1fr; padding: .9rem 1rem }
+  .connection-row .pill, .connection-event, .connection-actions { grid-column: 2 }
+  .connection-actions { justify-self: start }
+  .connection-actions .btn, .connection-actions button, .connection-edit summary { min-height: 44px }
+  .connection-result { grid-column: 1 / -1 }
+  .service-search { max-width: none }
+  .category-filters a { min-height: 44px; display: inline-flex; align-items: center }
+  .connect-form .btn, .connect-form button { min-height: 44px }
 }
 
 /* editors */

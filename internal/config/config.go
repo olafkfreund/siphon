@@ -218,6 +218,7 @@ type Source struct {
 	Package      string            `yaml:"package"`             // name in server.mcp_packages; fills Command
 	AWS          string            `yaml:"aws"`                 // provider: aws credential; the daemon injects short-lived keys
 	Connection   string            `yaml:"connection"`          // metadata: the Services connection this item belongs to
+	Service      string            `yaml:"service"`             // metadata: the catalogue service that made it
 
 	cmdFromPkg bool // Command was filled from Package, not written in the item
 }
@@ -271,7 +272,11 @@ type Credential struct {
 	SecretAccessKey Secret `yaml:"secret_access_key"`
 
 	Connection string `yaml:"connection"` // metadata: the Services connection this item belongs to
+	Service    string `yaml:"service"`    // metadata: the catalogue service that made it
 }
+
+// serviceID is the shape of a catalogue service id.
+var serviceID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,40}$`)
 
 // connectionName is the shape of a `connection:` label (an item name).
 var connectionName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
@@ -759,6 +764,9 @@ func (c *Config) Validate() error {
 		if cr := c.Credentials[name]; cr != nil && cr.Connection != "" && !connectionName.MatchString(cr.Connection) {
 			add("credentials.%s.connection: must match %s", name, connectionName)
 		}
+		if cr := c.Credentials[name]; cr != nil && cr.Service != "" && !serviceID.MatchString(cr.Service) {
+			add("credentials.%s.service: must match %s", name, serviceID)
+		}
 	}
 
 	for _, name := range sortedKeys(c.Sources) {
@@ -1042,6 +1050,9 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 	}
 	if s.Connection != "" && !connectionName.MatchString(s.Connection) {
 		add("%s.connection: must match %s", p, connectionName)
+	}
+	if s.Service != "" && !serviceID.MatchString(s.Service) {
+		add("%s.service: must match %s", p, serviceID)
 	}
 	if s.Poll < 0 || (s.Polled() && s.Poll == 0) {
 		add("%s: poll must be > 0", p)

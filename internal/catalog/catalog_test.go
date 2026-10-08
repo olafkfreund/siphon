@@ -49,7 +49,7 @@ func TestBasicIsASecretAndNeverInYAML(t *testing.T) {
 		t.Fatalf("secrets %+v", res.Secrets)
 	}
 	y := res.Items[0].YAML
-	if strings.Contains(y, "SENTINEL") || strings.Contains(y, "YUBi") || !strings.Contains(y, "file:") || !strings.HasSuffix(y, "connection: \"demo\"\n") {
+	if strings.Contains(y, "SENTINEL") || strings.Contains(y, "YUBi") || !strings.Contains(y, "file:") || !strings.Contains(y, "connection: \"demo\"\nservice: demo\n") {
 		t.Fatalf("yaml:\n%s", y)
 	}
 	// A newline in a non-secret value can't smuggle YAML.

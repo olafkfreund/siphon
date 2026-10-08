@@ -98,7 +98,16 @@ func New(o Options) http.Handler {
 			}
 			return itoa(*e)
 		},
-		"pe":        url.PathEscape,
+		"pe": url.PathEscape,
+		"lines": func(s string) []string {
+			var out []string
+			for _, l := range strings.Split(s, "\n") {
+				if l = strings.TrimSpace(l); l != "" {
+					out = append(out, l)
+				}
+			}
+			return out
+		},
 		"hasprefix": strings.HasPrefix,
 		"tools":     toolsHint,
 		"kindtitle": func(k string) string { return kindTitle[k] },

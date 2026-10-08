@@ -23,24 +23,24 @@ func awsHook(c *Ctx) error {
 			continue
 		}
 		if _, ok := c.Cfg.Server.MCPPackages[sv.Package]; !ok {
-			return bad("the %s server isn't installed: enable services.siphon.aws in your NixOS config", sv.Key)
+			return badf("servers", "the %s server isn't installed: enable services.siphon.aws in your NixOS config", sv.Key)
 		}
 		srcs = append(srcs, "mcp__"+c.Values["name"]+"-"+sv.Key)
 	}
 	if len(srcs) == 0 {
-		return bad("choose at least one server")
+		return badf("servers", "choose at least one server")
 	}
 	c.Done.ReadTools = "[" + strings.Join(srcs, ", ") + "]"
 	v := c.Values
 	if v["mode"] == "role" {
 		if v["role_arn"] == "" {
-			return bad("a role ARN is required")
+			return badf("role_arn", "a role ARN is required")
 		}
 		if (v["access_key_id"] == "") != (v["secret_access_key"] == "") {
-			return bad("base access keys go together: give both or neither")
+			return badf("access_key_id", "base access keys go together: give both or neither")
 		}
 	} else if v["profile"] == "" {
-		return bad("a profile name is required")
+		return badf("profile", "a profile name is required")
 	}
 	return nil
 }

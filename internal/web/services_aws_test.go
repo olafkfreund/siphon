@@ -86,7 +86,7 @@ func TestServicesAWS(t *testing.T) {
 
 func TestServicesAWSNeedsPackages(t *testing.T) {
 	ce := newCfgEnv(t)
-	if b := ce.get("/services").Body.String(); !strings.Contains(b, "enable <code>services.siphon.aws</code>") || strings.Contains(b, "/services/aws") {
+	if b := ce.get("/services").Body.String(); !strings.Contains(b, "services.siphon.aws") || strings.Contains(b, `href="/services/aws"`) {
 		t.Errorf("tile should explain, not offer a form")
 	}
 	w := ce.post("/services/aws", url.Values{"name": {"aws"}, "region": {"eu-west-1"}, "mode": {"profile"}, "profile": {"p"}, "servers": {"cloudwatch"}})
@@ -131,7 +131,7 @@ func TestAWSCredentialNotOnConnectionsPage(t *testing.T) {
 
 func TestServicesAWSAllowlist(t *testing.T) {
 	ce := newCfgEnvFile(t, awsWebCfg)
-	page := ce.get("/services").Body.String()
+	page := ce.get("/services/aws").Body.String()
 	if !strings.Contains(page, "<option>sso-prod</option>") || !strings.Contains(page, `<option value="arn:aws:iam::123456789012:role/listed">`) || strings.Contains(page, `value="profile" disabled`) {
 		t.Errorf("tile does not offer the lists")
 	}
@@ -166,8 +166,8 @@ func TestServicesAWSAllowlist(t *testing.T) {
 
 func TestServicesAWSEmptyProfileList(t *testing.T) {
 	ce := newCfgEnvFile(t, strings.Replace(awsWebCfg, "profiles: [p, sso-prod]", "profiles: []", 1))
-	page := ce.get("/services").Body.String()
-	if !strings.Contains(page, `value="profile" disabled`) || !strings.Contains(page, "server.aws.profiles</code> in siphon.yaml") {
+	page := ce.get("/services/aws").Body.String()
+	if !strings.Contains(page, `value="profile" disabled`) || !strings.Contains(page, "server.aws.profiles in siphon.yaml") {
 		t.Errorf("profile mode should be disabled with a hint")
 	}
 }

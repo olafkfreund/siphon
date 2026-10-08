@@ -54,6 +54,7 @@ type Field struct {
 	Pattern  string   `yaml:"pattern" json:"pattern,omitempty"` // text: the whole value must match
 	PatternE string   `yaml:"pattern_error" json:"-"`           // the message when it doesn't
 	Secure   bool     `yaml:"secure" json:"-"`                  // url: https unless loopback or a listed private endpoint
+	Section  int      `yaml:"section" json:"-"`                 // connect page section 1-3; default: bool 3, secret 2, else 1
 
 	re *regexp.Regexp
 }

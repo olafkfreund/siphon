@@ -116,6 +116,9 @@
             "description": "env:NAME, file:/path, or (where allowed) a literal",
             "type": "string"
           },
+          "service": {
+            "type": "string"
+          },
           "url": {
             "type": "string"
           }
@@ -480,6 +483,9 @@
           },
           "secret": {
             "description": "env:NAME, file:/path, or (where allowed) a literal",
+            "type": "string"
+          },
+          "service": {
             "type": "string"
           },
           "signature": {

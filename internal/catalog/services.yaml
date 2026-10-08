@@ -106,13 +106,13 @@ services:
     fields:
       - {key: name, label: Name, type: text, default: aws, required: true, pattern: '[a-z0-9][a-z0-9_-]{0,40}', pattern_error: 'a lowercase name (a-z, 0-9, - _) is required', help: 'Sources are named <name>-cloudwatch and <name>-docs.'}
       - {key: region, label: Region, type: text, default: eu-west-1, required: true}
-      - {key: mode, label: Credentials, type: choice, choices: [profile, role], default: profile, help: 'Profile: a named profile of the siphon user (SSO, a role or credential_process). Role: a read-only role, see examples/aws.'}
-      - {key: profile, label: Profile, type: text, help: 'Profile mode: one of server.aws.profiles.'}
-      - {key: role_arn, label: Role ARN, type: text, help: "Other ARNs need this credential's own access keys."}
-      - {key: external_id, label: External ID, type: text, help: 'Optional, role mode.'}
-      - {key: access_key_id, label: Base access key ID, type: secret, help: "Optional, role mode: otherwise the siphon user's own login assumes the role. Stored write-only."}
-      - {key: secret_access_key, label: Base secret access key, type: secret}
-      - {key: servers, label: Servers, type: multi, choices: [cloudwatch, docs], help: 'CloudWatch (logs, metrics, alarms) and AWS documentation.'}
+      - {key: mode, section: 2, label: Credentials, type: choice, choices: [profile, role], default: profile, help: 'Profile: a named profile of the siphon user (SSO, a role or credential_process). Role: a read-only role, see examples/aws.'}
+      - {key: profile, section: 2, label: Profile, type: text, help: 'Profile mode: one of server.aws.profiles.'}
+      - {key: role_arn, section: 2, label: Role ARN, type: text, help: "Other ARNs need this credential's own access keys."}
+      - {key: external_id, section: 2, label: External ID, type: text, help: 'Optional, role mode.'}
+      - {key: access_key_id, section: 2, label: Base access key ID, type: secret, help: "Optional, role mode: otherwise the siphon user's own login assumes the role. Stored write-only."}
+      - {key: secret_access_key, section: 2, label: Base secret access key, type: secret}
+      - {key: servers, label: Servers, type: multi, choices: [cloudwatch, docs], default: cloudwatch, help: 'CloudWatch (logs, metrics, alarms) and AWS documentation.'}
       - {key: webhook, label: 'Also receive EventBridge events (API destination)', type: bool}
     creates:
       - kind: credentials

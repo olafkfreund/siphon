@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,28 +26,8 @@ const awsHookHeader = "X-Siphon-Key"
 
 const githubMCP = "https://api.githubcopilot.com/mcp/"
 
-// serviceRow is an existing service-made source on the page.
-type serviceRow struct {
-	Name, Service, Kind, Detail string
-}
-
 // serviceDone is shown once after setup: the webhook secret never again.
 type serviceDone = catalog.Done
-
-type serviceForm struct {
-	Service, Name, Err string
-	AWSCloudWatch      bool     // server.mcp_packages has aws-cloudwatch
-	AWSDocs            bool     // ... aws-docs
-	Profiles, RoleARNs []string // server.aws allowlists: what a portal credential may use without its own keys
-}
-
-func (s *server) serviceForm() *serviceForm {
-	pk := s.Config().Server.MCPPackages
-	_, cw := pk["aws-cloudwatch"]
-	_, docs := pk["aws-docs"]
-	aws := s.Config().Server.AWS
-	return &serviceForm{AWSCloudWatch: cw, AWSDocs: docs, Profiles: aws.Profiles, RoleARNs: aws.RoleARNs}
-}
 
 // serviceOf says which catalogue service made a source, from its shape.
 // ponytail: a heuristic for the three first entries; a service id on the item
@@ -71,15 +50,13 @@ func serviceOf(src *config.Source) (service, detail string) {
 	return "", ""
 }
 
-func (s *server) serviceRows() []serviceRow {
-	out := []serviceRow{}
-	for name, src := range s.Config().Sources {
-		if svc, detail := serviceOf(src); svc != "" {
-			out = append(out, serviceRow{Name: name, Kind: src.Type, Service: svc, Detail: detail})
-		}
+// serviceFor is the catalogue service of a source: its label, else its shape.
+func serviceFor(src *config.Source) string {
+	if src.Service != "" {
+		return src.Service
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
+	svc, _ := serviceOf(src)
+	return svc
 }
 
 func (s *server) hookURL(name string) string {
@@ -114,7 +91,7 @@ func (s *server) connect(actor, id string, values map[string]string) (*serviceDo
 	if err != nil {
 		var ue catalog.UserError
 		if errors.As(err, &ue) {
-			return nil, errInvalid{ue.Msg}
+			return nil, fieldErr{errInvalid{ue.Msg}, ue.Field}
 		}
 		return nil, err
 	}
@@ -133,6 +110,14 @@ func (s *server) connect(actor, id string, values map[string]string) (*serviceDo
 	}
 	return done, err
 }
+
+// fieldErr is a refusal that belongs to one form field.
+type fieldErr struct {
+	errInvalid
+	Field string
+}
+
+func (e fieldErr) Unwrap() error { return e.errInvalid }
 
 // formValues reads a catalogue entry's fields from a posted form.
 func formValues(e *catalog.Entry, r *http.Request) map[string]string {
@@ -304,36 +289,8 @@ func (s *server) testAWS(ctx context.Context, name string) svcTest {
 }
 
 func (s *server) serviceRoutes(mux *http.ServeMux) {
-	for _, id := range []string{"github", "gitlab", "aws"} { // the old routes, now catalogue entries
-		e := catalog.Get(id)
-		mux.HandleFunc("POST /services/"+id, s.portal(func(w http.ResponseWriter, r *http.Request, csrf string) {
-			done, err := s.connect("portal", e.ID, formValues(e, r))
-			s.serviceResult(w, r, csrf, e.ID, r.PostFormValue("name"), done, err)
-		}))
-	}
 	mux.HandleFunc("POST /services/{name}/test", s.portal(func(w http.ResponseWriter, r *http.Request, _ string) {
 		s.render(w, "svctest", s.testService(r.Context(), r.PathValue("name")))
 	}))
-}
-
-// serviceResult shows the one-time result page, or the form with the error.
-func (s *server) serviceResult(w http.ResponseWriter, r *http.Request, csrf, service, name string, done *serviceDone, err error) {
-	var inv errInvalid
-	if errors.As(err, &inv) {
-		v := view{CSRF: csrf, Services: s.serviceRows(), ServiceForm: s.serviceFormErr(service, name, inv.msg)}
-		s.pageStatus(w, r, "services", v, http.StatusUnprocessableEntity)
-		return
-	}
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store") // the webhook secret is on this page
-	s.page(w, r, "servicedone", view{CSRF: csrf, ServiceDone: done})
-}
-
-func (s *server) serviceFormErr(service, name, msg string) *serviceForm {
-	f := s.serviceForm()
-	f.Service, f.Name, f.Err = service, name, msg
-	return f
+	s.servicePages(mux)
 }

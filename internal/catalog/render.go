@@ -22,11 +22,13 @@ import (
 func bytesReader(b []byte) io.Reader { return bytes.NewReader(b) }
 
 // UserError is a refusal to show the user (bad input, an unmet precondition).
-type UserError struct{ Msg string }
+type UserError struct{ Msg, Field string } // Field names the form field at fault, if one is
 
 func (e UserError) Error() string { return e.Msg }
 
-func bad(f string, a ...any) error { return UserError{fmt.Sprintf(f, a...)} }
+func bad(f string, a ...any) error { return UserError{Msg: fmt.Sprintf(f, a...)} }
+
+func badf(field, f string, a ...any) error { return UserError{fmt.Sprintf(f, a...), field} }
 
 // Env is what Render needs from the daemon.
 type Env struct {
@@ -81,7 +83,7 @@ var stubFuncs = template.FuncMap{
 
 func quote(s string) string           { return strconv.Quote(s) }
 func pathEsc(s string) string         { return url.PathEscape(strings.Trim(s, "/")) }
-func fail(msg string) (string, error) { return "", UserError{msg} }
+func fail(msg string) (string, error) { return "", UserError{Msg: msg} }
 func tools(src string, names ...string) string {
 	out := make([]string, len(names))
 	for i, t := range names {
@@ -167,16 +169,16 @@ func (e *Entry) Render(values map[string]string, env Env) (*Result, error) {
 		if !strings.HasSuffix(y, "\n") {
 			y += "\n"
 		}
-		y += "connection: " + quote(name) + "\n"
+		y += "connection: " + quote(name) + "\nservice: " + e.ID + "\n"
 		res.Items = append(res.Items, Item{c.Kind, iname, y})
 	}
 	if env.Config != nil {
 		for _, it := range res.Items {
 			if it.Kind == "sources" && env.Config.Sources[it.Name] != nil {
-				return nil, bad("a source named %s already exists; pick another name or edit it", it.Name)
+				return nil, badf("name", "a source named %s already exists; pick another name or edit it", it.Name)
 			}
 			if it.Kind == "credentials" && env.Config.Credentials[it.Name] != nil {
-				return nil, bad("a credential named %s already exists; pick another name", it.Name)
+				return nil, badf("name", "a credential named %s already exists; pick another name", it.Name)
 			}
 		}
 	}
@@ -289,37 +291,37 @@ func (e *Entry) clean(in map[string]string, cfg *config.Config) (map[string]stri
 			}
 			continue
 		}
-		if strings.TrimSpace(v) == "" {
+		if strings.TrimSpace(v) == "" && f.Type != "multi" {
 			v = f.Default
 		}
 		if strings.TrimSpace(v) == "" {
 			if f.Required {
-				return nil, bad("%s is required", f.Label)
+				return nil, badf(f.Key, "%s is required", f.Label)
 			}
 			continue
 		}
 		if f.Type != "secret" && strings.ContainsAny(v, "\r\n\x00") {
-			return nil, bad("%s must be a single line", f.Label)
+			return nil, badf(f.Key, "%s must be a single line", f.Label)
 		}
 		switch f.Type {
 		case "choice":
 			if !slices.Contains(f.Choices, v) {
-				return nil, bad("%s: choose one of %s", f.Label, strings.Join(f.Choices, ", "))
+				return nil, badf(f.Key, "%s: choose one of %s", f.Label, strings.Join(f.Choices, ", "))
 			}
 		case "multi":
 			for _, p := range splitList(v) {
 				if !slices.Contains(f.Choices, p) {
-					return nil, bad("%s: %q is not one of %s", f.Label, p, strings.Join(f.Choices, ", "))
+					return nil, badf(f.Key, "%s: %q is not one of %s", f.Label, p, strings.Join(f.Choices, ", "))
 				}
 			}
 		case "url":
 			v = strings.TrimRight(v, "/")
 			u, err := url.Parse(v)
 			if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-				return nil, bad("%s must be http(s)://host[:port][/path]", f.Label)
+				return nil, badf(f.Key, "%s must be http(s)://host[:port][/path]", f.Label)
 			}
 			if f.Secure && u.Scheme != "https" && !loopback(u.Hostname()) && (cfg == nil || !cfg.ServiceEndpoint(v)) {
-				return nil, bad("the %s must be https (http only for localhost or a host listed in server.services.private_endpoints): the token would travel in clear", f.Label)
+				return nil, badf(f.Key, "the %s must be https (http only for localhost or a host listed in server.services.private_endpoints): the token would travel in clear", f.Label)
 			}
 		}
 		if f.re != nil && !f.re.MatchString(v) {
@@ -327,7 +329,7 @@ func (e *Entry) clean(in map[string]string, cfg *config.Config) (map[string]stri
 			if msg == "" {
 				msg = f.Label + " has an invalid format"
 			}
-			return nil, bad("%s", msg)
+			return nil, badf(f.Key, "%s", msg)
 		}
 		out[f.Key] = v
 	}

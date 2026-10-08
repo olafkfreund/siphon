@@ -34,6 +34,14 @@ func connSources(cfg *config.Config, conn string) []string {
 // the outcome. The token is read from the connection's own sources, server
 // side, and used in memory only.
 func (s *server) testConnection(ctx context.Context, conn string) (any, int, error) {
+	res, code, err := s.runConnectionTest(ctx, conn)
+	if res == nil {
+		return nil, code, err
+	}
+	return res, code, err
+}
+
+func (s *server) runConnectionTest(ctx context.Context, conn string) (*connTestResult, int, error) {
 	cfg := s.Config()
 	names := connSources(cfg, conn)
 	if len(names) == 0 {
@@ -41,7 +49,7 @@ func (s *server) testConnection(ctx context.Context, conn string) (any, int, err
 	}
 	var e *catalog.Entry
 	for _, n := range names {
-		if svc, _ := serviceOf(cfg.Sources[n]); svc != "" {
+		if svc := serviceFor(cfg.Sources[n]); svc != "" {
 			e = catalog.Get(svc)
 			break
 		}
@@ -94,7 +102,7 @@ func (s *server) testConnection(ctx context.Context, conn string) (any, int, err
 	if err := store.SetConnectionCheck(s.Store.DB, store.ConnectionCheck{Connection: conn, At: s.Now(), OK: ok, Detail: detail}); err != nil {
 		return nil, 500, err
 	}
-	return connTestResult{svcTest: t, Connection: conn, OK: ok, Detail: detail}, 200, nil
+	return &connTestResult{svcTest: t, Connection: conn, OK: ok, Detail: detail}, 200, nil
 }
 
 // connInputs finds the token and the API base of a connection from its

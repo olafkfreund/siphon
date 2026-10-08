@@ -198,3 +198,10 @@ Revert the merge.
   - Test templates use `{token}`/`{base}` substitution, in memory.
   - The test runner (`runHTTPTest`) is shared by the old and new endpoints. `Err`, `User` and `ARN` are masked before they're stored or returned; the masking test caught a token echoed in `user`.
   - **Decision (Opus):** items also get an additive `service: <catalogue id>` field next to `connection:`. The test lookup and the Connected grouping use it instead of the source-shape heuristic, which only knew github, gitlab and aws. Added in step 4.
+- **Step 4 (coder):**
+  - The `service:` label is validated against the catalogue for portal and API edits (hand-edited `siphon.yaml` items aren't checked).
+  - Legacy items are grouped by name, with the `-hooks`/`-cloudwatch`/`-docs` suffixes stripped.
+  - Field errors are carried by `UserError.Field`; `Field.Section` and a `lines` func were added.
+  - `serviceRows`, `serviceForm` and the `.svc-*` CSS were removed.
+  - The portal POSTs to one `/services/{id}`.
+  - **Reviewed in light and dark on a copy of the dev data:** the design follows the Codex review. Three nits go to step 5: hide or explain Test for webhook-only connections, a neutral icon for "Not checked", and show the AWS hint as code.
