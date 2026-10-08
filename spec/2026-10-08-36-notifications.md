@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 36
 intent: intent/2026-10-08-36-notifications.md
 ---
