@@ -291,4 +291,8 @@ steps 6–8, and reviews.
 
 ## Deviations log
 
-(none yet)
+
+- Step 1 (coder):
+  - **`stubbed`:** `Config.stubbed` skips the resolved-url check while the portal validates with stand-in secret values. It still runs at real load.
+  - **`moved`:** `checkOverlay` treats a changed `url` ref as `moved`, so a token from `siphon.yaml` can't follow to a new url.
+  - **Schema:** `schema/agentgw.schema.json`, the legacy name, is regenerated alongside.

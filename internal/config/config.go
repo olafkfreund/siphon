@@ -90,9 +90,12 @@ type Config struct {
 	// Credentials are logins siphon owns: subscription (store files) or, with api_key, an API key.
 	Credentials map[string]*Credential `yaml:"credentials"`
 	Routines    map[string]*Routine    `yaml:"routines"`
-	Units       []string               `yaml:"units"`
+	// Notify are the channels that tell a person when a job needs approval, fails or a source breaks.
+	Notify map[string]*Notify `yaml:"notify"`
+	Units  []string           `yaml:"units"`
 
 	resolveErrs []error
+	stubbed     bool   // secrets were stood in for, so resolved values are not real
 	legacyDB    string // set when the default db fell back to an old agentgw.db // legacy-name
 }
 
@@ -285,6 +288,21 @@ type Credential struct {
 	Connection string `yaml:"connection"` // metadata: the Services connection this item belongs to
 	Service    string `yaml:"service"`    // metadata: the catalogue service that made it
 }
+
+// Notify is one notification channel. URL is a Secret for every type: an ntfy
+// topic or a Slack/webhook URL is itself the credential.
+type Notify struct {
+	Type   string   `yaml:"type"` // ntfy|slack|webhook
+	URL    Secret   `yaml:"url"`
+	Token  Secret   `yaml:"token"`  // optional: ntfy access token or webhook bearer
+	Events []string `yaml:"events"` // subset of NotifyEvents; empty means all
+}
+
+// NotifyTypes and NotifyEvents are the values a channel may use.
+var (
+	NotifyTypes  = []string{"ntfy", "slack", "webhook"}
+	NotifyEvents = []string{"approval", "reminder", "failed", "source"}
+)
 
 // serviceID is the shape of a catalogue service id.
 var serviceID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,40}$`)
@@ -507,8 +525,9 @@ func parse(b []byte, stub map[string]string) (*Config, error) {
 		sandbox = "none" // the systemd sandbox cannot work in a container
 	}
 	c := &Config{
-		Server: Server{Listen: ":8080", DB: "siphon.db", Workers: 4, Sandbox: sandbox, Egress: EgressServer{Listen: "127.77.0.1:3128"}},
-		Limits: Limits{AgentRunsPerDay: 50, HTTPMaxBody: 1 << 20, HTTPTimeout: Duration(30 * time.Second)},
+		stubbed: len(stub) > 0,
+		Server:  Server{Listen: ":8080", DB: "siphon.db", Workers: 4, Sandbox: sandbox, Egress: EgressServer{Listen: "127.77.0.1:3128"}},
+		Limits:  Limits{AgentRunsPerDay: 50, HTTPMaxBody: 1 << 20, HTTPTimeout: Duration(30 * time.Second)},
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	dec.KnownFields(true)
@@ -624,6 +643,11 @@ func (c *Config) secretPtrs() []*Secret {
 	for _, name := range sortedKeys(c.Credentials) {
 		if cr := c.Credentials[name]; cr != nil {
 			out = append(out, &cr.APIKey, &cr.AccessKeyID, &cr.SecretAccessKey)
+		}
+	}
+	for _, name := range sortedKeys(c.Notify) {
+		if n := c.Notify[name]; n != nil {
+			out = append(out, &n.URL, &n.Token)
 		}
 	}
 	for _, name := range sortedKeys(c.Sources) {
@@ -1150,7 +1174,38 @@ func (c *Config) Validate() error {
 			c.validateAction(sp, Action{Cmd: st.Cmd, Unit: st.Unit, Agent: st.Agent}, add)
 		}
 	}
+	c.validateNotify(add)
 	return errors.Join(errs...)
+}
+
+func (c *Config) validateNotify(add func(string, ...any)) {
+	for _, name := range sortedKeys(c.Notify) {
+		n, p := c.Notify[name], "notify."+name
+		if !credName.MatchString(name) {
+			add("%s: name must match [a-z0-9][a-z0-9_-]*", p)
+		}
+		if n == nil {
+			add("%s: empty", p)
+			continue
+		}
+		if !slices.Contains(NotifyTypes, n.Type) {
+			add("%s: type must be ntfy, slack or webhook, got %q", p, n.Type)
+		}
+		if !n.URL.isSet() {
+			add("%s: url is required (env:NAME or file:/path)", p)
+		} else if n.URL.Value != "" && !c.stubbed {
+			// Only a real resolved value is checked, and the message never repeats it.
+			if u, err := url.Parse(n.URL.Value); err != nil || u.Hostname() == "" || u.User != nil ||
+				!(u.Scheme == "https" || u.Scheme == "http" && c.ServiceEndpoint(n.URL.Value)) {
+				add("%s: url must be https, or http to a host:port in server.services.private_endpoints, with no user:pass@", p)
+			}
+		}
+		for _, ev := range n.Events {
+			if !slices.Contains(NotifyEvents, ev) {
+				add("%s: unknown event %q (approval, reminder, failed, source)", p, ev)
+			}
+		}
+	}
 }
 
 func (c *Config) validateSource(name string, s *Source, add func(string, ...any)) {

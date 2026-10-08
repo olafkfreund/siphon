@@ -152,6 +152,32 @@
       },
       "type": "object"
     },
+    "notify": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "token": {
+            "description": "env:NAME, file:/path, or (where allowed) a literal",
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "url": {
+            "description": "env:NAME, file:/path, or (where allowed) a literal",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
     "routines": {
       "additionalProperties": {
         "additionalProperties": false,

@@ -181,9 +181,9 @@ var (
 		"cfglist": "rules", "cfgedit": "rules", "history": "history", "historyitem": "history",
 		"help": "help", "helppage": "help", "helptemplates": "help"}
 	// Config kinds as people read them, and the nav entry each lights up.
-	kindTitle = map[string]string{"rules": "Rules", "sources": "Sources", "agents": "Agents", "routines": "Routines", "credentials": "Connections"}
-	kindOne   = map[string]string{"rules": "rule", "sources": "source", "agents": "agent", "routines": "routine", "credentials": "connection"}
-	kindNav   = map[string]string{"rules": "rules", "sources": "sources", "agents": "agents", "routines": "routines", "credentials": "logins"}
+	kindTitle = map[string]string{"rules": "Rules", "sources": "Sources", "agents": "Agents", "routines": "Routines", "credentials": "Connections", "notify": "Notifications"}
+	kindOne   = map[string]string{"rules": "rule", "sources": "source", "agents": "agent", "routines": "routine", "credentials": "connection", "notify": "notification channel"}
+	kindNav   = map[string]string{"rules": "rules", "sources": "sources", "agents": "agents", "routines": "routines", "credentials": "logins", "notify": "notify"}
 	provLabel = map[string]string{"file": "from siphon.yaml", "portal": "added in the portal", "override": "overrides siphon.yaml", "deleted": "deleted in the portal"}
 	// Pages that refresh themselves every 5 s (job detail decides by state).
 	polls = map[string]bool{"dashboard": true, "jobs": true, "approvals": true, "sources": true, "audit": true}

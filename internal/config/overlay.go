@@ -39,7 +39,7 @@ const (
 
 // Kinds are the editable top-level sections; server, limits and units never are.
 // "rules" is a list keyed by name, the rest are maps.
-var Kinds = map[string]bool{"sources": true, "agents": true, "routines": true, "credentials": true, "rules": true}
+var Kinds = map[string]bool{"sources": true, "agents": true, "routines": true, "credentials": true, "rules": true, "notify": true}
 
 // Effective applies items to the file's YAML node tree (keeping key order and
 // comments) and returns the merged YAML plus the provenance of every item.
@@ -258,6 +258,19 @@ func checkOverlay(file *Config, items, prior []Item, secretsDir string) error {
 				c.Region != fc.Region || c.Profile != fc.Profile || c.RoleARN != fc.RoleARN || c.ExternalID != fc.ExternalID
 			refs = map[string]string{"api_key": c.APIKey.Ref, "access_key_id": c.AccessKeyID.Ref, "secret_access_key": c.SecretAccessKey.Ref}
 			fileRefs = map[string]string{"api_key": fc.APIKey.Ref, "access_key_id": fc.AccessKeyID.Ref, "secret_access_key": fc.SecretAccessKey.Ref}
+		case "notify":
+			// Nothing is operator-only: Validate bounds the url (https, or a listed private endpoint).
+			var n Notify
+			if yaml.Unmarshal([]byte(it.YAML), &n) != nil {
+				continue
+			}
+			fn := file.Notify[it.Name]
+			if fn == nil {
+				fn = &Notify{}
+			}
+			moved = n.URL.Ref != fn.URL.Ref // the file's token must not go to a new url
+			refs = map[string]string{"url": n.URL.Ref, "token": n.Token.Ref}
+			fileRefs = map[string]string{"url": fn.URL.Ref, "token": fn.Token.Ref}
 		case "agents":
 			var a Agent
 			if yaml.Unmarshal([]byte(it.YAML), &a) != nil {
@@ -375,6 +388,11 @@ func itemRefs(kind, y string) map[string]string {
 		var c Credential
 		if yaml.Unmarshal([]byte(y), &c) == nil {
 			return map[string]string{"api_key": c.APIKey.Ref, "access_key_id": c.AccessKeyID.Ref, "secret_access_key": c.SecretAccessKey.Ref}
+		}
+	case "notify":
+		var n Notify
+		if yaml.Unmarshal([]byte(y), &n) == nil {
+			return map[string]string{"url": n.URL.Ref, "token": n.Token.Ref}
 		}
 	case "agents":
 		var a Agent

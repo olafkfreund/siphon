@@ -23,7 +23,7 @@ import (
 
 // Config kinds the API edits, and the read-only listings `get` also takes.
 var (
-	configKinds = []string{"sources", "rules", "agents", "routines", "credentials"}
+	configKinds = []string{"sources", "rules", "agents", "routines", "credentials", "notify"}
 	listKinds   = []string{"jobs", "approvals", "audit", "connections"}
 )
 

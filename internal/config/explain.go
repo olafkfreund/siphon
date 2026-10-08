@@ -142,6 +142,12 @@ var explainKinds = map[string]struct {
 		"access_key_id":     {false, "", "aws role mode: base access key id (env:/file:)", nil},
 		"secret_access_key": {false, "", "aws role mode: base secret access key (env:/file:)", nil},
 	}},
+	"notify": {"notify", map[string]hint{
+		"type":   {true, "", "where messages go", e("ntfy", "slack", "webhook")},
+		"url":    {true, "", "the topic or hook URL: env:NAME or file:/path (the portal and API store it as a file for you); https, or http to a listed private endpoint", nil},
+		"token":  {false, "", "ntfy access token or webhook bearer: env:NAME or file:/path", nil},
+		"events": {false, "all four", "which events to send", e("approval", "reminder", "failed", "source")},
+	}},
 }
 
 // Explain is the schema of kind flattened to dotted paths, with hints.
@@ -155,7 +161,7 @@ func Explain(kind string) (string, []ExplainField, error) {
 		}
 	}
 	if !ok {
-		return "", nil, fmt.Errorf("unknown kind %q (kinds: source, rule, agent, routine, credential)", kind)
+		return "", nil, fmt.Errorf("unknown kind %q (kinds: source, rule, agent, routine, credential, notify)", kind)
 	}
 	raw, err := Schema()
 	if err != nil {
