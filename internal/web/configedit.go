@@ -143,7 +143,7 @@ func (s *server) prepare(cur []store.ConfigItem, mutate func(map[itemKey]store.C
 	// Pasted secrets are not on disk yet: validate with stand-in values.
 	stub := map[string]string{}
 	for _, p := range pending {
-		stub["file:"+p.path(secretsDir(s.Config().Server.DB))] = "placeholder"
+		stub["file:"+p.path(secretsDir(s.Config().Server.DB))] = "https://placeholder.invalid/" // a valid url for notify; other secrets only need a value
 	}
 	cfg, _, err := config.LoadWithOverlayStub(s.ConfigPath, toItems(next), stub, toItems(cur))
 	if err != nil {

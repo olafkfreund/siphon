@@ -5,8 +5,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -87,5 +89,70 @@ func TestNotifyAPI(t *testing.T) {
 	}
 	if w := ce.api("GET", "/api/notifications?job=x", ""); w.Code != 400 {
 		t.Fatalf("bad job: %d", w.Code)
+	}
+}
+
+func TestNotifyPortal(t *testing.T) {
+	var hits atomic.Int32
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1) }))
+	defer hook.Close()
+	host := strings.TrimPrefix(hook.URL, "http://")
+	ce := newCfgEnvFile(t, "server: { sandbox: none, db: DIR/s.db, services: {private_endpoints: ['"+host+"']} }\n")
+
+	if w := ce.get("/notifications"); w.Code != 200 || !strings.Contains(w.Body.String(), "No channels yet") || !strings.Contains(w.Body.String(), `href="/notifications"`) {
+		t.Fatalf("empty page: %d", w.Code)
+	}
+	// Invalid: the page comes back with the problem, and never echoes the url or token.
+	w := ce.post("/notifications", url.Values{"name": {"hook"}, "type": {"webhook"}, "url": {"http://203.0.113.5/secret-path"}, "token": {"tok-xyz"}, "events": {"failed"}})
+	if w.Code != 422 || strings.Contains(w.Body.String(), "secret-path") || strings.Contains(w.Body.String(), "tok-xyz") || !strings.Contains(w.Body.String(), `role="alert"`) {
+		t.Fatalf("invalid add: %d %s", w.Code, w.Body.String())
+	}
+	if w := ce.post("/notifications", url.Values{"name": {"hook"}, "type": {"webhook"}, "url": {hook.URL + "/n"}}); w.Code != 422 {
+		t.Fatalf("no events: %d", w.Code)
+	}
+	w = ce.post("/notifications", url.Values{"name": {"hook"}, "type": {"webhook"}, "url": {hook.URL + "/n"}, "token": {"tok-xyz"}, "events": {"failed", "approval"}})
+	if w.Code != 303 {
+		t.Fatalf("add: %d %s", w.Code, w.Body.String())
+	}
+	if b, _ := os.ReadFile(filepath.Join(ce.dir, "secrets", "notify--hook+token")); string(b) != "tok-xyz" {
+		t.Fatalf("token file %q", b)
+	}
+	page := ce.get("/notifications?added=hook").Body.String()
+	if !strings.Contains(page, "Channel hook") || !strings.Contains(page, "failed · approval") || strings.Contains(page, "tok-xyz") || strings.Contains(page, hook.URL) {
+		t.Fatalf("page: %s", page)
+	}
+
+	// Test button: htmx partial.
+	w = ce.do("POST", "/notifications/hook/test", url.Values{"csrf": {ce.csrf}}, func(r *http.Request) { r.AddCookie(ce.c); r.Header.Set("HX-Request", "true") })
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "Sent (HTTP 200)") || hits.Load() != 1 {
+		t.Fatalf("test: %d %s hits=%d", w.Code, w.Body.String(), hits.Load())
+	}
+	if w := ce.post("/notifications/nope/test", nil); w.Code != 404 {
+		t.Fatalf("unknown test: %d", w.Code)
+	}
+
+	// Deliveries show on the page and on the job's page.
+	j, _ := ce.st.DB.Exec(`INSERT INTO jobs(rule,action_json,state,created_at) VALUES ('r1','{"action":{"Cmd":["x"]}}','failed',1)`)
+	id, _ := j.LastInsertId()
+	ce.st.DB.Exec(`INSERT INTO notifications(channel,event,key,job_id,title,body,created_at,next_at,state) VALUES ('hook','failed','job:1',?,'t','b',1,1,'sent')`, id)
+	if p := ce.get("/notifications").Body.String(); !strings.Contains(p, "Recent deliveries") || !strings.Contains(p, `href="/jobs/`) {
+		t.Fatalf("deliveries: %s", p)
+	}
+	if p := ce.get("/jobs/" + strconv.FormatInt(id, 10)).Body.String(); !strings.Contains(p, `id="nt"`) || !strings.Contains(p, "hook") {
+		t.Fatalf("job section: %s", p)
+	}
+	if p := ce.get("/jobs/1").Body.String(); strings.Contains(p, `id="nt"`) {
+		t.Log("job 1 unexpectedly has notifications")
+	}
+
+	// Delete removes the channel and its secret files.
+	if w := ce.post("/notifications/hook/delete", nil); w.Code != 303 {
+		t.Fatalf("delete: %d", w.Code)
+	}
+	if _, err := os.Stat(filepath.Join(ce.dir, "secrets", "notify--hook+token")); err == nil {
+		t.Fatal("secret file kept")
+	}
+	if w := ce.post("/notifications/hook/delete", nil); w.Code != 404 {
+		t.Fatalf("delete again: %d", w.Code)
 	}
 }

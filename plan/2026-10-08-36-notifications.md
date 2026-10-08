@@ -315,3 +315,8 @@ steps 6–8, and reviews.
   - **`notify add --url`** is the channel's url. The server comes from the saved login or `SIPHON_URL`, as with `connect` and `new`.
   - **Only `notify` accepts `url` and `token` as pasted secrets:** the config API accepts them for that kind alone.
   - **`applyfile`:** now knows the `notify` kind.
+- Step 5 (coder):
+  - **Fix to step 1:** `stubbed` also skipped the url check on the portal's second load, the one with the real values, so an unlisted `http://` url got through. `stubbed` is removed. The portal's stand-in secret value is now `https://placeholder.invalid/`, so the stub load passes and the real check runs on the real value. `TestNotifyPortal` pins this.
+  - **No auto-refresh:** the Notifications page doesn't refresh itself, so a half-filled add form isn't wiped.
+  - **Add and Delete** show only when the config is editable.
+  - **Each channel card** shows its last event, time and error.

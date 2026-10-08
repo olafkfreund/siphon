@@ -95,7 +95,6 @@ type Config struct {
 	Units  []string           `yaml:"units"`
 
 	resolveErrs []error
-	stubbed     bool   // secrets were stood in for, so resolved values are not real
 	legacyDB    string // set when the default db fell back to an old agentgw.db // legacy-name
 }
 
@@ -525,9 +524,8 @@ func parse(b []byte, stub map[string]string) (*Config, error) {
 		sandbox = "none" // the systemd sandbox cannot work in a container
 	}
 	c := &Config{
-		stubbed: len(stub) > 0,
-		Server:  Server{Listen: ":8080", DB: "siphon.db", Workers: 4, Sandbox: sandbox, Egress: EgressServer{Listen: "127.77.0.1:3128"}},
-		Limits:  Limits{AgentRunsPerDay: 50, HTTPMaxBody: 1 << 20, HTTPTimeout: Duration(30 * time.Second)},
+		Server: Server{Listen: ":8080", DB: "siphon.db", Workers: 4, Sandbox: sandbox, Egress: EgressServer{Listen: "127.77.0.1:3128"}},
+		Limits: Limits{AgentRunsPerDay: 50, HTTPMaxBody: 1 << 20, HTTPTimeout: Duration(30 * time.Second)},
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	dec.KnownFields(true)
@@ -1193,7 +1191,7 @@ func (c *Config) validateNotify(add func(string, ...any)) {
 		}
 		if !n.URL.isSet() {
 			add("%s: url is required (env:NAME or file:/path)", p)
-		} else if n.URL.Value != "" && !c.stubbed {
+		} else if n.URL.Value != "" {
 			// Only a real resolved value is checked, and the message never repeats it.
 			if u, err := url.Parse(n.URL.Value); err != nil || u.Hostname() == "" || u.User != nil ||
 				!(u.Scheme == "https" || u.Scheme == "http" && c.ServiceEndpoint(n.URL.Value)) {
