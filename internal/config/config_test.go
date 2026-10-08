@@ -847,3 +847,25 @@ rules:
 		}
 	}
 }
+
+func TestWebhookSignatureOptionsValidate(t *testing.T) {
+	for name, tc := range map[string]struct{ extra, want string }{
+		"slack ok":            {"signature: slack", ""},
+		"stripe ok":           {"signature: stripe", ""},
+		"prefix ok":           {"signature: sha256\n    signature_header: X-S\n    signature_prefix: v1=", ""},
+		"prefix needs sha256": {"signature: slack\n    signature_prefix: v1=", "signature_prefix is only for"},
+		"slack no header":     {"signature: slack\n    signature_header: X-S", "not allowed with signature slack"},
+		"separator ok":        {"signature: sha256\n    signature_header: X-S\n    timestamp_header: X-T\n    timestamp_separator: ':'", ""},
+		"separator needs ts":  {"signature: sha256\n    signature_header: X-S\n    timestamp_separator: ':'", "timestamp_separator needs"},
+	} {
+		y := "server: { sandbox: none }\nsources:\n  w:\n    type: webhook\n    secret: env:K\n    " + tc.extra + "\n"
+		t.Setenv("K", "k")
+		cfg, err := Parse([]byte(y))
+		if err == nil {
+			err = cfg.Validate()
+		}
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}

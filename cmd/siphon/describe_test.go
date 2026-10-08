@@ -104,7 +104,7 @@ func TestExplainCommand(t *testing.T) {
 			t.Errorf("explain rules lacks %q:\n%s", want, out)
 		}
 	}
-	if out = e.ok("explain", "source"); !strings.Contains(out, "read.tool") || !strings.Contains(out, "[github|sha256|token|standard-webhooks]") {
+	if out = e.ok("explain", "source"); !strings.Contains(out, "read.tool") || !strings.Contains(out, "[github|sha256|token|standard-webhooks|slack|stripe]") {
 		t.Errorf("explain source:\n%s", out)
 	}
 	if out = e.ok("explain", "routine"); !strings.Contains(out, "steps[].retry.attempts") {

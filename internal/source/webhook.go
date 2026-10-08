@@ -22,6 +22,8 @@ type WebhookOptions struct {
 	SigHeader       string
 	TokenHeader     string
 	TimestampHeader string
+	SigPrefix       string // sha256: the header may hold a comma-separated list of PREFIX+hex; any match counts
+	TimestampSep    string // sha256 with a timestamp: what joins timestamp and body (default ".")
 	IDHeader        string
 	MaxBody         int64
 	Now             func() time.Time
@@ -121,6 +123,30 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 				return
 			}
 			signed = body
+		case "slack":
+			// https://api.slack.com/authentication/verifying-requests-from-slack
+			header = "X-Slack-Signature"
+			ts := r.Header.Get("X-Slack-Request-Timestamp")
+			if !freshTS(ts, now) {
+				reject(http.StatusUnauthorized, "signature or timestamp invalid")
+				return
+			}
+			signed = body
+			if !macMatch(o.Secret, []byte("v0:"+ts+":"+string(body)), []string{r.Header.Get(header)}, "v0=") {
+				reject(http.StatusUnauthorized, "signature or timestamp invalid")
+				return
+			}
+			key = replayKey(ts, body)
+		case "stripe":
+			// https://docs.stripe.com/webhooks#verify-manually
+			header = "Stripe-Signature"
+			ts, sigs := parseStripe(r.Header.Get(header))
+			signed = body
+			if !freshTS(ts, now) || !macMatch(o.Secret, []byte(ts+"."+string(body)), sigs, "") {
+				reject(http.StatusUnauthorized, "signature or timestamp invalid")
+				return
+			}
+			key = replayKey(ts, body)
 		case "standard-webhooks":
 			header = "Webhook-Signature"
 			var ok bool
@@ -134,26 +160,32 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 				header = "X-Hub-Signature-256"
 			}
 			sig := r.Header.Get(header)
-			if o.Signature == "github" {
+			var cands []string
+			prefix := ""
+			switch {
+			case o.Signature == "github":
 				if !strings.HasPrefix(sig, "sha256=") {
 					reject(http.StatusUnauthorized, "signature missing")
 					return
 				}
-				sig = strings.TrimPrefix(sig, "sha256=")
-			} else if o.Signature == "sha256" {
-				sig = strings.TrimPrefix(sig, "sha256=")
-			} else {
+				prefix, cands = "sha256=", []string{sig}
+			case o.Signature == "sha256" && o.SigPrefix != "":
+				prefix, cands = o.SigPrefix, strings.Split(sig, ",")
+			case o.Signature == "sha256":
+				prefix, cands = "sha256=", []string{sig}
+			default:
 				reject(http.StatusUnauthorized, "no signature scheme configured")
 				return
 			}
-			provided, err := hex.DecodeString(sig)
-			mac := hmac.New(sha256.New, []byte(o.Secret))
 			signed = body
 			if o.Signature == "sha256" && o.TimestampHeader != "" {
-				signed = append(append([]byte(r.Header.Get(o.TimestampHeader)), '.'), body...)
+				sep := o.TimestampSep
+				if sep == "" {
+					sep = "."
+				}
+				signed = append(append([]byte(r.Header.Get(o.TimestampHeader)), sep...), body...)
 			}
-			mac.Write(signed)
-			if o.Secret == "" || err != nil || !hmac.Equal(provided, mac.Sum(nil)) {
+			if !macMatch(o.Secret, signed, cands, prefix) {
 				reject(http.StatusUnauthorized, "signature does not match (wrong secret?)")
 				return
 			}
@@ -242,4 +274,56 @@ func verifyStandard(secret string, r *http.Request, body []byte, now time.Time) 
 		}
 	}
 	return id, valid
+}
+
+// macMatch reports whether any candidate (PREFIX+hex, or bare hex for the
+// sha256 preset's optional prefix) is the HMAC-SHA256 of msg. Every candidate
+// is compared, in constant time.
+func macMatch(secret string, msg []byte, cands []string, prefix string) bool {
+	if secret == "" {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(msg)
+	want := mac.Sum(nil)
+	ok := false
+	for _, c := range cands {
+		c = strings.TrimSpace(c)
+		if prefix == "sha256=" { // the sha256 preset has always taken the bare form too
+			c = strings.TrimPrefix(c, prefix)
+		} else if rest, found := strings.CutPrefix(c, prefix); found {
+			c = rest
+		} else {
+			continue
+		}
+		if got, err := hex.DecodeString(c); err == nil && hmac.Equal(got, want) {
+			ok = true
+		}
+	}
+	return ok
+}
+
+// freshTS: a Unix-seconds timestamp within 5 minutes of now.
+func freshTS(ts string, now time.Time) bool {
+	seconds, err := strconv.ParseInt(ts, 10, 64)
+	return err == nil && now.Sub(time.Unix(seconds, 0)) <= 5*time.Minute && time.Unix(seconds, 0).Sub(now) <= 5*time.Minute
+}
+
+func replayKey(ts string, body []byte) string {
+	sum := sha256.Sum256(body)
+	return ts + "." + hex.EncodeToString(sum[:])
+}
+
+// parseStripe reads "t=…,v1=…,v1=…"; other schemes (v0) are ignored.
+func parseStripe(h string) (ts string, v1 []string) {
+	for _, part := range strings.Split(h, ",") {
+		k, v, _ := strings.Cut(strings.TrimSpace(part), "=")
+		switch k {
+		case "t":
+			ts = v
+		case "v1":
+			v1 = append(v1, v)
+		}
+	}
+	return
 }

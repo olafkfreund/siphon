@@ -207,15 +207,17 @@ type Source struct {
 	Headers      map[string]Secret `yaml:"headers"` // values may be env:/file: refs or plain literals
 	Body         string            `yaml:"body"`
 	Secret       Secret            `yaml:"secret"`           // webhook HMAC key
-	Signature    string            `yaml:"signature"`        // github|sha256|token|standard-webhooks
+	Signature    string            `yaml:"signature"`        // github|sha256|token|standard-webhooks|slack|stripe
 	SigHeader    string            `yaml:"signature_header"` // sha256 preset
 	TokenHeader  string            `yaml:"token_header"`     // token preset
 	TimestampHdr string            `yaml:"timestamp_header"`
-	ID           string            `yaml:"id"`         // delivery id, e.g. header.X-GitHub-Delivery
-	Env          map[string]Secret `yaml:"env"`        // stdio MCP child env; values are env:/file: refs
-	Package      string            `yaml:"package"`    // name in server.mcp_packages; fills Command
-	AWS          string            `yaml:"aws"`        // provider: aws credential; the daemon injects short-lived keys
-	Connection   string            `yaml:"connection"` // metadata: the Services connection this item belongs to
+	SigPrefix    string            `yaml:"signature_prefix"`    // sha256: e.g. "v1="; the header may list several
+	TimestampSep string            `yaml:"timestamp_separator"` // sha256 with timestamp_header: "." (default) or ":"
+	ID           string            `yaml:"id"`                  // delivery id, e.g. header.X-GitHub-Delivery
+	Env          map[string]Secret `yaml:"env"`                 // stdio MCP child env; values are env:/file: refs
+	Package      string            `yaml:"package"`             // name in server.mcp_packages; fills Command
+	AWS          string            `yaml:"aws"`                 // provider: aws credential; the daemon injects short-lived keys
+	Connection   string            `yaml:"connection"`          // metadata: the Services connection this item belongs to
 
 	cmdFromPkg bool // Command was filled from Package, not written in the item
 }
@@ -1105,12 +1107,18 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 			if s.TokenHeader == "" {
 				add("%s: signature token needs token_header", p)
 			}
-		case "standard-webhooks":
+		case "standard-webhooks", "slack", "stripe":
 			if s.SigHeader != "" || s.TimestampHdr != "" {
-				add("%s: signature_header and timestamp_header are not allowed with signature standard-webhooks", p)
+				add("%s: signature_header and timestamp_header are not allowed with signature %s", p, s.Signature)
 			}
 		default:
-			add("%s: signature must be github, sha256, token or standard-webhooks, got %q", p, s.Signature)
+			add("%s: signature must be github, sha256, token, standard-webhooks, slack or stripe, got %q", p, s.Signature)
+		}
+		if s.SigPrefix != "" && s.Signature != "sha256" {
+			add("%s: signature_prefix is only for signature sha256", p)
+		}
+		if s.TimestampSep != "" && (s.Signature != "sha256" || s.TimestampHdr == "") {
+			add("%s: timestamp_separator needs signature sha256 and a timestamp_header", p)
 		}
 	default:
 		add("%s: type must be mcp, http or webhook, got %q", p, s.Type)

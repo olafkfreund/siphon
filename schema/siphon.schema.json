@@ -488,7 +488,13 @@
           "signature_header": {
             "type": "string"
           },
+          "signature_prefix": {
+            "type": "string"
+          },
           "timestamp_header": {
+            "type": "string"
+          },
+          "timestamp_separator": {
             "type": "string"
           },
           "token_header": {
