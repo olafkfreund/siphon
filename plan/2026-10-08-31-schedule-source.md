@@ -165,3 +165,7 @@ Revert the merge. The new source type is additive, and existing configs
 are unchanged.
 
 ## Deviations log
+- **Step 1 (coder):**
+  - The robfig dependency and the `vendorHash` landed in step 1, not step 2 as the table says.
+  - Exported helpers for step 2: `config.ParseSchedule`, `(*Source).Location()`, `ScheduleReserved`, `MinScheduleEvery`.
+  - `at`, `timezone`, `catch_up` and `data` are rejected on other source types.

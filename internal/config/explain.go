@@ -42,7 +42,7 @@ var explainKinds = map[string]struct {
 	hints  map[string]hint
 }{
 	"source": {"sources", map[string]hint{
-		"type":             {true, "", "what the source is: a polled HTTP URL, an MCP server, or an incoming webhook", e("http", "mcp", "webhook")},
+		"type":             {true, "", "what the source is: a polled HTTP URL, an MCP server, an incoming webhook, or a schedule", e("http", "mcp", "webhook", "schedule")},
 		"url":              {false, "", "http or remote mcp: the URL to read", nil},
 		"command":          {false, "", "stdio mcp: the command (only siphon.yaml may set this; use package: instead)", nil},
 		"read":             {false, "", "mcp: what to read each poll", nil},
@@ -64,6 +64,10 @@ var explainKinds = map[string]struct {
 		"id":               {false, "", "webhook: where the delivery id comes from, like header.X-GitHub-Delivery", nil},
 		"env":              {false, "", "stdio mcp: the child's environment; values are env:/file: refs", nil},
 		"package":          {false, "", "stdio mcp: a name from server.mcp_packages in siphon.yaml", nil},
+		"at":               {false, "", "schedule: when to fire: 5-field cron, @hourly @daily @weekly @monthly, or every <duration> (at least 1m)", nil},
+		"timezone":         {false, "host local zone", "schedule: IANA zone for at, like Europe/London", nil},
+		"catch_up":         {false, "latest", "schedule: after downtime, fire the latest missed moment once, or none", e("latest", "none")},
+		"data":             {false, "", "schedule: extra fields merged into each event (not schedule, timezone, scheduled_at, fired_at, catch_up)", nil},
 		"aws":              {false, "", "mcp package: the aws credential whose short-lived keys the daemon injects", nil},
 	}},
 	"rule": {"rules", map[string]hint{

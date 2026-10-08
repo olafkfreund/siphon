@@ -410,6 +410,9 @@
           "allow_private": {
             "type": "boolean"
           },
+          "at": {
+            "type": "string"
+          },
           "auth": {
             "additionalProperties": false,
             "properties": {
@@ -426,12 +429,16 @@
           "body": {
             "type": "string"
           },
+          "catch_up": {
+            "type": "string"
+          },
           "command": {
             "items": {
               "type": "string"
             },
             "type": "array"
           },
+          "data": {},
           "env": {
             "additionalProperties": {
               "description": "env:NAME, file:/path, or (where allowed) a literal",
@@ -483,6 +490,9 @@
             "type": "string"
           },
           "timestamp_header": {
+            "type": "string"
+          },
+          "timezone": {
             "type": "string"
           },
           "token_header": {
