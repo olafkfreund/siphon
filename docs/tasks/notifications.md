@@ -108,6 +108,9 @@ the CLI, logged in.
 - **Private addresses:** a channel on your LAN (a self-hosted ntfy) must be
   listed in `server.services.private_endpoints`, as `host:port`. Plain
   `http://` is only allowed for such a listed host.
+- **`--dry-run` doesn't check the URL itself:** the URL is a secret, so the
+  dry run only checks the rest. A URL that isn't allowed (plain `http://` to
+  an unlisted host) is refused when you apply.
 - **Email:** not built in. Use ntfy's email forwarding, or a webhook that
   sends mail.
 

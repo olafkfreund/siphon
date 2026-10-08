@@ -133,11 +133,7 @@ func (s *server) removeNotify(actor, name string) error {
 	if _, _, _, err := s.commit(actor, "notify/"+name+" deleted", nil, mutate, nil); err != nil {
 		return err
 	}
-	dir := secretsDir(s.Config().Server.DB)
-	for _, k := range []string{"url", "token"} {
-		os.Remove(dir + "/" + config.SecretFileName("notify", name, k))
-	}
-	return nil
+	return nil // commit removes the secret files
 }
 
 func (s *server) notifyRoutes(mux *http.ServeMux) {

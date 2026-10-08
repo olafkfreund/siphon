@@ -317,7 +317,7 @@ func (f failTransport) RoundTrip(*http.Request) (*http.Response, error) { return
 
 func TestErrorsAreMasked(t *testing.T) {
 	e := newEnv(t, "webhook", "")
-	e.n.Client = func(*config.Config, string) (*http.Client, func(), error) {
+	e.n.Client = func(context.Context, *config.Config, string) (*http.Client, func(), error) {
 		return &http.Client{Transport: failTransport{errors.New("dial " + e.srv.URL + "/hook-secret-path with s3cr3t-token failed")}}, nil, nil
 	}
 	e.run()
@@ -409,7 +409,78 @@ func TestDeletedChannelRestartsFresh(t *testing.T) {
 	e.n.Config = func() *config.Config { return cfg }
 	e.now = e.now.Add(time.Hour)
 	e.run()
-	if since, _ := store.ChannelSince(e.st.DB, "hook", e.now.Add(time.Hour)); !since.Equal(e.now.Add(-2*scanEvery)) {
+	if since, _ := store.ChannelSince(e.st.DB, "hook", e.now.Add(time.Hour)); !since.Equal(e.now.Add(-2 * scanEvery)) {
 		t.Fatalf("not fresh: %v", since)
+	}
+}
+
+func TestUnreachableChannelIsTriedOncePerTick(t *testing.T) {
+	e := newEnv(t, "webhook", "")
+	cfg := e.n.Config()
+	cfg.Notify["dead"] = &config.Notify{Type: "webhook", URL: config.Secret{Value: "https://dead.example/x"}}
+	cfg.Notify["dead"].Events = []string{"failed"}
+	e.run()
+	var tries int
+	real := e.n.Client
+	e.n.Client = func(ctx context.Context, c *config.Config, u string) (*http.Client, func(), error) {
+		if strings.Contains(u, "dead.example") {
+			tries++
+			return &http.Client{Transport: failTransport{errors.New("connection refused")}}, nil, nil
+		}
+		return real(ctx, c, u)
+	}
+	for i := 0; i < 3; i++ {
+		store.EnqueueNotification(e.st.DB, store.Notification{Channel: "dead", Event: "failed", Key: "k" + itoa(int64(i)), Title: "t", Body: "b"}, e.now)
+	}
+	store.EnqueueNotification(e.st.DB, store.Notification{Channel: "hook", Event: "failed", Key: "ok", Title: "t", Body: "b"}, e.now)
+	if err := e.n.Deliver(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if tries != 1 || e.count() != 1 {
+		t.Fatalf("tries=%d delivered=%d", tries, e.count())
+	}
+	for _, r := range e.rows() {
+		if r.Channel == "dead" && (r.State != "pending" || r.Attempts != 1) {
+			t.Fatalf("%+v", r)
+		}
+	}
+}
+
+func TestMaskingFloor(t *testing.T) {
+	e := newEnv(t, "webhook", "")
+	fail := func(context.Context, *config.Config, string) (*http.Client, func(), error) {
+		return &http.Client{Transport: failTransport{errors.New("connection refused /long-secret-path?key=abcdefgh")}}, nil, nil
+	}
+	e.n.Client = fail
+	e.n.Config().Notify["hook"].URL.Value = "https://h.example/n"
+	_, err := e.n.Send(context.Background(), "hook", TestMessage(), "me")
+	if err == nil || !strings.Contains(err.Error(), "connection refused") {
+		t.Fatalf("short path mangled: %v", err)
+	}
+	e.n.Config().Notify["hook"].URL.Value = "https://h.example/long-secret-path?key=abcdefgh"
+	_, err = e.n.Send(context.Background(), "hook", TestMessage(), "me")
+	if err == nil || strings.Contains(err.Error(), "long-secret-path") || strings.Contains(err.Error(), "abcdefgh") {
+		t.Fatalf("leak: %v", err)
+	}
+}
+
+func TestGuardedClientRefusesOtherSchemes(t *testing.T) {
+	cfg, _ := config.Parse([]byte("{}"))
+	for _, u := range []string{"http://example.com/x", "ftp://example.com/x", "file:///etc/passwd"} {
+		if _, _, err := GuardedClient(context.Background(), cfg, u); err == nil || err.Error() != "bad url" {
+			t.Errorf("%s: %v", u, err)
+		}
+	}
+}
+
+func TestSlackEscapesText(t *testing.T) {
+	cfg, _ := config.Parse([]byte("server: {public_url: 'https://s.example/'}\n"))
+	ch := &config.Notify{Type: "slack", URL: config.Secret{Value: "https://h.example/x"}}
+	r, _ := request(context.Background(), cfg, ch, Message{Event: "failed", Title: "T & <!channel>", Body: "Rule <!channel>: x", Job: 1, At: time.Unix(0, 0)})
+	b, _ := io.ReadAll(r.Body)
+	var sl map[string]string
+	json.Unmarshal(b, &sl)
+	if strings.Contains(sl["text"], "<!channel>") || !strings.Contains(sl["text"], "&lt;!channel&gt;") || !strings.Contains(sl["text"], "T &amp; ") || !strings.Contains(sl["text"], "<https://s.example/jobs/1|Open in Siphon>") {
+		t.Fatalf("%s", sl["text"])
 	}
 }

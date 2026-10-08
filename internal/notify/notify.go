@@ -15,7 +15,6 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/olafkfreund/siphon/internal/action"
@@ -39,7 +38,7 @@ type Notifier struct {
 	Config func() *config.Config
 	Now    func() time.Time
 	// Client returns the client for a channel's url; tests inject it.
-	Client func(cfg *config.Config, rawURL string) (*http.Client, func(), error)
+	Client func(ctx context.Context, cfg *config.Config, rawURL string) (*http.Client, func(), error)
 }
 
 func New(st *store.Store, cfg func() *config.Config, now func() time.Time) *Notifier {
@@ -131,7 +130,7 @@ func (n *Notifier) scanChannel(cfg *config.Config, name string, ch *config.Notif
 		return err
 	}
 	if want("approval") || want("reminder") {
-		aps, err := store.PendingApprovalsFor(db, since)
+		aps, err := store.PendingApprovalsFor(db, since, now)
 		if err != nil {
 			return err
 		}
@@ -203,6 +202,7 @@ func (n *Notifier) Deliver(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	down := map[string]bool{} // channels that gave no answer this tick
 	for _, row := range due {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -222,6 +222,12 @@ func (n *Notifier) Deliver(ctx context.Context) error {
 			}
 			continue
 		}
+		if down[row.Channel] {
+			if err := store.MarkRetry(db, row.ID, now.Add(backoff[0]), "channel unreachable"); err != nil {
+				return err
+			}
+			continue
+		}
 		m := Message{Event: row.Event, Title: row.Title, Body: row.Body, Source: row.Source, Job: row.JobID, At: row.CreatedAt}
 		if row.JobID != 0 {
 			db.QueryRow(`SELECT rule FROM jobs WHERE id=?`, row.JobID).Scan(&m.Rule)
@@ -233,6 +239,9 @@ func (n *Notifier) Deliver(ctx context.Context) error {
 			m.Body += fmt.Sprintf(" (%d more suppressed)", k)
 		}
 		status, serr := n.post(ctx, cfg, ch, m)
+		if serr != nil && status == 0 {
+			down[row.Channel] = true
+		}
 		switch {
 		case serr == nil:
 			err = store.MarkSent(db, row.ID, now)
@@ -257,11 +266,15 @@ func retryable(status int) bool {
 // text is masked against the url and token.
 func (n *Notifier) post(ctx context.Context, cfg *config.Config, ch *config.Notify, m Message) (int, error) {
 	secrets := []string{ch.URL.Value, ch.Token.Value}
-	if u, err := url.Parse(ch.URL.Value); err == nil && len(u.Path) > 1 {
-		secrets = append(secrets, u.Path, strings.Trim(u.Path, "/")) // the topic or hook id is the credential
+	if u, err := url.Parse(ch.URL.Value); err == nil { // the topic or hook id is the credential
+		for _, p := range []string{u.Path, u.EscapedPath(), u.RawQuery} {
+			if len(p) >= 8 { // shorter would mangle ordinary words in errors
+				secrets = append(secrets, p)
+			}
+		}
 	}
 	mask := func(s string) error { return errors.New(string(action.Mask([]byte(s), secrets))) }
-	client, closeFn, err := n.Client(cfg, ch.URL.Value)
+	client, closeFn, err := n.Client(ctx, cfg, ch.URL.Value)
 	if err != nil {
 		return 0, mask(err.Error())
 	}

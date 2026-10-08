@@ -50,11 +50,11 @@ type OpenApproval struct {
 	ExpiresAt  time.Time
 }
 
-// PendingApprovalsFor lists open approvals created at or after since.
-func PendingApprovalsFor(db *sql.DB, since time.Time) ([]OpenApproval, error) {
+// PendingApprovalsFor lists open, unexpired approvals created at or after since.
+func PendingApprovalsFor(db *sql.DB, since, now time.Time) ([]OpenApproval, error) {
 	rows, err := db.Query(`SELECT j.id, j.resume_step, a.expires_at FROM approvals a JOIN jobs j ON j.id=a.job_id
-		WHERE a.decision IS NULL AND j.state='pending_approval' AND a.expires_at-? >= ? ORDER BY j.id`,
-		ApprovalTTL.Milliseconds(), ms(since))
+		WHERE a.decision IS NULL AND j.state='pending_approval' AND a.expires_at-? >= ? AND a.expires_at > ? ORDER BY j.id`,
+		ApprovalTTL.Milliseconds(), ms(since), ms(now))
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +224,7 @@ func MarkSuppressed(db *sql.DB, id int64) error {
 // TakeSuppressed returns how many rows of the channel were suppressed since
 // the last call, and marks them reported.
 func TakeSuppressed(db *sql.DB, channel string) (int, error) {
-	r, err := db.Exec(`UPDATE notifications SET error='reported' WHERE channel=? AND state='suppressed' AND error=''`, channel)
+	r, err := db.Exec(`UPDATE notifications SET reported=1 WHERE channel=? AND state='suppressed' AND reported=0`, channel)
 	if err != nil {
 		return 0, err
 	}

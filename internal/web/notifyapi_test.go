@@ -156,3 +156,26 @@ func TestNotifyPortal(t *testing.T) {
 		t.Fatalf("delete again: %d", w.Code)
 	}
 }
+
+func TestAPIDeleteRemovesNotifySecrets(t *testing.T) {
+	hook := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer hook.Close()
+	host := strings.TrimPrefix(hook.URL, "http://")
+	ce := newCfgEnvFile(t, "server: { sandbox: none, db: DIR/s.db, services: {private_endpoints: ['"+host+"']} }\n")
+	body := `{"items":[{"kind":"notify","name":"hook","yaml":"type: webhook\nevents: [failed]\n"}],"secrets":{"notify/hook.url":"` + hook.URL + `/n","notify/hook.token":"tok-123"}}`
+	if w := ce.api("POST", "/api/config/apply", body); w.Code != 200 {
+		t.Fatalf("apply: %d %s", w.Code, w.Body.String())
+	}
+	tok := filepath.Join(ce.dir, "secrets", "notify--hook+token")
+	if _, err := os.Stat(tok); err != nil {
+		t.Fatal(err)
+	}
+	if w := ce.api("DELETE", "/api/config/notify/hook", ""); w.Code != 200 {
+		t.Fatalf("delete: %d %s", w.Code, w.Body.String())
+	}
+	for _, f := range []string{"url", "token"} {
+		if _, err := os.Stat(filepath.Join(ce.dir, "secrets", "notify--hook+"+f)); err == nil {
+			t.Fatalf("%s kept", f)
+		}
+	}
+}

@@ -64,7 +64,8 @@ func request(ctx context.Context, cfg *config.Config, ch *config.Notify, m Messa
 			hdr.Set("Click", link)
 		}
 	case "slack":
-		text := "*" + m.Title + "*\n" + m.Body
+		esc := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace
+		text := "*" + esc(m.Title) + "*\n" + esc(m.Body)
 		if link != "" {
 			text += " <" + link + "|Open in Siphon>"
 		} else if hint != "" {

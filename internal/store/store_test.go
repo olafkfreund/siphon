@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -525,9 +526,14 @@ func TestNotifyScans(t *testing.T) {
 	appr(old, t0.Add(-time.Hour), nil)
 	appr(fresh, t0.Add(time.Hour), nil)
 	appr(decided, t0.Add(time.Hour), "approved")
-	ps, err := PendingApprovalsFor(db, t0)
+	ps, err := PendingApprovalsFor(db, t0, t0)
 	if err != nil || len(ps) != 1 || ps[0].ID != fresh || ps[0].ResumeStep != 2 || ps[0].Kind != "agent" || !ps[0].ExpiresAt.Equal(t0.Add(time.Hour+ApprovalTTL)) {
 		t.Fatalf("%+v %v", ps, err)
+	}
+	exp := mk("pending_approval", nil, 0)
+	appr(exp, t0.Add(-ApprovalTTL-time.Hour), nil)
+	if ps, _ := PendingApprovalsFor(db, t0.Add(-48*time.Hour), t0); len(ps) != 2 || ps[0].ID == exp || ps[1].ID == exp {
+		t.Fatalf("expired approval listed: %+v", ps)
 	}
 	a, b := mk("failed", ms(t0.Add(-time.Minute)), 0), mk("failed", ms(t0.Add(time.Minute)), 0)
 	mk("done", ms(t0.Add(time.Minute)), 0)
@@ -547,5 +553,62 @@ func TestNotifyScans(t *testing.T) {
 	EnqueueNotification(db, Notification{Channel: "c", Event: "source_ok", Key: "src:a:1", Source: "a", Title: "t", Body: "b"}, t0)
 	if eps, _ := SentSourceEpisodes(db, "c"); len(eps) != 1 || eps[0].Key != "src:b:2" || eps[0].Source != "b" {
 		t.Fatalf("%+v", eps)
+	}
+}
+
+func TestCleanupFreesJobIDsForNotifications(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	now := time.UnixMilli(1_800_000_000_000)
+	old := now.Add(-31 * 24 * time.Hour)
+	mk := func() int64 {
+		tx, _ := s.DB.Begin()
+		id, _ := InsertJob(tx, Job{Rule: "r", ActionJSON: "{}", State: "failed"}, old)
+		tx.Exec(`UPDATE jobs SET finished_at=? WHERE id=?`, ms(old), id)
+		tx.Commit()
+		return id
+	}
+	id := mk()
+	n := Notification{Channel: "c", Event: "failed", Key: "job:" + strconv.FormatInt(id, 10), JobID: id, Title: "t", Body: "b"}
+	if c, _ := EnqueueNotification(s.DB, n, old); !c {
+		t.Fatal("first enqueue")
+	}
+	MarkSent(s.DB, 1, old)
+	// job-less rows: a sent source episode with no recovery is kept; an old sent one that recovered goes.
+	for _, r := range []Notification{{Event: "source", Key: "a"}, {Event: "source", Key: "b"}, {Event: "source_ok", Key: "b"}, {Event: "test", Key: "z"}} {
+		r.Channel, r.Title, r.Body = "c", "t", "b"
+		EnqueueNotification(s.DB, r, old)
+	}
+	s.DB.Exec(`UPDATE notifications SET state='sent' WHERE job_id IS NULL`)
+	if err := Cleanup(s.DB, now); err != nil {
+		t.Fatal(err)
+	}
+	if id2 := mk(); id2 != id {
+		t.Skipf("ids not reused (%d,%d)", id, id2)
+	}
+	if c, err := EnqueueNotification(s.DB, n, now); err != nil || !c {
+		t.Fatalf("reused id's notification dropped: %v %v", c, err)
+	}
+	var keys string
+	s.DB.QueryRow(`SELECT group_concat(key) FROM notifications WHERE job_id IS NULL`).Scan(&keys)
+	if keys != "a" {
+		t.Fatalf("job-less rows left: %q", keys)
+	}
+}
+
+func TestSuppressedReportLeavesErrorEmpty(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	now := time.UnixMilli(1_800_000_000_000)
+	EnqueueNotification(s.DB, Notification{Channel: "c", Event: "failed", Key: "k", Title: "t", Body: "b"}, now)
+	MarkSuppressed(s.DB, 1)
+	if n, _ := TakeSuppressed(s.DB, "c"); n != 1 {
+		t.Fatal(n)
+	}
+	if n, _ := TakeSuppressed(s.DB, "c"); n != 0 {
+		t.Fatal("counted twice")
+	}
+	if l, _ := ListNotifications(s.DB, NotificationFilter{}); l[0].Error != "" {
+		t.Fatalf("error set: %q", l[0].Error)
 	}
 }

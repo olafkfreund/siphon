@@ -23,9 +23,9 @@ const (
 // only, unless the url's host:port is in server.services.private_endpoints
 // (then private, never link-local). It dials the resolved, checked address and
 // follows no redirects. Close the returned func when done.
-func GuardedClient(cfg *config.Config, rawURL string) (*http.Client, func(), error) {
+func GuardedClient(ctx context.Context, cfg *config.Config, rawURL string) (*http.Client, func(), error) {
 	u, err := url.Parse(rawURL)
-	if err != nil || u.Hostname() == "" {
+	if err != nil || u.Hostname() == "" || !(u.Scheme == "https" || u.Scheme == "http" && cfg.ServiceEndpoint(rawURL)) {
 		return nil, nil, errors.New("bad url")
 	}
 	port := 443
@@ -41,7 +41,7 @@ func GuardedClient(cfg *config.Config, rawURL string) (*http.Client, func(), err
 	if cfg.ServiceEndpoint(rawURL) {
 		mode = source.PrivateNoLinkLocal
 	}
-	rctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	rctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	addrs, err := source.ResolveAllowedMode(rctx, u.Hostname(), mode)
 	if err != nil {

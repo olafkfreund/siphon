@@ -314,6 +314,13 @@ func (s *server) commit(actor, summary string, rev *int64, mutate func(map[itemK
 			return 0, nil, nil, err
 		}
 	}
+	for k := range old { // a notify channel that is gone leaves no url/token file behind
+		if k.Kind == "notify" && e.cfg.Notify[k.Name] == nil {
+			for _, f := range []string{"url", "token"} {
+				os.Remove(secretsDir(s.Config().Server.DB) + "/" + config.SecretFileName("notify", k.Name, f))
+			}
+		}
+	}
 	if credsChanged || len(pending) > 0 { // a rotated key keeps its ref
 		modelCache.clear()
 	}

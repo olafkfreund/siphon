@@ -15,6 +15,7 @@ CREATE TABLE notifications (
   sent_at    INTEGER,
   state      TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','sent','failed','suppressed')),
   error      TEXT NOT NULL DEFAULT '',
+  reported   INTEGER NOT NULL DEFAULT 0, -- a suppressed row already counted in a later message
   UNIQUE(channel, event, key)
 );
 CREATE INDEX notifications_state_next ON notifications(state, next_at);

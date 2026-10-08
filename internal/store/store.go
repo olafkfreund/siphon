@@ -300,6 +300,13 @@ func Cleanup(db *sql.DB, now time.Time) error {
 	}{
 		{`UPDATE jobs SET parent_id=NULL WHERE parent_id IN (` + old + `)`, []any{cut}},
 		{`DELETE FROM approvals WHERE job_id IN (` + old + `)`, []any{cut}},
+		// Job ids are reused once the newest is deleted, so a job's notifications go with it
+		// (else INSERT OR IGNORE would drop the next job's message). Old job-less rows go too,
+		// except a "source failing" row still awaiting its "recovered" row.
+		{`DELETE FROM notifications WHERE job_id IN (` + old + `)`, []any{cut}},
+		{`DELETE FROM notifications WHERE job_id IS NULL AND event='source' AND created_at < ? AND (state!='sent' OR EXISTS
+			(SELECT 1 FROM notifications o WHERE o.channel=notifications.channel AND o.event='source_ok' AND o.key=notifications.key))`, []any{cut}},
+		{`DELETE FROM notifications WHERE job_id IS NULL AND state!='pending' AND created_at < ? AND event!='source'`, []any{cut}},
 		{`DELETE FROM jobs WHERE id IN (` + old + `)`, []any{cut}},
 		{`DELETE FROM audit WHERE at < ?`, []any{cut}},
 		{`DELETE FROM seen_event WHERE seen_at < ?`, []any{ms(now.Add(-seenRetention))}},

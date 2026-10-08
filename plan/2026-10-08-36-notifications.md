@@ -324,3 +324,13 @@ steps 6–8, and reviews.
   - **The gap:** the baseline (D4) was set at the notifier's first scan of a new channel, up to 15 s after the channel was added. An approval in that gap counted as history and was never sent.
   - **The fix:** the baseline is now backdated by two scan intervals, so it may include about 30 s from before the add. `TestBaselineCoversTheFirstInterval` pins this; it fails without the fix. The docs say "the last half-minute or so".
   - **Also:** the Notifications page has a gap above Recent deliveries (`mt`).
+- Security review fixes (fresh Opus reviewer: 0 critical, 1 high, 2 medium, 6 low; coder fixed them, each with a regression test):
+  - **H1, reused job ids:** retention now deletes a job's notifications with the job, and old job-less rows that aren't pending. A sent `source` row is kept until its `source_ok`. Without this, a reused job id (SQLite has no AUTOINCREMENT here) silently deduped a new job's message, and the outbox grew without bound.
+  - **M1, a dead channel:** after a network failure, that channel's other due rows wait for the next tick, so one dead channel can't stall the rest. The resolve uses `ctx`.
+  - **M2, masking:** errors mask the url, its path and its query only when each is at least 8 characters, so `connection refused` stays readable.
+  - **L1, scheme check at delivery:** https, or http only to a `ServiceEndpoint`.
+  - **L3, expired approvals** are never announced.
+  - **L4, Slack text** is escaped (`&`, `<`, `>`).
+  - **L5, suppressed rows:** migration 0005, still unreleased, gains `notifications.reported`, so a suppressed row's error stays empty.
+  - **L6, secret files:** every delete of a notify item removes its secret files, in the shared `commit` path.
+  - **L2, accepted:** `--dry-run` checks a notify url only against the stand-in, so an unlisted `http://` url fails at apply, not at dry-run. Documented.
