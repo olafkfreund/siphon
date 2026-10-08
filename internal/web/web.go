@@ -51,6 +51,8 @@ type Options struct {
 	// Hooks are mounted at POST /hook/{source}, unauthenticated: HMAC is their auth.
 	Hooks func(source string) http.Handler // nil result = not a webhook source
 	Now   func() time.Time
+	// Version is the build version shown by /metrics.
+	Version string
 }
 
 type server struct {
