@@ -77,8 +77,8 @@ var hooks = map[string]func(*Ctx) error{"aws": awsHook}
 var stubFuncs = template.FuncMap{
 	"q": quote, "pathesc": pathEsc, "package": func(string) bool { return false }, "private": func(string) bool { return false },
 	"has": func(string) bool { return false }, "fail": fail, "tools": tools,
-	"secret": func(string, string) string { return "" }, "basic": func(string, string, string) string { return "" },
-	"generated": func(string) string { return "" },
+	"secret": func(string, string, ...string) string { return "" }, "basic": func(string, string, string) string { return "" },
+	"generated": func(string, ...string) string { return "" },
 }
 
 func quote(s string) string           { return strconv.Quote(s) }
@@ -169,6 +169,12 @@ func (e *Entry) Render(values map[string]string, env Env) (*Result, error) {
 		if !strings.HasSuffix(y, "\n") {
 			y += "\n"
 		}
+		if c.Hook && res.Done.Hook == "" {
+			res.Done.Hook = iname
+			if env.HookURL != nil {
+				res.Done.HookURL = env.HookURL(iname)
+			}
+		}
 		y += "connection: " + quote(name) + "\nservice: " + e.ID + "\n"
 		res.Items = append(res.Items, Item{c.Kind, iname, y})
 	}
@@ -242,12 +248,13 @@ func (e *Entry) itemFuncs(c Create, iname string, vals map[string]string, env En
 		},
 		"private": func(field string) bool { return env.Config != nil && env.Config.ServiceEndpoint(vals[field]) },
 		"has":     func(field string) bool { return vals[field] != "" },
-		// secret "field" "yaml.path": the field's value as a write-only file ref.
-		"secret": func(field, key string) (string, error) {
-			if f := e.field(field); f == nil || f.Type != "secret" {
-				return "", fmt.Errorf("secret: %q is not a secret field", field)
+		// secret "field" "yaml.path" ["prefix"]: the field's value as a
+		// write-only file ref; a prefix such as "Bearer " is stored with it.
+		"secret": func(field, key string, prefix ...string) (string, error) {
+			if e.field(field) == nil {
+				return "", fmt.Errorf("secret: no field %q", field)
 			}
-			return store(key, vals[field]), nil
+			return store(key, strings.Join(prefix, "")+vals[field]), nil
 		},
 		// basic "emailField" "tokenField" "yaml.path": Basic base64(email:token), as a secret.
 		"basic": func(email, token, key string) (string, error) {
@@ -256,14 +263,15 @@ func (e *Entry) itemFuncs(c Create, iname string, vals map[string]string, env En
 			}
 			return store(key, "Basic "+base64.StdEncoding.EncodeToString([]byte(vals[email]+":"+vals[token]))), nil
 		},
-		// generated "yaml.path": a random webhook secret, shown once on the done page.
-		"generated": func(key string) string {
+		// generated "yaml.path" ["prefix"]: a random webhook secret, shown once
+		// on the done page (the prefix, such as "Bearer ", is stored but not shown).
+		"generated": func(key string, prefix ...string) string {
 			v := NewSecret()
 			res.Done.Hook, res.Done.HookSecret, res.Done.HookHeader = iname, v, c.HookHeader
 			if env.HookURL != nil {
 				res.Done.HookURL = env.HookURL(iname)
 			}
-			return store(key, v)
+			return store(key, strings.Join(prefix, "")+v)
 		},
 	}
 }
@@ -319,6 +327,9 @@ func (e *Entry) clean(in map[string]string, cfg *config.Config) (map[string]stri
 			u, err := url.Parse(v)
 			if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 				return nil, badf(f.Key, "%s must be http(s)://host[:port][/path]", f.Label)
+			}
+			if f.PrivateListed && config.PrivateHost(u.Hostname()) && (cfg == nil || !cfg.ServiceEndpoint(v)) {
+				return nil, badf(f.Key, "%s is a private address: list %s in server.services.private_endpoints first", f.Label, u.Host)
 			}
 			if f.Secure && u.Scheme != "https" && !loopback(u.Hostname()) && (cfg == nil || !cfg.ServiceEndpoint(v)) {
 				return nil, badf(f.Key, "the %s must be https (http only for localhost or a host listed in server.services.private_endpoints): the token would travel in clear", f.Label)

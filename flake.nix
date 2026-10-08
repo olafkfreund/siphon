@@ -82,6 +82,34 @@
           done
           touch $out
         '';
+        # catalogPackages installs a catalogue service's pinned MCP server next to github.
+        catalog-module =
+          let
+            sys = nixpkgs.lib.nixosSystem {
+              inherit (pkgs.stdenv.hostPlatform) system;
+              modules = [
+                self.nixosModules.default
+                {
+                  boot.loader.grub.enable = false;
+                  fileSystems."/" = {
+                    device = "none";
+                    fsType = "tmpfs";
+                  };
+                  system.stateVersion = "26.05";
+                  services.siphon = {
+                    enable = true;
+                    catalogPackages = [ "grafana" ];
+                  };
+                }
+              ];
+            };
+            pk = sys.config.services.siphon.mcpPackages;
+          in
+          assert pk ? github && pk ? grafana;
+          assert pk.grafana.package == pkgs.mcp-grafana;
+          assert builtins.elem "--disable-write" pk.grafana.args;
+          assert builtins.elem "GRAFANA_URL" pk.grafana.urlEnv;
+          pkgs.runCommand "catalog-module-ok" { } "touch $out";
         # cli.enable (default) puts siphon on PATH with SIPHON_URL at the daemon's port.
         cli-module =
           let

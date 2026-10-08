@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -61,7 +62,7 @@ func (s *server) runConnectionTest(ctx context.Context, conn string) (*connTestR
 	var secrets []string
 	switch {
 	case e.Test != nil:
-		token, base := connInputs(cfg, names, e.Test.Header)
+		token, base := connInputs(cfg, names, e.Test)
 		secrets = append(secrets, token)
 		rp := strings.NewReplacer("{token}", token, "{base}", base)
 		hdr, val, _ := strings.Cut(rp.Replace(e.Test.Header), ":")
@@ -69,7 +70,7 @@ func (s *server) runConnectionTest(ctx context.Context, conn string) (*connTestR
 		if token == "" {
 			t.Err = "no token is stored for this connection"
 		} else {
-			t = s.runHTTPTest(ctx, t, orDefault(e.Test.Method, "GET"), rp.Replace(e.Test.URL), strings.TrimSpace(hdr), strings.TrimSpace(val), rp.Replace(e.Test.Body), e.Test.Identity)
+			t = s.runHTTPTest(ctx, t, orDefault(e.Test.Method, "GET"), testTarget(rp.Replace(e.Test.URL)), strings.TrimSpace(hdr), strings.TrimSpace(val), rp.Replace(e.Test.Body), e.Test.Identity)
 		}
 	default:
 		for _, n := range names {
@@ -105,37 +106,64 @@ func (s *server) runConnectionTest(ctx context.Context, conn string) (*connTestR
 	return &connTestResult{svcTest: t, Connection: conn, OK: ok, Detail: detail}, 200, nil
 }
 
-// connInputs finds the token and the API base of a connection from its
-// sources: the value of the header the test names, a bearer, or an env value;
-// the base is a polled URL up to "/api/".
-func connInputs(cfg *config.Config, names []string, testHeader string) (token, base string) {
-	want, _, _ := strings.Cut(testHeader, ":")
+// secretAt reads a secret-bearing value of a source by path: env.NAME,
+// headers.NAME or auth.bearer.
+func secretAt(src *config.Source, path string) string {
+	switch {
+	case path == "auth.bearer" && src.Auth != nil:
+		return src.Auth.Bearer.Value
+	case strings.HasPrefix(path, "env."):
+		return src.Env[strings.TrimPrefix(path, "env.")].Value
+	case strings.HasPrefix(path, "headers."):
+		return src.Headers[strings.TrimPrefix(path, "headers.")].Value
+	}
+	return ""
+}
+
+// connInputs finds the token and the API base of a connection from its own
+// sources (never the webhooks'). The test says where (token_from, base_from);
+// otherwise the token is the header the test names, a bearer, or an env value,
+// and the base is the origin of a service URL (up to /api/ if it has one).
+func connInputs(cfg *config.Config, names []string, t *catalog.Test) (token, base string) {
+	want, _, _ := strings.Cut(t.Header, ":")
+	want = strings.TrimSpace(want)
 	for _, n := range names {
 		src := cfg.Sources[n]
 		if src.Type == "webhook" {
 			continue
 		}
 		if token == "" {
-			if v := src.Headers[strings.TrimSpace(want)].Value; v != "" {
-				token = v
-			} else if src.Auth != nil {
+			switch {
+			case t.TokenFrom != "":
+				token = secretAt(src, t.TokenFrom)
+			case src.Headers[want].Value != "":
+				token = src.Headers[want].Value
+			case src.Auth != nil && src.Auth.Bearer.Value != "":
 				token = src.Auth.Bearer.Value
-			}
-		}
-		if token == "" {
-			ks := make([]string, 0, len(src.Env))
-			for k := range src.Env {
-				ks = append(ks, k)
-			}
-			sort.Strings(ks)
-			for _, k := range ks {
-				if token = src.Env[k].Value; token != "" {
-					break
+			default:
+				ks := make([]string, 0, len(src.Env))
+				for k := range src.Env {
+					ks = append(ks, k)
+				}
+				sort.Strings(ks)
+				for _, k := range ks {
+					if token = src.Env[k].Value; token != "" {
+						break
+					}
 				}
 			}
 		}
-		if i := strings.Index(src.URL, "/api/"); base == "" && src.Type == "http" && i > 0 {
-			base = src.URL[:i]
+		if base != "" {
+			continue
+		}
+		if t.BaseFrom != "" {
+			base = strings.TrimRight(secretAt(src, t.BaseFrom), "/")
+		} else if u, err := url.Parse(src.URL); err == nil && u.Host != "" && (src.Type == "http" || src.Type == "mcp") {
+			if i := strings.Index(src.URL, "/api/"); i > 0 {
+				base = src.URL[:i]
+			} else {
+				base = u.Scheme + "://" + u.Host
+			}
 		}
 	}
 	return
@@ -147,3 +175,6 @@ func orDefault(s, d string) string {
 	}
 	return s
 }
+
+// testTarget lets a test point a catalogue test at a fake server.
+var testTarget = func(u string) string { return u }

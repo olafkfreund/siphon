@@ -211,3 +211,12 @@ Revert the merge.
   - Unavailable gives exit 3; unknown gives exit 2.
   - Step 4's nits are fixed: Test only where testable, a "send an event" hint otherwise; no icon on Not checked; backticks in reasons render as `<code>`.
   - **Rejected (Opus):** the coder gave AWS `region` a default (`eu-west-1`). A wrong default region fails confusingly, so it's made required again in step 6.
+- **Step 6 (coder Go + Opus Nix):**
+  - **Engine:** `secret`/`generated` take an optional value prefix (`Bearer `, `Token token=`); `hook: true` serves provider-issued signing secrets; `test.token_from`/`base_from` say where to read credentials; shared `defs:` anchors.
+  - **Entries:** 19 available (bitbucket, gitea, forgejo, linear, jira, slack, sentry, pagerduty, grafana, alertmanager, datadog, uptime-kuma, cloudflare, stripe, home-assistant, ntfy, webhook, mcp, plus the existing github, gitlab and aws) and 10 not-yet (discord, teams, mattermost, matrix, notion, google-pubsub, azure-eventgrid, azure-devops, opsgenie, **kubernetes**: "needs kubeconfig wiring").
+  - **Signing secrets:** Linear, Stripe, Slack, Sentry and PagerDuty issue their own, which the user pastes in. The others are generated and shown once.
+  - **Jira:** the site URL is sent as an `X-Siphon-Site` header so the test can find it (accepted).
+  - **Replay keys:** new webhooks use the body hash, since the delivery-ID headers weren't verified.
+  - **Bridge egress fix (Opus finding):** local MCP packages declare `url_env`; the bridge allowlist adds that URL's `host:port`, and private hosts must be in `server.services.private_endpoints` (checked at connect and at bridge start).
+  - **Nix:** `services.siphon.catalogPackages` reads the generated `nix/catalog-packages.json` (with a freshness test) and passes `url_env` through. The `checks.catalog-module` eval check covers it.
+  - The AWS `region` default was removed again.

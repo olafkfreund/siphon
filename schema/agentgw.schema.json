@@ -363,6 +363,12 @@
                   "type": "string"
                 },
                 "type": "array"
+              },
+              "url_env": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               }
             },
             "type": "object"

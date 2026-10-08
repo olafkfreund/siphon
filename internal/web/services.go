@@ -229,6 +229,9 @@ func (s *server) runHTTPTest(ctx context.Context, t svcTest, method, target, hdr
 		return t
 	}
 	req.Header.Set(hdr, val)
+	if reqBody != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	req.Header.Set("User-Agent", "siphon")
 	start := time.Now()
 	resp, err := (&http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)

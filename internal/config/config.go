@@ -120,6 +120,9 @@ type MCPPackage struct {
 	Command []string `yaml:"command"`
 	Env     []string `yaml:"env"`
 	Hosts   []string `yaml:"hosts"`
+	// URLEnv names env entries whose value is the URL of the user's own server
+	// (GITEA_HOST): its host:port is added to the bridge's egress allowlist.
+	URLEnv []string `yaml:"url_env"`
 }
 
 // ModelsServer holds model-endpoint settings that only siphon.yaml may set.
@@ -803,6 +806,11 @@ func (c *Config) Validate() error {
 				add("server.mcp_packages.%s: env name %q is not allowed", name, k)
 			}
 		}
+		for _, k := range pkg.URLEnv {
+			if !slices.Contains(pkg.Env, k) {
+				add("server.mcp_packages.%s: url_env %q must also be listed in env", name, k)
+			}
+		}
 		for _, h := range pkg.Hosts {
 			if _, err := parseHostPort(strings.ReplaceAll(h, "{region}", "eu-west-1")); err != nil {
 				add("server.mcp_packages.%s: hosts: %v", name, err)
@@ -1412,6 +1420,7 @@ func (c *Config) AgentEgress(a *Agent) (allow []HostPort, enabled bool) {
 }
 
 func (c *Config) packageHosts(src *Source) (out []HostPort) {
+	out, _ = c.urlEnvHosts(src)
 	if src.Package != "" {
 		for _, h := range c.Server.MCPPackages[src.Package].Hosts {
 			if cr := c.Credentials[src.AWS]; cr != nil {
@@ -1423,6 +1432,57 @@ func (c *Config) packageHosts(src *Source) (out []HostPort) {
 		}
 	}
 	return
+}
+
+// PrivateHost reports whether a literal host is localhost or a private,
+// loopback, link-local or unspecified IP. Names are not resolved here.
+func PrivateHost(h string) bool {
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && (ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified())
+}
+
+// urlEnvHosts are the user's own servers a package's url_env values point at.
+// A private or loopback host is only reachable when listed in
+// server.services.private_endpoints (the same rule as other sources); an
+// unlisted one is an error and gets no entry.
+func (c *Config) urlEnvHosts(src *Source) (out []HostPort, err error) {
+	if src.Package == "" {
+		return nil, nil
+	}
+	for _, k := range c.Server.MCPPackages[src.Package].URLEnv {
+		v := src.Env[k].Value
+		if v == "" {
+			continue
+		}
+		u, perr := url.Parse(v)
+		if perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
+			err = errors.Join(err, fmt.Errorf("env %s must be an http(s) URL", k))
+			continue
+		}
+		port := 443
+		if u.Scheme == "http" {
+			port = 80
+		}
+		if p, perr := strconv.Atoi(u.Port()); perr == nil {
+			port = p
+		}
+		listed := c.ServiceEndpoint(v)
+		if PrivateHost(u.Hostname()) && !listed {
+			err = errors.Join(err, fmt.Errorf("env %s: %s is a private address: list it in server.services.private_endpoints", k, strings.ToLower(u.Host)))
+			continue
+		}
+		out = append(out, HostPort{Host: strings.ToLower(u.Hostname()), Port: port, AllowPrivate: listed, NoLinkLocal: listed})
+	}
+	return out, err
+}
+
+// BridgeCheck refuses a bridged source whose own-server URL is not allowed.
+func (c *Config) BridgeCheck(src *Source) error {
+	_, err := c.urlEnvHosts(src)
+	return err
 }
 
 // BridgeEgress is the allowlist of the MCP bridge unit that runs a stdio

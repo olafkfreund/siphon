@@ -1,6 +1,7 @@
 package web
 
 import (
+	"io"
 	"time"
 
 	"encoding/json"
@@ -18,35 +19,12 @@ import (
 // validated edit path; no secret value ever reaches the rendered YAML.
 func TestCatalogEntriesRenderAndCommit(t *testing.T) {
 	const sentinel = "SENTINEL-SECRET-VALUE"
-	ce := newCfgEnvFile(t, strings.Replace(awsWebCfg, "mcp_packages: {", "mcp_packages: {\n  github: {command: [gh], hosts: [api.github.com]},", 1))
+	ce := newCfgEnvFile(t, strings.Replace(awsWebCfg, "mcp_packages: {", "mcp_packages: {\n  github: {command: [gh], hosts: [api.github.com]},"+catalogPackagesYAML(), 1))
 	for _, e := range catalog.All() {
 		if e.Status != "available" {
 			continue
 		}
-		v := map[string]string{"name": "t-" + e.ID, "project": "g/p", "profile": "p", "webhook": "on"}
-		for _, f := range e.Fields {
-			if _, ok := v[f.Key]; ok {
-				continue
-			}
-			switch f.Type {
-			case "secret":
-				v[f.Key] = sentinel
-			case "multi":
-				v[f.Key] = strings.Join(f.Choices, ",")
-			case "url":
-				v[f.Key] = "https://example.com"
-			case "choice":
-				v[f.Key] = f.Choices[0]
-			default:
-				if f.Default == "" {
-					v[f.Key] = "dummy"
-				}
-			}
-		}
-		if e.ID == "aws" { // role mode needs a pair of keys; profile mode none
-			delete(v, "access_key_id")
-			delete(v, "secret_access_key")
-		}
+		v := dummyValues(e, sentinel)
 		res, err := e.Render(v, catalog.Env{Config: ce.cur.Load()})
 		if err != nil {
 			t.Fatalf("%s: %v", e.ID, err)
@@ -61,7 +39,7 @@ func TestCatalogEntriesRenderAndCommit(t *testing.T) {
 			form[k] = strings.Split(x, ",")
 		}
 		if w := ce.post("/services/"+e.ID, form); w.Code != 200 {
-			t.Errorf("%s: commit: %d %s", e.ID, w.Code, w.Body.String())
+			t.Errorf("%s: commit: %d %s", e.ID, w.Code, alertText(w.Body.String()))
 		}
 		if ce.cur.Load().Sources["t-"+e.ID] == nil && ce.cur.Load().Credentials["t-"+e.ID] == nil {
 			t.Errorf("%s: nothing created", e.ID)
@@ -280,5 +258,174 @@ func TestWebhookOnlyConnectionHasNoTest(t *testing.T) {
 	}
 	if !strings.Contains(ce.get("/services").Body.String(), "<code>services.siphon.aws</code>") {
 		t.Error("reason not rendered as code")
+	}
+}
+
+// catalogPackagesYAML is mcp_packages entries for every needs-package service,
+// with the env names the catalogue says they take.
+func catalogPackagesYAML() string {
+	var b strings.Builder
+	for _, e := range catalog.All() {
+		if e.Nix != nil {
+			b.WriteString("\n  " + e.ID + ": {command: [x], env: [" + strings.Join(e.Nix.Env, ", ") + "], url_env: [" + strings.Join(e.Nix.URLEnv, ", ") + "]},")
+		}
+	}
+	return b.String()
+}
+
+func TestNotYetServicesCannotConnect(t *testing.T) {
+	ce := newCfgEnv(t)
+	n := 0
+	for _, e := range catalog.All() {
+		if e.Status != "not-yet" {
+			continue
+		}
+		n++
+		w := ce.api("POST", "/api/services/"+e.ID, jbody(map[string]any{"fields": map[string]any{"name": "x"}}))
+		if w.Code != 422 || !strings.Contains(w.Body.String(), "can't be connected here") {
+			t.Errorf("%s: %d %s", e.ID, w.Code, w.Body.String())
+		}
+		if p := ce.get("/services/" + e.ID).Body.String(); strings.Contains(p, `class="connect-form"`) || !strings.Contains(p, "can't be connected") {
+			t.Errorf("%s: connect page offers a form", e.ID)
+		}
+	}
+	if n < 9 {
+		t.Errorf("only %d not-yet entries", n)
+	}
+}
+
+// alertText is the error shown on a portal page, for readable failures.
+func alertText(page string) string {
+	if i := strings.Index(page, `role="alert"`); i >= 0 {
+		return page[i:min(len(page), i+300)]
+	}
+	return page[:min(len(page), 300)]
+}
+
+// dummyValues fills every field of an entry with something valid.
+func dummyValues(e *catalog.Entry, sentinel string) map[string]string {
+	v := map[string]string{"name": "t-" + e.ID, "project": "g/p", "profile": "p", "webhook": "on", "region": "eu-west-1"}
+	for _, f := range e.Fields {
+		if _, ok := v[f.Key]; ok {
+			continue
+		}
+		switch f.Type {
+		case "secret":
+			v[f.Key] = sentinel
+		case "multi":
+			v[f.Key] = strings.Join(f.Choices, ",")
+		case "url":
+			v[f.Key] = "https://example.com"
+		case "choice":
+			v[f.Key] = f.Choices[0]
+		default:
+			if f.Default == "" {
+				v[f.Key] = "dummy"
+			}
+		}
+	}
+	if e.ID == "aws" { // profile mode: no base keys
+		delete(v, "access_key_id")
+		delete(v, "secret_access_key")
+	}
+	return v
+}
+
+// Each entry's test runs against a fake server: the right method, the
+// credential in the right header, and the identity read from the JSON path.
+func TestCatalogEntryTestsAgainstFakeServer(t *testing.T) {
+	var got struct {
+		method, path, body string
+		hdr                http.Header
+	}
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got.method, got.path, got.body, got.hdr = r.Method, r.URL.Path, string(b), r.Header.Clone()
+		w.Write([]byte(`{"login":"who","username":"who","display_name":"who","displayName":"who","object":"who","message":"who",
+			"data":{"viewer":{"name":"who"}},"result":{"status":"who"}}`))
+	}))
+	defer fake.Close()
+	fu, _ := url.Parse(fake.URL)
+	testTarget = func(u string) string {
+		p, _ := url.Parse(u)
+		return fake.URL + p.RequestURI()
+	}
+	defer func() { testTarget = func(u string) string { return u } }()
+	cfg := strings.Replace(awsWebCfg, "server: { sandbox: none, db: DIR/s.db,", `server: { sandbox: none, db: DIR/s.db, services: { private_endpoints: ["`+fu.Host+`"] },`, 1)
+	ce := newCfgEnvFile(t, strings.Replace(cfg, "mcp_packages: {", "mcp_packages: {"+catalogPackagesYAML(), 1))
+	tested := 0
+	for _, e := range catalog.All() {
+		if e.Status != "available" || e.Test == nil {
+			continue
+		}
+		tested++
+		v := dummyValues(e, "SENTINEL-TEST-KEY")
+		w := ce.api("POST", "/api/services/"+e.ID, jbody(map[string]any{"fields": v}))
+		if w.Code != 200 {
+			t.Errorf("%s: connect %d %s", e.ID, w.Code, w.Body.String())
+			continue
+		}
+		got.method = ""
+		w = ce.api("POST", "/api/connections/t-"+e.ID+"/test", "")
+		var r struct {
+			OK     bool
+			Detail string
+		}
+		json.Unmarshal(w.Body.Bytes(), &r)
+		if w.Code != 200 || !r.OK || r.Detail != "who" {
+			t.Errorf("%s: test %d %s", e.ID, w.Code, w.Body.String())
+			continue
+		}
+		if got.method != catalog.OrGET(e.Test.Method) {
+			t.Errorf("%s: method %q", e.ID, got.method)
+		}
+		name, _, _ := strings.Cut(e.Test.Header, ":")
+		if strings.TrimSpace(got.hdr.Get(strings.TrimSpace(name))) == "" {
+			t.Errorf("%s: header %s not sent", e.ID, name)
+		}
+		if e.Test.Body != "" && got.body != e.Test.Body {
+			t.Errorf("%s: body %q", e.ID, got.body)
+		}
+		// a refused credential is reported, not hidden
+		if strings.Contains(w.Body.String(), "SENTINEL-TEST-KEY") {
+			t.Errorf("%s: secret in the reply", e.ID)
+		}
+	}
+	if tested < 10 {
+		t.Errorf("only %d entries have a test", tested)
+	}
+}
+
+func TestLocalPackageServiceRefusesUnlistedPrivateHost(t *testing.T) {
+	ce := newCfgEnvFile(t, strings.Replace(awsWebCfg, "mcp_packages: {", "mcp_packages: {"+catalogPackagesYAML(), 1))
+	body := func(base string) string {
+		return jbody(map[string]any{"fields": map[string]any{"name": "gt", "base": base, "token": "t"}})
+	}
+	for _, base := range []string{"http://10.0.0.5:3000", "https://localhost", "https://192.168.1.2"} {
+		if w := ce.api("POST", "/api/services/gitea", body(base)); w.Code != 422 || !strings.Contains(w.Body.String(), "private_endpoints") {
+			t.Errorf("%s: %d %s", base, w.Code, w.Body.String())
+		}
+	}
+	if ce.cur.Load().Sources["gt"] != nil {
+		t.Fatal("created")
+	}
+	if w := ce.api("POST", "/api/services/gitea", body("https://git.example.org")); w.Code != 200 {
+		t.Errorf("public: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestLocalPackageServiceAllowsListedPrivateHost(t *testing.T) {
+	cfg := strings.Replace(awsWebCfg, "server: { sandbox: none, db: DIR/s.db,", `server: { sandbox: none, db: DIR/s.db, services: { private_endpoints: ["10.0.0.5:3000"] },`, 1)
+	ce := newCfgEnvFile(t, strings.Replace(cfg, "mcp_packages: {", "mcp_packages: {"+catalogPackagesYAML(), 1))
+	w := ce.api("POST", "/api/services/gitea", jbody(map[string]any{"fields": map[string]any{"name": "gt", "base": "http://10.0.0.5:3000", "token": "t"}}))
+	if w.Code != 200 {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	c := ce.cur.Load()
+	if err := c.BridgeCheck(c.Sources["gt"]); err != nil {
+		t.Error(err)
+	}
+	if hp := c.BridgeEgress(c.Sources["gt"]); len(hp) != 1 || !hp[0].AllowPrivate {
+		t.Errorf("egress %v", hp)
 	}
 }

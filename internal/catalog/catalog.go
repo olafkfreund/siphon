@@ -7,6 +7,7 @@ package catalog
 
 import (
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
@@ -19,43 +20,47 @@ import (
 	"github.com/olafkfreund/siphon/internal/config"
 )
 
+//go:generate go run ./gen ../../nix/catalog-packages.json
+
 //go:embed services.yaml
 var servicesYAML []byte
 
 type Entry struct {
-	ID           string   `yaml:"id" json:"id"`
-	Name         string   `yaml:"name" json:"name"`
-	Mark         string   `yaml:"mark" json:"mark"`
-	Category     string   `yaml:"category" json:"category"`
-	Summary      string   `yaml:"summary" json:"summary"`
-	Capabilities []string `yaml:"capabilities" json:"capabilities"`
-	Status       string   `yaml:"status" json:"status"`
-	Reason       string   `yaml:"reason" json:"reason,omitempty"`
-	Fields       []Field  `yaml:"fields" json:"fields"`
-	Creates      []Create `yaml:"creates" json:"-"`
-	Setup        string   `yaml:"setup" json:"-"` // template: provider-side steps
-	ReadTools    []string `yaml:"read_tools" json:"-"`
-	WriteTools   []string `yaml:"write_tools" json:"-"`
-	Test         *Test    `yaml:"test" json:"-"`
-	Templates    []string `yaml:"templates" json:"templates,omitempty"`
-	Hook         string   `yaml:"hooks" json:"-"`                               // a registered Go hook (aws only)
-	NeedsPackage []string `yaml:"needs_package" json:"needs_package,omitempty"` // connectable once any one of these is in server.mcp_packages
+	ID           string      `yaml:"id" json:"id"`
+	Name         string      `yaml:"name" json:"name"`
+	Mark         string      `yaml:"mark" json:"mark"`
+	Category     string      `yaml:"category" json:"category"`
+	Summary      string      `yaml:"summary" json:"summary"`
+	Capabilities []string    `yaml:"capabilities" json:"capabilities"`
+	Status       string      `yaml:"status" json:"status"`
+	Reason       string      `yaml:"reason" json:"reason,omitempty"`
+	Fields       []Field     `yaml:"fields" json:"fields"`
+	Creates      []Create    `yaml:"creates" json:"-"`
+	Setup        string      `yaml:"setup" json:"-"` // template: provider-side steps
+	ReadTools    []string    `yaml:"read_tools" json:"-"`
+	WriteTools   []string    `yaml:"write_tools" json:"-"`
+	Test         *Test       `yaml:"test" json:"-"`
+	Templates    []string    `yaml:"templates" json:"templates,omitempty"`
+	Hook         string      `yaml:"hooks" json:"-"` // a registered Go hook (aws only)
+	Nix          *NixPackage `yaml:"nix" json:"-"`
+	NeedsPackage []string    `yaml:"needs_package" json:"needs_package,omitempty"` // connectable once any one of these is in server.mcp_packages
 
 	tmpl map[string]*template.Template // by "create/<i>/name|when|yaml", "setup"
 }
 
 type Field struct {
-	Key      string   `yaml:"key" json:"key"`
-	Label    string   `yaml:"label" json:"label"`
-	Type     string   `yaml:"type" json:"type"` // text|secret|url|choice|multi|bool
-	Default  string   `yaml:"default" json:"default,omitempty"`
-	Help     string   `yaml:"help" json:"help,omitempty"`
-	Required bool     `yaml:"required" json:"required,omitempty"`
-	Choices  []string `yaml:"choices" json:"choices,omitempty"`
-	Pattern  string   `yaml:"pattern" json:"pattern,omitempty"` // text: the whole value must match
-	PatternE string   `yaml:"pattern_error" json:"-"`           // the message when it doesn't
-	Secure   bool     `yaml:"secure" json:"-"`                  // url: https unless loopback or a listed private endpoint
-	Section  int      `yaml:"section" json:"-"`                 // connect page section 1-3; default: bool 3, secret 2, else 1
+	Key           string   `yaml:"key" json:"key"`
+	Label         string   `yaml:"label" json:"label"`
+	Type          string   `yaml:"type" json:"type"` // text|secret|url|choice|multi|bool
+	Default       string   `yaml:"default" json:"default,omitempty"`
+	Help          string   `yaml:"help" json:"help,omitempty"`
+	Required      bool     `yaml:"required" json:"required,omitempty"`
+	Choices       []string `yaml:"choices" json:"choices,omitempty"`
+	Pattern       string   `yaml:"pattern" json:"pattern,omitempty"` // text: the whole value must match
+	PatternE      string   `yaml:"pattern_error" json:"-"`           // the message when it doesn't
+	Secure        bool     `yaml:"secure" json:"-"`                  // url: https unless loopback or a listed private endpoint
+	PrivateListed bool     `yaml:"private_listed" json:"-"`          // url: a private or loopback host must be listed in server.services.private_endpoints
+	Section       int      `yaml:"section" json:"-"`                 // connect page section 1-3; default: bool 3, secret 2, else 1
 
 	re *regexp.Regexp
 }
@@ -67,6 +72,7 @@ type Create struct {
 	When       string `yaml:"when"`
 	YAML       string `yaml:"yaml"`
 	HookHeader string `yaml:"hook_header"` // a generated secret here is the webhook secret, sent in this header
+	Hook       bool   `yaml:"hook"`        // this item is the webhook: show its URL on the done page (for secrets the provider generates)
 }
 
 // Test is how a connection is checked: a request and where the identity is.
@@ -76,6 +82,23 @@ type Test struct {
 	Header   string `yaml:"header"`
 	Body     string `yaml:"body"`
 	Identity string `yaml:"identity"` // JSON path of the account name
+	// Where to find the credentials in the connection's own items, as
+	// env.NAME, headers.NAME or auth.bearer. Default: the header named in
+	// Header, else the bearer, else the first env value. {base} defaults to the
+	// origin of a service URL.
+	TokenFrom string `yaml:"token_from"`
+	BaseFrom  string `yaml:"base_from"`
+}
+
+// NixPackage is the pinned MCP server a needs-package service runs: it
+// becomes services.siphon.mcpPackages.<id> (see nix/catalog-packages.json).
+type NixPackage struct {
+	Attr  string   `yaml:"attr" json:"package"` // nixpkgs attribute
+	Args  []string `yaml:"args" json:"args"`
+	Env   []string `yaml:"env" json:"env"`
+	Hosts []string `yaml:"hosts" json:"hosts"`
+	// Env names holding the URL of the user's own server: the bridge may reach it.
+	URLEnv []string `yaml:"url_env" json:"url_env"`
 }
 
 var (
@@ -113,7 +136,8 @@ func Get(id string) *Entry {
 // Load parses and checks a catalogue, templates included.
 func Load(data []byte) ([]*Entry, error) {
 	var doc struct {
-		Services []*Entry `yaml:"services"`
+		Defs     map[string]any `yaml:"defs"` // YAML anchors shared by the entries
+		Services []*Entry       `yaml:"services"`
 	}
 	dec := yaml.NewDecoder(bytesReader(data))
 	dec.KnownFields(true)
@@ -145,6 +169,12 @@ func (e *Entry) check() error {
 	}
 	if (e.Status == "not-yet" || len(e.NeedsPackage) > 0) && e.Reason == "" {
 		return fmt.Errorf("a not-yet service needs a reason")
+	}
+	if e.Nix != nil && (e.Nix.Attr == "" || !slices.Equal(e.NeedsPackage, []string{e.ID})) {
+		return fmt.Errorf("nix needs attr and needs_package: [%s]", e.ID)
+	}
+	if e.Status == "available" && len(e.Creates) == 0 {
+		return fmt.Errorf("an available service creates something")
 	}
 	if e.Hook != "" && hooks[e.Hook] == nil {
 		return fmt.Errorf("unknown hook %q", e.Hook)
@@ -186,6 +216,28 @@ func (e *Entry) check() error {
 	return nil
 }
 
+// NixPackagesJSON is nix/catalog-packages.json: the pinned MCP server of each
+// needs-package service, keyed by service id.
+func NixPackagesJSON() ([]byte, error) {
+	m := map[string]*NixPackage{}
+	for _, e := range All() {
+		if e.Nix != nil {
+			p := *e.Nix
+			p.Args, p.Env, p.Hosts, p.URLEnv = nonNil(p.Args), nonNil(p.Env), nonNil(p.Hosts), nonNil(p.URLEnv)
+			m[e.ID] = &p
+		}
+	}
+	b, err := json.MarshalIndent(m, "", "  ")
+	return append(b, '\n'), err
+}
+
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
 // Availability is the entry's status on this install: not-yet stays, and an
 // entry with needs_package is needs-package until one of them is installed.
 // The reason says what to do.
@@ -216,4 +268,12 @@ func (e *Entry) CreatedNames() []string {
 		out = append(out, n)
 	}
 	return out
+}
+
+// OrGET is a test method, GET if unset.
+func OrGET(m string) string {
+	if m == "" {
+		return "GET"
+	}
+	return m
 }

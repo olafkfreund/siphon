@@ -295,8 +295,11 @@ siphon connect <service>|model|login [--<field> value ...]
 | `--access-key-id` |  | AWS: Base access key ID as - (stdin) or @file |
 | `--api-key` |  | model, login: API key as - (stdin) or @file |
 | `--base` |  | GitLab: GitLab URL |
+| `--client-secret` |  | Sentry: Client secret as - (stdin) or @file |
+| `--email` |  | Bitbucket: Atlassian account email |
 | `--external-id` |  | AWS: External ID |
 | `--file` |  | login: a login file (kind login), or - for stdin |
+| `--header` |  | Webhook: Header |
 | `--mode` |  | GitHub: MCP server |
 | `--name` |  | name of the connection (default: the service or preset) |
 | `--no-test` | `false` | skip the connection test |
@@ -304,11 +307,17 @@ siphon connect <service>|model|login [--<field> value ...]
 | `--project` |  | GitLab: Project |
 | `--region` |  | AWS: Region |
 | `--role-arn` |  | AWS: Role ARN |
+| `--secret` |  | Webhook: Secret as - (stdin) or @file |
 | `--secret-access-key` |  | AWS: Base secret access key as - (stdin) or @file |
 | `--servers` |  | AWS: Servers |
 | `--setup-token` |  | login claude: a setup token as - (stdin) or @file (kind token) |
+| `--signing-secret` |  | Linear: Webhook signing secret as - (stdin) or @file |
+| `--site` |  | Jira: Jira site URL |
+| `--timestamp` | `false` | Grafana: Sign with a timestamp (replay protection) |
 | `--token` |  | GitHub: Token as - (stdin) or @file |
+| `--topic` |  | ntfy: Topic |
 | `--url` |  | model: endpoint URL (default: the preset's) |
+| `--value` |  | MCP server: Header value as - (stdin) or @file |
 | `--webhook` | `false` | GitHub: Also receive webhooks (pull requests, issues, pushes) |
 
 Example:

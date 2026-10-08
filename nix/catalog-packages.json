@@ -1,0 +1,47 @@
+{
+  "forgejo": {
+    "package": "forgejo-mcp",
+    "args": [
+      "--transport",
+      "stdio"
+    ],
+    "env": [
+      "FORGEJO_ACCESS_TOKEN",
+      "FORGEJO_URL"
+    ],
+    "hosts": [],
+    "url_env": [
+      "FORGEJO_URL"
+    ]
+  },
+  "gitea": {
+    "package": "gitea-mcp-server",
+    "args": [
+      "-t",
+      "stdio",
+      "-r"
+    ],
+    "env": [
+      "GITEA_ACCESS_TOKEN",
+      "GITEA_HOST"
+    ],
+    "hosts": [],
+    "url_env": [
+      "GITEA_HOST"
+    ]
+  },
+  "grafana": {
+    "package": "mcp-grafana",
+    "args": [
+      "--disable-write"
+    ],
+    "env": [
+      "GRAFANA_URL",
+      "GRAFANA_SERVICE_ACCOUNT_TOKEN"
+    ],
+    "hosts": [],
+    "url_env": [
+      "GRAFANA_URL"
+    ]
+  }
+}

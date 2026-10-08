@@ -86,8 +86,12 @@ const awsServer = `, aws: {profiles: [p1]}, mcp_packages: {aws-cloudwatch: {comm
 
 func TestConnectAWS(t *testing.T) {
 	e := newCLIEnvCfg(t, awsServer, "")
-	if code, _, er := e.do("connect", "aws", "--name", "prod", "--no-test"); code != 3 || !strings.Contains(er, "profile name is required") {
+	if code, _, er := e.do("connect", "aws", "--name", "prod", "--no-test"); code != 2 || !strings.Contains(er, "--region") {
 		t.Fatalf("missing: %d %s", code, er)
+	}
+	// the region is never guessed; with one, a missing profile is the server's refusal
+	if code, _, er := e.do("connect", "aws", "--name", "prod", "--region", "eu-west-1", "--no-test"); code != 3 || !strings.Contains(er, "profile name is required") {
+		t.Fatalf("no profile: %d %s", code, er)
 	}
 	if code, _, er := e.do("connect", "aws", "--name", "prod", "--region", "eu-west-1", "--role-arn", "arn:aws:iam::123456789012:role/x", "--secret-access-key", "plain", "--no-test"); code != 2 || strings.Contains(er, "plain\n") {
 		t.Fatalf("plain key: %d %s", code, er)
@@ -445,10 +449,10 @@ func TestCatalogCommand(t *testing.T) {
 			Fields                     []struct{ Key string }
 		}
 	}
-	if err := json.Unmarshal([]byte(e.ok("catalog", "--category", "cloud", "-o", "json")), &j); err != nil || len(j.Services) != 1 || j.Services[0].ID != "aws" || j.Services[0].Availability != "needs-package" || len(j.Services[0].Fields) == 0 {
+	if err := json.Unmarshal([]byte(e.ok("catalog", "--category", "cloud", "-o", "json")), &j); err != nil || len(j.Services) < 3 || j.Services[0].ID != "aws" || j.Services[0].Availability != "needs-package" || len(j.Services[0].Fields) == 0 {
 		t.Fatalf("json: %+v %v", j, err)
 	}
-	if o := e.ok("catalog", "--category", "payments", "-o", "json"); !strings.Contains(o, `"services": []`) && !strings.Contains(o, `"services":[]`) {
+	if o := e.ok("catalog", "--category", "nope", "-o", "json"); !strings.Contains(o, `"services": []`) && !strings.Contains(o, `"services":[]`) {
 		t.Errorf("empty category: %s", o)
 	}
 	// an unavailable service is refused with its reason; an unknown one is a usage error
