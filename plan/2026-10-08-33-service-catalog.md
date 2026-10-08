@@ -220,3 +220,4 @@ Revert the merge.
   - **Bridge egress fix (Opus finding):** local MCP packages declare `url_env`; the bridge allowlist adds that URL's `host:port`, and private hosts must be in `server.services.private_endpoints` (checked at connect and at bridge start).
   - **Nix:** `services.siphon.catalogPackages` reads the generated `nix/catalog-packages.json` (with a freshness test) and passes `url_env` through. The `checks.catalog-module` eval check covers it.
   - The AWS `region` default was removed again.
+- **Fix (Opus, found before writing the Slack template):** the `slack` mode didn't answer Slack's `url_verification`. Slack sends it, signed, when you set a Request URL, and expects the `challenge` echoed back, so Slack would have refused the URL. A verified `url_verification` is now answered with its challenge and never delivered. Unsigned ones get 401. The research flagged handshakes for Event Grid, Notion and Discord, but missed Slack's.

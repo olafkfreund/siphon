@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strconv"
@@ -137,6 +138,14 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 				return
 			}
 			key = replayKey(ts, body)
+			// Slack verifies a new Request URL with a signed url_verification
+			// event that must be answered with its challenge, not delivered.
+			var v struct{ Type, Challenge string }
+			if json.Unmarshal(body, &v) == nil && v.Type == "url_verification" {
+				w.Header().Set("Content-Type", "text/plain")
+				io.WriteString(w, v.Challenge)
+				return
+			}
 		case "stripe":
 			// https://docs.stripe.com/webhooks#verify-manually
 			header = "Stripe-Signature"

@@ -2,8 +2,12 @@ package source
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -110,5 +114,33 @@ func TestWebhookSHA256PrefixListAndSeparator(t *testing.T) {
 	g.TimestampSep = "" // the default "." must not match a ":" signature
 	if code, _ := post(t, g, now, gbody, hdr); code != 401 {
 		t.Errorf("default separator accepted a colon signature: %d", code)
+	}
+}
+
+// Slack's Request URL check: a signed url_verification is answered with its
+// challenge and never delivered; an unsigned one is refused.
+func TestSlackURLVerification(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	body := `{"type":"url_verification","challenge":"chal-123","token":"x"}`
+	ts := strconv.FormatInt(now.Unix(), 10)
+	mac := hmac.New(sha256.New, []byte("slack-secret"))
+	mac.Write([]byte("v0:" + ts + ":" + body))
+	sig := "v0=" + hex.EncodeToString(mac.Sum(nil))
+	delivered := false
+	h := NewWebhook(WebhookOptions{Name: "s", Secret: "slack-secret", Signature: "slack", Now: func() time.Time { return now }},
+		func(context.Context, Event, string) (bool, error) { delivered = true; return false, nil })
+	send := func(sig string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/hook/s", strings.NewReader(body))
+		r.Header.Set("X-Slack-Request-Timestamp", ts)
+		r.Header.Set("X-Slack-Signature", sig)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	if w := send(sig); w.Code != 200 || w.Body.String() != "chal-123" || delivered {
+		t.Fatalf("signed verification: %d %q delivered=%v", w.Code, w.Body.String(), delivered)
+	}
+	if w := send("v0=00"); w.Code != http.StatusUnauthorized || w.Body.String() == "chal-123" {
+		t.Fatalf("unsigned verification answered: %d %q", w.Code, w.Body.String())
 	}
 }
