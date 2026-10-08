@@ -11,7 +11,7 @@ import (
 	"github.com/olafkfreund/siphon/internal/config"
 )
 
-var configKinds = []string{"sources", "rules", "agents", "routines", "credentials"}
+var configKinds = []string{"sources", "rules", "agents", "routines", "credentials", "notify"}
 
 // Item is one item of an apply request.
 type Item struct {

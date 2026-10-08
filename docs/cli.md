@@ -23,7 +23,7 @@ should also read `siphon guide`.
 | `--token-file` |  | file holding the API token (default: SIPHON_TOKEN_FILE, SIPHON_TOKEN, then client.yaml) |
 | `--url` |  | siphon URL (default: the saved login, else SIPHON_URL; needs -token-file or SIPHON_TOKEN* unless it is the saved login's) |
 
-Kinds for `get`: `sources`, `rules`, `agents`, `routines`, `credentials`, `jobs`, `approvals`, `audit`, `connections`.
+Kinds for `get`: `sources`, `rules`, `agents`, `routines`, `credentials`, `notify`, `jobs`, `approvals`, `audit`, `connections`.
 
 ## Exit codes
 
@@ -84,7 +84,7 @@ siphon status -o json
 
 ### siphon get
 
-List or show config items (sources rules agents routines credentials) or jobs, approvals, audit, connections.
+List or show config items (sources rules agents routines credentials notify) or jobs, approvals, audit, connections.
 
 ```sh
 siphon get <kind> [name]
@@ -433,7 +433,7 @@ siphon template github-pr-review > pr.yaml
 Every field of a config kind: type, required, default, allowed values.
 
 ```sh
-siphon explain source|rule|agent|routine|credential
+siphon explain source|rule|agent|routine|credential|notify
 ```
 
 Example:
@@ -509,6 +509,32 @@ Example:
 
 ```sh
 claude mcp add siphon -- siphon mcp
+```
+
+### siphon notify
+
+Notification channels (ntfy, Slack, webhook): add one (secrets only via - or @file), send a test message, or show the delivery log.
+
+```sh
+siphon notify add <name> --type t --url -|@file [--token -|@file] [--events a,b] [--dry-run] [--yes] | test <name> | log [--channel c] [--job id]
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--channel` |  | log: only this channel |
+| `--dry-run` | `false` | add: check and show the diff, change nothing |
+| `--events` |  | add: comma list of approval,reminder,failed,source (default all four) |
+| `--job` | `0` | log: only this job's notifications |
+| `--limit` | `0` | log: at most this many rows |
+| `--token` |  | add: an ntfy access token or webhook bearer, as - (stdin) or @file (optional) |
+| `--type` |  | add: ntfy, slack or webhook |
+| `--url` |  | add: the topic or hook URL, as - (stdin) or @file; never a plain value |
+| `--yes` | `false` | add: apply without asking |
+
+Example:
+
+```sh
+printf %s https://ntfy.sh/my-topic | siphon notify add phone --type ntfy --url - --yes
 ```
 
 ### siphon help

@@ -308,3 +308,10 @@ steps 6–8, and reviews.
   - **Sources and the baseline:** D4 covers sources too. A failing run that began before the channel's baseline isn't announced.
   - **Suppressed count:** it's taken before the send, so a failed send loses the suffix (noted with a `ponytail:` comment).
   - **Immediate failure:** a missing channel or a 3xx answer goes straight to `failed`.
+- Step 4 (coder):
+  - **No typed client methods:** the CLI calls the generic `client.Do`, like every other verb.
+  - **`notify_test` over MCP needs `--allow-write`:** it sends a real message to an outside service.
+  - **No new guard in `mcpGuard`:** pasted secrets are already gated by `--allow-secrets` in `apply`, and `Validate` rejects an inline url.
+  - **`notify add --url`** is the channel's url. The server comes from the saved login or `SIPHON_URL`, as with `connect` and `new`.
+  - **Only `notify` accepts `url` and `token` as pasted secrets:** the config API accepts them for that kind alone.
+  - **`applyfile`:** now knows the `notify` kind.

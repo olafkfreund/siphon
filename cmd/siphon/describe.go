@@ -64,7 +64,7 @@ func closeTemplates(name string) string {
 
 func buildExplain(fs *flag.FlagSet) func(*cli, []string) error {
 	return func(c *cli, args []string) error {
-		if err := needArgs(args, 1, "explain source|rule|agent|routine|credential"); err != nil {
+		if err := needArgs(args, 1, "explain source|rule|agent|routine|credential|notify"); err != nil {
 			return err
 		}
 		kind, fields, err := config.Explain(args[0])

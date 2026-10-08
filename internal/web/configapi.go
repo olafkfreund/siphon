@@ -219,6 +219,9 @@ func (s *server) write(r *http.Request, actor, summary string, rev *int64, mutat
 // secretPath are the fields a PUT may fill with a write-only value.
 var secretPath = regexp.MustCompile(`^(api_key|secret|auth\.bearer|access_key_id|secret_access_key|(env|headers)\.[A-Za-z0-9_-]+)$`)
 
+// notifySecretPath are the fields of a notify item that hold write-only values.
+var notifySecretPath = regexp.MustCompile(`^(url|token)$`)
+
 // withSecrets points each secret field of the item at its stored file and
 // returns the values to write (commit does, once the config checks pass).
 // Values never appear in an error.
@@ -242,7 +245,7 @@ func withSecrets(kind, name, y string, secrets map[string]string, db string) (st
 	var bad []error
 	for _, k := range keys {
 		switch {
-		case !secretPath.MatchString(k):
+		case !(kind == "notify" && notifySecretPath.MatchString(k)) && !(kind != "notify" && secretPath.MatchString(k)):
 			bad = append(bad, fmt.Errorf("secrets: %q is not a secret field", k))
 		case secrets[k] == "":
 			bad = append(bad, fmt.Errorf("secrets: %s is empty", k))
