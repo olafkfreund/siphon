@@ -320,7 +320,10 @@ pkgs.testers.runNixOSTest {
               when = ''event.object_kind == "merge_request"'';
               on = "each";
               id = "event.n";
-              action.cmd = [ "echo" "gitlab mr {{.event.n}}" ];
+              action.cmd = [
+                "echo"
+                "gitlab mr {{.event.n}}"
+              ];
             }
             {
               name = "std-event";
@@ -328,7 +331,10 @@ pkgs.testers.runNixOSTest {
               when = ''event.type == "ping"'';
               on = "each";
               id = "event.n";
-              action.cmd = [ "echo" "standard {{.event.n}}" ];
+              action.cmd = [
+                "echo"
+                "standard {{.event.n}}"
+              ];
             }
             {
               name = "aws-agent";
@@ -802,6 +808,9 @@ pkgs.testers.runNixOSTest {
         assert line and "20" in line[0], f"no NEXT run for tick: {line}"   # a dated next run
         why = json.loads(alice("siphon why tick -o json"))
         assert why["source"]["schedule"]["next_run_at"], why
+        # stop ticking: a stray minute job would break the orphan-count subtests below
+        alice("siphon delete rules tick")
+        alice("siphon delete sources tick")
 
     with subtest("catalogue services: connect from the CLI, verified deliveries (docs/connections)"):
         import json, hashlib, hmac, time as _t

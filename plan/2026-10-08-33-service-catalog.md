@@ -243,3 +243,4 @@ Revert the merge.
     - L7: a reused name starts as Not checked.
     - L8 (Opus): docs for the new modes and options.
 - CI (Opus): `ci/container-test.sh` and `ci/microvm-test.sh` piped into `grep -q` under `pipefail`. grep quit at the first match, which could SIGPIPE the producer and fail a passing check. The larger startup log on this branch made that happen in the OCI job. They now use `grep … >/dev/null`.
+- CI (Opus): `nix/vm-test.nix`: the #31 schedule subtest left its `every 1m` `tick` task running, and it fired inside the 40 s sampling window of the "after a crash" subtest, so that test counted 3 units (the orphan stop order itself was correct). The schedule subtest now deletes `tick` when it ends.
