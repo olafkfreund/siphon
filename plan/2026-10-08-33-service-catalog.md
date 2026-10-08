@@ -187,3 +187,9 @@ Revert the merge.
 - **Old routes and flags:** remain as aliases.
 
 ## Deviations log
+- **Step 1 (coder):**
+  - **Template funcs:** `secret "field" "yaml.path"`, `basic "email" "token" "path"` and `generated "path"` take the config path, because secret files are tied to their field path (#29's injective naming). A value prefix (e.g. `Bearer `) is added in step 6, when Linear needs it.
+  - **Engine and commit:** the engine is `Entry.Render(values, Env)` → items, secrets and done-info. The commit is `server.connect` in `internal/web`, which avoids an import cycle.
+  - **Extras:** more funcs (`q`, `pathesc`, `has`, `package`, `private`, `fail`, `tools`), a `multi` field type, field `pattern`/`secure`, and `hook_header`.
+  - Required-field errors read "<label> is required".
+  - Grouping by `connection:` is in step 4.

@@ -211,10 +211,11 @@ type Source struct {
 	SigHeader    string            `yaml:"signature_header"` // sha256 preset
 	TokenHeader  string            `yaml:"token_header"`     // token preset
 	TimestampHdr string            `yaml:"timestamp_header"`
-	ID           string            `yaml:"id"`      // delivery id, e.g. header.X-GitHub-Delivery
-	Env          map[string]Secret `yaml:"env"`     // stdio MCP child env; values are env:/file: refs
-	Package      string            `yaml:"package"` // name in server.mcp_packages; fills Command
-	AWS          string            `yaml:"aws"`     // provider: aws credential; the daemon injects short-lived keys
+	ID           string            `yaml:"id"`         // delivery id, e.g. header.X-GitHub-Delivery
+	Env          map[string]Secret `yaml:"env"`        // stdio MCP child env; values are env:/file: refs
+	Package      string            `yaml:"package"`    // name in server.mcp_packages; fills Command
+	AWS          string            `yaml:"aws"`        // provider: aws credential; the daemon injects short-lived keys
+	Connection   string            `yaml:"connection"` // metadata: the Services connection this item belongs to
 
 	cmdFromPkg bool // Command was filled from Package, not written in the item
 }
@@ -266,7 +267,12 @@ type Credential struct {
 	ExternalID      string `yaml:"external_id"`
 	AccessKeyID     Secret `yaml:"access_key_id"`
 	SecretAccessKey Secret `yaml:"secret_access_key"`
+
+	Connection string `yaml:"connection"` // metadata: the Services connection this item belongs to
 }
+
+// connectionName is the shape of a `connection:` label (an item name).
+var connectionName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 
 var (
 	awsRegion  = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-\d$`)
@@ -747,6 +753,12 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	for _, name := range sortedKeys(c.Credentials) {
+		if cr := c.Credentials[name]; cr != nil && cr.Connection != "" && !connectionName.MatchString(cr.Connection) {
+			add("credentials.%s.connection: must match %s", name, connectionName)
+		}
+	}
+
 	for _, name := range sortedKeys(c.Sources) {
 		if src := c.Sources[name]; src != nil {
 			for _, h := range sortedKeys(src.Headers) {
@@ -1025,6 +1037,9 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 	if s == nil {
 		add("%s: empty", p)
 		return
+	}
+	if s.Connection != "" && !connectionName.MatchString(s.Connection) {
+		add("%s.connection: must match %s", p, connectionName)
 	}
 	if s.Poll < 0 || (s.Polled() && s.Poll == 0) {
 		add("%s: poll must be > 0", p)

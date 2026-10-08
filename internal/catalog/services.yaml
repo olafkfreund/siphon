@@ -1,0 +1,160 @@
+# The service catalogue: one entry per service. See render.go for the
+# template functions (secret, basic, generated, q, pathesc, has, package,
+# private, fail). A field's raw value reaches the YAML only as validated
+# one-line text (use q) or through those functions.
+services:
+  - id: github
+    name: GitHub
+    mark: GH
+    category: code
+    summary: Agent tools through GitHub's MCP server, and pull request or issue events by webhook.
+    capabilities: [tools, webhooks]
+    status: available
+    fields:
+      - {key: name, label: Name, type: text, default: github, required: true, pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}', pattern_error: 'a name is required (letters, digits, . _ -)', help: 'Agents list it in mcp:; tools are named mcp__<name>__…'}
+      - {key: token, label: Token, type: secret, required: true, help: 'A fine-grained token for only the repos agents need: Contents, Pull requests, Issues: read (write only if agents should comment). Metadata: read.'}
+      - {key: mode, label: MCP server, type: choice, choices: [remote, local], default: remote, help: 'Local runs github-mcp-server in its own sandbox; needed for GitHub Enterprise.'}
+      - {key: webhook, label: 'Also receive webhooks (pull requests, issues, pushes)', type: bool, default: on}
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          {{if eq .mode "local"}}{{if not (package "github")}}{{fail "the local GitHub MCP server isn't installed: add it to server.mcp_packages (services.siphon.mcpPackages on NixOS)"}}{{end -}}
+          type: mcp
+          package: github
+          env:
+            GITHUB_PERSONAL_ACCESS_TOKEN: {{secret "token" "env.GITHUB_PERSONAL_ACCESS_TOKEN"}}
+          {{else -}}
+          type: mcp
+          url: https://api.githubcopilot.com/mcp/
+          auth:
+            bearer: {{secret "token" "auth.bearer"}}
+          {{end -}}
+          read: { tool: get_me }
+          poll: 24h
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: '{{.webhook}}'
+        yaml: |
+          type: webhook
+          signature: github
+          secret: {{generated "secret"}}
+          id: header.X-GitHub-Delivery
+    setup: |
+      Repository → Settings → Webhooks → Add webhook.
+      Payload URL as above, content type application/json, Secret as above.
+      Choose the events (e.g. Pull requests, Issues) and save.
+    read_tools: [get_me, get_pull_request, get_pull_request_files, get_pull_request_diff, list_pull_requests, get_issue, list_issues, search_code, get_file_contents, list_commits]
+    write_tools: [create_pull_request_review, add_issue_comment, create_issue, update_issue]
+    test: {method: GET, url: 'https://api.github.com/user', header: 'Authorization: Bearer {token}', identity: login}
+    templates: [github-pr-review, github-ci-failure, github-issue-triage]
+
+  - id: gitlab
+    name: GitLab
+    mark: GL
+    category: code
+    summary: Open merge requests polled from a project, and events by webhook. gitlab.com or self-hosted.
+    capabilities: [polling, webhooks]
+    status: available
+    fields:
+      - {key: name, label: Name, type: text, default: gitlab, required: true, pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}', pattern_error: 'a name is required (letters, digits, . _ -)'}
+      - {key: base, label: GitLab URL, type: url, default: 'https://gitlab.com', secure: true, help: 'Self-hosted on your LAN? List its host:port once in server.services.private_endpoints.'}
+      - {key: project, label: Project, type: text, required: true, help: group/project}
+      - {key: token, label: Token, type: secret, required: true, help: 'A project access token with read_api.'}
+      - {key: webhook, label: 'Also receive webhooks (merge requests, pipelines)', type: bool, default: on}
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          type: http
+          url: {{q (printf "%s/api/v4/projects/%s/merge_requests?state=opened&per_page=20" .base (pathesc .project))}}
+          headers:
+            PRIVATE-TOKEN: {{secret "token" "headers.PRIVATE-TOKEN"}}
+          poll: 5m
+          {{if private "base" -}}
+          allow_private: true
+          {{end -}}
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: '{{.webhook}}'
+        hook_header: X-Gitlab-Token
+        yaml: |
+          type: webhook
+          signature: token
+          token_header: X-Gitlab-Token
+          secret: {{generated "secret"}}
+          id: header.X-Gitlab-Event-UUID
+    setup: |
+      Project → Settings → Webhooks → Add new webhook.
+      URL as above, Secret token as above.
+      Tick Merge request events (and Pipeline events) and save.
+    test: {method: GET, url: '{base}/api/v4/user', header: 'PRIVATE-TOKEN: {token}', identity: username}
+    templates: [gitlab-mr-review, gitlab-pipeline-failed]
+
+  - id: aws
+    name: AWS
+    mark: AW
+    category: cloud
+    summary: CloudWatch and AWS documentation as agent tools, with short-lived credentials (never stored keys), and EventBridge events by webhook.
+    capabilities: [tools, webhooks]
+    status: available
+    hooks: aws
+    fields:
+      - {key: name, label: Name, type: text, default: aws, required: true, pattern: '[a-z0-9][a-z0-9_-]{0,40}', pattern_error: 'a lowercase name (a-z, 0-9, - _) is required', help: 'Sources are named <name>-cloudwatch and <name>-docs.'}
+      - {key: region, label: Region, type: text, default: eu-west-1, required: true}
+      - {key: mode, label: Credentials, type: choice, choices: [profile, role], default: profile, help: 'Profile: a named profile of the siphon user (SSO, a role or credential_process). Role: a read-only role, see examples/aws.'}
+      - {key: profile, label: Profile, type: text, help: 'Profile mode: one of server.aws.profiles.'}
+      - {key: role_arn, label: Role ARN, type: text, help: "Other ARNs need this credential's own access keys."}
+      - {key: external_id, label: External ID, type: text, help: 'Optional, role mode.'}
+      - {key: access_key_id, label: Base access key ID, type: secret, help: "Optional, role mode: otherwise the siphon user's own login assumes the role. Stored write-only."}
+      - {key: secret_access_key, label: Base secret access key, type: secret}
+      - {key: servers, label: Servers, type: multi, choices: [cloudwatch, docs], help: 'CloudWatch (logs, metrics, alarms) and AWS documentation.'}
+      - {key: webhook, label: 'Also receive EventBridge events (API destination)', type: bool}
+    creates:
+      - kind: credentials
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          provider: aws
+          region: {{q .region}}
+          {{if eq .mode "role" -}}
+          role_arn: {{q .role_arn}}
+          {{if .external_id -}}
+          external_id: {{q .external_id}}
+          {{end -}}
+          {{if has "access_key_id" -}}
+          access_key_id: {{secret "access_key_id" "access_key_id"}}
+          secret_access_key: {{secret "secret_access_key" "secret_access_key"}}
+          {{end -}}
+          {{else -}}
+          profile: {{q .profile}}
+          {{end -}}
+      - kind: sources
+        name: '{{.name}}-cloudwatch'
+        when: '{{.cloudwatch}}'
+        yaml: |
+          type: mcp
+          package: aws-cloudwatch
+          aws: {{q .name}}
+      - kind: sources
+        name: '{{.name}}-docs'
+        when: '{{.docs}}'
+        yaml: |
+          type: mcp
+          package: aws-docs
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: '{{.webhook}}'
+        hook_header: X-Siphon-Key
+        yaml: |
+          type: webhook
+          signature: token
+          token_header: X-Siphon-Key
+          secret: {{generated "secret"}}
+    setup: |
+      EventBridge → API destinations → Connections → Create: authorization type API key, API key name X-Siphon-Key, value = the secret above.
+      API destinations → Create: endpoint = the URL above, method POST, and that connection.
+      Add the destination as the target of a rule for the events you want.
+    templates: [aws-cloudwatch-alarm]

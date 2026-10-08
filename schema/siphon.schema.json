@@ -91,6 +91,9 @@
           "concurrency": {
             "type": "integer"
           },
+          "connection": {
+            "type": "string"
+          },
           "external_id": {
             "type": "string"
           },
@@ -431,6 +434,9 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "connection": {
+            "type": "string"
           },
           "env": {
             "additionalProperties": {
