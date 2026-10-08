@@ -216,10 +216,13 @@ func FinishJob(db *sql.DB, id int64, state string, exit int, output string, now 
 }
 
 // PutSourceState records the last poll time and error ("" on success).
+// failing_since marks where the current run of failures began, and clears on success.
 func PutSourceState(db *sql.DB, source string, now time.Time, pollErr string) error {
-	_, err := db.Exec(`INSERT INTO source_state(source,last_poll_at,last_error) VALUES (?,?,?)
-		ON CONFLICT(source) DO UPDATE SET last_poll_at=excluded.last_poll_at, last_error=excluded.last_error`,
-		source, ms(now), pollErr)
+	_, err := db.Exec(`INSERT INTO source_state(source,last_poll_at,last_error,failing_since)
+		VALUES (?,?,?,CASE WHEN ?='' THEN NULL ELSE ? END)
+		ON CONFLICT(source) DO UPDATE SET last_poll_at=excluded.last_poll_at, last_error=excluded.last_error,
+		failing_since=CASE WHEN excluded.last_error='' THEN NULL ELSE COALESCE(source_state.failing_since, excluded.last_poll_at) END`,
+		source, ms(now), pollErr, pollErr, ms(now))
 	return err
 }
 

@@ -16,7 +16,7 @@ func TestOpenTwiceIdempotent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, tbl := range []string{"jobs", "rule_state", "seen_event", "approvals", "audit", "rule_override", "source_state", "schema_migrations", "rule_error", "connection_check"} {
+		for _, tbl := range []string{"jobs", "rule_state", "seen_event", "approvals", "audit", "rule_override", "source_state", "schema_migrations", "rule_error", "connection_check", "notifications", "notify_channel"} {
 			var n int
 			if err := s.DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, tbl).Scan(&n); err != nil || n != 1 {
 				t.Fatalf("open %d: table %s missing (%v)", i, tbl, err)
@@ -24,7 +24,7 @@ func TestOpenTwiceIdempotent(t *testing.T) {
 		}
 		var m int
 		s.DB.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&m)
-		if m != 4 {
+		if m != 5 {
 			t.Fatalf("migrations recorded: %d", m)
 		}
 		var fk int
@@ -372,5 +372,180 @@ func TestMigration0004OnExistingDB(t *testing.T) {
 	SetConnectionCheck(s.DB, ConnectionCheck{"x", at.Add(time.Minute), false, "refused"})
 	if c, _ := GetConnectionCheck(s.DB, "x"); c == nil || c.OK || c.Detail != "refused" || !c.At.Equal(at.Add(time.Minute)) {
 		t.Fatalf("%+v", c)
+	}
+}
+
+// 0005 applies on top of a 0004 database, keeping its rows and adding failing_since.
+func TestMigration0005OnExistingDB(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", "file:"+p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Exec(`CREATE TABLE schema_migrations (version TEXT PRIMARY KEY)`)
+	for _, n := range []string{"0001_init.sql", "0002_config_overlay.sql", "0003_diagnostics.sql", "0004_connection_check.sql"} {
+		b, _ := migrationFS.ReadFile("migrations/" + n)
+		if _, err := db.Exec(string(b)); err != nil {
+			t.Fatal(err)
+		}
+		db.Exec(`INSERT INTO schema_migrations(version) VALUES (?)`, n)
+	}
+	db.Exec(`INSERT INTO source_state(source,last_poll_at,last_error) VALUES ('old',1,'boom')`)
+	db.Close()
+	s, err := Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if fs, err := FailingSources(s.DB); err != nil || len(fs) != 0 {
+		t.Fatalf("old row should not be failing: %v %v", fs, err)
+	}
+	now := time.UnixMilli(5000)
+	PutSourceState(s.DB, "old", now, "boom") // first failure seen by this version starts the run
+	if fs, _ := FailingSources(s.DB); len(fs) != 1 || !fs[0].Since.Equal(now) {
+		t.Fatalf("%+v", fs)
+	}
+}
+
+func TestFailingSince(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	t0 := time.UnixMilli(1000)
+	since := func() []FailingSource { f, _ := FailingSources(s.DB); return f }
+	PutSourceState(s.DB, "a", t0, "")
+	if len(since()) != 0 {
+		t.Fatal("healthy source is failing")
+	}
+	PutSourceState(s.DB, "a", t0.Add(time.Minute), "x")
+	PutSourceState(s.DB, "a", t0.Add(2*time.Minute), "y")
+	if f := since(); len(f) != 1 || !f[0].Since.Equal(t0.Add(time.Minute)) {
+		t.Fatalf("run start moved: %+v", f)
+	}
+	PutSourceState(s.DB, "a", t0.Add(3*time.Minute), "")
+	if len(since()) != 0 {
+		t.Fatal("recovery did not clear")
+	}
+	PutSourceState(s.DB, "a", t0.Add(4*time.Minute), "z")
+	if f := since(); len(f) != 1 || !f[0].Since.Equal(t0.Add(4*time.Minute)) {
+		t.Fatalf("new run: %+v", f)
+	}
+	PutSourceState(s.DB, "b", t0, "first") // insert while failing
+	if len(since()) != 2 {
+		t.Fatal("insert-as-failing missed")
+	}
+}
+
+func TestNotificationOutbox(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	db := s.DB
+	t0 := time.UnixMilli(1_000_000)
+	if a, _ := ChannelSince(db, "c", t0); !a.Equal(t0) {
+		t.Fatal(a)
+	}
+	if a, _ := ChannelSince(db, "c", t0.Add(time.Hour)); !a.Equal(t0) {
+		t.Fatalf("baseline moved: %v", a)
+	}
+	DropChannel(db, "c")
+	if a, _ := ChannelSince(db, "c", t0.Add(time.Hour)); !a.Equal(t0.Add(time.Hour)) {
+		t.Fatalf("not fresh: %v", a)
+	}
+
+	n := Notification{Channel: "c", Event: "failed", Key: "job:1", JobID: 0, Title: "t", Body: "b"}
+	if ok, err := EnqueueNotification(db, n, t0); !ok || err != nil {
+		t.Fatal(ok, err)
+	}
+	if ok, _ := EnqueueNotification(db, n, t0); ok {
+		t.Fatal("duplicate recorded")
+	}
+	n2 := n
+	n2.Key = "job:2"
+	EnqueueNotification(db, n2, t0.Add(time.Second))
+	due, _ := DueNotifications(db, t0.Add(time.Second), 10)
+	if len(due) != 2 || due[0].Key != "job:1" {
+		t.Fatalf("%+v", due)
+	}
+	if d, _ := DueNotifications(db, t0.Add(-time.Second), 10); len(d) != 0 {
+		t.Fatal("not yet due")
+	}
+	MarkRetry(db, due[0].ID, t0.Add(time.Hour), "boom")
+	if d, _ := DueNotifications(db, t0.Add(time.Minute), 10); len(d) != 1 || d[0].Key != "job:2" {
+		t.Fatalf("%+v", d)
+	}
+	MarkSent(db, due[1].ID, t0.Add(time.Minute))
+	if c, _ := SentInLastHour(db, "c", t0.Add(2*time.Minute)); c != 1 {
+		t.Fatal(c)
+	}
+	if c, _ := SentInLastHour(db, "c", t0.Add(2*time.Hour)); c != 0 {
+		t.Fatal(c)
+	}
+	if err := MarkFailed(db, due[0].ID, t0, "gave up"); err != nil {
+		t.Fatal(err)
+	}
+	var ev string
+	if db.QueryRow(`SELECT event FROM audit WHERE event='notify_failed'`).Scan(&ev) != nil {
+		t.Fatal("no audit row")
+	}
+	l, _ := ListNotifications(db, NotificationFilter{Channel: "c"})
+	if len(l) != 2 || l[0].Key != "job:2" || l[0].State != "sent" || l[0].SentAt == nil || l[1].State != "failed" || l[1].Attempts != 2 {
+		t.Fatalf("%+v", l)
+	}
+
+	n3 := n
+	n3.Key = "job:3"
+	EnqueueNotification(db, n3, t0)
+	d, _ := DueNotifications(db, t0, 10)
+	MarkSuppressed(db, d[0].ID)
+	if c, _ := TakeSuppressed(db, "c"); c != 1 {
+		t.Fatal(c)
+	}
+	if c, _ := TakeSuppressed(db, "c"); c != 0 {
+		t.Fatal("suppressed counted twice")
+	}
+}
+
+func TestNotifyScans(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	db := s.DB
+	t0 := time.UnixMilli(10_000_000)
+	act := `{"action":{"Agent":"rev"},"agents":{"rev":{"Kind":"claude"}}}`
+	mk := func(state string, finished any, step int) int64 {
+		r, err := db.Exec(`INSERT INTO jobs(rule,action_json,state,finished_at,resume_step,created_at) VALUES ('r',?,?,?,?,?)`, act, state, finished, step, ms(t0))
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _ := r.LastInsertId()
+		return id
+	}
+	appr := func(job int64, created time.Time, decision any) {
+		db.Exec(`INSERT INTO approvals(job_id,token_hash,expires_at,decision) VALUES (?,?,?,?)`, job, []byte("h"), ms(created.Add(ApprovalTTL)), decision)
+	}
+	old, fresh, decided := mk("pending_approval", nil, 0), mk("pending_approval", nil, 2), mk("pending_approval", nil, 0)
+	appr(old, t0.Add(-time.Hour), nil)
+	appr(fresh, t0.Add(time.Hour), nil)
+	appr(decided, t0.Add(time.Hour), "approved")
+	ps, err := PendingApprovalsFor(db, t0)
+	if err != nil || len(ps) != 1 || ps[0].ID != fresh || ps[0].ResumeStep != 2 || ps[0].Kind != "agent" || !ps[0].ExpiresAt.Equal(t0.Add(time.Hour+ApprovalTTL)) {
+		t.Fatalf("%+v %v", ps, err)
+	}
+	a, b := mk("failed", ms(t0.Add(-time.Minute)), 0), mk("failed", ms(t0.Add(time.Minute)), 0)
+	mk("done", ms(t0.Add(time.Minute)), 0)
+	fj, _ := FailedJobsSince(db, t0)
+	if len(fj) != 1 || fj[0].ID != b || a == b {
+		t.Fatalf("%+v", fj)
+	}
+
+	// Source episodes: sent "failing" rows without a "recovered" row.
+	for _, k := range []string{"src:a:1", "src:b:2"} {
+		EnqueueNotification(db, Notification{Channel: "c", Event: "source", Key: k, Source: k[4:5], Title: "t", Body: "b"}, t0)
+	}
+	due, _ := DueNotifications(db, t0, 10)
+	for _, d := range due {
+		MarkSent(db, d.ID, t0)
+	}
+	EnqueueNotification(db, Notification{Channel: "c", Event: "source_ok", Key: "src:a:1", Source: "a", Title: "t", Body: "b"}, t0)
+	if eps, _ := SentSourceEpisodes(db, "c"); len(eps) != 1 || eps[0].Key != "src:b:2" || eps[0].Source != "b" {
+		t.Fatalf("%+v", eps)
 	}
 }

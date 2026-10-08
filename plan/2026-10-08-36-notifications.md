@@ -296,3 +296,8 @@ steps 6–8, and reviews.
   - **`stubbed`:** `Config.stubbed` skips the resolved-url check while the portal validates with stand-in secret values. It still runs at real load.
   - **`moved`:** `checkOverlay` treats a changed `url` ref as `moved`, so a token from `siphon.yaml` can't follow to a new url.
   - **Schema:** `schema/agentgw.schema.json`, the legacy name, is regenerated alongside.
+- Step 2 (coder):
+  - **Approval age:** the `approvals` table has no `created_at`, so `PendingApprovalsFor(since)` treats an approval as opened at `expires_at - store.ApprovalTTL`. That keeps approvals opened before the baseline out of the messages (D4). `job.approvalTTL` now equals `store.ApprovalTTL` (Opus), so there's one value.
+  - **`TakeSuppressed(channel)`:** counts the channel's suppressed rows and marks them reported, for the D6 suffix.
+  - **Signatures:** small changes. `EnqueueNotification` reports whether it created a row. `FailedJobsSince` returns at most 200 rows, oldest first. `SentSourceEpisodes` returns only failing rows that were sent and have no `source_ok` yet.
+  - **Upgrade:** a source that was already failing before the upgrade starts its failing run at its first failed poll after the upgrade.

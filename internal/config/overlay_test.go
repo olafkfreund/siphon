@@ -534,4 +534,22 @@ func TestNotifyKind(t *testing.T) {
 	if c, _, err := LoadWithOverlay(path, []Item{{Kind: "notify", Name: "Bad", YAML: "{type: ntfy, url: '" + url + "'}"}}); err == nil && c.Validate() == nil {
 		t.Error("bad name accepted")
 	}
+
+	// The file's token must not be sent to a new url.
+	os.WriteFile(path, []byte("server: { db: "+dir+"/s.db }\nnotify:\n  fh: { type: ntfy, url: 'env:NURL', token: 'env:NTOK' }\n"), 0o600)
+	t.Setenv("NURL", "https://ntfy.example/t")
+	t.Setenv("NTOK", "tok")
+	mv := func(y string) error {
+		_, _, err := LoadWithOverlay(path, []Item{{Kind: "notify", Name: "fh", YAML: y}})
+		return err
+	}
+	if err := mv("{type: ntfy, url: '" + url + "', token: 'env:NTOK'}"); err == nil {
+		t.Error("file token moved to a new url")
+	}
+	if err := mv("{type: ntfy, url: 'env:NURL', token: 'env:NTOK', events: [failed]}"); err != nil {
+		t.Errorf("keeping the file's refs: %v", err)
+	}
+	if err := mv("{type: ntfy, url: '" + ref("fh", "url", "https://o.example/t") + "', token: '" + ref("fh", "token", "t2") + "'}"); err != nil {
+		t.Errorf("own url and token: %v", err)
+	}
 }
