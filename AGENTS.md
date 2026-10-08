@@ -22,6 +22,7 @@ siphon apply -f task.yaml --yes     # after the user has seen the diff
 siphon test <rule> --last           # does it match the last real event?
 siphon why <rule> -o json           # why didn't it fire?
 siphon draft "<what the user wants>"   # or let a model connection write the task, then review it
+siphon notify add phone --type ntfy --url - --yes   # URL on stdin: get told about approvals and failures
 ```
 
 **Rules:**

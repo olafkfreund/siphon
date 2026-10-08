@@ -15,5 +15,7 @@ siphon deny 42
 - **The record:** every decision is in `siphon get audit`, with who made it
   (`api:cli:<you>` from the CLI).
 - **Expiry:** unanswered approvals expire, and the job is marked as such.
+- **Get told:** add a channel so you hear about each approval and get a
+  reminder before it expires. See [Notifications](notifications.md).
 - **Assistants** (Claude Code, Codex, `siphon mcp`) never approve on their
   own. See [Siphon for AI assistants](../llm.md).

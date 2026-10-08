@@ -28,6 +28,7 @@ Key facts for an assistant:
 - [Run a task on a schedule](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/schedule.md): type: schedule (cron, @daily, every 15m), time zones, missed runs, test --at.
 - [An agent that reviews pull requests](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/github-pr-agent.md): GitHub tools, allowed_tools, approvals.
 - [Watch an MCP server](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/mcp-watch.md): read a resource or tool, for_each over lists.
+- [Notifications](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/notifications.md): ntfy, Slack, webhook channels for approvals, failed jobs, failing sources; siphon notify add|test|log.
 - [Routines](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/routine.md): ordered steps, retries, steps.<id>.output, schedules via a timer.
 - [Approvals](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/approvals.md): approve or deny from CLI or portal.
 - [Drafting tasks in plain language](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/drafting.md): `siphon draft` — a model connection writes the task, Siphon validates and repairs it, you review and apply.

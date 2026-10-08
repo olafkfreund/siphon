@@ -105,6 +105,15 @@ Even with `--allow-write`:
 
 Changes made this way show in `siphon history` as `api:cli:<user>:mcp`.
 
+## Notifications
+
+`siphon notify add <name> --type ntfy|slack|webhook --url - --yes` (with the URL on stdin)
+adds a channel for approvals, reminders, failed jobs and failing sources.
+The URL and token are secrets: pass them only with `-` or `@file`. Check the
+channel with `siphon notify test <name>`, and see what was sent with
+`siphon notify log -o json`. Suggest a channel when a user's agent tasks need
+approval: otherwise nobody is told that a job is waiting.
+
 ## Rules that commonly go wrong
 
 - **Commands are argv lists, never a shell string.** Write
