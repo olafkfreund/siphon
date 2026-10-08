@@ -197,6 +197,8 @@ ends with the likely one and the next command to run. More in [Troubleshooting](
 
 - **Get told:** [Notifications](tasks/notifications.md) for approvals,
   failed jobs and failing sources, on ntfy, Slack or a webhook.
+- **Run it for real:** [Backup and monitoring](tasks/backup-and-monitoring.md):
+  backups, restore, Prometheus metrics and how long history is kept.
 - **Ready-made tasks:** [the templates](templates/README.md): code review,
   CI failures, alerts, uptime, AWS, Home Assistant, nightly reports.
 - **How-tos by task:** [the guide index](README.md).
