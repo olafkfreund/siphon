@@ -256,3 +256,21 @@ func ListNotifications(db *sql.DB, f NotificationFilter) ([]Notification, error)
 		WHERE (?='' OR n.channel=?) AND (?=0 OR n.job_id=?) ORDER BY n.id DESC LIMIT ?`,
 		f.Channel, f.Channel, f.Job, f.Job, f.Limit)
 }
+
+// ChannelNames lists the channels that have a baseline row.
+func ChannelNames(db *sql.DB) ([]string, error) {
+	rows, err := db.Query(`SELECT name FROM notify_channel ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}

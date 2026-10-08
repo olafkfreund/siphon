@@ -10,6 +10,7 @@ import (
 
 	"github.com/olafkfreund/siphon/internal/action"
 	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/notify"
 	"github.com/olafkfreund/siphon/internal/store"
 )
 
@@ -69,6 +70,7 @@ func (p *Pipeline) Serve(ctx context.Context) error {
 	}
 	spawn(func() { p.retention(ctx) })
 	spawn(func() { p.expiryLoop(ctx) })
+	spawn(func() { notify.New(p.Store, p.Config, p.Now).Run(ctx) })
 
 	wg.Wait()
 	p.applyMu.Lock()

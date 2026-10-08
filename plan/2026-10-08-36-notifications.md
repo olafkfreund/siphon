@@ -301,3 +301,10 @@ steps 6–8, and reviews.
   - **`TakeSuppressed(channel)`:** counts the channel's suppressed rows and marks them reported, for the D6 suffix.
   - **Signatures:** small changes. `EnqueueNotification` reports whether it created a row. `FailedJobsSince` returns at most 200 rows, oldest first. `SentSourceEpisodes` returns only failing rows that were sent and have no `source_ok` yet.
   - **Upgrade:** a source that was already failing before the upgrade starts its failing run at its first failed poll after the upgrade.
+- Step 3 (coder):
+  - **Baselines:** `store.ChannelNames` lets `Scan` drop the baseline of a channel that's no longer configured (D4), so the delete paths needn't.
+  - **`Send` and `TestMessage`:** `Send` is `Notifier.Send(ctx, name, Message, actor)`, and `TestMessage()` builds the test message.
+  - **Outbox rows** hold only the fixed text. The rule and the link are looked up when the message is delivered.
+  - **Sources and the baseline:** D4 covers sources too. A failing run that began before the channel's baseline isn't announced.
+  - **Suppressed count:** it's taken before the send, so a failed send loses the suffix (noted with a `ponytail:` comment).
+  - **Immediate failure:** a missing channel or a 3xx answer goes straight to `failed`.
