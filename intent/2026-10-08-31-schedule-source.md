@@ -90,6 +90,8 @@ restarts, rather than landing at a time of day.
 
 ## Open questions
 
+Resolved by the owner on 2026-10-08 ("approved"): all four proposals below are adopted.
+
 1. **Syntax:** standard 5-field cron, plus `@daily`/`@weekly`/`@hourly`
    and `every <duration>`? Proposal: yes to all three. No seconds field.
 2. **Missed runs:** the default `catch_up: latest` runs the most recent
