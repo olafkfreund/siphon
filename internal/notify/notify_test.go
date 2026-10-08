@@ -100,6 +100,18 @@ func (e *env) rows() []store.Notification {
 	return l
 }
 
+// An approval made after the channel was added but before the notifier's
+// first scan of it (up to one interval) is still sent.
+func TestBaselineCoversTheFirstInterval(t *testing.T) {
+	e := newEnv(t, "webhook", "")
+	e.approval(e.job("pending_approval", 0, nil), nil)
+	e.now = e.now.Add(scanEvery - time.Second)
+	e.run()
+	if e.count() != 1 {
+		t.Fatalf("approval in the first interval: want 1 sent, got %d", e.count())
+	}
+}
+
 func TestBaselineThenEachEventOnce(t *testing.T) {
 	e := newEnv(t, "webhook", "")
 	e.now = e.now.Add(-time.Hour) // history: made before the channel exists
@@ -397,7 +409,7 @@ func TestDeletedChannelRestartsFresh(t *testing.T) {
 	e.n.Config = func() *config.Config { return cfg }
 	e.now = e.now.Add(time.Hour)
 	e.run()
-	if since, _ := store.ChannelSince(e.st.DB, "hook", e.now.Add(time.Hour)); !since.Equal(e.now) {
+	if since, _ := store.ChannelSince(e.st.DB, "hook", e.now.Add(time.Hour)); !since.Equal(e.now.Add(-2*scanEvery)) {
 		t.Fatalf("not fresh: %v", since)
 	}
 }

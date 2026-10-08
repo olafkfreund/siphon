@@ -116,7 +116,11 @@ func (n *Notifier) Scan(ctx context.Context) error {
 
 func (n *Notifier) scanChannel(cfg *config.Config, name string, ch *config.Notify, now time.Time) error {
 	db := n.Store.DB
-	since, err := store.ChannelSince(db, name, now)
+	// The first scan sees a new channel up to one interval after it was added:
+	// backdate its baseline (two intervals, for tick jitter), or an approval in
+	// the gap is never sent.
+	// ponytail: may include up to 30 s from before the add; a stored creation time would be exact.
+	since, err := store.ChannelSince(db, name, now.Add(-2*scanEvery))
 	if err != nil {
 		return err
 	}

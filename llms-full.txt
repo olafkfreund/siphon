@@ -2423,8 +2423,8 @@ or `test`. `job` is `0`, and `rule` is empty, for source messages.
 
 Leave out `--events` to get all four.
 
-**A new channel only hears about new things.** It never sends anything
-that happened before you added it.
+**A new channel only hears about new things.** It sends nothing from
+before you added it, apart from the last half-minute or so.
 
 ## What a message contains
 

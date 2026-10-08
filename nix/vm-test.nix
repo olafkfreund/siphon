@@ -64,6 +64,11 @@ pkgs.testers.runNixOSTest {
         serviceConfig.ExecStart = "${pkgs.python3}/bin/python3 ${./stub-sts.py}";
       };
       systemd.services.siphon.environment.AWS_ENDPOINT_URL_STS = "http://127.0.0.1:8099";
+      # A webhook notification channel on loopback (docs/tasks/notifications.md).
+      systemd.services.notify-recv = {
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig.ExecStart = "${pkgs.python3}/bin/python3 ${./notify-recv.py}";
+      };
       environment.etc."siphon/gl-token".text = "gl-hook-token-123";
       # Standard Webhooks secret: whsec_ + base64 of the key bytes.
       environment.etc."siphon/std-secret".text = "whsec_c2lwaG9uLXN0YW5kYXJkLXdlYmhvb2tzLWtleQ==";
@@ -136,6 +141,7 @@ pkgs.testers.runNixOSTest {
             };
           };
           server.models.private_endpoints = [ "external:8000" ];
+          server.services.private_endpoints = [ "127.0.0.1:18099" ];
           sources.extm = {
             type = "mcp";
             url = "http://external:8000/mcp";
@@ -773,6 +779,7 @@ pkgs.testers.runNixOSTest {
         # first task: webhook -> command
         t = json.loads(alice("""siphon new task --name vmhello --webhook vm-hook --when 'event.msg != nil' --on each --id event.msg --cmd '["echo","vm {{.event.msg}}"]' --yes -o json"""))
         sec = t["webhook"]["secret"]
+        sec_hello = sec  # later subtests reuse the name sec
         machine.succeed(f"""curl -sf -H 'X-Siphon-Key: {sec}' -d '{{"msg":"hi"}}' http://127.0.0.1:8080/hook/vm-hook""")
         wait_job("vmhello", "done")
         last = json.loads(alice("siphon test vmhello --last -o json"))
@@ -837,6 +844,48 @@ pkgs.testers.runNixOSTest {
         machine.succeed(f"curl -s -c /tmp/svc.jar -o /dev/null --data-urlencode token={TOKEN} http://127.0.0.1:8080/login")
         page = machine.succeed("curl -sf -b /tmp/svc.jar http://127.0.0.1:8080/services")
         assert "Uptime Kuma" in page and "Slack" in page and "Explore services" in page
+
+    with subtest("notifications: approval and failure reach a webhook channel, once (docs/tasks/notifications.md)"):
+        import json, time as _t
+        def notes():
+            out = machine.succeed("cat /tmp/notify.log 2>/dev/null || true")
+            return [json.loads(l) for l in out.splitlines() if l.strip()]
+        def wait_note(pred, timeout=60):
+            end = _t.time() + timeout
+            while _t.time() < end:
+                hit = [n for n in notes() if pred(n)]
+                if hit:
+                    return hit
+                _t.sleep(2)
+            raise Exception(f"no such notification: {notes()}")
+        machine.wait_for_open_port(18099)
+        alice("printf %s http://127.0.0.1:18099/n | siphon notify add hook --type webhook --url - --events approval,failed --yes")
+        assert "sent" in alice("siphon notify test hook")
+        assert [n["event"] for n in notes()] == ["test"], notes()
+        # an agent run waits for approval -> exactly one message for it
+        machine.succeed(f"""curl -sf -H 'X-Siphon-Key: {sec_hello}' -d '{{"agent":true,"n":2}}' http://127.0.0.1:8080/hook/vm-hook""")
+        job = wait_job("vm-agent-rule", "pending_approval")
+        appr = wait_note(lambda n: n["event"] == "approval")
+        assert len(appr) == 1 and appr[0]["job"] == job["id"] and appr[0]["rule"] == "vm-agent-rule", appr
+        alice(f"siphon deny {job['id']}")
+        # a failing command -> one "failed" message
+        alice("""siphon new task --name vm-fails --source vm-hook --when 'event.fail == true' --on each --id event.n --cmd '["false"]' --yes""")
+        machine.succeed(f"""curl -sf -H 'X-Siphon-Key: {sec_hello}' -d '{{"fail":true,"n":1}}' http://127.0.0.1:8080/hook/vm-hook""")
+        fjob = wait_job("vm-fails", "failed")
+        assert len(wait_note(lambda n: n["event"] == "failed" and n["job"] == fjob["id"])) == 1
+        # a restart re-sends nothing: the outbox remembers what was delivered
+        before = len(notes())
+        machine.succeed("systemctl restart siphon.service")
+        machine.wait_for_open_port(8080)
+        _t.sleep(35)  # two scans
+        assert len(notes()) == before, notes()[before:]
+        log = json.loads(alice("siphon notify log -o json"))
+        rows = log if isinstance(log, list) else log.get("notifications", [])
+        mine = [r for r in rows if r["channel"] == "hook"]
+        assert mine and all(r["state"] == "sent" for r in mine), rows
+        # leave nothing behind for the later subtests
+        alice("siphon delete rules vm-fails")
+        alice("siphon delete notify hook")
 
     with subtest("a rule created over the config API fires without a restart"):
         import json

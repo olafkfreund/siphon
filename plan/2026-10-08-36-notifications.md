@@ -320,3 +320,7 @@ steps 6–8, and reviews.
   - **No auto-refresh:** the Notifications page doesn't refresh itself, so a half-filled add form isn't wiped.
   - **Add and Delete** show only when the config is editable.
   - **Each channel card** shows its last event, time and error.
+- Step 7 (Opus), a bug the VM subtest found:
+  - **The gap:** the baseline (D4) was set at the notifier's first scan of a new channel, up to 15 s after the channel was added. An approval in that gap counted as history and was never sent.
+  - **The fix:** the baseline is now backdated by two scan intervals, so it may include about 30 s from before the add. `TestBaselineCoversTheFirstInterval` pins this; it fails without the fix. The docs say "the last half-minute or so".
+  - **Also:** the Notifications page has a gap above Recent deliveries (`mt`).
