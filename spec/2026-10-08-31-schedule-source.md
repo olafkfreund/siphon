@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 31
 intent: intent/2026-10-08-31-schedule-source.md
 ---
