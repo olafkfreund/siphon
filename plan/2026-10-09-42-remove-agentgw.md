@@ -145,4 +145,17 @@ spec: spec/2026-10-09-42-remove-agentgw.md
 
 ## Deviations
 
-None yet.
+- **Step 1 (coder):** the coder's `git rm` of `cmd/siphon/legacy_test.go`
+  and `schema/agentgw.schema.json` was still staged when the step-2 commit
+  (835a4e9) was made, so those two deletions landed in that commit. The rest
+  of step 1 is in its own commit.
+- **Step 1:** `backupDB` lost its `*flag.FlagSet` parameter. It was only
+  there for `resolveConfig`.
+- **Step 5, the host check (read-only):** clean.
+  - no `.nix` file under `~/GitHub` mentions the old name;
+  - this host has no `/var/lib/agentgw`, and nothing in `/etc/nixos`
+    mentions it;
+  - the dev instance uses `siphon.yaml` and `state.db`.
+
+  An untracked, ignored-until-now `agentgw` binary (a local build from
+  2026-10-06) sits at the repo root. It is left to the owner.

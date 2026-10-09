@@ -595,25 +595,6 @@ func TestAgentEgressFailsClosed(t *testing.T) {
 	}
 }
 
-// legacy-name: a config without db: keeps using an existing agentgw.db.
-func TestLegacyDefaultDB(t *testing.T) {
-	dir := t.TempDir()
-	cfg := filepath.Join(dir, "siphon.yaml")
-	os.WriteFile(cfg, nil, 0o600)
-	if c, _ := Load(cfg); filepath.Base(c.Server.DB) != "siphon.db" || len(c.Warnings()) > 0 && strings.Contains(strings.Join(c.Warnings(), ""), "rename it") {
-		t.Fatalf("fresh dir: %s", c.Server.DB)
-	}
-	os.WriteFile(filepath.Join(dir, "agentgw.db"), nil, 0o600) // legacy-name
-	c, _ := Load(cfg)
-	if filepath.Base(c.Server.DB) != "agentgw.db" || !strings.Contains(strings.Join(c.Warnings(), "\n"), "rename it to siphon.db") { // legacy-name
-		t.Fatalf("legacy: %s %v", c.Server.DB, c.Warnings())
-	}
-	os.WriteFile(filepath.Join(dir, "siphon.db"), nil, 0o600)
-	if c, _ := Load(cfg); filepath.Base(c.Server.DB) != "siphon.db" {
-		t.Fatalf("both exist: %s", c.Server.DB)
-	}
-}
-
 func TestModelValidation(t *testing.T) {
 	t.Setenv("K", "sk-test")
 	const ok = "credentials: {o: {provider: ollama, url: 'http://h:11434'}}\nagents: {m: {kind: model, model: q, credential: o}}\n"

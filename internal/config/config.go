@@ -95,7 +95,6 @@ type Config struct {
 	Units  []string           `yaml:"units"`
 
 	resolveErrs []error
-	legacyDB    string // set when the default db fell back to an old agentgw.db // legacy-name
 }
 
 type Server struct {
@@ -503,21 +502,10 @@ func Load(path string) (*Config, error) {
 	return c, nil
 }
 
-// resolveDB points a relative db at the config file's directory and applies
-// the legacy-name fallback.
+// resolveDB points a relative db at the config file's directory.
 func (c *Config) resolveDB(path string) {
-	// A relative db lives next to the config file, wherever the daemon is started.
 	if d := c.Server.DB; d != "" && d != ":memory:" && !filepath.IsAbs(d) {
 		c.Server.DB = filepath.Join(filepath.Dir(path), d)
-	}
-	// The default db was agentgw.db before the rename: keep using an existing one. // legacy-name
-	if filepath.Base(c.Server.DB) == "siphon.db" {
-		old := filepath.Join(filepath.Dir(c.Server.DB), "agentgw.db") // legacy-name
-		if _, err := os.Stat(c.Server.DB); errors.Is(err, os.ErrNotExist) {
-			if _, err := os.Stat(old); err == nil {
-				c.Server.DB, c.legacyDB = old, old
-			}
-		}
 	}
 }
 
@@ -734,9 +722,6 @@ func (c *Config) usedByAgent(source string) bool {
 // Warnings lists non-fatal findings.
 func (c *Config) Warnings() []string {
 	var w []string
-	if c.legacyDB != "" {
-		w = append(w, fmt.Sprintf("using %s: rename it to siphon.db (the old default name goes away in v0.2.0)", c.legacyDB)) // legacy-name
-	}
 	if c.Server.Sandbox == "none" {
 		w = append(w, "server.sandbox is none: actions run unsandboxed")
 		if c.Server.Egress.CmdDefault {

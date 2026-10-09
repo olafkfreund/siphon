@@ -15,8 +15,7 @@ func TestSchemaUpToDate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// agentgw.schema.json is the legacy copy (until v0.2.0); it must stay identical. // legacy-name
-	for _, path := range []string{"../../schema/siphon.schema.json", "../../schema/agentgw.schema.json"} { // legacy-name
+	for _, path := range []string{"../../schema/siphon.schema.json"} {
 		if os.Getenv("UPDATE_SCHEMA") == "1" {
 			if err := os.WriteFile(path, got, 0644); err != nil {
 				t.Fatal(err)
