@@ -24,6 +24,11 @@ var blockedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("::/96"),
 }
 
+// HTTPClient is the guarded egress client (private-address rules, no redirects) for other packages.
+func HTTPClient(allowPrivate bool, timeout time.Duration, maxBody int64) *http.Client {
+	return guardedClient(allowPrivate, timeout, maxBody, false)
+}
+
 func guardedClient(allowPrivate bool, timeout time.Duration, maxBody int64, stream bool) *http.Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
