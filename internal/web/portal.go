@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/olafkfreund/siphon/internal/store"
@@ -248,6 +249,7 @@ func (s *server) portalAs(need role, h func(w http.ResponseWriter, r *http.Reque
 		ok := err == nil
 		if ok {
 			sess, ok = s.parseSession(c.Value)
+			ok = ok && s.sessionAllowed(sess)
 		}
 		if !ok {
 			if r.Method == http.MethodGet {
@@ -283,4 +285,15 @@ func (s *server) portalAs(need role, h func(w http.ResponseWriter, r *http.Reque
 		}
 		h(w, r, csrf)
 	}
+}
+
+// sessionAllowed drops sessions the live config no longer allows: SSO ones
+// once server.oidc is gone, token ones once token_login is off.
+// ponytail: a removed role mapping still lasts until expiry or restart; that needs groups in the cookie.
+func (s *server) sessionAllowed(se session) bool {
+	o := s.Config().Server.OIDC
+	if strings.HasPrefix(se.actor, "oidc:") {
+		return o != nil
+	}
+	return se.actor != "portal" || o == nil || o.TokenLoginOn()
 }

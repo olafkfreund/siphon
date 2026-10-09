@@ -37,23 +37,28 @@ func (s *server) loginData(err string) loginData {
 	return loginData{Err: err, SSO: o != nil, Token: o == nil || o.TokenLoginOn()}
 }
 
-// oidcProvider discovers lazily and caches the provider per issuer. An error is not cached.
+// oidcRetry is how long a failed discovery is answered from memory, so an
+// unreachable issuer can't tie up a connection per visit.
+const oidcRetry = 30 * time.Second
+
+// oidcProvider discovers lazily and caches the provider per issuer and
+// allow_private (JWKS reuses the discovery client). A failure is cached for oidcRetry.
 func (s *server) oidcProvider(r *http.Request, o *config.OIDC) (*oidc.Provider, error) {
+	key := o.Issuer + "|" + strconv.FormatBool(o.AllowPrivate)
 	s.oidcMu.Lock()
-	if s.oidcIss == o.Issuer && s.oidcProv != nil {
-		p := s.oidcProv
-		s.oidcMu.Unlock()
-		return p, nil
+	if s.oidcKey == key {
+		p, err, at := s.oidcProv, s.oidcErr, s.oidcErrAt
+		if p != nil || err != nil && s.Now().Sub(at) < oidcRetry {
+			s.oidcMu.Unlock()
+			return p, err
+		}
 	}
 	s.oidcMu.Unlock()
 	p, err := oidc.NewProvider(oidcCtx(r, o), o.Issuer)
-	if err != nil {
-		return nil, err
-	}
 	s.oidcMu.Lock()
-	s.oidcIss, s.oidcProv = o.Issuer, p
+	s.oidcKey, s.oidcProv, s.oidcErr, s.oidcErrAt = key, p, err, s.Now()
 	s.oidcMu.Unlock()
-	return p, nil
+	return p, err
 }
 
 // oidcCtx makes go-oidc and oauth2 use the guarded client (no redirects, private-address rules).
@@ -178,7 +183,9 @@ func (s *server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := r.Cookie(oidcCookie)
 	if err != nil {
-		fail("no sign-in in progress", nil)
+		// Not counted: without the signed cookie there is nothing to guess, and
+		// behind a proxy every user shares one limiter bucket.
+		s.oidcPage(w, http.StatusBadRequest, "Sign-in failed", "SSO sign-in failed (no sign-in in progress). Start again from the sign-in page.", false)
 		return
 	}
 	f := strings.Split(c.Value, "|")
@@ -228,7 +235,7 @@ func (s *server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	var cl struct {
 		Sub, Email    string
-		EmailVerified bool `json:"email_verified"`
+		EmailVerified any `json:"email_verified"` // some providers send "true"
 	}
 	var all map[string]any
 	if err := idt.Claims(&cl); err != nil {
@@ -241,11 +248,12 @@ func (s *server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	// An unverified email never names anyone: the audit log would believe it.
 	who := cl.Sub
-	if cl.Email != "" && cl.EmailVerified {
+	verified := cl.EmailVerified == true || cl.EmailVerified == "true"
+	if cl.Email != "" && verified {
 		who = cl.Email
 	}
 	actor := "oidc:" + who
-	rl := roleFor(o, cl.Email, cl.EmailVerified, claimGroups(all, o.GroupsClaimOrDefault()))
+	rl := roleFor(o, cl.Email, verified, claimGroups(all, o.GroupsClaimOrDefault()))
 	if rl == 0 {
 		s.audit(actor, "oidc_refused", actor)
 		s.oidcPage(w, http.StatusForbidden, "Not allowed", who+" has no role in Siphon. Ask an admin.", false)

@@ -87,7 +87,7 @@ func TestTokenLoginOff(t *testing.T) {
 }
 
 func TestActorFromSession(t *testing.T) {
-	e := newEnv(t, nil)
+	e := newEnv(t, func(o *Options) { o.Cfg.Server.OIDC = &config.OIDC{} })
 	c, csrf := e.asRole(roleOperator, "oidc:a@x")
 	if code := e.postAs(c, csrf, "/rules/disk-full/disable"); code != 303 {
 		t.Fatalf("got %d", code)
@@ -180,5 +180,32 @@ func TestRolesHideControls(t *testing.T) {
 		if !strings.Contains(b, `role="switch"`) {
 			t.Errorf("%s: rule state not shown", tc.role)
 		}
+	}
+}
+
+// A session the live config no longer allows is refused: SSO without
+// server.oidc, a token login once token_login is off.
+func TestSessionFollowsLiveConfig(t *testing.T) {
+	off := false
+	for _, tc := range []struct {
+		name  string
+		oidc  *config.OIDC
+		actor string
+		ok    bool
+	}{
+		{"sso without oidc", nil, "oidc:a@x", false},
+		{"sso with oidc", &config.OIDC{}, "oidc:a@x", true},
+		{"token, token_login off", &config.OIDC{TokenLogin: &off}, "portal", false},
+		{"token, oidc on", &config.OIDC{}, "portal", true},
+		{"token, no oidc", nil, "portal", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, func(o *Options) { o.Cfg.Server.OIDC = tc.oidc })
+			c, _ := e.asRole(roleAdmin, tc.actor)
+			code := e.do("GET", "/rules", nil, func(r *http.Request) { r.AddCookie(c) }).Code
+			if (code == 200) != tc.ok {
+				t.Fatalf("got %d", code)
+			}
+		})
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -137,6 +138,7 @@ func TestOIDCSignInRoles(t *testing.T) {
 		{"operator by group string", map[string]any{"groups": "ops"}, roleOperator},
 		{"highest wins", map[string]any{"groups": []string{"all", "adm", "ops"}}, roleAdmin},
 		{"verified email, any case", map[string]any{"email": "v@example.COM"}, roleViewer},
+		{"email_verified as a string", map[string]any{"email": "v@example.com", "email_verified": "true"}, roleViewer},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := oidcEnv(t, p, nil)
@@ -295,5 +297,42 @@ func TestOIDCProviderDown(t *testing.T) {
 	w := e.do("GET", "/login/oidc", nil, nil)
 	if w.Code != 502 || !strings.Contains(w.Body.String(), "SSO provider unreachable") {
 		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+}
+
+// No sign-in cookie: refused, but not charged to the limiter (behind a proxy
+// every user shares one bucket, and there is nothing to guess).
+func TestOIDCNoCookieNotCounted(t *testing.T) {
+	p := newIdP(t)
+	e := oidcEnv(t, p, nil)
+	for i := 0; i <= failBurst; i++ {
+		w := e.do("GET", "/login/oidc/callback?state=x&code=y", nil, fromIP("192.0.2.14"))
+		if w.Code != 400 {
+			t.Fatalf("attempt %d: %d", i, w.Code)
+		}
+	}
+}
+
+// A failed discovery is reused for oidcRetry, then tried again.
+func TestOIDCDiscoveryFailureCached(t *testing.T) {
+	var hits atomic.Int32
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		http.Error(w, "down", 500)
+	}))
+	t.Cleanup(dead.Close)
+	e := oidcEnv(t, &idp{Server: dead}, nil)
+	for range 3 {
+		if w := e.do("GET", "/login/oidc", nil, nil); w.Code != 502 {
+			t.Fatalf("%d", w.Code)
+		}
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("discovery hits %d, want 1", hits.Load())
+	}
+	e.now = e.now.Add(oidcRetry)
+	e.do("GET", "/login/oidc", nil, nil)
+	if hits.Load() != 2 {
+		t.Fatalf("after retry window: %d", hits.Load())
 	}
 }

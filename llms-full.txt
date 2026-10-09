@@ -3035,7 +3035,7 @@ working for the CLI, the API and scripts.
 
 | Role | Can |
 |---|---|
-| **viewer** | read every page (the portal never shows secret values) |
+| **viewer** | read every page. Secrets in `env:` or `file:` refs are never shown, but plain values in the config are, including header values, and so is the config export |
 | **operator** | a viewer who can also approve and deny jobs, turn rules on and off, run rule tests and the egress preview, test connections, services and notifications, and start an MCP OAuth login |
 | **admin** | everything, including config edits, logins, notifications and services |
 
@@ -3081,6 +3081,10 @@ server:
   says it is verified (`email_verified: true`).
 - **No match, no access:** someone who matches no role is refused. The
   refusal is logged in the audit log as `oidc_refused`.
+- **`groups_claim` must be a claim only your provider's admins control,**
+  such as `groups` or `roles`. Never point it at `name`,
+  `preferred_username` or anything else people can edit about themselves:
+  they could give themselves a group like `siphon-admins`.
 
 **The other settings:**
 - **The issuer** must be `https`, or `http` on localhost.
@@ -3096,9 +3100,8 @@ server:
     "file:/run/credentials/siphon.service/oidc-secret";
   ```
 
-Restart Siphon. The login page now shows **Sign in with SSO**. Role
-mappings are read at each sign-in, so a changed mapping applies the next
-time someone signs in.
+Restart Siphon. The login page now shows **Sign in with SSO**. After any
+later change to `server.oidc`, restart Siphon again.
 
 ## 3. Sign in
 
@@ -3129,7 +3132,9 @@ role are shown next to **Sign out**.
   - **Groups:** add a groups claim under "Token configuration". It sends
     group object IDs, not names.
   - **Large tenants:** past about 200 groups, Entra ID leaves groups out of
-    the token. Use app roles with `groups_claim: roles`, or map by email.
+    the token. Use app roles with `groups_claim: roles`.
+  - **No email mapping:** Entra ID doesn't send `email_verified`, so
+    `emails:` never match. Map by groups or app roles only.
 - **GitHub, through Dex:** GitHub alone isn't an OpenID Connect provider.
   Put Dex in front of it with the GitHub connector.
   - Add `groups` to `scopes`.
@@ -3156,9 +3161,17 @@ with the admin token (`server.token`), or use the CLI.
 
 ## Taking access away
 
-Removing someone from a group takes effect when their session ends, at
-most 12 hours later. To cut access at once, remove them at the provider
-and restart Siphon. A restart ends every portal session.
+A session keeps the role it was signed in with until it ends, at most 12
+hours later. That holds after you remove someone from a group at the
+provider, and after you take their group or email out of `roles`.
+
+**To cut access at once,** remove them at the provider, then restart
+Siphon. A restart ends every portal session.
+
+Changes to `server.oidc` apply when Siphon restarts, and a restart also
+ends every session. Siphon also checks each request against the config it
+is running with, so an SSO session stops working once `server.oidc` is
+gone, and a token session once `token_login` is `false`.
 
 ## Upgrading
 

@@ -74,8 +74,10 @@ type server struct {
 	editMu      sync.Mutex             // serialises config saves
 	notice      atomic.Pointer[string] // set when a save could not be applied live
 	oidcMu      sync.Mutex
-	oidcIss     string // issuer of oidcProv
+	oidcKey     string // issuer and allow_private of oidcProv/oidcErr
 	oidcProv    *oidc.Provider
+	oidcErr     error // last discovery failure, reused until oidcErrAt+oidcRetry
+	oidcErrAt   time.Time
 }
 
 const (
