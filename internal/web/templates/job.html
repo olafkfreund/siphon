@@ -1,8 +1,8 @@
 {{define "job"}}{{with .JobV}}
 <div class="top"><div><div class="muted small"><a href="/jobs">Jobs</a> / {{.ID}}</div><h1 class="title-row">Job {{.ID}} {{template "pill" .State}}</h1></div><span class="sp"></span>
 {{if eq .State "pending_approval"}}
-  <form method="post" action="/approvals/{{.ID}}/deny"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/jobs/{{.ID}}"><button class="btn no">Deny</button></form>
-  <form method="post" action="/approvals/{{.ID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/jobs/{{.ID}}"><button class="btn ok">Approve &amp; run</button></form>
+  {{if can $.Role "operator"}}<form method="post" action="/approvals/{{.ID}}/deny"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/jobs/{{.ID}}"><button class="btn no">Deny</button></form>{{end}}
+  {{if can $.Role "operator"}}<form method="post" action="/approvals/{{.ID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/jobs/{{.ID}}"><button class="btn ok">Approve &amp; run</button></form>{{end}}
 {{end}}</div>
 {{if .Summary}}<div class="banner fail" role="alert"><div><b>Why it failed:</b> <code class="wrap">{{.Summary}}</code></div>{{if .Connect}}<a class="btn sm primary" href="/connections?connect={{pe .Connect}}#add">{{template "icon" "key"}}Connect {{.Connect}}</a>{{end}}</div>{{end}}
 <div class="grid g2">

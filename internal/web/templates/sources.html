@@ -5,7 +5,7 @@
   {{if eq .Type "schedule"}}<p class="small muted mt">Next run {{zoned .NextRunAt .Timezone}} · last run {{if .LastRunAt}}{{zoned .LastRunAt .Timezone}}{{else}}never{{end}}</p>{{end}}
   <p class="small {{if .LastError}}err{{else}}muted{{end}} mt">{{if .LastError}}{{.LastError}}{{else if eq .Type "schedule"}}{{else if .LastPollAt}}{{if eq .Type "webhook"}}Last delivery{{else}}Last poll{{end}} {{agop .LastPollAt}}{{else}}{{if eq .Type "webhook"}}Waiting for the first delivery.{{else}}Not polled yet.{{end}}{{end}}</p>
   {{if .OAuth}}<div class="rule-head mt"><span class="small muted">OAuth: {{.OAuth}}</span><span class="sp"></span>
-    <form method="post" action="/sources/{{pe .Name}}/oauth"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{if or (eq .OAuth "ok") (eq .OAuth "expired")}}Log in again{{else}}Log in{{end}}</button></form></div>{{end}}
+    {{if can $.Role "operator"}}<form method="post" action="/sources/{{pe .Name}}/oauth"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{if or (eq .OAuth "ok") (eq .OAuth "expired")}}Log in again{{else}}Log in{{end}}</button></form>{{end}}</div>{{end}}
 </section>
 {{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>Nothing in the current yet. Add a source to <code>siphon.yaml</code>.</section>{{end}}
 </div>{{end}}

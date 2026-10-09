@@ -28,6 +28,7 @@
   </nav>
   <div class="foot">
     <button type="button" class="btn sm" data-action="theme">{{template "icon" "moon"}}Theme</button>
+    {{if .Role}}<span class="muted">{{.Actor}} · {{.Role}}</span>{{end}}
     <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="btn sm">{{template "icon" "out"}}Sign out</button></form>
   </div>
 </aside>

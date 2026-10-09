@@ -10,8 +10,8 @@
   <section class="card" aria-labelledby="needs"><h2 id="needs">{{if .RecentFailed}}Needs attention{{else}}Needs you{{end}}</h2>
     {{range .Pending}}<div class="need">{{template "pill" .State}}<div class="what"><a href="/jobs/{{.ID}}"><b>{{.Rule}}</b></a> {{template "run" .}} <span class="muted small">· {{ago .CreatedAt}}</span></div><span class="sp"></span>
       <div class="acts">
-        <form method="post" action="/approvals/{{.ID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/"><button class="btn sm ok">Approve</button></form>
-        <form method="post" action="/approvals/{{.ID}}/deny"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/"><button class="btn sm no">Deny</button></form>
+        {{if can $.Role "operator"}}<form method="post" action="/approvals/{{.ID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/"><button class="btn sm ok">Approve</button></form>{{end}}
+        {{if can $.Role "operator"}}<form method="post" action="/approvals/{{.ID}}/deny"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/"><button class="btn sm no">Deny</button></form>{{end}}
       </div></div>{{end}}
     {{range .RecentFailed}}<div class="need">{{template "pill" .State}}<div class="what"><a href="/jobs/{{.ID}}"><b>{{.Rule}}</b></a> {{template "run" .}} <span class="muted small">·{{if .ExitCode}} exited {{exit .ExitCode}} ·{{end}} {{ago .CreatedAt}}</span></div><span class="sp"></span><a class="btn sm" href="/jobs/{{.ID}}">Open</a></div>{{end}}
     {{if and (not .Pending) (not .RecentFailed)}}<div class="empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>All clear. Nothing waiting, nothing failed in the last day.</div>{{end}}

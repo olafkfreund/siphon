@@ -16,6 +16,7 @@ import (
 // view is the data for every portal partial; only the fields a page uses are set.
 type view struct {
 	CSRF        string
+	Role        string // the signed-in role; templates hide controls it cannot use
 	State       string
 	Sources     []sourceView
 	Rules       []ruleView
@@ -47,6 +48,7 @@ type view struct {
 
 type layout struct {
 	Title, Path, CSRF, Active, Banner string
+	Actor, Role                       string
 	Pending                           int
 	Unsandboxed                       bool
 	Poll                              bool // lists and live jobs refresh; editors never do
@@ -54,7 +56,7 @@ type layout struct {
 }
 
 func (s *server) portalRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) { s.render(w, "login", "") })
+	mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) { s.render(w, "login", s.loginData("")) })
 	mux.HandleFunc("POST /login", s.login)
 
 	page := func(path, name string, fill func(r *http.Request, v *view) (bool, error)) {
@@ -174,6 +176,7 @@ var backPath = regexp.MustCompile(`^/(jobs/[0-9]+)?$`)
 
 // afterPost answers an htmx POST with the refreshed partial, a plain form POST with a redirect.
 func (s *server) afterPost(w http.ResponseWriter, r *http.Request, path, name string, v view) {
+	v.Role = s.role(r).String()
 	if r.Header.Get("HX-Request") == "true" {
 		s.render(w, name, v)
 		return
@@ -186,6 +189,7 @@ func (s *server) afterPost(w http.ResponseWriter, r *http.Request, path, name st
 
 // page renders a partial for htmx requests, or wraps it in the full layout.
 func (s *server) page(w http.ResponseWriter, r *http.Request, name string, v view) {
+	v.Role = s.role(r).String()
 	if r.Header.Get("HX-Request") == "true" {
 		s.render(w, name, v)
 		return
@@ -204,7 +208,7 @@ func (s *server) page(w http.ResponseWriter, r *http.Request, name string, v vie
 	if v.Cfg != nil && v.Cfg.Kind != "" { // config pages light up their own kind
 		title, act = kindTitle[v.Cfg.Kind], kindNav[v.Cfg.Kind]
 	}
-	s.render(w, "layout", layout{Title: title, Path: r.URL.RequestURI(), CSRF: v.CSRF, Active: act,
+	s.render(w, "layout", layout{Actor: s.actor(r), Role: v.Role, Title: title, Path: r.URL.RequestURI(), CSRF: v.CSRF, Active: act,
 		Pending: len(pending), Poll: poll, Banner: s.banner(), Unsandboxed: s.Unsandboxed, Body: template.HTML(body.String())})
 }
 
@@ -222,7 +226,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	if !s.tokenOK(r.PostFormValue("token")) {
 		s.lim.fail(ip)
 		w.WriteHeader(http.StatusUnauthorized)
-		s.render(w, "login", "Invalid token")
+		s.render(w, "login", s.loginData("Invalid token"))
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: s.sessionValue(roleAdmin, "portal"), Path: "/", MaxAge: 86400,

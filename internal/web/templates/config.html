@@ -1,23 +1,23 @@
 {{define "cfglist"}}{{with .Cfg}}<div class="top"><div><h1>{{kindtitle .Kind}}</h1><div class="muted">From <code>siphon.yaml</code> and from portal edits. Every save is a revision you can restore.</div></div><span class="sp"></span>
-<a class="btn primary" href="/config/{{.Kind}}/new">New {{kindone .Kind}}</a></div>
+{{if can $.Role "admin"}}<a class="btn primary" href="/config/{{.Kind}}/new">New {{kindone .Kind}}</a>{{end}}</div>
 <nav class="small mb">{{$k := .Kind}}{{range .Kinds}}<a href="/config/{{.}}"{{if eq . $k}} aria-current="page"{{end}}>{{.}}</a> {{end}} · <a href="/history">History</a></nav>
 {{if .Notice}}<div class="banner" role="status">{{.Notice}}</div>{{end}}
 <section class="card"><table><thead><tr><th>Name</th><th>From</th><th></th></tr></thead><tbody>
 {{range .Rows}}<tr><td>{{if eq .Prov "deleted"}}<s>{{.Name}}</s>{{else}}<a href="/config/{{$k}}/{{pe .Name}}"><b>{{.Name}}</b></a>{{end}}</td><td><span class="badge{{if eq .Prov "portal"}} portal{{else if eq .Prov "override"}} ovr{{end}}">{{prov .Prov}}</span></td>
-<td>{{if ne .Prov "file"}}<form method="post" action="/config/{{$k}}/{{pe .Name}}/reset" class="sm"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{$.Cfg.Rev}}"><button>Reset to file</button></form>{{end}}</td></tr>
+<td>{{if ne .Prov "file"}}{{if can $.Role "admin"}}<form method="post" action="/config/{{$k}}/{{pe .Name}}/reset" class="sm"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{$.Cfg.Rev}}"><button>Reset to file</button></form>{{end}}{{end}}</td></tr>
 {{else}}<tr><td colspan="3"><div class="empty">Nothing here yet.</div></td></tr>{{end}}
 </tbody></table></section>{{end}}{{end}}
 
 {{define "cfgedit"}}{{with .Cfg}}{{$c := .}}<div class="top"><div><div class="muted small"><a href="/config/{{.Kind}}">{{kindtitle .Kind}}</a> / {{if .New}}new{{else}}{{.Name}}{{end}}</div><h1>{{if .New}}New {{kindone .Kind}}{{else}}Edit {{kindone .Kind}} <span class="muted">{{.Name}}</span>{{end}}</h1></div><span class="sp"></span>{{if .Prov}}<span class="badge{{if eq .Prov "portal"}} portal{{else if eq .Prov "override"}} ovr{{end}}">{{prov .Prov}}</span>{{end}}</div>
 {{if .Errors}}<div class="banner" role="alert"><pre>{{.Errors}}</pre></div>{{end}}
 {{if .Diff}}<section class="card mb"><h2>Changes</h2><div class="diff"><pre>{{diffhtml .Diff}}</pre></div>
-{{if .Done}}<form method="post" action="{{.Base}}/save"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><input type="hidden" name="mode" value="yaml"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="yaml" value="{{.YAML}}"><div class="row-actions"><button class="btn primary">Confirm and save</button></div></form>{{end}}</section>{{end}}
+{{if .Done}}{{if can $.Role "admin"}}<form method="post" action="{{.Base}}/save"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><input type="hidden" name="mode" value="yaml"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="yaml" value="{{.YAML}}"><div class="row-actions"><button class="btn primary">Confirm and save</button></div></form>{{end}}{{end}}</section>{{end}}
 {{if .HasForm}}<form method="post" action="{{.Base}}/save" class="mb">
 <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><input type="hidden" name="mode" value="form">
 <div class="grid g2"><div class="card">
 {{if .New}}<label class="f">Name<input name="name" value="{{.Name}}" required></label>{{else}}<input type="hidden" name="name" value="{{.Name}}"><label class="f">Name<input value="{{.Name}}" disabled></label>{{end}}
 {{if eq .Side "rules"}}{{template "ruleform" .}}{{else}}{{template "genfields" .}}{{end}}
-<div class="row-actions"><button class="btn" formaction="{{.Base}}/check">Review changes</button><button class="btn primary">Save &amp; apply</button></div>
+{{if can $.Role "admin"}}<div class="row-actions"><button class="btn" formaction="{{.Base}}/check">Review changes</button><button class="btn primary">Save &amp; apply</button></div>{{end}}
 </div>
 {{if eq .Side "rules"}}<div class="card tester-card"><h2>{{template "icon" "play"}} Test it</h2>
 <div class="seg mb"><label><input type="radio" name="event_src" value="last" checked><span>{{template "icon" "bolt"}}Last event</span></label><label><input type="radio" name="event_src" value="paste"><span>{{template "icon" "copy"}}Paste JSON</span></label></div>
@@ -39,10 +39,10 @@
 <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><input type="hidden" name="mode" value="yaml">
 {{if .New}}<label class="f">Name<input name="name" value="{{.Name}}" required></label>{{else}}<input type="hidden" name="name" value="{{.Name}}">{{end}}
 <textarea name="yaml" rows="14" class="mono" aria-label="YAML">{{.YAML}}</textarea>
-<div class="row-actions"><button class="btn" formaction="{{.Base}}/check">Review changes</button><button class="btn primary">Save &amp; apply</button></div>
+{{if can $.Role "admin"}}<div class="row-actions"><button class="btn" formaction="{{.Base}}/check">Review changes</button><button class="btn primary">Save &amp; apply</button></div>{{end}}
 </form></details>
-{{if and .Exists (ne .Prov "file")}}<form method="post" action="{{.Base}}/reset" class="sm"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><button>Reset to file</button></form>{{end}}
-{{if .Exists}}<form method="post" action="{{.Base}}/delete" class="sm"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><button class="btn no">Delete</button></form>{{end}}
+{{if and .Exists (ne .Prov "file")}}{{if can $.Role "admin"}}<form method="post" action="{{.Base}}/reset" class="sm"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><button>Reset to file</button></form>{{end}}{{end}}
+{{if .Exists}}{{if can $.Role "admin"}}<form method="post" action="{{.Base}}/delete" class="sm"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><button class="btn no">Delete</button></form>{{end}}{{end}}
 {{end}}{{end}}
 
 {{define "genfields"}}{{range .Fields}}{{if not .Adv}}{{template "field" .}}{{end}}{{end}}
@@ -110,4 +110,4 @@
 {{define "historyitem"}}{{with .Hist}}{{with .Rev}}<div class="top"><div><h1>Revision {{.ID}}</h1><div class="muted">{{.Summary}} · {{.Actor}} · {{tm .At}}</div></div></div>
 <nav class="small mb"><a href="/history">← History</a></nav>
 <section class="card"><div class="diff"><pre>{{diffhtml .Diff}}</pre></div>
-<form method="post" action="/history/{{.ID}}/restore"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{$.Hist.Latest}}"><button class="btn primary">Restore this revision</button></form></section>{{end}}{{end}}{{end}}
+{{if can $.Role "admin"}}<form method="post" action="/history/{{.ID}}/restore"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{$.Hist.Latest}}"><button class="btn primary">Restore this revision</button></form>{{end}}</section>{{end}}{{end}}{{end}}

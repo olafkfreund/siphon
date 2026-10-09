@@ -1,0 +1,12 @@
+{{define "signedin"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+{{if .Refresh}}<meta http-equiv="refresh" content="0;url=/">{{end}}
+<title>{{.Title}} · Siphon</title>
+<link rel="icon" href="/static/mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css"><script src="/static/app.js"></script></head>
+<body><main class="login"><div class="card">
+  <img class="logo" src="/static/mark.svg" alt="">
+  <div class="word">siphon</div>
+  <p{{if not .Refresh}} class="err" role="alert"{{end}}>{{.Msg}}</p>
+  <a class="btn primary block" href="{{if .Refresh}}/{{else}}/login{{end}}">{{if .Refresh}}Continue{{else}}Back to sign in{{end}}</a>
+</div></main></body></html>{{end}}

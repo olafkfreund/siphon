@@ -26,6 +26,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
+
 	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/mcpoauth"
 	"github.com/olafkfreund/siphon/internal/store"
@@ -71,6 +73,9 @@ type server struct {
 	tpl         *template.Template
 	editMu      sync.Mutex             // serialises config saves
 	notice      atomic.Pointer[string] // set when a save could not be applied live
+	oidcMu      sync.Mutex
+	oidcIss     string // issuer of oidcProv
+	oidcProv    *oidc.Provider
 }
 
 const (
@@ -111,6 +116,7 @@ func New(o Options) http.Handler {
 			return itoa(*e)
 		},
 		"pe":    url.PathEscape,
+		"can":   func(have, need string) bool { return parseRole(have) >= parseRole(need) && parseRole(have) != 0 },
 		"has":   func(l []string, s string) bool { return slices.Contains(l, s) },
 		"ticks": ticks,
 		"lines": func(s string) []string {
@@ -167,6 +173,7 @@ func New(o Options) http.Handler {
 	s.oauthRoutes(mux)
 	s.apiRoutes(mux)
 	s.portalRoutes(mux)
+	s.oidcRoutes(mux)
 	s.configRoutes(mux)
 	s.helpRoutes(mux)
 	if o.onNew != nil {
