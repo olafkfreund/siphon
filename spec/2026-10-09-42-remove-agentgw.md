@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 42
 intent: intent/2026-10-09-42-remove-agentgw.md
 ---
