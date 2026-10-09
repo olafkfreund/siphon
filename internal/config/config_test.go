@@ -1023,3 +1023,36 @@ func TestRetentionValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestMetricsTokenValidation(t *testing.T) {
+	setenv(t)
+	const scrape = "scrape-secret-0123456789abcdef012345"
+	t.Setenv("AGW_SCRAPE", scrape)
+	t.Setenv("AGW_SHORT", "short")
+	t.Setenv("AGW_SAME", "tok-secret-0123456789abcdef0123456789")
+	for _, tc := range []struct{ yaml, want string }{
+		{"", ""},
+		{"server: {token: env:AGW_TOKEN, metrics: {token: env:AGW_SCRAPE}}", ""},
+		{"server: {metrics: {token: " + scrape + "}}", "inline secret"},
+		{"server: {metrics: {token: env:AGW_SHORT}}", "at least 32"},
+		{"server: {token: env:AGW_TOKEN, metrics: {token: env:AGW_SAME}}", "must differ"},
+	} {
+		c, err := Parse([]byte(tc.yaml))
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = c.Validate()
+		if tc.want != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("%q: want %q, got %v", tc.yaml, tc.want, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%q: unexpected: %v", tc.yaml, err)
+		}
+		if c.Server.Metrics.Token.isSet() && !slices.Contains(c.Secrets(), scrape) {
+			t.Fatal("scrape token missing from Secrets()")
+		}
+	}
+}

@@ -401,6 +401,16 @@
           },
           "type": "object"
         },
+        "metrics": {
+          "additionalProperties": false,
+          "properties": {
+            "token": {
+              "description": "env:NAME, file:/path, or (where allowed) a literal",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
         "models": {
           "additionalProperties": false,
           "properties": {

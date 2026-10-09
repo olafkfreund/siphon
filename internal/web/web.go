@@ -34,8 +34,10 @@ var assets embed.FS
 
 type Options struct {
 	Token string // bearer token and portal login; empty locks everyone out
-	Store *store.Store
-	Cfg   *config.Config // fixed config; used only when Config is nil (tests)
+	// MetricsToken opens /metrics only; empty: admin token only.
+	MetricsToken string
+	Store        *store.Store
+	Cfg          *config.Config // fixed config; used only when Config is nil (tests)
 	// Config returns the live config (Pipeline.Config); Apply makes a new one live (Pipeline.Apply).
 	Config func() *config.Config
 	Apply  func(*config.Config) error
@@ -57,12 +59,13 @@ type Options struct {
 
 type server struct {
 	Options
-	key     []byte // per-process; a restart logs everyone out
-	tokHash [32]byte
-	lim     *limiter
-	tpl     *template.Template
-	editMu  sync.Mutex             // serialises config saves
-	notice  atomic.Pointer[string] // set when a save could not be applied live
+	key         []byte // per-process; a restart logs everyone out
+	tokHash     [32]byte
+	metricsHash [32]byte
+	lim         *limiter
+	tpl         *template.Template
+	editMu      sync.Mutex             // serialises config saves
+	notice      atomic.Pointer[string] // set when a save could not be applied live
 }
 
 const (
@@ -75,7 +78,7 @@ func New(o Options) http.Handler {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	s := &server{Options: o, key: make([]byte, 32), tokHash: sha256.Sum256([]byte(o.Token)), lim: &limiter{now: o.Now, m: map[string]*bucket{}}}
+	s := &server{Options: o, key: make([]byte, 32), tokHash: sha256.Sum256([]byte(o.Token)), metricsHash: sha256.Sum256([]byte(o.MetricsToken)), lim: &limiter{now: o.Now, m: map[string]*bucket{}}}
 	if _, err := rand.Read(s.key); err != nil {
 		panic(err)
 	}
@@ -180,6 +183,15 @@ func (s *server) tokenOK(t string) bool {
 	}
 	sum := sha256.Sum256([]byte(t))
 	return subtle.ConstantTimeCompare(sum[:], s.tokHash[:]) == 1
+}
+
+// metricsOK is tokenOK or the scrape token; use it for /metrics only.
+// Both compares always run, so timing doesn't say which token matched.
+func (s *server) metricsOK(t string) bool {
+	admin := s.tokenOK(t)
+	sum := sha256.Sum256([]byte(t))
+	scrape := subtle.ConstantTimeCompare(sum[:], s.metricsHash[:]) == 1
+	return admin || s.MetricsToken != "" && scrape
 }
 
 func (s *server) mac(msg string) string {
