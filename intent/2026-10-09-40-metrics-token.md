@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 40
 author: olafkfreund
 ---
@@ -85,3 +85,10 @@ admin token"). This task removes it.
 
    Recommendation: the existing mechanism, with a doc example. It adds no
    option.
+
+## Resolved (owner approval, 2026-10-09)
+
+All three recommendations accepted:
+1. `server.metrics: { token: <secret> }`.
+2. The admin token keeps working on `/metrics`.
+3. No new NixOS option. The token is passed through `services.siphon.credentials`.
