@@ -4,7 +4,7 @@
   <div class="rule-head"><b>{{.Name}}</b>{{if .Overridden}}<span class="badge ovr">turned off in the portal</span>{{end}}<span class="sp"></span>
     <a class="btn sm" href="/config/rules/{{pe .Name}}">Edit</a><span class="muted small">{{if .Enabled}}{{if .LastFired}}fired {{agop .LastFired}}{{else}}not fired yet{{end}}{{else}}disabled{{end}}</span>
     {{$verb := "disable"}}{{if not .Enabled}}{{$verb = "enable"}}{{end}}
-    {{if can $.Role "operator"}}<form method="post" action="/rules/{{pe .Name}}/{{$verb}}" hx-post="/rules/{{pe .Name}}/{{$verb}}" hx-target="#main"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="switch{{if .Enabled}} on{{end}}" role="switch" aria-checked="{{if .Enabled}}true{{else}}false{{end}}" aria-label="{{if .Enabled}}Disable{{else}}Enable{{end}} {{.Name}}"></button></form>{{end}}
+    {{if can $.Role "operator"}}<form method="post" action="/rules/{{pe .Name}}/{{$verb}}" hx-post="/rules/{{pe .Name}}/{{$verb}}" hx-target="#main"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="switch{{if .Enabled}} on{{end}}" role="switch" aria-checked="{{if .Enabled}}true{{else}}false{{end}}" aria-label="{{if .Enabled}}Disable{{else}}Enable{{end}} {{.Name}}"></button></form>{{else}}<button type="button" class="switch{{if .Enabled}} on{{end}}" role="switch" aria-checked="{{if .Enabled}}true{{else}}false{{end}}" aria-label="{{.Name}} is {{if .Enabled}}on{{else}}off{{end}}" disabled></button>{{end}}
   </div>
   <div class="flow{{if not .Enabled}} off{{end}}">
     <div class="node"><small><span>Source</span>{{if .SourceType}} · <span>{{.SourceType}}</span>{{end}}</small><code>{{.Source}}</code></div>

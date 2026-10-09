@@ -156,3 +156,29 @@ func TestPortalPOSTRoles(t *testing.T) {
 		}
 	}
 }
+
+// Controls a role can't use are hidden; the state they show is not.
+func TestRolesHideControls(t *testing.T) {
+	e := newEnv(t, nil)
+	for _, tc := range []struct {
+		role    role
+		toggle  bool
+		newRule bool
+	}{
+		{roleViewer, false, false},
+		{roleOperator, true, false},
+		{roleAdmin, true, true},
+	} {
+		c, _ := e.asRole(tc.role, "u")
+		b := e.do("GET", "/rules", nil, func(r *http.Request) { r.AddCookie(c) }).Body.String()
+		if got := strings.Contains(b, `action="/rules/disk-full/`); got != tc.toggle {
+			t.Errorf("%s: toggle form %v", tc.role, got)
+		}
+		if got := strings.Contains(b, `href="/config/rules/new"`); got != tc.newRule {
+			t.Errorf("%s: new rule link %v", tc.role, got)
+		}
+		if !strings.Contains(b, `role="switch"`) {
+			t.Errorf("%s: rule state not shown", tc.role)
+		}
+	}
+}
