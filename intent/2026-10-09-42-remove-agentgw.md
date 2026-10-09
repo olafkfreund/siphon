@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 42
 author: olafkfreund
 ---
@@ -91,3 +91,10 @@ Every tagged release (v0.1.0 through v0.4.0) already shipped as `siphon`.
 3. **Version:** ship this in v0.5.0 together with #40 (the scrape token)?
    Recommendation: yes. Removing the shims breaks compatibility for
    pre-release installs, so it shouldn't be a patch release.
+
+## Resolved (owner approval, 2026-10-09)
+
+All three recommendations accepted:
+1. `services.agentgw` uses `mkRemovedOptionModule`, with a pointer to `services.siphon`.
+2. The `/var/lib/agentgw` migration is removed. The release notes give the `mv` command.
+3. This ships in v0.5.0, together with #40.
