@@ -51,6 +51,7 @@ pkgs.testers.runNixOSTest {
       # Test-only secrets; real deployments use agenix/sops paths.
       environment.etc."siphon/token".text = "test-token-0123456789abcdef0123456789";
       environment.etc."siphon/hook".text = "hook-secret";
+      environment.etc."siphon/metrics-token".text = "scrape-token-0123456789abcdef0123456789";
 
       environment.etc."siphon/stub-token".text = stubToken;
       # A normal user for the CLI walkthrough (docs/getting-started.md).
@@ -98,12 +99,14 @@ pkgs.testers.runNixOSTest {
         credentials = {
           token = "/etc/siphon/token";
           hook = "/etc/siphon/hook";
+          metrics-token = "/etc/siphon/metrics-token";
         };
         settings = {
           server = {
             # All addresses: the restricted sandbox must still not reach it.
             listen = "0.0.0.0:8080";
             token = "file:/run/credentials/siphon.service/token";
+            metrics.token = "file:/run/credentials/siphon.service/metrics-token";
           };
           sources.gh = {
             type = "webhook";
@@ -914,6 +917,10 @@ pkgs.testers.runNixOSTest {
         assert machine.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {metrics}").strip() == "401"
         body = machine.succeed(f"curl -sf -H 'Authorization: Bearer {TOKEN}' {metrics}")
         assert 'siphon_jobs{state="done"}' in body and "# TYPE siphon_approvals_pending gauge" in body, body
+        # The scrape token opens /metrics and nothing else.
+        scrape = "-H 'Authorization: Bearer scrape-token-0123456789abcdef0123456789'"
+        machine.succeed(f"curl -sf {scrape} {metrics} >/dev/null")
+        assert machine.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {scrape} http://127.0.0.1:8080/api/inventory").strip() == "401"
         alice("siphon delete rules vm-kept")
         alice("siphon delete notify kept")
         machine.succeed("rm -rf /var/lib/siphon/pre-restore-* /var/backup/siphon/siphon-*.tar.gz")
