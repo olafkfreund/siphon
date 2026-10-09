@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 40
 intent: intent/2026-10-09-40-metrics-token.md
 ---
