@@ -118,6 +118,14 @@ type Server struct {
 	MCPPackages map[string]MCPPackage `yaml:"mcp_packages"`
 	// Retention is how long finished jobs, the audit log and seen events are kept. 0 means the default.
 	Retention Retention `yaml:"retention"`
+	// Metrics holds the scrape-only credential for GET /metrics.
+	Metrics MetricsServer `yaml:"metrics"`
+}
+
+// MetricsServer is the optional scrape-only token: it opens /metrics and
+// nothing else. Read at start; a change needs a restart.
+type MetricsServer struct {
+	Token Secret `yaml:"token"`
 }
 
 // Retention holds the keep-for durations; each is 0 (default) or at least 24h.
@@ -646,7 +654,7 @@ func parse(b []byte, stub map[string]string) (*Config, error) {
 // secretPtrs are values that must always be env:/file: refs. Source headers
 // are handled separately: they may be plain literals unless the name looks secret.
 func (c *Config) secretPtrs() []*Secret {
-	out := []*Secret{&c.Server.Token}
+	out := []*Secret{&c.Server.Token, &c.Server.Metrics.Token}
 	for _, name := range sortedKeys(c.Credentials) {
 		if cr := c.Credentials[name]; cr != nil {
 			out = append(out, &cr.APIKey, &cr.AccessKeyID, &cr.SecretAccessKey)
@@ -937,6 +945,14 @@ func (c *Config) Validate() error {
 	}
 	if t := c.Server.Token; t.isSet() && t.Value != "" && len(t.Value) < 32 {
 		add("server.token: must be at least 32 characters")
+	}
+	if m := c.Server.Metrics.Token; m.isSet() && m.Value != "" {
+		if len(m.Value) < 32 {
+			add("server.metrics.token: must be at least 32 characters")
+		}
+		if m.Value == c.Server.Token.Value {
+			add("server.metrics.token: must differ from server.token")
+		}
 	}
 	for _, name := range sortedKeys(c.Server.MCPPackages) {
 		pkg := c.Server.MCPPackages[name]
