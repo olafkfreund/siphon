@@ -7,8 +7,9 @@ import (
 	"testing"
 )
 
-// TestNoStragglers fails on the old name in tracked files outside the allowlist.
+// TestNoStragglers fails on the old name in tracked files outside the history folders.
 func TestNoStragglers(t *testing.T) {
+	old := "agent" + "gw" // split, so this file doesn't match itself
 	out, err := exec.Command("git", "-C", "..", "ls-files", "-z").Output()
 	if err != nil {
 		t.Skip("git unavailable:", err)
@@ -22,7 +23,7 @@ func TestNoStragglers(t *testing.T) {
 			continue // deleted in the working tree
 		}
 		for i, line := range strings.Split(string(b), "\n") {
-			if strings.Contains(strings.ToLower(line), "agentgw") && !strings.Contains(line, "legacy-name") { // legacy-name
+			if strings.Contains(strings.ToLower(line), old) {
 				t.Errorf("%s:%d: old name: %s", f, i+1, strings.TrimSpace(line))
 			}
 		}
@@ -34,9 +35,6 @@ func allowedFile(f string) bool {
 		if strings.HasPrefix(f, p) {
 			return true
 		}
-	}
-	if f == "schema/agentgw.schema.json" { // legacy-name
-		return true
 	}
 	return false
 }
