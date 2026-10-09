@@ -51,7 +51,9 @@ change in behaviour for anyone on `siphon` names, and no migration.
     It evaluates a system that sets `services.agentgw.enable = true`, and
     asserts that `builtins.tryEval` on the system's top-level build fails.
     `tryEval` drops the error text, so the message itself is checked once
-    by hand in the plan's tests.
+    by hand in the plan's tests. The option is set as
+    `services.${"agent" + "gw"}.enable = true`, a dynamic attribute, so the
+    strict straggler test doesn't match it.
 - **`nix/module.nix`:**
   - the rename import (`:180-181`) becomes:
 
