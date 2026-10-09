@@ -109,6 +109,14 @@ pkgs.testers.runNixOSTest {
             metrics.token = "file:/run/credentials/siphon.service/metrics-token";
             # Where the browser returns after an OAuth login (#44).
             public_url = "http://127.0.0.1:8080";
+            # SSO for the portal (#46). Nothing listens on :9, so discovery
+            # fails; the token login (used by the subtests above) keeps working.
+            oidc = {
+              issuer = "http://127.0.0.1:9";
+              client_id = "siphon";
+              allow_private = true;
+              roles.viewer.emails = [ "nobody@example.com" ];
+            };
           };
           sources.gh = {
             type = "webhook";
@@ -959,6 +967,21 @@ pkgs.testers.runNixOSTest {
         code = machine.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' '{base}/oauth/callback?state=bogus&code=x'").strip()
         assert code == "400", code
         machine.succeed("test ! -e /var/lib/siphon/credentials/.mcp/oauthsrc")
+
+    with subtest("portal SSO: the button, an unreachable provider and a bogus callback (docs/tasks/sso.md)"):
+        base = "http://127.0.0.1:8080"
+        page = machine.succeed(f"curl -sf {base}/login")
+        assert "Sign in with SSO" in page and 'name="token"' in page, page
+        # Discovery fails fast instead of hanging, and the error is shown.
+        code = machine.succeed(f"curl -s -o /tmp/sso.html -w '%{{http_code}}' -m 40 {base}/login/oidc").strip()
+        assert code == "502", code
+        machine.succeed("grep -q 'SSO provider unreachable' /tmp/sso.html")
+        # No sign-in in progress: refused (one failure on the shared limiter budget).
+        code = machine.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' '{base}/login/oidc/callback?state=x&code=y'").strip()
+        assert code == "400", code
+        # The token login is the break-glass path and still works.
+        machine.succeed(f"curl -s -c /tmp/sso.jar -o /dev/null --data-urlencode token={TOKEN} {base}/login")
+        machine.succeed("grep -q siphon_session /tmp/sso.jar")
 
     with subtest("stopping siphon leaves no orphaned action units (cmd and agent)"):
         assert hook('{"kind":"sleep","n":3}') == "202"
