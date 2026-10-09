@@ -158,27 +158,10 @@ let
     "antigravity"
   ];
   etcManaged = d: lib.any (k: k == d || lib.hasPrefix "${d}/" k) (lib.attrNames config.environment.etc);
-  # One-time move of an old install's state (copy, never move: rollback-safe).
-  migrateLegacyState = pkgs.writeShellScript "siphon-migrate-state" ''
-    set -eu
-    old=/var/lib/agentgw # legacy-name
-    new=${stateDir}
-    # Runs once: never after it completed (an admin may reset state later),
-    # and again if a previous copy was interrupted (.migrating left behind).
-    [ -e "$new/MIGRATED_FROM_AGENTGW" ] && exit 0 # legacy-name
-    if [ -e "$old/state.db" ] && { [ ! -e "$new/state.db" ] || [ -e "$new/.migrating" ]; }; then
-      ${pkgs.coreutils}/bin/touch "$new/.migrating"
-      ${pkgs.coreutils}/bin/cp -a "$old/." "$new/"
-      ${pkgs.coreutils}/bin/touch "$new/MIGRATED_FROM_AGENTGW" # legacy-name
-      ${pkgs.coreutils}/bin/chown -R siphon:siphon "$new"
-      ${pkgs.coreutils}/bin/rm "$new/.migrating"
-      echo "siphon: migrated state from $old to $new (old copy kept)"
-    fi
-  '';
 in
 {
-  # Renamed from agentgw; old option paths keep working until v0.2.0. # legacy-name
-  imports = [ (lib.mkRenamedOptionModule [ "services" "agentgw" ] [ "services" "siphon" ]) ]; # legacy-name
+  # The pre-release name: setting it fails evaluation with a pointer.
+  imports = [ (lib.mkRemovedOptionModule [ "services" ("agent" + "gw") ] "Siphon was renamed: use services.siphon.") ];
 
   options.services.siphon = {
     enable = lib.mkEnableOption "siphon, a gateway from MCP/API sources through rules to actions";
@@ -485,7 +468,6 @@ in
       environment = lib.optionalAttrs (cfg.aws.configFile != null) { AWS_CONFIG_FILE = cfg.aws.configFile; };
       serviceConfig = {
         ExecStartPre = [
-          "+${migrateLegacyState}"
           # -file-only: a bad portal edit must not stop the service; serve falls
           # back to the last valid revision and shows a banner instead.
           "${cfg.package}/bin/siphon validate -file-only -config ${configPath}"
