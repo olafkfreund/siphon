@@ -2735,6 +2735,8 @@ stored login.
   database (`/var/lib/siphon` on NixOS and in the OCI image), mode 0600.
 - **The contents:** the tokens, and the client a dynamic registration
   produced.
+- **The previous version:** each refresh keeps the previous file as
+  `mcp-oauth.json.prev`, also 0600. Logging out deletes both.
 - **A pre-registered `client_secret`** is never copied there. It stays an
   `env:` or `file:` reference.
 - **Backups:** `siphon backup` includes the file (see

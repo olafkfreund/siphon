@@ -97,9 +97,7 @@ type Manager struct {
 	cfg   func() *config.Config
 	now   func() time.Time
 
-	// ponytail: one lock for every source's refresh, so a slow token endpoint
-	// delays the others; per-source locks if that ever matters.
-	rmu sync.Mutex // serialises refreshes (rotating refresh tokens must not race)
+	rmus sync.Map // source name -> *sync.Mutex: serialises its refreshes (rotating refresh tokens must not race)
 
 	mu      sync.Mutex
 	logins  map[string]*login
@@ -161,8 +159,11 @@ func (m *Manager) oauthConfig(st stored, s *config.Source) *oauth2.Config {
 
 var safeText = regexp.MustCompile(`[^A-Za-z0-9 _.:,/-]`)
 
+// tokenLike is a run long enough to be a token, JWT or secret.
+var tokenLike = regexp.MustCompile(`[A-Za-z0-9_.-]{24,}`)
+
 func clip(s string, n int) string {
-	s = safeText.ReplaceAllString(s, "")
+	s = tokenLike.ReplaceAllString(safeText.ReplaceAllString(s, ""), "[redacted]")
 	if len(s) > n {
 		s = s[:n]
 	}
@@ -191,8 +192,16 @@ func (m *Manager) access(ctx context.Context, name string) (*oauth2.Token, error
 	if err != nil {
 		return nil, err
 	}
-	m.rmu.Lock()
-	defer m.rmu.Unlock()
+	mu, _ := m.rmus.LoadOrStore(name, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	defer mu.(*sync.Mutex).Unlock()
+	// L3: a rejected refresh token is never retried; only a new login clears it
+	m.mu.Lock()
+	dead := m.dead[name]
+	m.mu.Unlock()
+	if dead {
+		return nil, loginRequired(name)
+	}
 	for range 2 {
 		raw, st, ok := m.load(name, s)
 		if !ok {
@@ -407,6 +416,9 @@ func (m *Manager) run(ctx context.Context, name string, s *config.Source, redire
 			}
 		},
 		NewTokenSource: func(_ context.Context, c *oauth2.Config, t *oauth2.Token) (oauth2.TokenSource, error) {
+			if ctx.Err() != nil { // logged out, replaced or timed out while the code was exchanged
+				return nil, errors.New("login was cancelled")
+			}
 			st := stored{Resource: s.URL, Issuer: l.iss, ClientID: c.ClientID, Dynamic: oc.ClientID == "",
 				AuthURL: c.Endpoint.AuthURL, TokenURL: c.Endpoint.TokenURL, AuthStyle: int(c.Endpoint.AuthStyle), Scopes: c.Scopes,
 				Token: tokenJSON{Access: t.AccessToken, Refresh: t.RefreshToken, Type: t.TokenType, Expiry: t.Expiry}}
@@ -439,6 +451,9 @@ func (m *Manager) run(ctx context.Context, name string, s *config.Source, redire
 	switch {
 	case oc.ClientID != "":
 		pc := &oauthex.ClientCredentials{ClientID: oc.ClientID}
+		if reuse { // pinned to the issuer of its earlier login (trust on first use)
+			pc.Issuer = prev.Issuer
+		}
 		if oc.ClientSecret.Value != "" {
 			pc.ClientSecretAuth = &oauthex.ClientSecretAuth{ClientSecret: oc.ClientSecret.Value}
 		}

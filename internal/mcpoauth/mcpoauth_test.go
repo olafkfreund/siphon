@@ -322,6 +322,14 @@ func TestInvalidGrantMeansLoginRequired(t *testing.T) {
 		t.Fatalf("want ErrLoginRequired: %v", err)
 	}
 	noSecrets(t, err, rt)
+	// the rejected refresh token is never retried: even a server that would
+	// now accept it gets no second request
+	e.as.mu.Lock()
+	e.as.refresh = rt
+	e.as.mu.Unlock()
+	if _, err := e.m.Token(context.Background(), "s"); !errors.Is(err, ErrLoginRequired) {
+		t.Fatalf("retried a rejected refresh token: %v", err)
+	}
 	if s, _ := e.m.Status("s"); s != "expired" {
 		t.Fatalf("status %s", s)
 	}
@@ -477,4 +485,12 @@ func TestNoTokenInErrors(t *testing.T) {
 		t.Fatal("want error")
 	}
 	noSecrets(t, err, secrets...)
+}
+
+func TestClipRedactsTokenLikeText(t *testing.T) {
+	jwt := "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJlLXZhbHVl"
+	got := clip("dial tcp: refused, token "+jwt+" and opaque_0123456789abcdefghijklmn", 300)
+	if strings.Contains(got, "eyJ") || strings.Contains(got, "0123456789abcdefghijklmn") || !strings.Contains(got, "dial tcp: refused") {
+		t.Fatalf("clip: %q", got)
+	}
 }
