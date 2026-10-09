@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 42
 spec: spec/2026-10-09-42-remove-agentgw.md
 ---
