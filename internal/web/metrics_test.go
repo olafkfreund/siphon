@@ -68,6 +68,9 @@ func TestMetricsToken(t *testing.T) {
 	if w := e.do("GET", "/metrics", nil, bearer); w.Code != 200 {
 		t.Fatalf("admin on /metrics: %d", w.Code)
 	}
+	if w := e.do("GET", "/", nil, sc); w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/login" {
+		t.Fatalf("scrape on the portal: %d %q", w.Code, w.Header().Get("Location"))
+	}
 	// failing requests last: five per IP per minute trips the limiter
 	if w := e.do("GET", "/api/inventory", nil, sc); w.Code != 401 {
 		t.Fatalf("scrape on /api: %d", w.Code)

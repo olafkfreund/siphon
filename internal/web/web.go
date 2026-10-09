@@ -186,12 +186,12 @@ func (s *server) tokenOK(t string) bool {
 }
 
 // metricsOK is tokenOK or the scrape token; use it for /metrics only.
+// Both compares always run, so timing doesn't say which token matched.
 func (s *server) metricsOK(t string) bool {
-	if s.tokenOK(t) {
-		return true
-	}
+	admin := s.tokenOK(t)
 	sum := sha256.Sum256([]byte(t))
-	return s.MetricsToken != "" && subtle.ConstantTimeCompare(sum[:], s.metricsHash[:]) == 1
+	scrape := subtle.ConstantTimeCompare(sum[:], s.metricsHash[:]) == 1
+	return admin || s.MetricsToken != "" && scrape
 }
 
 func (s *server) mac(msg string) string {

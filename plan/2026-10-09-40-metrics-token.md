@@ -147,4 +147,15 @@ spec: spec/2026-10-09-40-metrics-token.md
 
 ## Deviations
 
-None yet.
+- **Step 2 (coder):** in `bearer`, the `CutPrefix` result is renamed `found`
+  so that it doesn't shadow the new `ok` parameter. Behaviour is unchanged.
+- **Step 5 (security review: no High or Medium):**
+  - **L1, accepted.** A failing scrape shares the per-IP failed-auth limiter
+    with the API and portal. A Prometheus with a stale token can therefore
+    get its IP 429'd on the API too. This was already true with the admin
+    token, and the plan chose the shared limiter. A separate limiter can
+    come later if it bites.
+  - **L2, fixed.** `metricsOK` always runs both compares, so timing doesn't
+    reveal which token matched.
+  - **L3, fixed.** `TestMetricsToken` now checks that the scrape token on
+    `GET /` gets a 303 redirect to `/login`.
