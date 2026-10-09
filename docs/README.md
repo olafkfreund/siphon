@@ -23,6 +23,7 @@ baseline in **`siphon.yaml`**.
 | run something at set times | [schedule](tasks/schedule.md) | `weekday-standup`, `weekly-digest`, `nightly-report` |
 | have an agent review pull requests | [github-pr-agent](tasks/github-pr-agent.md) | `github-pr-review`, `github-ci-failure`, `github-issue-triage`, `gitlab-mr-review` |
 | watch an MCP server | [mcp-watch](tasks/mcp-watch.md) | `mcp-build-watch`, `mcp-task-triage` |
+| connect an MCP server that uses OAuth | [connect-oauth-mcp](tasks/connect-oauth-mcp.md) | |
 | chain steps (fetch → summarise → notify) | [routines](tasks/routine.md) | `nightly-report`, `alertmanager-summary` |
 | approve or deny agent runs | [approvals](tasks/approvals.md) | |
 | get told when something needs me | [notifications](tasks/notifications.md) | |
