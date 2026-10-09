@@ -45,6 +45,7 @@ func oauthEnv(t *testing.T) *env {
 	cfg := &config.Config{Sources: map[string]*config.Source{
 		"o":     {Type: "mcp", URL: srv.URL + "/mcp", AllowPrivate: true, Auth: &config.Auth{OAuth: &config.OAuth{}}},
 		"plain": {Type: "mcp", URL: "https://x.example/mcp"},
+		"down":  {Type: "mcp", URL: "http://127.0.0.1:1/mcp", AllowPrivate: true, Auth: &config.Auth{OAuth: &config.OAuth{}}},
 	}}
 	cfg.Server.PublicURL = "http://127.0.0.1:8080"
 	return newEnv(t, func(o *Options) {
@@ -59,6 +60,10 @@ func TestOAuthAPI(t *testing.T) {
 		if w := e.do(c[0], c[1], nil, nil); w.Code != 401 {
 			t.Errorf("%s %s without token: %d", c[0], c[1], w.Code)
 		}
+	}
+	// A login that can't start says why (a 502, not a bare 500).
+	if w := e.do("POST", "/api/sources/down/oauth/login", nil, bearer); w.Code != 502 || !strings.Contains(w.Body.String(), "did not start") {
+		t.Errorf("unreachable server: %d %s", w.Code, w.Body.String())
 	}
 	if w := e.do("GET", "/api/sources/plain/oauth", nil, bearer); w.Code != 404 {
 		t.Errorf("non-oauth source: %d", w.Code)

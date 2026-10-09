@@ -18,11 +18,11 @@ func (s *server) oauthSource(name string) bool {
 // startLogin begins a login and audits it (source name and action only).
 func (s *server) startLogin(r *http.Request, actor, name string) (string, int, error) {
 	u, err := s.OAuth.Start(r.Context(), name)
-	if err != nil {
-		return "", http.StatusBadGateway, err
+	if err != nil { // mcpoauth cleans its errors: no token reaches them
+		return "", http.StatusBadGateway, errMsg("OAuth login did not start: " + err.Error())
 	}
 	if pu, err := url.Parse(u); err != nil || (pu.Scheme != "https" && pu.Scheme != "http") {
-		return "", http.StatusBadGateway, errors.New("bad authorization URL")
+		return "", http.StatusBadGateway, errMsg("bad authorization URL")
 	}
 	s.audit(actor, "oauth_login_started", name)
 	return u, http.StatusOK, nil
