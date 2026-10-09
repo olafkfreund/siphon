@@ -168,7 +168,7 @@ func (s *server) testService(ctx context.Context, name string) svcTest {
 	}
 	var target, hdr, val, who string
 	switch {
-	case src.Type == "mcp" && src.Auth != nil && strings.HasPrefix(src.URL, "https://api.githubcopilot.com/"):
+	case src.Type == "mcp" && src.Auth != nil && src.Auth.Bearer.Value != "" && strings.HasPrefix(src.URL, "https://api.githubcopilot.com/"):
 		target, hdr, val, who = "https://api.github.com/user", "Authorization", "Bearer "+src.Auth.Bearer.Value, "login"
 	case src.Type == "mcp" && src.Package == "github":
 		target, hdr, val, who = "https://api.github.com/user", "Authorization", "Bearer "+src.Env["GITHUB_PERSONAL_ACCESS_TOKEN"].Value, "login"

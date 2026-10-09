@@ -27,6 +27,7 @@ import (
 	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/cred"
 	"github.com/olafkfreund/siphon/internal/egress"
+	"github.com/olafkfreund/siphon/internal/mcpoauth"
 	"github.com/olafkfreund/siphon/internal/rule"
 	"github.com/olafkfreund/siphon/internal/source"
 	"github.com/olafkfreund/siphon/internal/store"
@@ -44,6 +45,8 @@ type Pipeline struct {
 	nudge chan struct{} // set by Serve; wakes idle workers after enqueues
 	// MCPTransport, if set, supplies the transport for an mcp source (tests).
 	MCPTransport func(source string) mcp.Transport
+	// OAuth holds the logins of auth.oauth sources.
+	OAuth *mcpoauth.Manager
 
 	runFn func(context.Context, store.QueuedJob) (string, int, string) // tests only
 	rnd   func() float64                                               // retry jitter source; tests inject
@@ -103,6 +106,7 @@ func routineSteps(cfg *config.Config, a config.Action) []config.Step {
 func New(cfg *config.Config, st *store.Store, now func() time.Time) *Pipeline {
 	p := &Pipeline{Store: st, Now: now, nudge: make(chan struct{}, 64)}
 	p.cfg.Store(cfg)
+	p.OAuth = mcpoauth.New(filepath.Join(filepath.Dir(cfg.Server.DB), "credentials", ".mcp"), p.Config, now)
 	return p
 }
 
@@ -168,7 +172,7 @@ func (p *Pipeline) poll(ctx context.Context, cfg *config.Config, name string) (r
 			AllowPrivate: s.AllowPrivate, MaxBody: int64(cfg.Limits.HTTPMaxBody), Timeout: time.Duration(cfg.Limits.HTTPTimeout),
 		}}.Poll(ctx)
 	case "mcp":
-		o := mcpOptions(cfg, name)
+		o := p.mcpOptions(cfg, name)
 		m := source.MCP{Options: o}
 		if p.MCPTransport != nil {
 			m.Transport = p.MCPTransport(name)
@@ -448,6 +452,14 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 		if s.Auth != nil && s.Auth.Bearer.Value != "" {
 			h["Authorization"] = "Bearer " + s.Auth.Bearer.Value
 		}
+		if s.Auth != nil && s.Auth.OAuth != nil {
+			tok, err := p.OAuth.Token(ctx, name)
+			if err != nil {
+				return "failed", -1, err.Error(), nil
+			}
+			h["Authorization"] = "Bearer " + tok
+			secrets = append(secrets, tok) // masked before any output is written
+		}
 		servers[name] = action.MCPServer{URL: s.URL, Command: s.Command, Headers: h}
 	}
 	opts := action.AgentOptions{
@@ -677,7 +689,7 @@ func decodePayload(s string) (Payload, error) {
 	return Payload{Action: raw.Action, Env: m, Agent: raw.Agent, Steps: raw.Steps, Agents: raw.Agents}, nil
 }
 
-func mcpOptions(cfg *config.Config, name string) source.MCPOptions {
+func (p *Pipeline) mcpOptions(cfg *config.Config, name string) source.MCPOptions {
 	s := cfg.Sources[name]
 	o := source.MCPOptions{
 		Name: name, Command: s.Command, URL: s.URL, AllowPrivate: s.AllowPrivate,
@@ -688,6 +700,9 @@ func mcpOptions(cfg *config.Config, name string) source.MCPOptions {
 	}
 	if s.Auth != nil {
 		o.Bearer = s.Auth.Bearer.Value
+		if s.Auth.OAuth != nil {
+			o.OAuth = p.OAuth.Handler(name)
+		}
 	}
 	if len(s.Env) > 0 {
 		o.Env = make(map[string]string, len(s.Env))
