@@ -80,13 +80,13 @@ func (s *server) oauthRoutes(mux *http.ServeMux) {
 	}))
 
 	// Portal: the Log in button.
-	mux.HandleFunc("POST /sources/{name}/oauth", s.portal(func(w http.ResponseWriter, r *http.Request, _ string) {
+	mux.HandleFunc("POST /sources/{name}/oauth", s.portalAs(roleOperator, func(w http.ResponseWriter, r *http.Request, _ string) {
 		name := r.PathValue("name")
 		if !s.oauthSource(name) {
 			http.NotFound(w, r)
 			return
 		}
-		u, code, err := s.startLogin(r, "portal", name)
+		u, code, err := s.startLogin(r, s.actor(r), name)
 		if err != nil {
 			http.Error(w, err.Error(), code)
 			return

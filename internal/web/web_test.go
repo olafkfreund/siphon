@@ -22,6 +22,7 @@ type env struct {
 	st  *store.Store
 	h   http.Handler
 	now time.Time
+	srv *server
 }
 
 func newEnv(t *testing.T, mod func(*Options)) *env {
@@ -42,6 +43,7 @@ func newEnv(t *testing.T, mod func(*Options)) *env {
 	if mod != nil {
 		mod(&o)
 	}
+	o.onNew = func(s *server) { e.srv = s }
 	e.h = New(o)
 	return e
 }

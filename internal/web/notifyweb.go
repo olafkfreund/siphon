@@ -140,7 +140,7 @@ func (s *server) notifyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /notifications", s.portal(func(w http.ResponseWriter, r *http.Request, csrf string) {
 		r.ParseForm()
 		name, typ, events := r.PostFormValue("name"), r.PostFormValue("type"), r.PostForm["events"]
-		err := s.addNotify("portal", name, typ, r.PostFormValue("url"), r.PostFormValue("token"), events)
+		err := s.addNotify(s.actor(r), name, typ, r.PostFormValue("url"), r.PostFormValue("token"), events)
 		var inv errInvalid
 		if errors.As(err, &inv) {
 			v := view{CSRF: csrf}
@@ -155,7 +155,7 @@ func (s *server) notifyRoutes(mux *http.ServeMux) {
 		http.Redirect(w, r, "/notifications?added="+name, http.StatusSeeOther)
 	}))
 	mux.HandleFunc("POST /notifications/{name}/delete", s.portal(func(w http.ResponseWriter, r *http.Request, _ string) {
-		if err := s.removeNotify("portal", r.PathValue("name")); err != nil {
+		if err := s.removeNotify(s.actor(r), r.PathValue("name")); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				http.NotFound(w, r)
 				return
@@ -165,13 +165,13 @@ func (s *server) notifyRoutes(mux *http.ServeMux) {
 		}
 		http.Redirect(w, r, "/notifications", http.StatusSeeOther)
 	}))
-	mux.HandleFunc("POST /notifications/{name}/test", s.portal(func(w http.ResponseWriter, r *http.Request, _ string) {
+	mux.HandleFunc("POST /notifications/{name}/test", s.portalAs(roleOperator, func(w http.ResponseWriter, r *http.Request, _ string) {
 		name := r.PathValue("name")
 		if s.Config().Notify[name] == nil {
 			http.NotFound(w, r)
 			return
 		}
-		status, err := notify.New(s.Store, s.Config, s.Now).Send(r.Context(), name, notify.TestMessage(), "portal")
+		status, err := notify.New(s.Store, s.Config, s.Now).Send(r.Context(), name, notify.TestMessage(), s.actor(r))
 		t := notifyTest{OK: err == nil, Status: status}
 		if err != nil {
 			t.Err = err.Error()

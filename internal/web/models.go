@@ -265,7 +265,7 @@ func (s *server) modelRoutes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("POST /connections/models", s.portal(func(w http.ResponseWriter, r *http.Request, csrf string) {
 		name, preset, raw := r.PostFormValue("name"), r.PostFormValue("preset"), r.PostFormValue("url")
-		err := s.addModelConn("portal", name, preset, raw, r.PostFormValue("api_key"))
+		err := s.addModelConn(s.actor(r), name, preset, raw, r.PostFormValue("api_key"))
 		var inv errInvalid
 		if errors.As(err, &inv) {
 			v := s.connectionsView(r, csrf)
@@ -279,7 +279,7 @@ func (s *server) modelRoutes(mux *http.ServeMux) {
 		}
 		http.Redirect(w, r, "/connections?added="+name+"#models", http.StatusSeeOther)
 	}))
-	mux.HandleFunc("POST /connections/{name}/test", s.portal(func(w http.ResponseWriter, r *http.Request, _ string) {
+	mux.HandleFunc("POST /connections/{name}/test", s.portalAs(roleOperator, func(w http.ResponseWriter, r *http.Request, _ string) {
 		t := s.listModels(r.Context(), r.PathValue("name"), true)
 		s.render(w, "conntest", t)
 	}))

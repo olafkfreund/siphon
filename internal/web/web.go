@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"html/template"
 	"io/fs"
@@ -41,6 +42,7 @@ type Options struct {
 	Cfg          *config.Config // fixed config; used only when Config is nil (tests)
 	// Config returns the live config (Pipeline.Config); Apply makes a new one live (Pipeline.Apply).
 	Config func() *config.Config
+	onNew  func(*server) // tests: gets the server, to mint sessions
 	Apply  func(*config.Config) error
 	// ConfigPath is the config file the portal edits are layered on; empty disables editing.
 	ConfigPath  string
@@ -167,6 +169,9 @@ func New(o Options) http.Handler {
 	s.portalRoutes(mux)
 	s.configRoutes(mux)
 	s.helpRoutes(mux)
+	if o.onNew != nil {
+		o.onNew(s)
+	}
 	return secure(mux)
 }
 
@@ -204,25 +209,89 @@ func (s *server) mac(msg string) string {
 	return hex.EncodeToString(m.Sum(nil))
 }
 
-// The cookie is an HMAC over the token under a random key: the raw token never reaches the browser.
-// Cookie value: "<issue unix seconds>|<HMAC(key, "session:"+ts)>", valid for 24 h.
-// There is no server-side session store, so logout only clears the browser's
-// cookie; the value itself stays valid until it expires or the process restarts.
-const sessionTTL = 24 * time.Hour
+// role orders portal privileges: viewer < operator < admin. Zero is "unset".
+type role int
 
-func (s *server) sessionValue() string {
-	ts := strconv.FormatInt(s.Now().Unix(), 10)
-	return ts + "|" + s.mac("session:"+ts)
+const (
+	roleViewer role = iota + 1
+	roleOperator
+	roleAdmin
+)
+
+func (r role) String() string {
+	switch r {
+	case roleViewer:
+		return "viewer"
+	case roleOperator:
+		return "operator"
+	case roleAdmin:
+		return "admin"
+	}
+	return ""
 }
 
-func (s *server) sessionValid(v string) bool {
-	ts, sig, ok := strings.Cut(v, "|")
-	if !ok || s.Token == "" || !eq(sig, s.mac("session:"+ts)) {
-		return false
+func parseRole(v string) role {
+	for _, r := range []role{roleViewer, roleOperator, roleAdmin} {
+		if r.String() == v {
+			return r
+		}
 	}
-	n, err := strconv.ParseInt(ts, 10, 64)
+	return 0
+}
+
+type session struct {
+	role  role
+	actor string
+}
+
+// The cookie is stateless and signed under the per-process key; the raw token
+// never reaches the browser. Value:
+// "<unix ts>|<role>|<base64url(actor)>|<HMAC(key, "session:"+ts+"|"+role+"|"+actor)>".
+// logout only clears the browser's cookie; the value stays valid until it
+// expires or the process restarts.
+const (
+	sessionTTL     = 24 * time.Hour
+	oidcSessionTTL = 12 * time.Hour
+)
+
+func (s *server) sessionValue(r role, actor string) string {
+	ts := strconv.FormatInt(s.Now().Unix(), 10)
+	return ts + "|" + r.String() + "|" + base64.RawURLEncoding.EncodeToString([]byte(actor)) + "|" + s.mac("session:"+ts+"|"+r.String()+"|"+actor)
+}
+
+func (s *server) parseSession(v string) (session, bool) {
+	p := strings.Split(v, "|")
+	if len(p) != 4 || s.Token == "" {
+		return session{}, false
+	}
+	ab, err := base64.RawURLEncoding.DecodeString(p[2])
+	actor := string(ab)
+	if err != nil || !eq(p[3], s.mac("session:"+p[0]+"|"+p[1]+"|"+actor)) {
+		return session{}, false
+	}
+	n, err := strconv.ParseInt(p[0], 10, 64)
+	ttl := sessionTTL
+	if strings.HasPrefix(actor, "oidc:") {
+		ttl = oidcSessionTTL
+	}
 	age := s.Now().Sub(time.Unix(n, 0))
-	return err == nil && age >= -time.Minute && age < sessionTTL
+	rl := parseRole(p[1])
+	return session{rl, actor}, err == nil && rl != 0 && age >= -time.Minute && age < ttl
+}
+
+type sessionKey struct{}
+
+// actor is who the audit log names for a portal action.
+func (s *server) actor(r *http.Request) string {
+	if se, ok := r.Context().Value(sessionKey{}).(session); ok {
+		return se.actor
+	}
+	return "portal"
+}
+
+func (s *server) role(r *http.Request) role {
+	se, _ := r.Context().Value(sessionKey{}).(session)
+	return se.role
 }
 
 func (s *server) csrfFor(session string) string { return s.mac("csrf:" + session) }
