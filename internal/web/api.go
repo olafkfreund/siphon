@@ -21,7 +21,7 @@ func (s *server) apiRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST "+path, s.api(func(w http.ResponseWriter, r *http.Request) { s.reply(w, r, f) }))
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) { jsonErr(w, http.StatusNotFound, "not found") })
-	mux.HandleFunc("GET /metrics", s.api(s.metrics))
+	mux.HandleFunc("GET /metrics", s.bearer(s.metricsOK, s.metrics))
 	s.connectionAPI(mux)
 	s.diagAPI(mux)
 	s.inventoryAPI(mux)
@@ -127,16 +127,18 @@ func limit(r *http.Request) int {
 	return min(n, 500)
 }
 
-// api wraps a handler with bearer auth and the failed-auth rate limit.
-func (s *server) api(h http.HandlerFunc) http.HandlerFunc {
+// api wraps a handler with admin bearer auth and the failed-auth rate limit.
+func (s *server) api(h http.HandlerFunc) http.HandlerFunc { return s.bearer(s.tokenOK, h) }
+
+func (s *server) bearer(ok func(string) bool, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
 		if s.lim.blocked(ip) {
 			jsonErr(w, http.StatusTooManyRequests, "too many failed attempts")
 			return
 		}
-		tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if !ok || !s.tokenOK(tok) {
+		tok, found := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if !found || !ok(tok) {
 			s.lim.fail(ip)
 			w.Header().Set("WWW-Authenticate", `Bearer realm="siphon"`)
 			jsonErr(w, http.StatusUnauthorized, "unauthorized")

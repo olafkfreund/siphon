@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"testing"
@@ -54,5 +55,31 @@ func TestMetrics(t *testing.T) {
 		if strings.Contains(body, bad) {
 			t.Errorf("%q leaked into\n%s", bad, body)
 		}
+	}
+}
+
+func TestMetricsToken(t *testing.T) {
+	const scrape = "scrape-token-0123456789abcdef012345"
+	sc := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+scrape) }
+	e := newEnv(t, func(o *Options) { o.MetricsToken = scrape })
+	if w := e.do("GET", "/metrics", nil, sc); w.Code != 200 {
+		t.Fatalf("scrape on /metrics: %d", w.Code)
+	}
+	if w := e.do("GET", "/metrics", nil, bearer); w.Code != 200 {
+		t.Fatalf("admin on /metrics: %d", w.Code)
+	}
+	// failing requests last: five per IP per minute trips the limiter
+	if w := e.do("GET", "/api/inventory", nil, sc); w.Code != 401 {
+		t.Fatalf("scrape on /api: %d", w.Code)
+	}
+	if w := e.do("POST", "/login", url.Values{"token": {scrape}}, nil); w.Code != 401 {
+		t.Fatalf("scrape on login: %d", w.Code)
+	}
+	if w := e.do("GET", "/metrics", nil, func(r *http.Request) { r.Header.Set("Authorization", "Bearer nope") }); w.Code != 401 {
+		t.Fatalf("wrong token: %d", w.Code)
+	}
+	e = newEnv(t, nil)
+	if w := e.do("GET", "/metrics", nil, func(r *http.Request) { r.Header.Set("Authorization", "Bearer ") }); w.Code != 401 {
+		t.Fatalf("empty token, none configured: %d", w.Code)
 	}
 }
