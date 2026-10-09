@@ -126,7 +126,7 @@ func (c *cli) secretValue(f secField) (string, error) {
 
 type connectOpts struct {
 	name, url, apiKey, file, setupToken string
-	noTest                              bool
+	noTest, noWait, logout              bool
 }
 
 // flagName is a catalogue field key as a flag: role_arn becomes --role-arn.
@@ -140,6 +140,8 @@ func buildConnect(fs *flag.FlagSet) func(*cli, []string) error {
 	fs.StringVar(&o.file, "file", "", "login: a login file (kind login), or - for stdin")
 	fs.StringVar(&o.setupToken, "setup-token", "", "login claude: a setup token as - (stdin) or @file (kind token)")
 	fs.BoolVar(&o.noTest, "no-test", false, "skip the connection test")
+	fs.BoolVar(&o.noWait, "no-wait", false, "oauth: print the login URL and return")
+	fs.BoolVar(&o.logout, "logout", false, "oauth: delete the source's login")
 	// One flag per catalogue field (the first service to use a key describes it).
 	for _, e := range catalog.All() {
 		for _, f := range e.Fields {
@@ -160,13 +162,15 @@ func buildConnect(fs *flag.FlagSet) func(*cli, []string) error {
 	}
 	return func(c *cli, args []string) error {
 		if len(args) < 1 {
-			return usageErr("usage: siphon connect <service>|model|login [--<field> value ...]", "list the services with `siphon catalog`; for a model: `siphon connect model ollama --url http://host:11434`")
+			return usageErr("usage: siphon connect <service>|model|login|oauth [--<field> value ...]", "list the services with `siphon catalog`; for a model: `siphon connect model ollama --url http://host:11434`")
 		}
 		switch args[0] {
 		case "model":
 			return c.connectModel(args[1:], o)
 		case "login":
 			return c.connectLogin(args[1:], o)
+		case "oauth":
+			return c.connectOAuth(args[1:], o)
 		}
 		if len(args) != 1 {
 			return usageErr("usage: siphon connect "+args[0]+" [--<field> value ...]", "")
@@ -731,3 +735,67 @@ func whyNext(rule, source, code string) string {
 }
 
 var loginProviders = []string{"claude", "codex", "agy"}
+
+// oauthSleep and oauthPolls bound `connect oauth`'s wait: 300 polls, 2 seconds apart (10 minutes); tests replace them.
+var (
+	oauthSleep = func() { time.Sleep(2 * time.Second) }
+	oauthPolls = 300
+)
+
+// connectOAuth logs a source in with OAuth (or out): it prints the URL to open,
+// then polls the source's status until the browser login finishes.
+func (c *cli) connectOAuth(args []string, o *connectOpts) error {
+	if len(args) != 1 {
+		return usageErr("usage: siphon connect oauth <source> [--no-wait | --logout]", "the source needs auth.oauth in its config")
+	}
+	path := "/api/sources/" + url.PathEscape(args[0]) + "/oauth"
+	if o.logout {
+		if err := c.call("DELETE", path, nil, nil); err != nil {
+			return err
+		}
+		if c.json() {
+			return c.jsonOut(map[string]string{"source": args[0], "status": "none"})
+		}
+		c.say("logged out of %s\n", args[0])
+		return nil
+	}
+	var start struct {
+		URL string `json:"url"`
+	}
+	if err := c.call("POST", path+"/login", nil, &start); err != nil {
+		return err
+	}
+	if o.noWait {
+		if c.json() {
+			return c.jsonOut(map[string]string{"source": args[0], "url": start.URL})
+		}
+		fmt.Fprintf(c.out, "open this URL to log in to %s:\n%s\n", args[0], start.URL)
+		return nil
+	}
+	w := c.out
+	if c.json() {
+		w = c.errw // stdout stays one JSON document; the person still needs the URL
+	}
+	fmt.Fprintf(w, "open this URL to log in to %s (waiting up to 10 minutes):\n%s\n", args[0], start.URL)
+	for range oauthPolls {
+		var st struct {
+			Status string `json:"status"`
+		}
+		if err := c.call("GET", path, nil, &st); err != nil {
+			return err
+		}
+		switch st.Status {
+		case "ok":
+			if c.json() {
+				return c.jsonOut(map[string]string{"source": args[0], "status": "ok"})
+			}
+			c.say("logged in\n")
+			return nil
+		case "pending":
+			oauthSleep()
+		default:
+			return fmt.Errorf("the login of %s did not complete (status %s); run it again", args[0], st.Status)
+		}
+	}
+	return fmt.Errorf("timed out waiting for the login of %s", args[0])
+}

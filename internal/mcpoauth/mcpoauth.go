@@ -40,6 +40,9 @@ var startWait = 30 * time.Second
 // ErrLoginRequired means the source has no usable login. Errors wrap it.
 var ErrLoginRequired = errors.New("OAuth login required")
 
+// ErrUnknownLogin is Complete's answer to a state it doesn't know, or that expired.
+var ErrUnknownLogin = errors.New("unknown or expired login")
+
 func loginRequired(source string) error {
 	return fmt.Errorf("source %q: %w: siphon connect oauth %s, or Log in on the Sources page", source, ErrLoginRequired, source)
 }
@@ -472,7 +475,7 @@ func (m *Manager) Complete(state, code, iss, errParam string) (string, error) {
 	delete(m.states, state)
 	m.mu.Unlock()
 	if !ok || m.now().After(p.expires) {
-		return "", errors.New("unknown or expired login")
+		return "", ErrUnknownLogin
 	}
 	r := result{code: code, iss: iss}
 	if errParam != "" {

@@ -1,0 +1,10 @@
+{{define "oauth"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OAuth login · Siphon</title>
+<link rel="icon" href="/static/mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css"></head>
+<body><main class="login"><div class="card">
+  <img class="logo" src="/static/mark.svg" alt="">
+  <div class="word">siphon</div>
+  {{if .Err}}<p class="err" role="alert">Login failed: {{.Err}}</p>{{else}}<p>Logged in to {{.Source}}. You can close this tab.</p>{{end}}
+</div></main></body></html>{{end}}

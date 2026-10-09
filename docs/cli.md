@@ -300,9 +300,11 @@ siphon connect <service>|model|login [--<field> value ...]
 | `--external-id` |  | AWS: External ID |
 | `--file` |  | login: a login file (kind login), or - for stdin |
 | `--header` |  | Webhook: Header |
+| `--logout` | `false` | oauth: delete the source's login |
 | `--mode` |  | GitHub: MCP server |
 | `--name` |  | name of the connection (default: the service or preset) |
 | `--no-test` | `false` | skip the connection test |
+| `--no-wait` | `false` | oauth: print the login URL and return |
 | `--profile` |  | AWS: Profile |
 | `--project` |  | GitLab: Project |
 | `--region` |  | AWS: Region |
