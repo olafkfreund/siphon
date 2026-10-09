@@ -26,6 +26,7 @@ baseline in **`siphon.yaml`**.
 | connect an MCP server that uses OAuth | [connect-oauth-mcp](tasks/connect-oauth-mcp.md) | |
 | chain steps (fetch → summarise → notify) | [routines](tasks/routine.md) | `nightly-report`, `alertmanager-summary` |
 | approve or deny agent runs | [approvals](tasks/approvals.md) | |
+| let people sign in with SSO, with roles | [sso](tasks/sso.md) | |
 | get told when something needs me | [notifications](tasks/notifications.md) | |
 | back up, restore, monitor | [backup and monitoring](tasks/backup-and-monitoring.md) | |
 | investigate cloud alarms | [AWS](connections/aws.md) | `aws-cloudwatch-alarm` |

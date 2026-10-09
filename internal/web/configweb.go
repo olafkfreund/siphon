@@ -86,8 +86,8 @@ func (s *server) configRoutes(mux *http.ServeMux) {
 	})
 	h("GET /history/{id}", s.histItem)
 	h("POST /history/{id}/restore", s.histRestore)
-	mux.HandleFunc("POST /rules/test", s.portal(s.ruleTest))
-	mux.HandleFunc("POST /agents/egress-preview", s.portal(s.egressPreview))
+	mux.HandleFunc("POST /rules/test", s.portalAs(roleOperator, s.ruleTest))
+	mux.HandleFunc("POST /agents/egress-preview", s.portalAs(roleOperator, s.egressPreview))
 	mux.HandleFunc("POST /logins", s.portal(s.loginAdd))
 	s.modelRoutes(mux)
 	s.notifyRoutes(mux)
@@ -291,7 +291,7 @@ func (s *server) cfgPost(w http.ResponseWriter, r *http.Request, csrf, verb stri
 		}
 		return
 	}
-	_, _, applyErr, err := s.commit("portal", summary, &rev, mutate, pending)
+	_, _, applyErr, err := s.commit(s.actor(r), summary, &rev, mutate, pending)
 	var inv errInvalid
 	switch {
 	case errors.As(err, &inv):
@@ -352,7 +352,7 @@ func (s *server) histRestore(w http.ResponseWriter, r *http.Request, _ string) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	if err := s.restore("portal", id, &cur); err != nil {
+	if err := s.restore(s.actor(r), id, &cur); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return
@@ -445,7 +445,7 @@ func (s *server) addLogin(actor, name, provider, kind, value string) error {
 
 func (s *server) loginAdd(w http.ResponseWriter, r *http.Request, csrf string) {
 	name, provider, kind := r.PostFormValue("name"), r.PostFormValue("provider"), r.PostFormValue("kind")
-	err := s.addLogin("portal", name, provider, kind, r.PostFormValue("value"))
+	err := s.addLogin(s.actor(r), name, provider, kind, r.PostFormValue("value"))
 	var inv errInvalid
 	if errors.As(err, &inv) { // show the problem on the page; the value is never echoed
 		v := s.connectionsView(r, csrf)
@@ -461,7 +461,7 @@ func (s *server) loginAdd(w http.ResponseWriter, r *http.Request, csrf string) {
 }
 
 func (s *server) loginDelete(w http.ResponseWriter, r *http.Request, _ string) {
-	if err := s.removeLogin("portal", r.PathValue("name")); err != nil {
+	if err := s.removeLogin(s.actor(r), r.PathValue("name")); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			http.NotFound(w, r)
 			return

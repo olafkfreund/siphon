@@ -13,7 +13,7 @@
     <span class="muted small connection-event">Last event: {{.LastEvent}}</span>
     <div class="connection-actions">
       {{if .Hint}}<span class="muted small">{{.Hint}}</span>{{end}}
-      {{if .CanTest}}<form method="post" action="/services/c/{{pe .Name}}/test" hx-post="/services/c/{{pe .Name}}/test" hx-target="next .connection-result"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{template "icon" "play"}}Test</button></form>{{end}}
+      {{if .CanTest}}{{if can $.Role "operator"}}<form method="post" action="/services/c/{{pe .Name}}/test" hx-post="/services/c/{{pe .Name}}/test" hx-target="next .connection-result"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{template "icon" "play"}}Test</button></form>{{end}}{{end}}
       <details class="connection-edit"><summary class="btn sm">Edit</summary><ul>{{range .Items}}<li><a href="{{.Href}}">{{.Name}}</a> <span class="muted tiny">{{.Kind}}</span></li>{{end}}</ul></details>
     </div>
     <div class="connection-result" aria-live="polite"></div>
@@ -60,7 +60,7 @@
   {{range .Sections}}<section class="connect-section" aria-labelledby="sec-{{.N}}"><h2 id="sec-{{.N}}"><span class="step-n" aria-hidden="true">{{.N}}</span>{{.Title}}</h2>
     {{range .Fields}}{{template "svcfield" .}}{{end}}
   </section>{{end}}
-  <div class="row-actions form-end"><a class="btn" href="/services">Back</a><button class="btn primary">{{template "icon" "check"}}Connect {{.Name}}</button></div>
+  {{if can $.Role "admin"}}<div class="row-actions form-end"><a class="btn" href="/services">Back</a><button class="btn primary">{{template "icon" "check"}}Connect {{.Name}}</button></div>{{end}}
 </form>{{end}}
 </div>{{end}}{{end}}
 

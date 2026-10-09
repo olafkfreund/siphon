@@ -295,7 +295,7 @@ func (s *server) testAWS(ctx context.Context, name string) svcTest {
 }
 
 func (s *server) serviceRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /services/{name}/test", s.portal(func(w http.ResponseWriter, r *http.Request, _ string) {
+	mux.HandleFunc("POST /services/{name}/test", s.portalAs(roleOperator, func(w http.ResponseWriter, r *http.Request, _ string) {
 		s.render(w, "svctest", s.testService(r.Context(), r.PathValue("name")))
 	}))
 	s.servicePages(mux)

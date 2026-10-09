@@ -9,8 +9,8 @@
   {{with .Last}}<p class="muted small">Last: {{.Event}} {{if .SentAt}}{{tp .SentAt}}{{else}}{{ago .CreatedAt}}{{end}}{{if .Error}} · {{.Error}}{{end}}</p>{{end}}
   <div id="ntest-{{.Name}}"></div>
   <div class="row-actions">
-    <form method="post" action="/notifications/{{pe .Name}}/test" hx-post="/notifications/{{pe .Name}}/test" hx-target="#ntest-{{.Name}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{template "icon" "play"}}Test</button></form>
-    {{if $.Notify.Editable}}<form method="post" action="/notifications/{{pe .Name}}/delete" data-confirm="Delete the channel {{.Name}}? It stops receiving messages."><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm no">Delete</button></form>{{end}}
+    {{if can $.Role "operator"}}<form method="post" action="/notifications/{{pe .Name}}/test" hx-post="/notifications/{{pe .Name}}/test" hx-target="#ntest-{{.Name}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{template "icon" "play"}}Test</button></form>{{end}}
+    {{if $.Notify.Editable}}{{if can $.Role "admin"}}<form method="post" action="/notifications/{{pe .Name}}/delete" data-confirm="Delete the channel {{.Name}}? It stops receiving messages."><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm no">Delete</button></form>{{end}}{{end}}
   </div>
 </article>
 {{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>No channels yet.{{if .Editable}} Add one below.{{end}}</section>{{end}}
@@ -32,7 +32,7 @@
   {{$ev := .Events}}<fieldset class="f kinds"><legend>Send me</legend><span class="seg">
     {{range $.Notify.AllEvents}}<label><input type="checkbox" name="events" value="{{.}}"{{if has $ev .}} checked{{end}}><span>{{.}}</span></label>{{end}}
   </span></fieldset>
-  <div class="row-actions"><button class="btn primary">{{template "icon" "check"}}Add channel</button></div>
+  {{if can $.Role "admin"}}<div class="row-actions"><button class="btn primary">{{template "icon" "check"}}Add channel</button></div>{{end}}
 </form>
 </section>{{end}}{{end}}
 

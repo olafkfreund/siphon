@@ -1068,3 +1068,44 @@ func TestOAuthSource(t *testing.T) {
 		t.Errorf("client_secret not in Secrets: %v", err)
 	}
 }
+
+func TestOIDCConfig(t *testing.T) {
+	t.Setenv("OIDC_SECRET", "s3cret")
+	const ok = `
+server: {public_url: "https://s.example.com", oidc: {issuer: "https://idp.example.com", client_id: siphon, client_secret: "env:OIDC_SECRET", roles: {viewer: {emails: [a@example.com]}}}}
+`
+	cases := []struct{ name, yaml, want string }{
+		{"ok", ok, ""},
+		{"loopback http", strings.Replace(ok, "https://idp.example.com", "http://127.0.0.1:9", 1), ""},
+		{"http issuer", strings.Replace(ok, "https://idp.example.com", "http://idp.example.com", 1), "server.oidc.issuer"},
+		{"no client_id", strings.Replace(ok, "client_id: siphon, ", "", 1), "client_id"},
+		{"no public_url", strings.Replace(ok, `public_url: "https://s.example.com", `, "", 1), "public_url"},
+		{"no roles", strings.Replace(ok, "roles: {viewer: {emails: [a@example.com]}}", "roles: {viewer: {}}", 1), "server.oidc.roles"},
+		{"scopes without openid", strings.Replace(ok, "roles:", "scopes: [email], roles:", 1), "openid"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := Parse([]byte(tc.yaml))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = c.Validate()
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("unexpected: %v", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("want %q, got %v", tc.want, err)
+			}
+		})
+	}
+	c, _ := Parse([]byte(ok))
+	if !slices.Contains(c.Secrets(), "s3cret") {
+		t.Error("client_secret missing from Secrets()")
+	}
+	if !c.Server.OIDC.TokenLoginOn() || c.Server.OIDC.GroupsClaimOrDefault() != "groups" || len(c.Server.OIDC.ScopesOrDefault()) != 3 {
+		t.Error("defaults wrong")
+	}
+	if _, err := Parse([]byte(strings.Replace(ok, "viewer:", "root:", 1))); err == nil {
+		t.Error("unknown role name should fail decoding")
+	}
+}

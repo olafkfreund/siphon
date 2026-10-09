@@ -367,7 +367,7 @@ func (s *server) servicePages(mux *http.ServeMux) {
 			return
 		}
 		vals := formValues(e, r)
-		done, err := s.connect("portal", e.ID, vals)
+		done, err := s.connect(s.actor(r), e.ID, vals)
 		var inv errInvalid
 		if errors.As(err, &inv) {
 			var fe fieldErr
@@ -385,7 +385,7 @@ func (s *server) servicePages(mux *http.ServeMux) {
 		w.Header().Set("Cache-Control", "no-store") // the webhook secret is on this page
 		s.page(w, r, "servicedone", view{CSRF: csrf, ServiceDone: done})
 	}))
-	mux.HandleFunc("POST /services/c/{name}/test", s.portal(func(w http.ResponseWriter, r *http.Request, _ string) {
+	mux.HandleFunc("POST /services/c/{name}/test", s.portalAs(roleOperator, func(w http.ResponseWriter, r *http.Request, _ string) {
 		res, code, err := s.runConnectionTest(r.Context(), r.PathValue("name"))
 		if err != nil {
 			http.Error(w, err.Error(), code)

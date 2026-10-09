@@ -2,11 +2,13 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"html/template"
 	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/olafkfreund/siphon/internal/store"
@@ -15,6 +17,7 @@ import (
 // view is the data for every portal partial; only the fields a page uses are set.
 type view struct {
 	CSRF        string
+	Role        string // the signed-in role; templates hide controls it cannot use
 	State       string
 	Sources     []sourceView
 	Rules       []ruleView
@@ -46,6 +49,7 @@ type view struct {
 
 type layout struct {
 	Title, Path, CSRF, Active, Banner string
+	Actor, Role                       string
 	Pending                           int
 	Unsandboxed                       bool
 	Poll                              bool // lists and live jobs refresh; editors never do
@@ -53,7 +57,7 @@ type layout struct {
 }
 
 func (s *server) portalRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) { s.render(w, "login", "") })
+	mux.HandleFunc("GET /login", func(w http.ResponseWriter, r *http.Request) { s.render(w, "login", s.loginData("")) })
 	mux.HandleFunc("POST /login", s.login)
 
 	page := func(path, name string, fill func(r *http.Request, v *view) (bool, error)) {
@@ -130,17 +134,17 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 		return true, err
 	})
 
-	mux.HandleFunc("POST /logout", s.portal(func(w http.ResponseWriter, r *http.Request, _ string) {
+	mux.HandleFunc("POST /logout", s.portalAs(roleViewer, func(w http.ResponseWriter, r *http.Request, _ string) {
 		http.SetCookie(w, &http.Cookie{Name: cookieName, Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: secureCookie(r)})
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 	}))
-	mux.HandleFunc("POST /rules/{name}/{verb}", s.portal(func(w http.ResponseWriter, r *http.Request, csrf string) {
+	mux.HandleFunc("POST /rules/{name}/{verb}", s.portalAs(roleOperator, func(w http.ResponseWriter, r *http.Request, csrf string) {
 		name, verb := r.PathValue("name"), r.PathValue("verb")
 		if (verb != "enable" && verb != "disable") || !s.hasRule(name) {
 			http.NotFound(w, r)
 			return
 		}
-		if err := store.SetRuleOverride(s.Store.DB, name, verb == "enable", "portal", s.Now()); err != nil {
+		if err := store.SetRuleOverride(s.Store.DB, name, verb == "enable", s.actor(r), s.Now()); err != nil {
 			slog.Error("rule override", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -149,14 +153,14 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 		v.Rules, _ = s.rules()
 		s.afterPost(w, r, "/rules", "rules", v)
 	}))
-	mux.HandleFunc("POST /approvals/{id}/{verb}", s.portal(func(w http.ResponseWriter, r *http.Request, csrf string) {
+	mux.HandleFunc("POST /approvals/{id}/{verb}", s.portalAs(roleOperator, func(w http.ResponseWriter, r *http.Request, csrf string) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		verb := r.PathValue("verb")
 		if err != nil || (verb != "approve" && verb != "deny") {
 			http.NotFound(w, r)
 			return
 		}
-		if err := s.Decide(id, verb == "approve", "portal"); err != nil {
+		if err := s.Decide(id, verb == "approve", s.actor(r)); err != nil {
 			code, msg := decisionError(err)
 			http.Error(w, msg, code)
 			return
@@ -173,6 +177,7 @@ var backPath = regexp.MustCompile(`^/(jobs/[0-9]+)?$`)
 
 // afterPost answers an htmx POST with the refreshed partial, a plain form POST with a redirect.
 func (s *server) afterPost(w http.ResponseWriter, r *http.Request, path, name string, v view) {
+	v.Role = s.role(r).String()
 	if r.Header.Get("HX-Request") == "true" {
 		s.render(w, name, v)
 		return
@@ -185,6 +190,7 @@ func (s *server) afterPost(w http.ResponseWriter, r *http.Request, path, name st
 
 // page renders a partial for htmx requests, or wraps it in the full layout.
 func (s *server) page(w http.ResponseWriter, r *http.Request, name string, v view) {
+	v.Role = s.role(r).String()
 	if r.Header.Get("HX-Request") == "true" {
 		s.render(w, name, v)
 		return
@@ -203,7 +209,7 @@ func (s *server) page(w http.ResponseWriter, r *http.Request, name string, v vie
 	if v.Cfg != nil && v.Cfg.Kind != "" { // config pages light up their own kind
 		title, act = kindTitle[v.Cfg.Kind], kindNav[v.Cfg.Kind]
 	}
-	s.render(w, "layout", layout{Title: title, Path: r.URL.RequestURI(), CSRF: v.CSRF, Active: act,
+	s.render(w, "layout", layout{Actor: s.actor(r), Role: v.Role, Title: title, Path: r.URL.RequestURI(), CSRF: v.CSRF, Active: act,
 		Pending: len(pending), Poll: poll, Banner: s.banner(), Unsandboxed: s.Unsandboxed, Body: template.HTML(body.String())})
 }
 
@@ -213,23 +219,39 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
 		return
 	}
+	if o := s.Config().Server.OIDC; o != nil && !o.TokenLoginOn() {
+		http.NotFound(w, r)
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	if !s.tokenOK(r.PostFormValue("token")) {
 		s.lim.fail(ip)
 		w.WriteHeader(http.StatusUnauthorized)
-		s.render(w, "login", "Invalid token")
+		s.render(w, "login", s.loginData("Invalid token"))
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: s.sessionValue(), Path: "/", MaxAge: 86400,
+	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: s.sessionValue(roleAdmin, "portal"), Path: "/", MaxAge: 86400,
 		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: secureCookie(r)})
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-// portal requires a valid session cookie, and a CSRF token on every POST.
+// portal requires a valid session cookie, a CSRF token on every POST, and a
+// role: viewer for GET, admin for POST.
 func (s *server) portal(h func(w http.ResponseWriter, r *http.Request, csrf string)) http.HandlerFunc {
+	return s.portalAs(0, h)
+}
+
+// portalAs is portal with an explicit minimum role (0: viewer for GET, admin for POST).
+func (s *server) portalAs(need role, h func(w http.ResponseWriter, r *http.Request, csrf string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		c, err := r.Cookie(cookieName)
-		if err != nil || !s.sessionValid(c.Value) {
+		var sess session
+		ok := err == nil
+		if ok {
+			sess, ok = s.parseSession(c.Value)
+			ok = ok && s.sessionAllowed(sess)
+		}
+		if !ok {
 			if r.Method == http.MethodGet {
 				http.Redirect(w, r, "/login", http.StatusSeeOther)
 				return
@@ -237,6 +259,18 @@ func (s *server) portal(h func(w http.ResponseWriter, r *http.Request, csrf stri
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		min := need
+		if min == 0 {
+			min = roleViewer
+			if r.Method != http.MethodGet && r.Method != http.MethodHead {
+				min = roleAdmin
+			}
+		}
+		if sess.role < min {
+			http.Error(w, "your role ("+sess.role.String()+") can't do this; ask an admin", http.StatusForbidden)
+			return
+		}
+		r = r.WithContext(context.WithValue(r.Context(), sessionKey{}, sess))
 		csrf := s.csrfFor(c.Value)
 		if r.Method == http.MethodPost {
 			r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
@@ -251,4 +285,15 @@ func (s *server) portal(h func(w http.ResponseWriter, r *http.Request, csrf stri
 		}
 		h(w, r, csrf)
 	}
+}
+
+// sessionAllowed drops sessions the live config no longer allows: SSO ones
+// once server.oidc is gone, token ones once token_login is off.
+// ponytail: a removed role mapping still lasts until expiry or restart; that needs groups in the cookie.
+func (s *server) sessionAllowed(se session) bool {
+	o := s.Config().Server.OIDC
+	if strings.HasPrefix(se.actor, "oidc:") {
+		return o != nil
+	}
+	return se.actor != "portal" || o == nil || o.TokenLoginOn()
 }

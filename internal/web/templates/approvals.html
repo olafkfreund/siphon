@@ -5,8 +5,8 @@
     <div class="muted small">created {{ago $a.CreatedAt}} · expires {{tm $a.ExpiresAt}}</div></div><span class="sp"></span>
     <div class="acts">
       <a class="btn sm" href="/jobs/{{$a.JobID}}">Details</a>
-      <form method="post" action="/approvals/{{$a.JobID}}/deny"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm no">Deny</button></form>
-      <form method="post" action="/approvals/{{$a.JobID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm ok">Approve</button></form>
+      {{if can $.Role "operator"}}<form method="post" action="/approvals/{{$a.JobID}}/deny"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm no">Deny</button></form>{{end}}
+      {{if can $.Role "operator"}}<form method="post" action="/approvals/{{$a.JobID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm ok">Approve</button></form>{{end}}
     </div></div>
 </section>
 {{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>Nothing is waiting for you.</section>{{end}}

@@ -423,6 +423,97 @@
           },
           "type": "object"
         },
+        "oidc": {
+          "additionalProperties": false,
+          "properties": {
+            "allow_private": {
+              "type": "boolean"
+            },
+            "client_id": {
+              "type": "string"
+            },
+            "client_secret": {
+              "description": "env:NAME, file:/path, or (where allowed) a literal",
+              "type": "string"
+            },
+            "groups_claim": {
+              "type": "string"
+            },
+            "issuer": {
+              "type": "string"
+            },
+            "roles": {
+              "additionalProperties": false,
+              "properties": {
+                "admin": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "emails": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "groups": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                },
+                "operator": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "emails": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "groups": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                },
+                "viewer": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "emails": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "groups": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "scopes": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "token_login": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
         "public_url": {
           "type": "string"
         },

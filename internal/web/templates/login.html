@@ -7,12 +7,13 @@
   <img class="logo" src="/static/mark.svg" alt="">
   <div class="word">siphon</div>
   <div class="muted">Draws events in. Jets agents out.</div>
-  <form method="post" action="/login">
-    {{if .}}<p class="err" role="alert">{{.}}</p>{{end}}
+  {{if .Err}}<p class="err" role="alert">{{.Err}}</p>{{end}}
+  {{if .SSO}}<a class="btn primary block" href="/login/oidc">Sign in with SSO</a>{{end}}
+  {{if .Token}}<form method="post" action="/login">
     <label>Access token
       <input type="password" name="token" autocomplete="current-password" required autofocus>
       <span class="hint">The value of <code>server.token</code>.</span>
     </label>
     <button class="btn primary block">Sign in</button>
-  </form>
+  </form>{{end}}
 </div></main></body></html>{{end}}

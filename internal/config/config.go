@@ -119,6 +119,76 @@ type Server struct {
 	Retention Retention `yaml:"retention"`
 	// Metrics holds the scrape-only credential for GET /metrics.
 	Metrics MetricsServer `yaml:"metrics"`
+	// OIDC turns on single sign-on for the portal. Operator-only; read live.
+	OIDC *OIDC `yaml:"oidc"`
+}
+
+// OIDC is the one sign-in provider. Roles map provider groups or verified
+// emails to portal roles; the highest matching role wins.
+type OIDC struct {
+	Issuer       string   `yaml:"issuer"`
+	ClientID     string   `yaml:"client_id"`
+	ClientSecret Secret   `yaml:"client_secret"`
+	Scopes       []string `yaml:"scopes"`       // default openid, email, profile
+	GroupsClaim  string   `yaml:"groups_claim"` // default groups
+	AllowPrivate bool     `yaml:"allow_private"`
+	TokenLogin   *bool    `yaml:"token_login"` // default true
+	Roles        Roles    `yaml:"roles"`
+}
+
+type Roles struct {
+	Admin    RoleMatch `yaml:"admin"`
+	Operator RoleMatch `yaml:"operator"`
+	Viewer   RoleMatch `yaml:"viewer"`
+}
+
+type RoleMatch struct {
+	Groups []string `yaml:"groups"`
+	Emails []string `yaml:"emails"`
+}
+
+// TokenLoginOn reports whether the admin token form still works.
+func (o *OIDC) TokenLoginOn() bool { return o.TokenLogin == nil || *o.TokenLogin }
+
+func (o *OIDC) ScopesOrDefault() []string {
+	if len(o.Scopes) == 0 {
+		return []string{"openid", "email", "profile"}
+	}
+	return o.Scopes
+}
+
+func (o *OIDC) GroupsClaimOrDefault() string {
+	if o.GroupsClaim == "" {
+		return "groups"
+	}
+	return o.GroupsClaim
+}
+
+func (c *Config) validateOIDC(add func(string, ...any)) {
+	o := c.Server.OIDC
+	if o == nil {
+		return
+	}
+	iu, err := url.Parse(o.Issuer)
+	if err != nil || iu.Host == "" || !(iu.Scheme == "https" || iu.Scheme == "http" && loopbackListen(net.JoinHostPort(iu.Hostname(), "0"))) {
+		add("server.oidc.issuer: must be https, or http on a loopback host")
+	}
+	if o.ClientID == "" {
+		add("server.oidc.client_id: required")
+	}
+	if c.Server.PublicURL == "" {
+		add("server.oidc: needs server.public_url (the provider returns to <public_url>/login/oidc/callback)")
+	}
+	n := 0
+	for _, r := range []RoleMatch{o.Roles.Admin, o.Roles.Operator, o.Roles.Viewer} {
+		n += len(r.Groups) + len(r.Emails)
+	}
+	if n == 0 {
+		add("server.oidc.roles: map at least one group or email to a role")
+	}
+	if len(o.Scopes) > 0 && !slices.Contains(o.Scopes, "openid") {
+		add("server.oidc.scopes: must include openid")
+	}
 }
 
 // MetricsServer is the optional scrape-only token: it opens /metrics and
@@ -651,6 +721,9 @@ func parse(b []byte, stub map[string]string) (*Config, error) {
 // are handled separately: they may be plain literals unless the name looks secret.
 func (c *Config) secretPtrs() []*Secret {
 	out := []*Secret{&c.Server.Token, &c.Server.Metrics.Token}
+	if c.Server.OIDC != nil {
+		out = append(out, &c.Server.OIDC.ClientSecret)
+	}
 	for _, name := range sortedKeys(c.Credentials) {
 		if cr := c.Credentials[name]; cr != nil {
 			out = append(out, &cr.APIKey, &cr.AccessKeyID, &cr.SecretAccessKey)
@@ -1042,6 +1115,7 @@ func (c *Config) Validate() error {
 			add("server.public_url: want http(s)://host[:port][/path]")
 		}
 	}
+	c.validateOIDC(add)
 	if c.Limits.HTTPTimeout < 0 {
 		add("limits.http_timeout: must not be negative")
 	}
