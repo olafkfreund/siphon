@@ -58,11 +58,11 @@ func backup(args []string) error {
 }
 
 // backupDB is -db if given, else Server.DB of -config.
-func backupDB(fl *flag.FlagSet, cfgPath, db string) (string, error) {
+func backupDB(cfgPath, db string) (string, error) {
 	if db != "" {
 		return db, nil
 	}
-	cfg, err := config.Load(resolveConfig(fl, cfgPath))
+	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return "", err
 	}
@@ -100,7 +100,7 @@ func backupCreate(args []string, stdout, stderr io.Writer, stdoutTTY bool) (err 
 		return exitError{2, errors.New("usage: siphon backup create [-config f | -db path] [--force] <file|->")}
 	}
 	target := fl.Arg(0)
-	db, err := backupDB(fl, *cfgPath, *dbFlag)
+	db, err := backupDB(*cfgPath, *dbFlag)
 	if err != nil {
 		return err
 	}
@@ -263,7 +263,7 @@ func backupRestore(args []string, in io.Reader, stderr io.Writer, stdinTTY bool)
 		return exitError{2, errors.New("usage: siphon backup restore [-config f | -db path] [--yes] <file|->")}
 	}
 	src := fl.Arg(0)
-	db, err := backupDB(fl, *cfgPath, *dbFlag)
+	db, err := backupDB(*cfgPath, *dbFlag)
 	if err != nil {
 		return err
 	}

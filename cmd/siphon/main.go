@@ -39,9 +39,6 @@ import (
 var version = "dev"
 
 func main() {
-	if filepath.Base(os.Args[0]) == "agentgw" { // legacy-name
-		fmt.Fprintln(os.Stderr, "agentgw is now siphon; this alias goes away in v0.2.0") // legacy-name
-	}
 	if len(os.Args) < 2 {
 		fmt.Fprint(os.Stderr, usageText())
 		os.Exit(2)
@@ -146,23 +143,6 @@ func main() {
 	}
 }
 
-// resolveConfig returns path, except that when -config wasn't given and only the
-// old default file exists it returns that one, with a warning.
-func resolveConfig(fs *flag.FlagSet, path string) string {
-	set := false
-	fs.Visit(func(f *flag.Flag) { set = set || f.Name == "config" })
-	if set {
-		return path
-	}
-	if _, err := os.Stat(path); err != nil {
-		if _, err := os.Stat("agentgw.yaml"); err == nil { // legacy-name
-			fmt.Fprintln(os.Stderr, "warning: agentgw.yaml is deprecated, rename it to siphon.yaml") // legacy-name
-			return "agentgw.yaml"                                                                    // legacy-name
-		}
-	}
-	return path
-}
-
 // load parses -config from args, loads and validates it (file plus portal
 // edits unless -file-only); rest are positional args.
 func load(name string, args []string) (*config.Config, []string, error) {
@@ -179,7 +159,7 @@ func loadCfg(name string, args []string, fallback bool) (*config.Config, []strin
 	if err := fs.Parse(args); err != nil {
 		return nil, nil, "", "", err
 	}
-	p := resolveConfig(fs, *path)
+	p := *path
 	var items []config.Item
 	if !*fileOnly {
 		base, err := config.Load(p)
@@ -271,7 +251,7 @@ func configExport(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	p := resolveConfig(fs, *path)
+	p := *path
 	base, err := config.Load(p)
 	if err != nil {
 		return err
@@ -476,7 +456,7 @@ func openLocal(fs *flag.FlagSet, args []string) (*store.Store, []string, error) 
 	if err := fs.Parse(args); err != nil {
 		return nil, nil, err
 	}
-	cfg, err := config.Load(resolveConfig(fs, *path))
+	cfg, err := config.Load(*path)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -561,7 +541,7 @@ func credentials(args []string) error {
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	cfg, err := config.Load(resolveConfig(fs, *path))
+	cfg, err := config.Load(*path)
 	if err != nil {
 		return err
 	}

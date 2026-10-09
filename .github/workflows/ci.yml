@@ -22,7 +22,7 @@ jobs:
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
       - run: nix develop -c go vet ./...
       - run: nix develop -c go test -race -count=1 ./...
-      - run: nix build -L .#siphon .#agentgw .#checks.x86_64-linux.legacy-option # also proves vendorHash is current; legacy-name
+      - run: nix build -L .#siphon .#checks.x86_64-linux.removed-option # also proves vendorHash is current
 
   vm:
     name: NixOS VM test (sandbox, polkit, subscriptions)

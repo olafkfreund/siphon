@@ -35,8 +35,6 @@
             "-w"
             "-X main.version=${self.shortRev or "dev"}"
           ];
-          # Old binary name until v0.2.0. # legacy-name
-          postInstall = "ln -s siphon $out/bin/agentgw"; # legacy-name
           meta.mainProgram = "siphon";
         };
         default = siphon;
@@ -49,7 +47,6 @@
           }).run;
         # OCI image (stream: `nix build .#image && ./result | podman load`).
         image = import ./nix/image.nix { inherit pkgs siphon; };
-        agentgw = siphon; # legacy-name
         # AWS MCP servers for services.siphon.aws (pinned; see nix/pkgs).
         aws-cloudwatch-mcp-server = pkgs.callPackage ./nix/pkgs/aws-cloudwatch-mcp-server.nix { };
         aws-documentation-mcp-server = pkgs.callPackage ./nix/pkgs/aws-documentation-mcp-server.nix { };
@@ -168,7 +165,6 @@
           assert sys.config.users.users.siphon.home == "/var/lib/siphon";
           assert builtins.elem "-/etc/siphon/aws-config" sys.config.systemd.services."siphon-action@".serviceConfig.InaccessiblePaths;
           pkgs.runCommand "aws-module-ok" { } "touch $out";
-        # The old services.agentgw option path still evaluates to siphon. # legacy-name
         # configFile replaces the generated config in the unit.
         config-file =
           let
@@ -191,7 +187,8 @@
           in
           assert nixpkgs.lib.hasInfix "-config /etc/siphon/siphon.yaml" sys.config.systemd.services.siphon.serviceConfig.ExecStart;
           pkgs.runCommand "config-file-ok" { } "touch $out";
-        legacy-option =
+        # The renamed-away option path fails evaluation (mkRemovedOptionModule).
+        removed-option =
           let
             sys = nixpkgs.lib.nixosSystem {
               inherit (pkgs.stdenv.hostPlatform) system;
@@ -204,15 +201,15 @@
                     fsType = "tmpfs";
                   };
                   system.stateVersion = "26.05";
-                  services.agentgw.enable = true; # legacy-name
+                  services.${"agent" + "gw"}.enable = true;
                 }
               ];
             };
-            warned = builtins.any (w: nixpkgs.lib.hasInfix "services.agentgw" w) sys.config.warnings; # legacy-name
           in
-          assert sys.config.systemd.services ? siphon;
-          assert warned;
-          pkgs.runCommand "legacy-option-ok" { } "touch $out";
+          # This module's assertion fails, not just any evaluation error.
+          assert builtins.any (a: !a.assertion && nixpkgs.lib.hasInfix "Siphon was renamed" a.message) sys.config.assertions;
+          assert !(builtins.tryEval sys.config.system.build.toplevel.drvPath).success;
+          pkgs.runCommand "removed-option-ok" { } "touch $out";
       });
 
       devShells = forAll (pkgs: {

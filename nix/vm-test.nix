@@ -589,23 +589,6 @@ pkgs.testers.runNixOSTest {
         listing = machine.succeed(f"runuser -u siphon -- {agw} credentials ls -config {cfg}")
         assert "refreshed" not in listing and "r1" not in listing.split(), f"ls leaked a token: {listing}"
 
-    with subtest("state from an old agentgw install is migrated"):  # legacy-name
-        machine.fail("test -e /var/lib/siphon/MIGRATED_FROM_AGENTGW")  # legacy-name: fresh install untouched
-        jobs_before = machine.succeed("sqlite3 /var/lib/siphon/state.db 'select count(*) from jobs'").strip()
-        machine.succeed("systemctl stop siphon.service")
-        machine.succeed("mv /var/lib/siphon /var/lib/agentgw && chown -R root:root /var/lib/agentgw")  # legacy-name
-        machine.succeed("systemctl start siphon.service")
-        machine.wait_for_open_port(8080)
-        machine.succeed("test -e /var/lib/siphon/MIGRATED_FROM_AGENTGW")  # legacy-name
-        assert machine.succeed("sqlite3 /var/lib/siphon/state.db 'select count(*) from jobs'").strip() == jobs_before
-        assert machine.succeed("find /var/lib/siphon ! -user siphon | wc -l").strip() == "0", "migrated files not owned by siphon"
-        machine.succeed("test -e /var/lib/siphon/credentials/claude-max/credentials.json")
-        machine.succeed("test -e /var/lib/agentgw/state.db")  # legacy-name: old copy kept
-        # A second start must not migrate again.
-        machine.succeed("systemctl restart siphon.service")
-        machine.wait_for_open_port(8080)
-        assert machine.succeed("journalctl -u siphon -b | grep -c 'migrated state'").strip() == "1"
-
     with subtest("egress: restricted agents reach only allowlisted hosts via the proxy"):
         external.wait_for_open_port(8080)
         assert hook('{"kind":"probe","n":200}') == "202"

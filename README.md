@@ -7,8 +7,6 @@
 Like an octopus siphon that draws water in and jets it out, Siphon draws events
 in from MCP servers, APIs and webhooks and jets out agents, commands and routines.
 
-Formerly agentgw. <!-- legacy-name -->
-
 A self-hosted gateway that watches MCP servers, REST APIs and webhooks, decides
 with rules whether something needs attention, and then runs a command, starts a
 systemd unit, runs a routine, or hands the problem to an AI agent. One Go
@@ -671,12 +669,3 @@ Apache License 2.0, see [LICENSE](LICENSE).
 
 The design learned from [Windmill](https://www.windmill.dev) (job queue,
 sandboxing and SSRF lessons). No Windmill code was copied.
-
-## Upgrading from agentgw <!-- legacy-name -->
-
-- `services.agentgw` still works, with a warning, until v0.2.0. <!-- legacy-name -->
-- On first start, state is copied from `/var/lib/agentgw` to `/var/lib/siphon`; the old copy is kept. <!-- legacy-name -->
-- `agentgw.yaml` is still read if `siphon.yaml` is missing. <!-- legacy-name -->
-- The `agentgw` binary is a symlink to `siphon` and prints a deprecation notice. <!-- legacy-name -->
-- Without a `db:` setting, an existing `agentgw.db` next to the config is still used (with a warning) until you rename it to `siphon.db`. <!-- legacy-name -->
-- If you set `settings.server.db` to a path under `/var/lib/agentgw`, change it to `/var/lib/siphon`: only the default state is migrated. <!-- legacy-name -->
