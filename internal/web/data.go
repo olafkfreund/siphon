@@ -20,7 +20,8 @@ type sourceView struct {
 	Poll       string     `json:"poll,omitempty"`
 	LastPollAt *time.Time `json:"last_poll_at"`
 	LastError  string     `json:"last_error"`
-	Health     string     `json:"health"` // ok | stale | error | idle
+	Health     string     `json:"health"`          // ok | stale | error | idle
+	OAuth      string     `json:"oauth,omitempty"` // auth.oauth sources: none | pending | ok | expired
 
 	// schedule sources only
 	At        string     `json:"at,omitempty"`
@@ -89,6 +90,9 @@ func (s *server) sources() ([]sourceView, error) {
 		}
 		if src.Type == "schedule" {
 			s.fillSchedule(&v, src)
+		}
+		if s.OAuth != nil && src.Auth != nil && src.Auth.OAuth != nil {
+			v.OAuth, _ = s.OAuth.Status(name)
 		}
 		switch {
 		case v.LastError != "":

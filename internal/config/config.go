@@ -260,6 +260,14 @@ type Read struct {
 
 type Auth struct {
 	Bearer Secret `yaml:"bearer"`
+	OAuth  *OAuth `yaml:"oauth"`
+}
+
+// OAuth opts a remote MCP source in to an OAuth login (see docs).
+type OAuth struct {
+	ClientID     string   `yaml:"client_id"`
+	ClientSecret Secret   `yaml:"client_secret"`
+	Scopes       []string `yaml:"scopes"`
 }
 
 type Rule struct {
@@ -658,6 +666,9 @@ func (c *Config) secretPtrs() []*Secret {
 			out = append(out, &s.Secret)
 			if s.Auth != nil {
 				out = append(out, &s.Auth.Bearer)
+				if s.Auth.OAuth != nil {
+					out = append(out, &s.Auth.OAuth.ClientSecret)
+				}
 			}
 		}
 	}
@@ -829,6 +840,37 @@ func (c *Config) AgentCredential(agent string) (string, *Credential) {
 		return "", nil
 	}
 	return a.Credential, c.Credentials[a.Credential]
+}
+
+func (s *Source) authOAuth() *OAuth {
+	if s.Auth == nil {
+		return nil
+	}
+	return s.Auth.OAuth
+}
+
+func (c *Config) validateOAuth(p string, s *Source, o *OAuth, add func(string, ...any)) {
+	if s.URL == "" || len(s.Command) > 0 {
+		add("%s.auth.oauth: only for a remote MCP source (url, not command)", p)
+	}
+	if s.Auth.Bearer.isSet() {
+		add("%s.auth.oauth: not allowed with auth.bearer", p)
+	}
+	for k := range s.Headers {
+		if strings.EqualFold(k, "Authorization") {
+			add("%s.auth.oauth: not allowed with an Authorization header", p)
+		}
+	}
+	if o.ClientSecret.isSet() && o.ClientID == "" {
+		add("%s.auth.oauth.client_secret: needs client_id", p)
+	}
+	pu, err := url.Parse(c.Server.PublicURL)
+	switch {
+	case c.Server.PublicURL == "":
+		add("%s.auth.oauth: needs server.public_url (the browser returns to <public_url>/oauth/callback)", p)
+	case err == nil && pu.Scheme != "https" && !(pu.Scheme == "http" && loopbackListen(net.JoinHostPort(pu.Hostname(), "0"))):
+		add("%s.auth.oauth: server.public_url must be https, or http on a loopback host", p)
+	}
 }
 
 func loopbackListen(addr string) bool {
@@ -1264,6 +1306,9 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 					}
 				}
 			}
+		}
+		if o := s.authOAuth(); o != nil {
+			c.validateOAuth(p, s, o, add)
 		}
 		if s.Read == nil && s.Poll != 0 && s.AWS == "" {
 			add("%s: poll needs read (without read the source is agent tools only)", p)

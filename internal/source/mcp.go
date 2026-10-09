@@ -12,6 +12,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -21,6 +22,7 @@ type MCPOptions struct {
 	Env          map[string]string // added to the stdio child's minimal env, never argv
 	URL          string
 	Bearer       string
+	OAuth        auth.OAuthHandler // steady-state OAuth login (excludes Bearer)
 	Resource     string
 	Tool         string
 	ToolArgs     map[string]any
@@ -192,10 +194,10 @@ func (s MCP) transport(ctx context.Context, stream bool) mcp.Transport {
 	if transport == nil {
 		var client *http.Client
 		client = guardedClient(o.AllowPrivate, o.Timeout, o.MaxBody, stream)
-		if o.Bearer != "" {
+		if o.Bearer != "" && o.OAuth == nil {
 			client.Transport = bearerTransport{base: client.Transport, token: o.Bearer}
 		}
-		transport = &mcp.StreamableClientTransport{Endpoint: o.URL, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: !stream}
+		transport = &mcp.StreamableClientTransport{Endpoint: o.URL, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: !stream, OAuthHandler: o.OAuth}
 	}
 	return transport
 }

@@ -17,7 +17,7 @@ NixOS module and in the OCI image):
 |---|---|
 | `state.db` | tasks and every config revision, jobs, approvals, the audit log, notifications |
 | `secrets/` | the secret values pasted in the portal or passed with `--secret` |
-| `credentials/` | subscription logins (`siphon connect login`, `credentials import`) |
+| `credentials/` | subscription logins (`siphon connect login`, `credentials import`) and MCP OAuth logins (`siphon connect oauth`) |
 
 **Not included:** `siphon.yaml` and `server.token`. Keep those with your own
 config management (Nix, /etc, your secrets tool).

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/mcpoauth"
 	"github.com/olafkfreund/siphon/internal/store"
 )
 
@@ -53,6 +54,8 @@ type Options struct {
 	// Hooks are mounted at POST /hook/{source}, unauthenticated: HMAC is their auth.
 	Hooks func(source string) http.Handler // nil result = not a webhook source
 	Now   func() time.Time
+	// OAuth holds the logins of auth.oauth sources (Pipeline.OAuth); nil disables the login routes.
+	OAuth *mcpoauth.Manager
 	// Version is the build version shown by /metrics.
 	Version string
 }
@@ -159,6 +162,7 @@ func New(o Options) http.Handler {
 		}
 		http.NotFound(w, r)
 	})
+	s.oauthRoutes(mux)
 	s.apiRoutes(mux)
 	s.portalRoutes(mux)
 	s.configRoutes(mux)

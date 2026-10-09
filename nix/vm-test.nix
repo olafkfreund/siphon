@@ -107,6 +107,8 @@ pkgs.testers.runNixOSTest {
             listen = "0.0.0.0:8080";
             token = "file:/run/credentials/siphon.service/token";
             metrics.token = "file:/run/credentials/siphon.service/metrics-token";
+            # Where the browser returns after an OAuth login (#44).
+            public_url = "http://127.0.0.1:8080";
           };
           sources.gh = {
             type = "webhook";
@@ -167,6 +169,13 @@ pkgs.testers.runNixOSTest {
             type = "webhook";
             signature = "standard-webhooks";
             secret = "file:/etc/siphon/std-secret";
+          };
+          # An OAuth MCP source with no login and nothing listening (#44).
+          sources.oauthsrc = {
+            type = "mcp";
+            url = "http://127.0.0.1:9/mcp";
+            allow_private = true;
+            auth.oauth = { };
           };
           # A stdio MCP server with a secret env: agents reach it via the bridge.
           sources.stubsrc = {
@@ -936,6 +945,20 @@ pkgs.testers.runNixOSTest {
             raise
         assert count("select count(*) from config_revision") == revs0 + 1
         assert count("select count(*) from audit where event='config_changed'") == changed0 + 1
+
+    with subtest("an OAuth MCP source: status, a failing login start and the public callback (docs/tasks/connect-oauth-mcp.md)"):
+        import json
+        auth = f"-H 'Authorization: Bearer {TOKEN}'"
+        base = "http://127.0.0.1:8080"
+        st = json.loads(machine.succeed(f"curl -sf {auth} {base}/api/sources/oauthsrc/oauth"))
+        assert st["status"] == "none", st
+        # Nothing listens on :9: starting a login fails fast instead of hanging.
+        code = machine.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' -m 40 -X POST {auth} {base}/api/sources/oauthsrc/oauth/login").strip()
+        assert code == "502", code
+        # The callback needs no token, and refuses a state it never issued.
+        code = machine.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' '{base}/oauth/callback?state=bogus&code=x'").strip()
+        assert code == "400", code
+        machine.succeed("test ! -e /var/lib/siphon/credentials/.mcp/oauthsrc")
 
     with subtest("stopping siphon leaves no orphaned action units (cmd and agent)"):
         assert hook('{"kind":"sleep","n":3}') == "202"

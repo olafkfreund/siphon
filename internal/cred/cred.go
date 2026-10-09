@@ -42,6 +42,7 @@ var fileProvider = map[string]string{
 	"oauth-token":             "claude",
 	"auth.json":               "codex",
 	"antigravity-oauth-token": "agy",
+	"mcp-oauth.json":          "mcp",
 }
 
 const maxImport = 1 << 20

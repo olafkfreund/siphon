@@ -127,7 +127,7 @@ func (p *Pipeline) listen(ctx context.Context, cfg *config.Config, name string, 
 		return
 	}
 	for ctx.Err() == nil {
-		m := source.MCP{Options: mcpOptions(cfg, name)}
+		m := source.MCP{Options: p.mcpOptions(cfg, name)}
 		if p.MCPTransport != nil {
 			m.Transport = p.MCPTransport(name)
 		}
