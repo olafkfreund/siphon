@@ -2523,9 +2523,29 @@ siphon validate -config /etc/siphon/siphon.yaml
 
 ## Metrics
 
-`GET /metrics` serves the Prometheus text format. It needs the same login
-token as the API, so nothing is open without it. A wrong token gets 401, and
-repeated failures get 429.
+`GET /metrics` serves the Prometheus text format. It needs a token, so
+nothing is open without it. A wrong token gets 401, and repeated failures get
+429.
+
+**Give Prometheus a scrape token.** It opens `/metrics` and nothing else:
+the API and the portal refuse it. Make one with at least 32 characters,
+different from `server.token` (`openssl rand -hex 32`):
+
+```yaml
+# siphon.yaml
+server:
+  metrics:
+    token: file:/etc/siphon/metrics-token
+```
+
+On NixOS, pass the file like the login token:
+
+```nix
+services.siphon.credentials.metrics-token = "/run/agenix/siphon-metrics-token";
+services.siphon.settings.server.metrics.token = "file:/run/credentials/siphon.service/metrics-token";
+```
+
+Then point Prometheus at the same value:
 
 ```yaml
 # prometheus.yml
@@ -2534,7 +2554,7 @@ scrape_configs:
     scrape_interval: 30s
     static_configs: [{ targets: ["siphon.lan:8080"] }]
     authorization:
-      credentials_file: /run/secrets/siphon-token
+      credentials_file: /run/secrets/siphon-metrics-token
 ```
 
 | Metric | Labels | Meaning |
@@ -2552,10 +2572,12 @@ scrape_configs:
 | `siphon_rule_error` | `rule` | 1 when a rule has an error (see `siphon why`) |
 | `siphon_notifications` | `channel`, `state` | notification deliveries by state (`pending` = retrying) |
 
-- **The token is the admin token.** Siphon has one login token, and
-  Prometheus needs it to scrape. Anyone who can read the scrape config can
-  also use the API. Keep the token in a file only Prometheus can read
+- **Use the scrape token, not the login token.** The login token
+  (`server.token`) also works on `/metrics`, so older scrape configs keep
+  working. But it gives whoever reads the scrape config the whole API. Either
+  way, keep the token in a file only Prometheus can read
   (`credentials_file`), not inline in `prometheus.yml`.
+- **A changed token needs a restart** of Siphon, like `server.token`.
 - **Labels** are only names from your config. Metrics never include job
   contents, errors, URLs or secrets.
 - **Computed per scrape:** every value is read from the database when
