@@ -26,6 +26,7 @@ baseline in **`siphon.yaml`**.
 | chain steps (fetch → summarise → notify) | [routines](tasks/routine.md) | `nightly-report`, `alertmanager-summary` |
 | approve or deny agent runs | [approvals](tasks/approvals.md) | |
 | get told when something needs me | [notifications](tasks/notifications.md) | |
+| back up, restore, monitor | [backup and monitoring](tasks/backup-and-monitoring.md) | |
 | investigate cloud alarms | [AWS](connections/aws.md) | `aws-cloudwatch-alarm` |
 
 ## Connections

@@ -284,16 +284,37 @@ const (
 	seenRetention = 7 * 24 * time.Hour
 )
 
-// Cleanup deletes finished jobs and audit rows older than 30 days and
-// seen_event rows older than 7 days.
-func Cleanup(db *sql.DB, now time.Time) error {
+// Retention is how long Cleanup keeps rows; a zero field uses the default (30d, 30d, 7d).
+type Retention struct{ Jobs, Audit, Seen time.Duration }
+
+// NewestMigration is the name of the last embedded migration, e.g. "0005_notifications.sql".
+func NewestMigration() string {
+	files, _ := migrationFS.ReadDir("migrations") // ReadDir sorts by name
+	if len(files) == 0 {
+		return ""
+	}
+	return files[len(files)-1].Name()
+}
+
+// Cleanup deletes finished jobs (and their notifications) older than r.Jobs,
+// audit rows older than r.Audit and seen_event rows older than r.Seen.
+func Cleanup(db *sql.DB, now time.Time, r Retention) error {
+	if r.Jobs == 0 {
+		r.Jobs = jobRetention
+	}
+	if r.Audit == 0 {
+		r.Audit = jobRetention
+	}
+	if r.Seen == 0 {
+		r.Seen = seenRetention
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	old := `SELECT id FROM jobs WHERE state IN ('done','failed','cancelled') AND finished_at < ?`
-	cut := ms(now.Add(-jobRetention))
+	cut := ms(now.Add(-r.Jobs))
 	for _, q := range []struct {
 		sql  string
 		args []any
@@ -308,8 +329,8 @@ func Cleanup(db *sql.DB, now time.Time) error {
 			(SELECT 1 FROM notifications o WHERE o.channel=notifications.channel AND o.event='source_ok' AND o.key=notifications.key))`, []any{cut}},
 		{`DELETE FROM notifications WHERE job_id IS NULL AND state!='pending' AND created_at < ? AND event!='source'`, []any{cut}},
 		{`DELETE FROM jobs WHERE id IN (` + old + `)`, []any{cut}},
-		{`DELETE FROM audit WHERE at < ?`, []any{cut}},
-		{`DELETE FROM seen_event WHERE seen_at < ?`, []any{ms(now.Add(-seenRetention))}},
+		{`DELETE FROM audit WHERE at < ?`, []any{ms(now.Add(-r.Audit))}},
+		{`DELETE FROM seen_event WHERE seen_at < ?`, []any{ms(now.Add(-r.Seen))}},
 	} {
 		if _, err := tx.Exec(q.sql, q.args...); err != nil {
 			return err

@@ -130,12 +130,18 @@ func main() {
 		err = serve(ctx, args)
 	case "credentials":
 		err = credentials(args)
+	case "backup":
+		err = backup(args)
 	default:
 		fmt.Fprint(os.Stderr, usageText())
 		os.Exit(2)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "siphon:", err)
+		var ee exitError
+		if errors.As(err, &ee) {
+			os.Exit(ee.code)
+		}
 		os.Exit(1)
 	}
 }
@@ -519,7 +525,7 @@ func serve(ctx context.Context, args []string) error {
 		IdleTimeout:       120 * time.Second,
 		Handler: web.New(web.Options{
 			Token: cfg.Server.Token.Value, Store: st, Config: p.Config, Apply: p.Apply, Banner: banner, Unsandboxed: cfg.Server.Sandbox == "none", ConfigPath: cfgPath, Decide: p.Decide, TestAWS: p.TestAWS,
-			Hooks: p.Webhooks(), Now: time.Now,
+			Hooks: p.Webhooks(), Now: time.Now, Version: version,
 		}),
 	}
 	httpErr := make(chan error, 1)

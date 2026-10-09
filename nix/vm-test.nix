@@ -74,6 +74,7 @@ pkgs.testers.runNixOSTest {
       environment.etc."siphon/std-secret".text = "whsec_c2lwaG9uLXN0YW5kYXJkLXdlYmhvb2tzLWtleQ==";
       services.siphon = {
         enable = true;
+        backup.enable = true;
         mcpPackages.stubaws = {
           package = stubMcpSlow;
           args = [ ];
@@ -886,6 +887,36 @@ pkgs.testers.runNixOSTest {
         # leave nothing behind for the later subtests
         alice("siphon delete rules vm-fails")
         alice("siphon delete notify hook")
+
+    with subtest("backup, offline restore and metrics (docs/tasks/backup-and-monitoring.md)"):
+        alice("""siphon new task --name vm-kept --source vm-hook --when 'event.keep == true' --on each --id event.n --cmd '["true"]' --yes""")
+        alice("printf %s http://127.0.0.1:18099/k | siphon notify add kept --type webhook --url - --events failed --yes")
+        # the timer's unit, run now: one 0600 archive with the db and the pasted secret
+        machine.succeed("systemctl start siphon-backup.service")
+        archives = machine.succeed("ls /var/backup/siphon/siphon-*.tar.gz").split()
+        assert len(archives) == 1, archives
+        assert machine.succeed(f"stat -c %a {archives[0]}").strip() == "600"
+        listing = machine.succeed(f"tar -tzf {archives[0]}")
+        for want in ("siphon-backup.json", "state.db", "secrets/notify--kept+url"):
+            assert want in listing, listing
+        # restore refuses while siphon runs (exit 5), then works offline
+        status, out = machine.execute(f"runuser -u siphon -- siphon backup restore -db /var/lib/siphon/state.db --yes {archives[0]} 2>&1")
+        assert status == 5, (status, out)
+        machine.succeed("systemctl stop siphon.service")
+        machine.succeed("rm -rf /var/lib/siphon/state.db /var/lib/siphon/state.db-wal /var/lib/siphon/state.db-shm /var/lib/siphon/secrets")
+        machine.succeed(f"runuser -u siphon -- siphon backup restore -db /var/lib/siphon/state.db --yes {archives[0]}")
+        machine.succeed("systemctl start siphon.service")
+        machine.wait_for_open_port(8080)
+        alice("siphon get rules vm-kept")  # exit 4 if the restore lost it
+        machine.succeed("test -f /var/lib/siphon/secrets/notify--kept+url")
+        # /metrics: the login token, like the API
+        metrics = "http://127.0.0.1:8080/metrics"
+        assert machine.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {metrics}").strip() == "401"
+        body = machine.succeed(f"curl -sf -H 'Authorization: Bearer {TOKEN}' {metrics}")
+        assert 'siphon_jobs{state="done"}' in body and "# TYPE siphon_approvals_pending gauge" in body, body
+        alice("siphon delete rules vm-kept")
+        alice("siphon delete notify kept")
+        machine.succeed("rm -rf /var/lib/siphon/pre-restore-* /var/backup/siphon/siphon-*.tar.gz")
 
     with subtest("a rule created over the config API fires without a restart"):
         import json

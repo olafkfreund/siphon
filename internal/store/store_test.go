@@ -175,7 +175,7 @@ func TestCleanup(t *testing.T) {
 	MarkSeen(tx, "x", "new", now.Add(-6*day))
 	tx.Commit()
 
-	if err := Cleanup(s.DB, now); err != nil {
+	if err := Cleanup(s.DB, now, Retention{}); err != nil {
 		t.Fatal(err)
 	}
 	exists := func(id int64) bool {
@@ -580,7 +580,7 @@ func TestCleanupFreesJobIDsForNotifications(t *testing.T) {
 		EnqueueNotification(s.DB, r, old)
 	}
 	s.DB.Exec(`UPDATE notifications SET state='sent' WHERE job_id IS NULL`)
-	if err := Cleanup(s.DB, now); err != nil {
+	if err := Cleanup(s.DB, now, Retention{}); err != nil {
 		t.Fatal(err)
 	}
 	if id2 := mk(); id2 != id {
@@ -610,5 +610,83 @@ func TestSuppressedReportLeavesErrorEmpty(t *testing.T) {
 	}
 	if l, _ := ListNotifications(s.DB, NotificationFilter{}); l[0].Error != "" {
 		t.Fatalf("error set: %q", l[0].Error)
+	}
+}
+
+func TestCleanupCustomRetention(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	now := time.UnixMilli(1_800_000_000_000)
+	day := 24 * time.Hour
+	tx, _ := s.DB.Begin()
+	Audit(tx, now.Add(-3*day), "a", "old", 0, "")
+	Audit(tx, now.Add(-1*day), "a", "new", 0, "")
+	MarkSeen(tx, "x", "old", now.Add(-3*day))
+	MarkSeen(tx, "x", "new", now.Add(-1*day))
+	tx.Commit()
+	count := func(q string) (n int) { s.DB.QueryRow(q).Scan(&n); return }
+	// zero Audit/Seen use the defaults: nothing is old enough
+	if err := Cleanup(s.DB, now, Retention{Jobs: 2 * day}); err != nil {
+		t.Fatal(err)
+	}
+	if count(`SELECT COUNT(*) FROM audit`) != 2 || count(`SELECT COUNT(*) FROM seen_event`) != 2 {
+		t.Fatal("zero fields must use the defaults")
+	}
+	if err := Cleanup(s.DB, now, Retention{Jobs: 2 * day, Audit: 2 * day, Seen: 2 * day}); err != nil {
+		t.Fatal(err)
+	}
+	if count(`SELECT COUNT(*) FROM audit WHERE event='old'`) != 0 || count(`SELECT COUNT(*) FROM audit WHERE event='new'`) != 1 ||
+		count(`SELECT COUNT(*) FROM seen_event`) != 1 {
+		t.Fatal("custom cutoff")
+	}
+}
+
+func TestNewestMigration(t *testing.T) {
+	if got := NewestMigration(); got != "0005_notifications.sql" {
+		t.Fatal(got)
+	}
+}
+
+func TestGetMetrics(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	now := time.UnixMilli(1_800_000_000_000)
+	mk := func(state, action string, created time.Time, finished time.Time) {
+		tx, _ := s.DB.Begin()
+		id, err := InsertJob(tx, Job{Rule: "r", ActionJSON: action, State: state}, created)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx.Exec(`UPDATE jobs SET created_at=?, finished_at=? WHERE id=?`, ms(created), ms(finished), id)
+		tx.Commit()
+	}
+	mk("queued", "{}", now.Add(-100*time.Second), now)
+	mk("queued", "{}", now.Add(-50*time.Second), now)
+	mk("pending_approval", `{"action":{"Agent":"a"}}`, now.Add(-200*time.Second), now)
+	mk("failed", "{}", now.Add(-48*time.Hour), now.Add(-10*time.Minute))
+	mk("failed", "{}", now.Add(-48*time.Hour), now.Add(-2*time.Hour))
+	mk("done", "{}", now.Add(-48*time.Hour), now.Add(-time.Minute))
+	s.DB.Exec(`INSERT INTO source_state(source, last_poll_at, failing_since) VALUES ('a', 5000, 1), ('b', NULL, NULL)`)
+	s.DB.Exec(`INSERT INTO rule_error(rule, at, error) VALUES ('r1', 1, 'secret text')`)
+	EnqueueNotification(s.DB, Notification{Channel: "c", Event: "test", Key: "k", Title: "t", Body: "b"}, now)
+
+	m, err := GetMetrics(s.DB, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Jobs["queued"] != 2 || m.Jobs["running"] != 0 || m.Jobs["failed"] != 2 || len(m.Jobs) != 6 {
+		t.Fatalf("jobs %v", m.Jobs)
+	}
+	if m.Finished["failed"] != 1 || m.Finished["done"] != 1 || m.Finished["cancelled"] != 0 {
+		t.Fatalf("finished %v", m.Finished)
+	}
+	if m.QueueOldest != 100 || m.Approvals != 1 || m.ApprovalOldest != 200 || m.AgentRuns != 1 {
+		t.Fatalf("%+v", m)
+	}
+	if !m.SourceFailing["a"] || m.SourceFailing["b"] || m.SourcePoll["a"] != 5 || len(m.SourcePoll) != 1 {
+		t.Fatalf("sources %v %v", m.SourceFailing, m.SourcePoll)
+	}
+	if !m.RuleError["r1"] || m.Notifications[[2]string{"c", "pending"}] != 1 {
+		t.Fatalf("%v %v", m.RuleError, m.Notifications)
 	}
 }

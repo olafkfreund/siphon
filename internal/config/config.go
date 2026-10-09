@@ -116,6 +116,15 @@ type Server struct {
 	// MCPPackages are the stdio MCP servers a source may name with package:.
 	// Only siphon.yaml can list them; the portal picks from the list.
 	MCPPackages map[string]MCPPackage `yaml:"mcp_packages"`
+	// Retention is how long finished jobs, the audit log and seen events are kept. 0 means the default.
+	Retention Retention `yaml:"retention"`
+}
+
+// Retention holds the keep-for durations; each is 0 (default) or at least 24h.
+type Retention struct {
+	Jobs       Duration `yaml:"jobs"`
+	Audit      Duration `yaml:"audit"`
+	SeenEvents Duration `yaml:"seen_events"`
 }
 
 // MCPPackage is a vetted stdio MCP server: its command, the env names it may
@@ -918,6 +927,14 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	for _, r := range []struct {
+		key string
+		d   Duration
+	}{{"jobs", c.Server.Retention.Jobs}, {"audit", c.Server.Retention.Audit}, {"seen_events", c.Server.Retention.SeenEvents}} {
+		if r.d != 0 && time.Duration(r.d) < 24*time.Hour {
+			add("server.retention.%s: must be at least 24h", r.key)
+		}
+	}
 	if t := c.Server.Token; t.isSet() && t.Value != "" && len(t.Value) < 32 {
 		add("server.token: must be at least 32 characters")
 	}

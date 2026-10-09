@@ -21,6 +21,7 @@ func (s *server) apiRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST "+path, s.api(func(w http.ResponseWriter, r *http.Request) { s.reply(w, r, f) }))
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) { jsonErr(w, http.StatusNotFound, "not found") })
+	mux.HandleFunc("GET /metrics", s.api(s.metrics))
 	s.connectionAPI(mux)
 	s.diagAPI(mux)
 	s.inventoryAPI(mux)

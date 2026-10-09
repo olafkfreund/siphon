@@ -1002,3 +1002,24 @@ func TestScheduleKeyedByInstant(t *testing.T) {
 		}
 	}
 }
+
+func TestRetentionValidation(t *testing.T) {
+	setenv(t)
+	for _, tc := range []struct{ yaml, want string }{
+		{"", ""},
+		{"server: { retention: { jobs: 24h, audit: 48h, seen_events: 25h } }", ""},
+		{"server: { retention: { audit: 23h } }", "server.retention.audit: must be at least 24h"},
+	} {
+		c, err := Parse([]byte(tc.yaml))
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = c.Validate()
+		if tc.want == "" && (err != nil || c.Server.Retention.Jobs != 0 && tc.yaml == "") {
+			t.Fatalf("unexpected: %v", err)
+		}
+		if tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+			t.Fatalf("want %q, got %v", tc.want, err)
+		}
+	}
+}

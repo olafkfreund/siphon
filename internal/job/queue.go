@@ -160,7 +160,8 @@ func (p *Pipeline) retention(ctx context.Context) {
 	t := time.NewTicker(24 * time.Hour)
 	defer t.Stop()
 	for {
-		if err := store.Cleanup(p.Store.DB, p.Now()); err != nil {
+		r := p.Config().Server.Retention // read each run: a reload applies at the next one
+		if err := store.Cleanup(p.Store.DB, p.Now(), store.Retention{Jobs: time.Duration(r.Jobs), Audit: time.Duration(r.Audit), Seen: time.Duration(r.SeenEvents)}); err != nil {
 			slog.Error("retention", "err", err)
 		}
 		select {

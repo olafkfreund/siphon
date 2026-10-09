@@ -416,6 +416,24 @@
         "public_url": {
           "type": "string"
         },
+        "retention": {
+          "additionalProperties": false,
+          "properties": {
+            "audit": {
+              "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+              "type": "string"
+            },
+            "jobs": {
+              "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+              "type": "string"
+            },
+            "seen_events": {
+              "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
         "sandbox": {
           "type": "string"
         },

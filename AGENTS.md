@@ -38,7 +38,9 @@ siphon notify add phone --type ntfy --url - --yes   # URL on stdin: get told abo
   - `server.*`, `limits`, `units`;
   - stdio `command`s;
   - new private hosts;
-  - AWS profiles or roles not in `server.aws`.
+  - AWS profiles or roles not in `server.aws`;
+  - backups and restores (`siphon backup`, on the host:
+    [backup and monitoring](docs/tasks/backup-and-monitoring.md)).
 - **Exit codes:** 0 ok, 1 error, 2 usage, 3 validation, 4 not found,
   5 conflict. With `-o json`, errors are `{"error", "errors", "hint"}`;
   follow the `hint`.
