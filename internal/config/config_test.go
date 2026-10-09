@@ -1037,3 +1037,34 @@ func TestMetricsTokenValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestOAuthSource(t *testing.T) {
+	t.Setenv("AGW_CS", "s3cret-value")
+	t.Setenv("AGW_B", "b")
+	src := func(pub, auth, extra string) string {
+		return "server: {public_url: \"" + pub + "\"}\nsources: {s: {type: mcp, url: \"https://m/mcp\", " + extra + "auth: {" + auth + "}}}"
+	}
+	for name, tc := range map[string]struct{ y, want string }{
+		"ok":          {src("https://gw.example", "oauth: {}", ""), ""},
+		"ok loopback": {src("http://127.0.0.1:8080", "oauth: {client_id: id, client_secret: env:AGW_CS, scopes: [a]}", ""), ""},
+		"localhost":   {src("http://localhost", "oauth: {}", ""), ""},
+		"no public":   {src("", "oauth: {}", ""), "needs server.public_url"},
+		"http public": {src("http://gw.example", "oauth: {}", ""), "must be https"},
+		"bearer":      {src("https://gw.example", "bearer: env:AGW_B, oauth: {}", ""), "not allowed with auth.bearer"},
+		"header":      {src("https://gw.example", "oauth: {}", "headers: {authorization: x}, "), "Authorization header"},
+		"secret only": {src("https://gw.example", "oauth: {client_secret: env:AGW_CS}", ""), "needs client_id"},
+		"command":     {"server: {public_url: \"https://gw.example\"}\nsources: {s: {type: mcp, command: [/bin/x], auth: {oauth: {}}}}", "only for a remote MCP source"},
+	} {
+		c, err := Parse([]byte(tc.y))
+		if err == nil {
+			err = c.Validate()
+		}
+		if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%s: err=%v want %q", name, err, tc.want)
+		}
+	}
+	c, _ := Parse([]byte(src("https://gw.example", "oauth: {client_id: id, client_secret: env:AGW_CS}", "")))
+	if err := c.Validate(); err != nil || !slices.Contains(c.Secrets(), "s3cret-value") {
+		t.Errorf("client_secret not in Secrets: %v", err)
+	}
+}

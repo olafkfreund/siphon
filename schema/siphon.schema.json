@@ -485,6 +485,25 @@
               "bearer": {
                 "description": "env:NAME, file:/path, or (where allowed) a literal",
                 "type": "string"
+              },
+              "oauth": {
+                "additionalProperties": false,
+                "properties": {
+                  "client_id": {
+                    "type": "string"
+                  },
+                  "client_secret": {
+                    "description": "env:NAME, file:/path, or (where allowed) a literal",
+                    "type": "string"
+                  },
+                  "scopes": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
               }
             },
             "type": "object"

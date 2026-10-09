@@ -366,6 +366,9 @@ func sourceRefs(s *Source) map[string]string {
 	m := map[string]string{"secret": s.Secret.Ref}
 	if s.Auth != nil {
 		m["auth.bearer"] = s.Auth.Bearer.Ref
+		if s.Auth.OAuth != nil {
+			m["auth.oauth.client_secret"] = s.Auth.OAuth.ClientSecret.Ref
+		}
 	}
 	for k, v := range s.Headers {
 		m["headers."+k] = v.Ref
