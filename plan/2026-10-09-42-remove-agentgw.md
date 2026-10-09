@@ -157,5 +157,17 @@ spec: spec/2026-10-09-42-remove-agentgw.md
     mentions it;
   - the dev instance uses `siphon.yaml` and `state.db`.
 
+- **Step 6 (security review: no High):**
+  - **M, fixed.** `removed-option` also asserts that this module's
+    assertion ("Siphon was renamed") is the one failing. Before, any
+    evaluation error passed. Mutation-tested: without the import, the check
+    fails.
+  - **L, fixed.** The straggler test also checks file names.
+  - **L, owner.** The stray `./agentgw` binary is no longer git-ignored.
+    Delete it; don't re-add the ignore.
+  - **L, accepted.** A host or CLI user still on old state starts empty,
+    and the old data stays put. The v0.5.0 notes give both `mv` commands
+    (`/var/lib/agentgw`, and `agentgw.db` to `siphon.db`).
+
   An untracked, ignored-until-now `agentgw` binary (a local build from
   2026-10-06) sits at the repo root. It is left to the owner.

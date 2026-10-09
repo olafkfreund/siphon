@@ -18,6 +18,9 @@ func TestNoStragglers(t *testing.T) {
 		if allowedFile(f) {
 			continue
 		}
+		if strings.Contains(strings.ToLower(f), old) {
+			t.Errorf("%s: old name in the file name", f)
+		}
 		b, err := os.ReadFile("../" + f)
 		if err != nil {
 			continue // deleted in the working tree

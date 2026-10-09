@@ -206,6 +206,8 @@
               ];
             };
           in
+          # This module's assertion fails, not just any evaluation error.
+          assert builtins.any (a: !a.assertion && nixpkgs.lib.hasInfix "Siphon was renamed" a.message) sys.config.assertions;
           assert !(builtins.tryEval sys.config.system.build.toplevel.drvPath).success;
           pkgs.runCommand "removed-option-ok" { } "touch $out";
       });
