@@ -2965,8 +2965,8 @@ server:
 ```
 
 **What Siphon does with the list:**
-- **Entries** are addresses or ranges, such as `10.0.0.0/8` or
-  `fd00::/8`.
+- **Entries** are single addresses, such as `10.0.5.10`, or a range that
+  holds only proxies, such as `10.0.5.0/28`.
 - **Trusted requests only:** Siphon reads `X-Forwarded-For` only on
   requests that come from a listed address. It reads the header from the
   right, skipping listed proxies, and uses the first address that isn't
@@ -2974,9 +2974,14 @@ server:
 - **No trusted proxies, no header:** with no `trusted_proxies`, Siphon
   ignores `X-Forwarded-For` entirely.
 
-**Never list a range that clients can connect from directly.** Anyone
-inside it could choose their own address and get unlimited sign-in
-attempts. List only the proxies themselves.
+**Never list a range that contains clients,** whether they connect
+directly or through the proxy. Siphon skips every listed address while
+reading the header, so a client inside a listed range can put any address
+in front of its own and choose a fresh limit for every request. That
+means unlimited sign-in attempts.
+
+List only the proxies' own addresses. Siphon warns at start when an entry
+trusts every address (`0.0.0.0/0` or `::/0`).
 
 The setting is read at start, so restart Siphon after changing it.
 

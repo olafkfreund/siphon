@@ -1129,6 +1129,12 @@ func TestTrustedProxiesInvalid(t *testing.T) {
 			t.Fatalf("want %q, got %v", want, err)
 		}
 	}
+	if err := (&Config{Server: Server{TrustedProxies: []string{"::ffff:10.0.0.0/104"}}}).Validate(); err == nil || !strings.Contains(err.Error(), "server.trusted_proxies[0]:") {
+		t.Fatalf("mapped prefix: %v", err)
+	}
+	if w := strings.Join((&Config{Server: Server{Listen: "127.0.0.1:8080", TrustedProxies: []string{"0.0.0.0/0"}}}).Warnings(), "\n"); !strings.Contains(w, "trusts every address") {
+		t.Fatalf("no /0 warning: %q", w)
+	}
 	if got := (&Server{TrustedProxies: []string{"::ffff:10.0.0.1"}}).Proxies(); len(got) != 1 || got[0].String() != "10.0.0.1/32" {
 		t.Fatalf("mapped: %v", got)
 	}

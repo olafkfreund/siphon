@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -31,6 +32,7 @@ func TestClientIPProxies(t *testing.T) {
 		{"two header lines", trusted, "127.0.0.1:1", []string{"203.0.113.66", "198.51.100.1"}, "198.51.100.1"},
 		{"entries with ports", trusted, "127.0.0.1:1", []string{"198.51.100.1:5, 10.0.0.2:5"}, "198.51.100.1"},
 		{"unix socket peer", trusted, "@", []string{"198.51.100.1"}, "@"},
+		{"oversized header gives peer", trusted, "127.0.0.1:1", []string{strings.Repeat("1.2.3.4,", 600) + "198.51.100.1"}, "127.0.0.1"},
 	}
 	for _, c := range cases {
 		s := &server{Options: Options{TrustedProxies: c.proxies}}

@@ -140,7 +140,7 @@ func (s *Server) Proxies() []netip.Prefix {
 
 func parseProxy(e string) (netip.Prefix, bool) {
 	if p, err := netip.ParsePrefix(e); err == nil {
-		return p, true
+		return p, !p.Addr().Is4In6() // clients are compared unmapped: write 10.0.0.0/8, not ::ffff:10.0.0.0/104
 	}
 	a, err := netip.ParseAddr(e)
 	if err != nil || a.Zone() != "" { // a zoned address never matches a client
@@ -842,6 +842,11 @@ func (c *Config) Warnings() []string {
 			if r.Egress.Enabled {
 				w = append(w, fmt.Sprintf("rule %s: egress allowlists are not enforced with sandbox: none", r.Name))
 			}
+		}
+	}
+	for _, p := range c.Server.Proxies() {
+		if p.Bits() == 0 {
+			w = append(w, fmt.Sprintf("server.trusted_proxies: %s trusts every address, so any client can choose its own failed-login bucket", p))
 		}
 	}
 	if !loopbackListen(c.Server.Listen) {

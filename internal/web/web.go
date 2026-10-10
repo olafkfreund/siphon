@@ -323,10 +323,11 @@ func (s *server) clientIP(r *http.Request) string {
 	if !s.trusted(hop) {
 		return ipKey(hop)
 	}
-	xs := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
-	if len(xs) == 1 && strings.TrimSpace(xs[0]) == "" {
+	xff := strings.Join(r.Header.Values("X-Forwarded-For"), ",")
+	if strings.TrimSpace(xff) == "" || len(xff) > maxXFF { // too long: not worth splitting, fail closed
 		return ipKey(hop)
 	}
+	xs := strings.Split(xff, ",")
 	for i := len(xs) - 1; i >= 0; i-- {
 		e := strings.TrimSpace(xs[i])
 		a, err := netip.ParseAddr(e)
@@ -345,6 +346,9 @@ func (s *server) clientIP(r *http.Request) string {
 	}
 	return ipKey(hop)
 }
+
+// maxXFF bounds the X-Forwarded-For walk; real chains are a few addresses.
+const maxXFF = 4096
 
 func (s *server) trusted(a netip.Addr) bool {
 	for _, p := range s.TrustedProxies {

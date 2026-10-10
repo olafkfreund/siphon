@@ -139,3 +139,24 @@ Self-contained. The approved decisions:
 ## Deviations
 
 None yet.
+- **Step 1, review fix:** `parseProxy` rejects zoned addresses, which can
+  never match a client, and unmaps plain IPv4-mapped addresses.
+- **Step 2:** `ParseAddr` is tried before `ParseAddrPort`, the reverse of
+  the plan text. The two never accept the same input, so the result is
+  the same.
+- **Step 5, the security review** (fresh Opus): no High findings, 1
+  Medium, 3 Low. All are fixed.
+  - **M1, docs:** a listed range that also holds clients lets those
+    clients pick their own bucket, even when they come through nginx,
+    because their own address is skipped as trusted.
+    `reverse-proxy.md` now warns against any range that contains
+    clients, and its examples are proxy-only addresses.
+  - **L2:** an `X-Forwarded-For` header longer than 4 KiB (`maxXFF`)
+    isn't split. It falls back to the peer's address, so a 1 MB header
+    can't cost about 8 MB per request.
+  - **L3:** a mapped prefix (`::ffff:10.0.0.0/104`) is now a `Validate`
+    error, since it could never match.
+  - **L4:** a `/0` entry gives a start-up warning.
+  - **Pre-existing, not changed:** the limiter clears every bucket once it
+    holds more than `maxBuckets` (4096). That's unchanged from before #48;
+    a follow-up if it matters.
