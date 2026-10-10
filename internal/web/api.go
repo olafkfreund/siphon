@@ -132,7 +132,7 @@ func (s *server) api(h http.HandlerFunc) http.HandlerFunc { return s.bearer(s.to
 
 func (s *server) bearer(ok func(string) bool, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ip := clientIP(r)
+		ip := s.clientIP(r)
 		if s.lim.blocked(ip) {
 			jsonErr(w, http.StatusTooManyRequests, "too many failed attempts")
 			return

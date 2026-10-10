@@ -363,6 +363,7 @@ func TestHooksUnauthenticated(t *testing.T) {
 
 func TestLimiterKeysIPv6By64(t *testing.T) {
 	r := func(a string) *http.Request { x := httptest.NewRequest("GET", "/", nil); x.RemoteAddr = a; return x }
+	clientIP := (&server{}).clientIP
 	a, b := clientIP(r("[2001:db8:1:2:aaaa::1]:1")), clientIP(r("[2001:db8:1:2:bbbb::9]:2"))
 	if a != b || a != "2001:db8:1:2::/64" {
 		t.Fatalf("%s %s", a, b)

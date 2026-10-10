@@ -96,7 +96,7 @@ func (s *server) oauthRoutes(mux *http.ServeMux) {
 
 	// The browser comes back here. Public: the single-use state is the proof.
 	mux.HandleFunc("GET /oauth/callback", func(w http.ResponseWriter, r *http.Request) {
-		ip := clientIP(r)
+		ip := s.clientIP(r)
 		if s.lim.blocked(ip) { // before any lookup
 			http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
 			return
