@@ -111,6 +111,8 @@ pkgs.testers.runNixOSTest {
             public_url = "http://127.0.0.1:8080";
             # SSO for the portal (#46). Nothing listens on :9, so discovery
             # fails; the token login (used by the subtests above) keeps working.
+            # The limiter keys on X-Forwarded-For from this proxy (#48).
+            trusted_proxies = [ "127.0.0.1" ];
             oidc = {
               issuer = "http://127.0.0.1:9";
               client_id = "siphon";
@@ -982,6 +984,18 @@ pkgs.testers.runNixOSTest {
         # The token login is the break-glass path and still works.
         machine.succeed(f"curl -s -c /tmp/sso.jar -o /dev/null --data-urlencode token={TOKEN} {base}/login")
         machine.succeed("grep -q siphon_session /tmp/sso.jar")
+
+    with subtest("behind a trusted proxy, one client's failed logins don't lock out another (docs/tasks/reverse-proxy.md)"):
+        base = "http://127.0.0.1:8080"
+        def login(client, token):
+            return machine.succeed(
+                f"curl -s -o /dev/null -w '%{{http_code}}' -H 'X-Forwarded-For: {client}' --data-urlencode token={token} {base}/login"
+            ).strip()
+        for i in range(5):
+            assert login("203.0.113.7", "wrong") == "401", i
+        assert login("203.0.113.7", "wrong") == "429"
+        # Another client behind the same proxy has its own budget.
+        assert login("203.0.113.8", TOKEN) == "303"
 
     with subtest("stopping siphon leaves no orphaned action units (cmd and agent)"):
         assert hook('{"kind":"sleep","n":3}') == "202"
