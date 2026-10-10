@@ -62,6 +62,8 @@ type Options struct {
 	OAuth *mcpoauth.Manager
 	// Version is the build version shown by /metrics.
 	Version string
+	// TrustedProxies are the peers whose X-Forwarded-For the failed-login limiter believes.
+	TrustedProxies []netip.Prefix
 }
 
 type server struct {
@@ -305,19 +307,60 @@ func (s *server) role(r *http.Request) role {
 
 func (s *server) csrfFor(session string) string { return s.mac("csrf:" + session) }
 
-// clientIP is the limiter key: the IPv4 address, or the /64 prefix of an IPv6
-// one (a single host controls a whole /64).
-// ponytail: X-Forwarded-For is not trusted; behind a proxy all clients share one bucket.
-func clientIP(r *http.Request) string {
+// clientIP is the limiter key (see ipKey). Behind a trusted proxy it is the client
+// X-Forwarded-For names: walk the entries from the right past trusted hops; the first
+// untrusted address is the client. A bad entry stops the walk at the last trusted hop.
+func (s *server) clientIP(r *http.Request) string {
 	h, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		h = r.RemoteAddr
 	}
-	a, err := netip.ParseAddr(h)
+	hop, err := netip.ParseAddr(h)
 	if err != nil {
 		return h
 	}
-	a = a.Unmap()
+	hop = hop.Unmap()
+	if !s.trusted(hop) {
+		return ipKey(hop)
+	}
+	xff := strings.Join(r.Header.Values("X-Forwarded-For"), ",")
+	if strings.TrimSpace(xff) == "" || len(xff) > maxXFF { // too long: not worth splitting, fail closed
+		return ipKey(hop)
+	}
+	xs := strings.Split(xff, ",")
+	for i := len(xs) - 1; i >= 0; i-- {
+		e := strings.TrimSpace(xs[i])
+		a, err := netip.ParseAddr(e)
+		if err != nil {
+			ap, err := netip.ParseAddrPort(e)
+			if err != nil {
+				return ipKey(hop)
+			}
+			a = ap.Addr()
+		}
+		a = a.Unmap()
+		if !s.trusted(a) {
+			return ipKey(a)
+		}
+		hop = a
+	}
+	return ipKey(hop)
+}
+
+// maxXFF bounds the X-Forwarded-For walk; real chains are a few addresses.
+const maxXFF = 4096
+
+func (s *server) trusted(a netip.Addr) bool {
+	for _, p := range s.TrustedProxies {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// ipKey is the IPv4 address, or the /64 prefix of an IPv6 one (a single host controls a whole /64).
+func ipKey(a netip.Addr) string {
 	if a.Is6() {
 		p, _ := a.Prefix(64)
 		return p.String()

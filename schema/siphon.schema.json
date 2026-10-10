@@ -554,6 +554,12 @@
           "description": "env:NAME, file:/path, or (where allowed) a literal",
           "type": "string"
         },
+        "trusted_proxies": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "workers": {
           "type": "integer"
         }

@@ -9,6 +9,7 @@ import (
 	"io"
 	"maps"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -121,6 +122,32 @@ type Server struct {
 	Metrics MetricsServer `yaml:"metrics"`
 	// OIDC turns on single sign-on for the portal. Operator-only; read live.
 	OIDC *OIDC `yaml:"oidc"`
+	// TrustedProxies are the reverse proxies (IP addresses or CIDR prefixes) whose
+	// X-Forwarded-For the failed-login limiter believes. Operator-only; read at start.
+	TrustedProxies []string `yaml:"trusted_proxies"`
+}
+
+// Proxies parses TrustedProxies, masked, and skips invalid entries (Validate reports them).
+func (s *Server) Proxies() []netip.Prefix {
+	var out []netip.Prefix
+	for _, e := range s.TrustedProxies {
+		if p, ok := parseProxy(e); ok {
+			out = append(out, p.Masked())
+		}
+	}
+	return out
+}
+
+func parseProxy(e string) (netip.Prefix, bool) {
+	if p, err := netip.ParsePrefix(e); err == nil {
+		return p, !p.Addr().Is4In6() // clients are compared unmapped: write 10.0.0.0/8, not ::ffff:10.0.0.0/104
+	}
+	a, err := netip.ParseAddr(e)
+	if err != nil || a.Zone() != "" { // a zoned address never matches a client
+		return netip.Prefix{}, false
+	}
+	a = a.Unmap() // clients are compared unmapped
+	return netip.PrefixFrom(a, a.BitLen()), true
 }
 
 // OIDC is the one sign-in provider. Roles map provider groups or verified
@@ -817,8 +844,13 @@ func (c *Config) Warnings() []string {
 			}
 		}
 	}
+	for _, p := range c.Server.Proxies() {
+		if p.Bits() == 0 {
+			w = append(w, fmt.Sprintf("server.trusted_proxies: %s trusts every address, so any client can choose its own failed-login bucket", p))
+		}
+	}
 	if !loopbackListen(c.Server.Listen) {
-		w = append(w, fmt.Sprintf("server.listen %q is not loopback: the portal is plain HTTP, put it behind TLS or a reverse proxy", c.Server.Listen))
+		w = append(w, fmt.Sprintf("server.listen %q is not loopback: the portal is plain HTTP, put it behind TLS or a reverse proxy; see docs/tasks/reverse-proxy.md", c.Server.Listen))
 	}
 	for _, name := range sortedKeys(c.Sources) {
 		if s := c.Sources[name]; s != nil && s.AllowPrivate {
@@ -1113,6 +1145,11 @@ func (c *Config) Validate() error {
 	if u := c.Server.PublicURL; u != "" {
 		if pu, err := url.Parse(u); err != nil || (pu.Scheme != "http" && pu.Scheme != "https") || pu.Host == "" || pu.User != nil {
 			add("server.public_url: want http(s)://host[:port][/path]")
+		}
+	}
+	for i, e := range c.Server.TrustedProxies {
+		if _, ok := parseProxy(e); !ok {
+			add("server.trusted_proxies[%d]: want an IP address or CIDR prefix", i)
 		}
 	}
 	c.validateOIDC(add)

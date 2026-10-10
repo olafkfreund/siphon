@@ -167,7 +167,7 @@ func (s *server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	ip := clientIP(r)
+	ip := s.clientIP(r)
 	if s.lim.blocked(ip) {
 		http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
 		return

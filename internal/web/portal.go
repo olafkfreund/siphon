@@ -214,7 +214,7 @@ func (s *server) page(w http.ResponseWriter, r *http.Request, name string, v vie
 }
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
-	ip := clientIP(r)
+	ip := s.clientIP(r)
 	if s.lim.blocked(ip) {
 		http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
 		return
