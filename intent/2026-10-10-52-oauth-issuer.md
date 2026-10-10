@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 52
 author: olafkfreund
 ---
@@ -75,3 +75,10 @@ Siphon just never gives it one up front.
 3. **Changing the issuer after a login:** a stored login bound to a
    different issuer is no longer reused, so the next login starts fresh.
    I propose yes.
+
+## Resolved
+
+1. **(a):** set like the rest of a source's `auth.oauth`.
+2. **(a):** not required, but `Validate` warns when `client_secret` is
+   set without it.
+3. **(a):** a stored login bound to a different issuer isn't reused.
