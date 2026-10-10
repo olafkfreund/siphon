@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 48
 spec: spec/2026-10-10-48-trusted-proxies.md
 ---
