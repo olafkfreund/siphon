@@ -1109,3 +1109,27 @@ server: {public_url: "https://s.example.com", oidc: {issuer: "https://idp.exampl
 		t.Error("unknown role name should fail decoding")
 	}
 }
+
+func TestTrustedProxies(t *testing.T) {
+	s := Server{TrustedProxies: []string{"10.1.2.3/8", "127.0.0.1", "::1", "2001:db8::/32", "nope"}}
+	var got []string
+	for _, p := range s.Proxies() {
+		got = append(got, p.String())
+	}
+	if want := "10.0.0.0/8 127.0.0.1/32 ::1/128 2001:db8::/32"; strings.Join(got, " ") != want {
+		t.Fatalf("Proxies() = %v, want %s", got, want)
+	}
+}
+
+func TestTrustedProxiesInvalid(t *testing.T) {
+	c := &Config{Server: Server{TrustedProxies: []string{"127.0.0.1", "10.0.0.0/33", "fe80::1%eth0"}}}
+	err := c.Validate()
+	for _, want := range []string{"server.trusted_proxies[1]:", "server.trusted_proxies[2]:"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("want %q, got %v", want, err)
+		}
+	}
+	if got := (&Server{TrustedProxies: []string{"::ffff:10.0.0.1"}}).Proxies(); len(got) != 1 || got[0].String() != "10.0.0.1/32" {
+		t.Fatalf("mapped: %v", got)
+	}
+}
