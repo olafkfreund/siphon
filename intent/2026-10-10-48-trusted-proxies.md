@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 48
 author: olafkfreund
 ---
@@ -79,3 +79,14 @@ The #44 and #46 security reviews both raised this.
    the only change.
 4. **Use the real address anywhere else,** such as the audit log or logs?
    Recommendation: not now. Audit rows carry actors, not addresses.
+
+## Resolved (owner approval, 2026-10-10)
+
+The owner approved every recommendation:
+
+1. **Proxies** are CIDR prefixes; a plain address means /32 or /128.
+2. **Header:** `X-Forwarded-For` only.
+3. **`X-Forwarded-Proto`** is left as it is; the limiter key is the only
+   change.
+4. **The real address** is used only for the limiter, not the audit log or
+   the logs.
