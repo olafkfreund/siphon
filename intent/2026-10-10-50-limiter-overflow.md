@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 50
 author: olafkfreund
 ---
@@ -69,3 +69,8 @@ The #48 security review found this. It predates #48.
 
    I'd propose (a), after first dropping buckets that have refilled. Those
    carry no penalty, so forgetting them is free.
+
+## Resolved
+
+1. **(a)**, the proposal. Buckets that have refilled are dropped first,
+   then new keys share one overflow bucket while the map is still full.
