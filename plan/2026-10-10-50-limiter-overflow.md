@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 50
 spec: spec/2026-10-10-50-limiter-overflow.md
 ---
