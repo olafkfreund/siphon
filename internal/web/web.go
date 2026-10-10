@@ -83,9 +83,10 @@ type server struct {
 }
 
 const (
-	cookieName = "siphon_session"
-	failBurst  = 5 // bad logins / API auth failures per IP per minute
-	maxBuckets = 4096
+	cookieName  = "siphon_session"
+	failBurst   = 5 // bad logins / API auth failures per IP per minute
+	maxBuckets  = 4096
+	overflowKey = "*" // shared by new keys while the map is full; never an ipKey
 )
 
 func New(o Options) http.Handler {
@@ -392,6 +393,9 @@ func (l *limiter) blocked(ip string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	b := l.m[ip]
+	if b == nil && len(l.m) >= maxBuckets {
+		b = l.m[overflowKey]
+	}
 	if b == nil {
 		return false
 	}
@@ -402,8 +406,16 @@ func (l *limiter) blocked(ip string) bool {
 func (l *limiter) fail(ip string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if len(l.m) > maxBuckets { // ponytail: forgets all penalties; beats sweeping under the lock
-		l.m = map[string]*bucket{}
+	if l.m[ip] == nil && len(l.m) >= maxBuckets {
+		// ponytail: O(maxBuckets) per new-key failure while full; throttle to once a second if a profile says so
+		for k, b := range l.m {
+			if l.refill(b); b.tokens >= failBurst {
+				delete(l.m, k)
+			}
+		}
+		if len(l.m) >= maxBuckets {
+			ip = overflowKey // a flood shares one bucket instead of erasing every penalty
+		}
 	}
 	b := l.m[ip]
 	if b == nil {
@@ -412,6 +424,10 @@ func (l *limiter) fail(ip string) {
 	}
 	l.refill(b)
 	b.tokens--
+	if ip == overflowKey {
+		// concurrent requests all pass blocked before any fail; a shared bucket must not overdraw into a long global lockout
+		b.tokens = max(b.tokens, 0)
+	}
 }
 
 func secureCookie(r *http.Request) bool {
