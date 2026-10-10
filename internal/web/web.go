@@ -424,6 +424,10 @@ func (l *limiter) fail(ip string) {
 	}
 	l.refill(b)
 	b.tokens--
+	if ip == overflowKey {
+		// concurrent requests all pass blocked before any fail; a shared bucket must not overdraw into a long global lockout
+		b.tokens = max(b.tokens, 0)
+	}
 }
 
 func secureCookie(r *http.Request) bool {

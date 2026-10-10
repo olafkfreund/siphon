@@ -385,39 +385,64 @@ func TestLimiterKeysIPv6By64(t *testing.T) {
 
 func TestLimiterOverflow(t *testing.T) {
 	now := time.Unix(1e9, 0)
-	l := &limiter{now: func() time.Time { return now }, m: map[string]*bucket{}}
-	for i := 0; i < failBurst; i++ {
-		l.fail("a")
+	full := func() *limiter { // maxBuckets live buckets, one failure each
+		l := &limiter{now: func() time.Time { return now }, m: map[string]*bucket{}}
+		for i := 0; i < maxBuckets; i++ {
+			l.fail("ip" + itoa(i))
+		}
+		return l
 	}
-	for i := 0; i < maxBuckets+10; i++ {
-		l.fail("ip" + itoa(i))
-	}
-	if !l.blocked("a") {
-		t.Fatal("a flood of new keys erased a penalty")
-	}
-	if len(l.m) > maxBuckets+1 {
-		t.Fatalf("map grew to %d", len(l.m))
-	}
-
-	// the overflow bucket is shared: 10 failures already, so new keys are blocked
-	if !l.blocked("new") {
-		t.Fatal("new key not held by the overflow bucket")
-	}
-	now = now.Add(2 * time.Minute)
-	if l.blocked("new") {
-		t.Fatal("overflow bucket never refills")
-	}
-
-	// refilled buckets are swept before a new key falls back to the overflow bucket
-	l = &limiter{now: func() time.Time { return now }, m: map[string]*bucket{}}
-	for i := 0; i < maxBuckets; i++ {
-		l.fail("ip" + itoa(i))
-	}
-	now = now.Add(2 * time.Minute)
-	l.fail("n")
-	if l.m["n"] == nil || l.m[overflowKey] != nil || len(l.m) != 1 {
-		t.Fatalf("sweep: n=%v overflow=%v len=%d", l.m["n"], l.m[overflowKey], len(l.m))
-	}
+	t.Run("penalty survives a flood", func(t *testing.T) {
+		l := &limiter{now: func() time.Time { return now }, m: map[string]*bucket{}}
+		for i := 0; i < failBurst; i++ {
+			l.fail("a")
+		}
+		for i := 0; i < maxBuckets+10; i++ {
+			l.fail("ip" + itoa(i))
+		}
+		if !l.blocked("a") {
+			t.Fatal("a flood of new keys erased a penalty")
+		}
+		if len(l.m) > maxBuckets+1 {
+			t.Fatalf("map grew to %d", len(l.m))
+		}
+	})
+	t.Run("full map without overflow bucket", func(t *testing.T) {
+		if full().blocked("new") {
+			t.Fatal("new key blocked before any overflow failure")
+		}
+	})
+	t.Run("overflow bucket is shared", func(t *testing.T) {
+		l := full()
+		for i := 0; i < failBurst; i++ {
+			l.fail("new" + itoa(i))
+		}
+		if !l.blocked("other") {
+			t.Fatal("new key not held by the overflow bucket")
+		}
+		now = now.Add(2 * time.Minute)
+		if l.blocked("other") {
+			t.Fatal("overflow bucket never refills")
+		}
+	})
+	t.Run("overflow bucket can't overdraw", func(t *testing.T) {
+		l := full()
+		for i := 0; i < 1000; i++ { // concurrent requests that all passed blocked
+			l.fail("new" + itoa(i))
+		}
+		now = now.Add(13 * time.Second) // one token at failBurst a minute
+		if l.blocked("other") {
+			t.Fatal("overflow bucket overdrew into a long lockout")
+		}
+	})
+	t.Run("refilled buckets are swept", func(t *testing.T) {
+		l := full()
+		now = now.Add(2 * time.Minute)
+		l.fail("n")
+		if l.m["n"] == nil || l.m[overflowKey] != nil || len(l.m) != 1 {
+			t.Fatalf("sweep: n=%v overflow=%v len=%d", l.m["n"], l.m[overflowKey], len(l.m))
+		}
+	})
 }
 
 func TestSessionExpiryAndTamper(t *testing.T) {

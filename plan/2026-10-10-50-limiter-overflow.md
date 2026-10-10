@@ -81,3 +81,28 @@ implements it.
 ## Rollback
 
 - Revert the merge. There's no config, data or schema change.
+
+## Deviations
+
+- **Step 2, the security review** (fresh Opus): 1 High, 2 Medium, 2 Low.
+  - **H1, fixed:** `blocked` and `fail` take the lock separately, with
+    the auth check between them. An OIDC callback takes a provider round
+    trip, so concurrent new keys all pass `blocked` and then overdraw the
+    shared bucket. 1,000 of them leave it near −995 tokens, which locks
+    out every new IP for about 200 minutes.
+    - `fail` now clamps the overflow bucket at 0 tokens, so its lockout
+      ends at most about 12s after the last failure.
+    - Per-key buckets are unchanged: a key that overdraws only locks out
+      itself.
+  - **M2, accepted:** during a live flood, new IPs share one bucket even
+    with valid credentials. That's the tradeoff the spec accepted, and it
+    costs the attacker about 340 failed requests a second to sustain.
+  - **M3, covered by H1:** `blocked` doesn't sweep, so after a flood, new
+    keys wait for the overflow bucket to refill. With the clamp that's
+    under 12s.
+  - **L4, accepted:** the overflow bucket takes one of the `maxBuckets`
+    slots. Memory stays within `maxBuckets+1`.
+  - **L5, fixed:** the test now uses subtests as planned, with
+    `failBurst` fresh overflow failures. It adds two cases: a full map
+    with no overflow bucket doesn't block, and the overflow bucket can't
+    overdraw.
