@@ -53,6 +53,28 @@ func startBridges(ctx context.Context, o *AgentOptions) (forwards map[int]string
 	names := slices.Sorted(maps.Keys(mcp))
 	for i, name := range names {
 		s := mcp[name]
+		if s.Token != nil {
+			key, kerr := randomHex(32)
+			if kerr != nil {
+				return nil, nil, nil, kerr
+			}
+			sock, port, stopOne, perr := startOAuthProxy(o, s, key)
+			if perr != nil {
+				return nil, nil, nil, fmt.Errorf("oauth proxy for %q: %w", name, perr)
+			}
+			o.Secrets = append(o.Secrets, key)
+			if o.Sandbox.Mode != "none" {
+				port = bridgeBasePort + i
+				if forwards == nil {
+					forwards = map[int]string{}
+				}
+				forwards[port] = sock
+			}
+			stops = append(stops, stopOne)
+			direct = append(direct, "127.0.0.1:"+strconv.Itoa(port))
+			mcp[name] = MCPServer{URL: "http://127.0.0.1:" + strconv.Itoa(port) + "/mcp", Headers: map[string]string{"Authorization": "Bearer " + key}}
+			continue
+		}
 		if len(s.Env) == 0 || len(s.Command) == 0 {
 			continue
 		}

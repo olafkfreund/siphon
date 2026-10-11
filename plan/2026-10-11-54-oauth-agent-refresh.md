@@ -202,3 +202,22 @@ Self-contained. The approved decisions:
 - **Revert the merge.** There's no config, data or schema change.
 - **Agents that need the MCP host in egress for other traffic** keep any
   explicit `egress.allow` entry, unaffected either way.
+
+## Deviations
+
+- **Step 2:**
+  - `startOAuthProxy` takes no `ctx`; nothing used it.
+  - Added `TestStartOAuthProxyUnix`, which covers the systemd-mode socket
+    in a short `/tmp` dir.
+  - The proxy masks its key plus `o.Secrets` as they are at start.
+  - **`FlushInterval: -1`** is a safeguard, and no test can tell it apart
+    from 0: `httputil.ReverseProxy` already flushes immediately for a
+    response with no `Content-Length`. The SSE test still checks that an
+    event arrives before the upstream finishes.
+- **Step 4:** the VM test reuses the existing Streamable HTTP MCP stub in
+  `nix/stub-model.py` (`/mcp` on the external node), which now records a
+  hash of the `Authorization` header with each call. There's no new
+  `stub-mcp-http.py`.
+  - The source `oauthm`, the agent `oauthagent` and the rule
+    `oauth-agent` are new.
+  - The login file is written as the `siphon` user.
