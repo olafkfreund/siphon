@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 52
 spec: spec/2026-10-10-52-oauth-issuer.md
 ---
