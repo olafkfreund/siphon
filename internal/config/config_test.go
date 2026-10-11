@@ -1053,6 +1053,11 @@ func TestOAuthSource(t *testing.T) {
 		"bearer":      {src("https://gw.example", "bearer: env:AGW_B, oauth: {}", ""), "not allowed with auth.bearer"},
 		"header":      {src("https://gw.example", "oauth: {}", "headers: {authorization: x}, "), "Authorization header"},
 		"secret only": {src("https://gw.example", "oauth: {client_secret: env:AGW_CS}", ""), "needs client_id"},
+		"issuer ftp":  {src("https://gw.example", "oauth: {issuer: \"ftp://x\"}", ""), "auth.oauth.issuer"},
+		"issuer http": {src("https://gw.example", "oauth: {issuer: \"http://example.com\"}", ""), "auth.oauth.issuer"},
+		"issuer junk": {src("https://gw.example", "oauth: {issuer: \"not a url\"}", ""), "auth.oauth.issuer"},
+		"issuer ok":   {src("https://gw.example", "oauth: {issuer: \"https://login.example.com\"}", ""), ""},
+		"issuer lb":   {src("https://gw.example", "oauth: {issuer: \"http://127.0.0.1:9000\"}", ""), ""},
 		"command":     {"server: {public_url: \"https://gw.example\"}\nsources: {s: {type: mcp, command: [/bin/x], auth: {oauth: {}}}}", "only for a remote MCP source"},
 	} {
 		c, err := Parse([]byte(tc.y))
@@ -1066,6 +1071,24 @@ func TestOAuthSource(t *testing.T) {
 	c, _ := Parse([]byte(src("https://gw.example", "oauth: {client_id: id, client_secret: env:AGW_CS}", "")))
 	if err := c.Validate(); err != nil || !slices.Contains(c.Secrets(), "s3cret-value") {
 		t.Errorf("client_secret not in Secrets: %v", err)
+	}
+}
+
+func TestOAuthIssuerWarning(t *testing.T) {
+	t.Setenv("AGW_CS", "x")
+	for auth, want := range map[string]bool{
+		"oauth: {client_id: id, client_secret: env:AGW_CS}":                                true,
+		"oauth: {client_id: id, client_secret: env:AGW_CS, issuer: \"https://i.example\"}": false,
+		"oauth: {client_id: id}": false,
+	} {
+		c, err := Parse([]byte("server: {public_url: \"https://gw.example\"}\nsources: {s: {type: mcp, url: \"https://m/mcp\", auth: {" + auth + "}}}"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := strings.Contains(strings.Join(c.Warnings(), "\n"), "without auth.oauth.issuer")
+		if got != want {
+			t.Errorf("%s: warning=%v want %v", auth, got, want)
+		}
 	}
 }
 

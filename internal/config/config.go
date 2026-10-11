@@ -196,8 +196,7 @@ func (c *Config) validateOIDC(add func(string, ...any)) {
 	if o == nil {
 		return
 	}
-	iu, err := url.Parse(o.Issuer)
-	if err != nil || iu.Host == "" || !(iu.Scheme == "https" || iu.Scheme == "http" && loopbackListen(net.JoinHostPort(iu.Hostname(), "0"))) {
+	if !secureURL(o.Issuer) {
 		add("server.oidc.issuer: must be https, or http on a loopback host")
 	}
 	if o.ClientID == "" {
@@ -365,6 +364,8 @@ type OAuth struct {
 	ClientID     string   `yaml:"client_id"`
 	ClientSecret Secret   `yaml:"client_secret"`
 	Scopes       []string `yaml:"scopes"`
+	// Issuer pins the authorization server: a login through any other fails.
+	Issuer string `yaml:"issuer"`
 }
 
 type Rule struct {
@@ -862,6 +863,9 @@ func (c *Config) Warnings() []string {
 		if s := c.Sources[name]; s != nil && s.Type == "webhook" && s.Signature == "token" {
 			w = append(w, fmt.Sprintf("source %s: signature token sends the secret in a header: weaker than an HMAC, and a captured delivery can be replayed", name))
 		}
+		if s := c.Sources[name]; s != nil && s.Auth != nil && s.Auth.OAuth != nil && s.Auth.OAuth.ClientSecret.isSet() && s.Auth.OAuth.Issuer == "" {
+			w = append(w, fmt.Sprintf("source %s: auth.oauth.client_secret without auth.oauth.issuer: the first login trusts whichever authorization server the MCP server names", name))
+		}
 		if s := c.Sources[name]; s != nil && s.Auth != nil && s.Auth.Bearer.isSet() && cleartextRemote(s.URL) {
 			w = append(w, fmt.Sprintf("source %s: bearer token sent over plain http to a non-loopback host", name))
 		}
@@ -969,6 +973,9 @@ func (c *Config) validateOAuth(p string, s *Source, o *OAuth, add func(string, .
 	if o.ClientSecret.isSet() && o.ClientID == "" {
 		add("%s.auth.oauth.client_secret: needs client_id", p)
 	}
+	if o.Issuer != "" && !secureURL(o.Issuer) {
+		add("%s.auth.oauth.issuer: must be https, or http on a loopback host", p)
+	}
 	pu, err := url.Parse(c.Server.PublicURL)
 	switch {
 	case c.Server.PublicURL == "":
@@ -976,6 +983,12 @@ func (c *Config) validateOAuth(p string, s *Source, o *OAuth, add func(string, .
 	case err == nil && pu.Scheme != "https" && !(pu.Scheme == "http" && loopbackListen(net.JoinHostPort(pu.Hostname(), "0"))):
 		add("%s.auth.oauth: server.public_url must be https, or http on a loopback host", p)
 	}
+}
+
+// secureURL: an absolute URL that is https, or http on a loopback host.
+func secureURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && u.Host != "" && (u.Scheme == "https" || u.Scheme == "http" && loopbackListen(net.JoinHostPort(u.Hostname(), "0")))
 }
 
 func loopbackListen(addr string) bool {

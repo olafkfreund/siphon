@@ -55,6 +55,7 @@ var explainKinds = map[string]struct {
 		"auth.oauth":               {false, "", "remote mcp: log in with OAuth from the portal or `siphon connect oauth`; needs server.public_url; not with auth.bearer", nil},
 		"auth.oauth.client_id":     {false, "", "oauth: a pre-registered client id (default: register dynamically)", nil},
 		"auth.oauth.client_secret": {false, "", "oauth: the pre-registered client's secret (env:NAME or file:/path); needs client_id", nil},
+		"auth.oauth.issuer":        {false, "", "oauth: pin the authorization server; a login through any other fails. Set it with a client_secret, or for an MCP server you don't run", nil},
 		"auth.oauth.scopes":        {false, "", "oauth: scopes to ask for, replacing the ones the server advertises", nil},
 		"connection":               {false, "", "label: the Services connection this item belongs to (set by the Services page; metadata only)", nil},
 		"service":                  {false, "", "label: the catalogue service that made it (set by the Services page; metadata only)", nil},
