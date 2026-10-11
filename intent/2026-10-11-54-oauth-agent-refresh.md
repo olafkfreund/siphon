@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 54
 author: olafkfreund
 ---
@@ -83,3 +83,10 @@ author: olafkfreund
      servers. My proposal: parsing JSON-RPC in a streaming proxy is
      complexity for a check that already exists.
    - **(b)** Yes, defence in depth.
+
+## Resolved
+
+1. **(a):** a daemon-side proxy. The agent gets a loopback URL and a
+   per-run key, never the token.
+2. **(a):** MCP passes through unchanged. The agent CLI's
+   `--allowedTools` stays the enforcement.
