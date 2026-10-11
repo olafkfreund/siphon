@@ -145,6 +145,9 @@ func (m *Manager) load(name string, s *config.Source) (raw []byte, st stored, ok
 	if id := s.Auth.OAuth.ClientID; id != "" && (st.Dynamic || st.ClientID != id) || id == "" && !st.Dynamic {
 		return nil, stored{}, false
 	}
+	if p := s.Auth.OAuth.Issuer; p != "" && strings.TrimSuffix(st.Issuer, "/") != strings.TrimSuffix(p, "/") {
+		return nil, stored{}, false // pinned elsewhere (or never recorded): log in again
+	}
 	return raw, st, true
 }
 
@@ -382,6 +385,12 @@ func (m *Manager) Start(ctx context.Context, name string) (string, error) {
 func (m *Manager) run(ctx context.Context, name string, s *config.Source, redirect string, l *login, urlCh chan<- string) error {
 	hc := m.client(name, s)
 	oc := s.Auth.OAuth
+	issuer := func() string {
+		if oc.Issuer != "" {
+			return oc.Issuer
+		}
+		return l.iss
+	}
 	cfg := &auth.AuthorizationCodeHandlerConfig{
 		RedirectURL:         redirect,
 		RequestRefreshToken: true,
@@ -419,7 +428,7 @@ func (m *Manager) run(ctx context.Context, name string, s *config.Source, redire
 			if ctx.Err() != nil { // logged out, replaced or timed out while the code was exchanged
 				return nil, errors.New("login was cancelled")
 			}
-			st := stored{Resource: s.URL, Issuer: l.iss, ClientID: c.ClientID, Dynamic: oc.ClientID == "",
+			st := stored{Resource: s.URL, Issuer: issuer(), ClientID: c.ClientID, Dynamic: oc.ClientID == "",
 				AuthURL: c.Endpoint.AuthURL, TokenURL: c.Endpoint.TokenURL, AuthStyle: int(c.Endpoint.AuthStyle), Scopes: c.Scopes,
 				Token: tokenJSON{Access: t.AccessToken, Refresh: t.RefreshToken, Type: t.TokenType, Expiry: t.Expiry}}
 			if st.Dynamic {
@@ -447,12 +456,18 @@ func (m *Manager) run(ctx context.Context, name string, s *config.Source, redire
 	if len(oc.Scopes) > 0 {
 		cfg.ScopeFilter = func([]string) []string { return append([]string(nil), oc.Scopes...) }
 	}
+	regMeta := &oauthex.ClientRegistrationMetadata{
+		RedirectURIs: []string{redirect}, ClientName: "siphon", TokenEndpointAuthMethod: "none",
+		GrantTypes: []string{"authorization_code", "refresh_token"}, ResponseTypes: []string{"code"}}
 	_, prev, reuse := m.load(name, s)
 	switch {
 	case oc.ClientID != "":
 		pc := &oauthex.ClientCredentials{ClientID: oc.ClientID}
 		if reuse { // pinned to the issuer of its earlier login (trust on first use)
 			pc.Issuer = prev.Issuer
+		}
+		if oc.Issuer != "" {
+			pc.Issuer = oc.Issuer
 		}
 		if oc.ClientSecret.Value != "" {
 			pc.ClientSecretAuth = &oauthex.ClientSecretAuth{ClientSecret: oc.ClientSecret.Value}
@@ -464,10 +479,25 @@ func (m *Manager) run(ctx context.Context, name string, s *config.Source, redire
 			pc.ClientSecretAuth = &oauthex.ClientSecretAuth{ClientSecret: prev.ClientSecret}
 		}
 		cfg.PreregisteredClient = pc
+	case oc.Issuer != "": // go-sdk does not check the issuer when it registers, so register against the pin here
+		asm, err := auth.GetAuthServerMetadata(ctx, oc.Issuer, hc)
+		if err != nil {
+			return cleanErr(fmt.Errorf("authorization server %s does not support dynamic registration: set auth.oauth.client_id: %w", oc.Issuer, err))
+		}
+		if asm == nil || asm.RegistrationEndpoint == "" {
+			return fmt.Errorf("authorization server %s does not support dynamic registration: set auth.oauth.client_id", oc.Issuer)
+		}
+		reg, err := oauthex.RegisterClient(ctx, asm.RegistrationEndpoint, regMeta, hc)
+		if err != nil {
+			return cleanErr(err)
+		}
+		pc := &oauthex.ClientCredentials{ClientID: reg.ClientID, Issuer: oc.Issuer}
+		if reg.ClientSecret != "" {
+			pc.ClientSecretAuth = &oauthex.ClientSecretAuth{ClientSecret: reg.ClientSecret}
+		}
+		cfg.PreregisteredClient = pc
 	default:
-		cfg.DynamicClientRegistrationConfig = &auth.DynamicClientRegistrationConfig{Metadata: &oauthex.ClientRegistrationMetadata{
-			RedirectURIs: []string{redirect}, ClientName: "siphon", TokenEndpointAuthMethod: "none",
-			GrantTypes: []string{"authorization_code", "refresh_token"}, ResponseTypes: []string{"code"}}}
+		cfg.DynamicClientRegistrationConfig = &auth.DynamicClientRegistrationConfig{Metadata: regMeta}
 	}
 	h, err := auth.NewAuthorizationCodeHandler(cfg)
 	if err != nil {

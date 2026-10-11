@@ -43,6 +43,7 @@ type fakeAS struct {
 	*httptest.Server
 	mu         sync.Mutex
 	registers  int
+	tokens     int
 	n          int
 	challenge  map[string]string // code -> PKCE challenge
 	access     map[string]bool   // valid access tokens
@@ -99,6 +100,7 @@ func newAS(t *testing.T) *fakeAS {
 		r.ParseForm()
 		a.mu.Lock()
 		defer a.mu.Unlock()
+		a.tokens++
 		bad := func() {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(400)
@@ -492,5 +494,78 @@ func TestClipRedactsTokenLikeText(t *testing.T) {
 	got := clip("dial tcp: refused, token "+jwt+" and opaque_0123456789abcdefghijklmn", 300)
 	if strings.Contains(got, "eyJ") || strings.Contains(got, "0123456789abcdefghijklmn") || !strings.Contains(got, "dial tcp: refused") {
 		t.Fatalf("clip: %q", got)
+	}
+}
+
+func (e *env) pin(v string) { e.cfg.Sources["s"].Auth.OAuth.Issuer = v }
+
+func TestIssuerPinPreregistered(t *testing.T) {
+	oc := config.OAuth{ClientID: "pre"}
+	oc.ClientSecret.Value = "pre-secret"
+	e := newEnv(t, oc)
+	b := newAS(t)
+	e.pin(b.URL)
+	err := e.login(e.m)
+	if err == nil || !strings.Contains(err.Error(), b.URL) || !strings.Contains(err.Error(), e.as.URL) {
+		t.Fatalf("want an error naming both issuers: %v", err)
+	}
+	noSecrets(t, err, "pre-secret")
+	if e.as.tokens != 0 {
+		t.Fatalf("token endpoint of the other server hit %d times", e.as.tokens)
+	}
+	e.pin(e.as.URL)
+	e.login1(e.m)
+	raw, _ := os.ReadFile(e.file())
+	var st stored
+	json.Unmarshal(raw, &st)
+	if st.Issuer != e.as.URL {
+		t.Fatalf("stored issuer %q", st.Issuer)
+	}
+}
+
+func TestIssuerPinDynamic(t *testing.T) {
+	e := newEnv(t, config.OAuth{})
+	b := newAS(t)
+	e.pin(b.URL)
+	if err := e.login(e.m); err == nil {
+		t.Fatal("login through another server accepted")
+	}
+	if e.as.registers != 0 || e.as.tokens != 0 || b.registers != 1 {
+		t.Fatalf("as registers=%d tokens=%d, b registers=%d", e.as.registers, e.as.tokens, b.registers)
+	}
+	e.pin(e.as.URL)
+	e.login1(e.m)
+	raw, _ := os.ReadFile(e.file())
+	var st stored
+	json.Unmarshal(raw, &st)
+	if e.as.registers != 1 || !st.Dynamic {
+		t.Fatalf("registers %d, stored %s", e.as.registers, raw)
+	}
+	e.login1(e.m)
+	if e.as.registers != 1 {
+		t.Fatalf("re-login registered again: %d", e.as.registers)
+	}
+}
+
+func TestIssuerPinRefusesOldLogin(t *testing.T) {
+	e := newEnv(t, config.OAuth{})
+	e.login1(e.m)
+	e.pin(e.as.URL + "/") // a trailing slash is ignored
+	if s, _ := e.m.Status("s"); s != "ok" {
+		t.Fatalf("status %s", s)
+	}
+	e.pin(newAS(t).URL)
+	if s, _ := e.m.Status("s"); s != "none" {
+		t.Fatalf("status %s", s)
+	}
+	raw, _ := os.ReadFile(e.file())
+	var st stored
+	json.Unmarshal(raw, &st)
+	st.Issuer = ""
+	raw, _ = json.Marshal(st)
+	os.WriteFile(e.file(), raw, 0o600)
+	e.pin(e.as.URL)
+	if s, _ := e.m.Status("s"); s != "none" {
+		t.Fatalf("empty stored issuer accepted: %s", s)
 	}
 }
