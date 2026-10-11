@@ -15,10 +15,10 @@ import (
 	"github.com/olafkfreund/siphon/internal/store"
 )
 
-// An agent run gets the OAuth access token as an Authorization header, masked
-// in the job output, never the refresh token; with no login the job fails
-// with the login message.
-func TestAgentRunOAuthToken(t *testing.T) {
+// An agent run reaches an OAuth server through the daemon's proxy: its config
+// holds a loopback URL and a masked per-run key, never the access or refresh
+// token; with no login the job fails with the login message.
+func TestAgentRunOAuthProxy(t *testing.T) {
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "cat-config.sh")
 	script := "#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = --mcp-config ] && cat \"$2\"; shift; done\n"
@@ -81,7 +81,7 @@ rules:
 	}
 	clock.Add(int64(2 * time.Second)) // past the rule cooldown
 	status, out := run()
-	if strings.Contains(out, "ACCESS-TOK") || strings.Contains(out, "REFRESH-SECRET") || !strings.Contains(out, "Bearer ***") {
+	if strings.Contains(out, "ACCESS-TOK") || strings.Contains(out, "REFRESH-SECRET") || !strings.Contains(out, "Bearer ***") || !strings.Contains(out, "http://127.0.0.1:") || strings.Contains(out, "m1.example") {
 		t.Fatalf("token missing or leaked: %s %s", status, out)
 	}
 }

@@ -453,12 +453,14 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 			h["Authorization"] = "Bearer " + s.Auth.Bearer.Value
 		}
 		if s.Auth != nil && s.Auth.OAuth != nil {
-			tok, err := p.OAuth.Token(ctx, name)
-			if err != nil {
+			// Check the login now; the run reaches the server through the daemon's
+			// proxy, which fetches a current token per request (#54).
+			if _, err := p.OAuth.Token(ctx, name); err != nil {
 				return "failed", -1, err.Error(), nil
 			}
-			h["Authorization"] = "Bearer " + tok
-			secrets = append(secrets, tok) // masked before any output is written
+			servers[name] = action.MCPServer{URL: s.URL, Headers: h, AllowPrivate: s.AllowPrivate,
+				Token: func(c context.Context) (string, error) { return p.OAuth.Token(c, name) }}
+			continue
 		}
 		servers[name] = action.MCPServer{URL: s.URL, Command: s.Command, Headers: h}
 	}
