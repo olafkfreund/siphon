@@ -242,3 +242,9 @@ Self-contained. The approved decisions:
     - a transport error is masked.
   - **Not changed:** the `none`-mode stop test already checks that the
     port refuses connections.
+- **Step 4, stub listening:** the stub in `nix/stub-model.py` now listens
+  on both IPv4 and IPv6 (`::`). `external` resolves to IPv6 first, and
+  Siphon's guarded dial tries only the first address. The first VM run
+  failed on that with a 502, after proving that the systemd-mode forward
+  reaches the proxy. The single-address dial predates #54 and is a
+  possible follow-up.

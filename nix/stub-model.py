@@ -4,8 +4,11 @@
 #                                 with the tool's result
 #   POST /mcp                  -> minimal streamable-HTTP MCP: initialize,
 #                                 tools/list (echo), tools/call
-# Every MCP tools/call is appended to /tmp/mcp-calls so the test can see it.
+# Every MCP tools/call is appended to /tmp/mcp-calls so the test can see it,
+# with a hash of the Authorization header it came with (never the header).
+import hashlib
 import json
+import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TOOL = {"name": "echo", "description": "Echo the text back",
@@ -67,7 +70,8 @@ class H(BaseHTTPRequestHandler):
             if method == "tools/call":
                 args = req.get("params", {}).get("arguments", {})
                 with open("/tmp/mcp-calls", "a") as f:
-                    f.write(json.dumps(args) + "\n")
+                    auth = self.headers.get("Authorization", "")
+                    f.write(json.dumps(args) + " auth-sha=" + (hashlib.sha256(auth.encode()).hexdigest()[:16] if auth else "none") + "\n")
                 return self.reply(200, {"jsonrpc": "2.0", "id": rid, "result": {
                     "content": [{"type": "text", "text": "echo: " + str(args.get("text"))}]}})
             if method == "ping":
@@ -81,4 +85,8 @@ class H(BaseHTTPRequestHandler):
         pass
 
 
-ThreadingHTTPServer(("0.0.0.0", 8000), H).serve_forever()
+class Server(ThreadingHTTPServer):
+    address_family = socket.AF_INET6  # dual stack: siphon's guarded dial tries the first address, here IPv6
+
+
+Server(("::", 8000), H).serve_forever()

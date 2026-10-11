@@ -187,6 +187,14 @@ pkgs.testers.runNixOSTest {
             allow_private = true;
             auth.oauth = { };
           };
+          # An OAuth MCP source with a login the test writes: agents reach it
+          # through the daemon's per-run proxy, never with the token (#54).
+          sources.oauthm = {
+            type = "mcp";
+            url = "http://external:8000/mcp";
+            allow_private = true;
+            auth.oauth = { };
+          };
           # A stdio MCP server with a secret env: agents reach it via the bridge.
           sources.stubsrc = {
             type = "mcp";
@@ -222,6 +230,16 @@ pkgs.testers.runNixOSTest {
             approve = false;
           };
           # The built-in loop on a model connection, with one allowed MCP tool.
+          agents.oauthagent = {
+            kind = "model";
+            credential = "stubm";
+            model = "stub-model";
+            prompt = "Use the echo tool, then answer.";
+            mcp = [ "oauthm" ];
+            allowed_tools = [ "mcp__oauthm__echo" ];
+            max_turns = 3;
+            approve = false;
+          };
           agents.local = {
             kind = "model";
             credential = "stubm";
@@ -382,6 +400,15 @@ pkgs.testers.runNixOSTest {
               id = "event.n";
               cooldown = "1s";
               action.agent = "bridged";
+            }
+            {
+              name = "oauth-agent";
+              source = "gh";
+              when = ''event.kind == "oauth"'';
+              on = "each";
+              id = "event.n";
+              cooldown = "1s";
+              action.agent = "oauthagent";
             }
             {
               name = "model-agent";
@@ -674,6 +701,29 @@ pkgs.testers.runNixOSTest {
         out = machine.succeed("sqlite3 /var/lib/siphon/state.db \"select output from jobs where rule='model-agent'\"")
         assert "final: echo: hi from the model" in out, out
         external.succeed("grep -q 'hi from the model' /tmp/mcp-calls")
+
+    with subtest("an OAuth MCP source in an agent run: the daemon's proxy adds the token, the agent never has it (#54)"):
+        import hashlib, json
+        d = "/var/lib/siphon/credentials/.mcp/oauthm"
+        login = json.dumps({"resource": "http://external:8000/mcp", "dynamic": True, "client_id": "c", "client_secret": "cs",
+                            "auth_url": "http://external:8000/a", "token_url": "http://external:8000/t",
+                            "token": {"access_token": "VM-ACCESS-TOK", "refresh_token": "VM-REFRESH-TOK", "token_type": "Bearer", "expiry": "2100-01-01T00:00:00Z"}})
+        machine.succeed(f"printf '%s' '{login}' | runuser -u siphon -- sh -c 'umask 077 && mkdir -p {d} && cat > {d}/mcp-oauth.json'")
+        assert hook('{"kind":"oauth","n":610}') == "202"
+        try:
+            machine.wait_until_succeeds(
+                "sqlite3 /var/lib/siphon/state.db \"select state from jobs where rule='oauth-agent'\" | grep -qx done",
+                timeout=120,
+            )
+        except Exception:
+            dump()
+            print(machine.execute("sqlite3 /var/lib/siphon/state.db \"select output from jobs where rule='oauth-agent'\"")[1])
+            raise
+        out = machine.succeed("sqlite3 /var/lib/siphon/state.db \"select output from jobs where rule='oauth-agent'\"")
+        assert "final: echo: hi from the model" in out, out
+        assert "VM-ACCESS-TOK" not in out and "VM-REFRESH-TOK" not in out, f"a token reached the job output: {out}"
+        want = hashlib.sha256(b"Bearer VM-ACCESS-TOK").hexdigest()[:16]
+        external.succeed(f"grep -q 'auth-sha={want}' /tmp/mcp-calls")
 
     with subtest("webhook auth: GitLab token header and Standard Webhooks"):
         import base64, hashlib, hmac, json, time
