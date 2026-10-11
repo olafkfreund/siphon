@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 54
 spec: spec/2026-10-11-54-oauth-agent-refresh.md
 ---
