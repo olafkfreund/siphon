@@ -41,10 +41,24 @@ sources:
   ```yaml
   auth:
     oauth:
+      issuer: https://auth.example.com    # the authorization server; see "Pin the authorization server"
       client_id: abc123
       client_secret: file:/run/secrets/linear-client-secret   # env: or file: only; optional
   ```
 - **Scopes:** `scopes: [read]` replaces the scopes the server advertises.
+- **Pin the authorization server:** `issuer:` names the only authorization
+  server Siphon will log in through.
+  - **Why:** without it, Siphon uses whichever server the MCP server names,
+    and a malicious or compromised MCP server can name its own. That
+    server would then get your client secret and show you its own login
+    page.
+  - **With it set,** a login through any other server fails before
+    anything is sent there. This works with dynamic registration too.
+  - **When to set it:** always when there's a `client_secret`, and for any
+    MCP server you don't run yourself. Siphon warns at start about a
+    `client_secret` without an `issuer`.
+  - **Where to find the value:** the `issuer` field of
+    `<authorization server>/.well-known/oauth-authorization-server`.
 
 `auth.oauth` works only with a remote `type: mcp` source. You can't combine
 it with `auth.bearer` or an `Authorization` header.
@@ -87,8 +101,10 @@ The refresh token can be revoked or expire. When that happens:
   [notifications](notifications.md));
 - the fix is to log in again.
 
-Changing the source's `url` or `client_id` also needs a new login, because
-a login is only ever used for the server it was issued for.
+Changing the source's `url`, `client_id` or `issuer` also needs a new
+login, because a login is only ever used for the server it was issued for.
+Adding an `issuer` to a source that's already logged in can need one new
+login too, when the stored login doesn't record its issuer.
 
 **Log out:** run `siphon connect oauth linear --logout`. This deletes the
 stored login.
