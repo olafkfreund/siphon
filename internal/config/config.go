@@ -1777,6 +1777,9 @@ func (c *Config) AgentEgress(a *Agent) (allow []HostPort, enabled bool) {
 		if src == nil || src.URL == "" {
 			continue
 		}
+		if src.Auth != nil && src.Auth.OAuth != nil { // the agent reaches it through the daemon's proxy (#54)
+			continue
+		}
 		u, err := url.Parse(src.URL)
 		if err != nil || u.Hostname() == "" {
 			continue

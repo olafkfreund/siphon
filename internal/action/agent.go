@@ -28,6 +28,11 @@ type MCPServer struct {
 	// Mask, when set, is the only part of Env masked in bridge errors (the secrets);
 	// nil masks every Env value.
 	Mask []string
+	// Token (remote OAuth only) makes this a server the daemon reaches for the
+	// agent through a per-run proxy that adds a current token to each request.
+	// It is never serialised. AllowPrivate is the proxy's dial rule.
+	Token        func(context.Context) (string, error)
+	AllowPrivate bool
 }
 
 type AgentOptions struct {

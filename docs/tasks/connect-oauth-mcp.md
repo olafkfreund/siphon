@@ -87,8 +87,15 @@ drops a login that's still in progress. Start it again.
 
 - **Polling** starts on the next poll. Agents that list the source in `mcp:`
   get its tools.
-- **Agent runs** get a current access token, never the refresh token. Job
-  output hides the token.
+- **Agent runs** reach the server through Siphon, never directly:
+  - **Fresh tokens:** Siphon adds a current access token to every request,
+    and refreshes it when needed, so a run that lasts longer than the
+    token still works.
+  - **Nothing secret in the agent:** it gets a loopback address and a
+    key that's valid for that run only. It never sees the access token,
+    the refresh token or the source's `headers:`.
+  - **Egress:** the agent's egress allowlist doesn't need the MCP
+    server's host.
 - **Refresh:** Siphon refreshes the token when it's about to expire, and
   writes the new one back. A restart doesn't need a new login.
 
