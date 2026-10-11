@@ -480,6 +480,7 @@ func (m *Manager) run(ctx context.Context, name string, s *config.Source, redire
 		}
 		cfg.PreregisteredClient = pc
 	case oc.Issuer != "": // go-sdk does not check the issuer when it registers, so register against the pin here
+		// ponytail: registers before go-sdk learns which server the MCP server names; a mismatch leaves an unused client at the pinned server only
 		asm, err := auth.GetAuthServerMetadata(ctx, oc.Issuer, hc)
 		if err != nil {
 			return cleanErr(fmt.Errorf("authorization server %s does not support dynamic registration: set auth.oauth.client_id: %w", oc.Issuer, err))

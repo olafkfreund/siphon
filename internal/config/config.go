@@ -985,10 +985,10 @@ func (c *Config) validateOAuth(p string, s *Source, o *OAuth, add func(string, .
 	}
 }
 
-// secureURL: an absolute URL that is https, or http on a loopback host.
+// secureURL: an absolute URL that is https, or http on a loopback host, with no userinfo, query or fragment.
 func secureURL(s string) bool {
 	u, err := url.Parse(s)
-	return err == nil && u.Host != "" && (u.Scheme == "https" || u.Scheme == "http" && loopbackListen(net.JoinHostPort(u.Hostname(), "0")))
+	return err == nil && u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == "" && (u.Scheme == "https" || u.Scheme == "http" && loopbackListen(net.JoinHostPort(u.Hostname(), "0")))
 }
 
 func loopbackListen(addr string) bool {

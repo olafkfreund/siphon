@@ -162,3 +162,28 @@ Self-contained. The approved decisions:
   config, since the older version rejects the key.
 - **Stored logins** made under a pin stay readable by the older version,
   since `Issuer` already exists in `stored`.
+
+## Deviations
+
+- **Step 2:** a metadata fetch error in the pinned dynamic case keeps its
+  cause: `cleanErr(fmt.Errorf("... set auth.oauth.client_id: %w", err))`.
+- **Step 4, the security review** (fresh Opus): no High or Medium
+  findings; it found no way around the pin. There were 4 Low, handled as
+  follows.
+  - **L1, docs:** only a trailing `/` is ignored, so an issuer with
+    different case fails closed with a puzzling mismatch. The docs and
+    `explain` now say to copy it exactly.
+  - **L2:** `secureURL` now rejects userinfo, a query or a fragment.
+    This applies to `server.oidc.issuer` too, where such values were
+    never valid issuers.
+  - **L3, accepted:** the pinned dynamic case registers at the pinned
+    server before go-sdk learns which server the MCP server names. A
+    mismatch leaves an unused client at the pinned server only. There's a
+    `ponytail:` comment on it.
+  - **L4, tests:** both mismatch tests now call `Start` and check that no
+    authorization URL is returned, and that the error names both issuers.
+    Not added: a server whose metadata claims another issuer. go-sdk's
+    `GetAuthServerMeta` covers that, and its own tests check it.
+- **Not related to the pin, unchanged:** a dynamic client registered as
+  `token_endpoint_auth_method: none` gets go-sdk's auth style from the
+  server's metadata. That's pre-existing behaviour in the reuse path.

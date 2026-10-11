@@ -1056,6 +1056,8 @@ func TestOAuthSource(t *testing.T) {
 		"issuer ftp":  {src("https://gw.example", "oauth: {issuer: \"ftp://x\"}", ""), "auth.oauth.issuer"},
 		"issuer http": {src("https://gw.example", "oauth: {issuer: \"http://example.com\"}", ""), "auth.oauth.issuer"},
 		"issuer junk": {src("https://gw.example", "oauth: {issuer: \"not a url\"}", ""), "auth.oauth.issuer"},
+		"issuer user": {src("https://gw.example", "oauth: {issuer: \"https://u:p@as.example\"}", ""), "auth.oauth.issuer"},
+		"issuer qry":  {src("https://gw.example", "oauth: {issuer: \"https://as.example/?x=1\"}", ""), "auth.oauth.issuer"},
 		"issuer ok":   {src("https://gw.example", "oauth: {issuer: \"https://login.example.com\"}", ""), ""},
 		"issuer lb":   {src("https://gw.example", "oauth: {issuer: \"http://127.0.0.1:9000\"}", ""), ""},
 		"command":     {"server: {public_url: \"https://gw.example\"}\nsources: {s: {type: mcp, command: [/bin/x], auth: {oauth: {}}}}", "only for a remote MCP source"},

@@ -2696,7 +2696,8 @@ sources:
     MCP server you don't run yourself. Siphon warns at start about a
     `client_secret` without an `issuer`.
   - **Where to find the value:** the `issuer` field of
-    `<authorization server>/.well-known/oauth-authorization-server`.
+    `<authorization server>/.well-known/oauth-authorization-server`. Copy
+    it exactly, case included. Only a trailing `/` is ignored.
 
 `auth.oauth` works only with a remote `type: mcp` source. You can't combine
 it with `auth.bearer` or an `Authorization` header.

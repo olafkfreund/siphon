@@ -505,9 +505,9 @@ func TestIssuerPinPreregistered(t *testing.T) {
 	e := newEnv(t, oc)
 	b := newAS(t)
 	e.pin(b.URL)
-	err := e.login(e.m)
-	if err == nil || !strings.Contains(err.Error(), b.URL) || !strings.Contains(err.Error(), e.as.URL) {
-		t.Fatalf("want an error naming both issuers: %v", err)
+	u, err := e.m.Start(context.Background(), "s")
+	if u != "" || err == nil || !strings.Contains(err.Error(), b.URL) || !strings.Contains(err.Error(), e.as.URL) {
+		t.Fatalf("want no authorization URL and an error naming both issuers: %q %v", u, err)
 	}
 	noSecrets(t, err, "pre-secret")
 	if e.as.tokens != 0 {
@@ -527,8 +527,9 @@ func TestIssuerPinDynamic(t *testing.T) {
 	e := newEnv(t, config.OAuth{})
 	b := newAS(t)
 	e.pin(b.URL)
-	if err := e.login(e.m); err == nil {
-		t.Fatal("login through another server accepted")
+	u, err := e.m.Start(context.Background(), "s")
+	if u != "" || err == nil || !strings.Contains(err.Error(), b.URL) || !strings.Contains(err.Error(), e.as.URL) {
+		t.Fatalf("want no authorization URL and an error naming both issuers: %q %v", u, err)
 	}
 	if e.as.registers != 0 || e.as.tokens != 0 || b.registers != 1 {
 		t.Fatalf("as registers=%d tokens=%d, b registers=%d", e.as.registers, e.as.tokens, b.registers)
