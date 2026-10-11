@@ -132,3 +132,22 @@ func TestResolveAllowedMode(t *testing.T) {
 		}
 	}
 }
+
+func TestStreamClientNoRedirects(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/x", http.StatusFound)
+			return
+		}
+		t.Error("followed redirect")
+	}))
+	defer srv.Close()
+	resp, err := StreamClient(true).Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+}

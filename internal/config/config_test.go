@@ -595,6 +595,20 @@ func TestAgentEgressFailsClosed(t *testing.T) {
 	}
 }
 
+// An OAuth MCP source is reached through the daemon's proxy, so its host
+// is not in the agent's allowlist; a bearer source's host is.
+func TestAgentEgressSkipsOAuthSource(t *testing.T) {
+	c, err := Parse([]byte("sources: {o: {type: mcp, url: 'https://oauth.example/mcp', auth: {oauth: {}}}, b: {type: mcp, url: 'https://bearer.example/mcp'}}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := c.AgentEgress(&Agent{Kind: "codex", MCP: []string{"o", "b"}})
+	h := hostsOf(got)
+	if !strings.Contains(h, "bearer.example:443") || strings.Contains(h, "oauth.example") {
+		t.Fatalf("got %s", h)
+	}
+}
+
 func TestModelValidation(t *testing.T) {
 	t.Setenv("K", "sk-test")
 	const ok = "credentials: {o: {provider: ollama, url: 'http://h:11434'}}\nagents: {m: {kind: model, model: q, credential: o}}\n"

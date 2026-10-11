@@ -29,6 +29,9 @@ func HTTPClient(allowPrivate bool, timeout time.Duration, maxBody int64) *http.C
 	return guardedClient(allowPrivate, timeout, maxBody, false)
 }
 
+// StreamClient is HTTPClient for long-lived streams: no overall timeout, no body cap, no redirects.
+func StreamClient(allowPrivate bool) *http.Client { return guardedClient(allowPrivate, 0, 0, true) }
+
 func guardedClient(allowPrivate bool, timeout time.Duration, maxBody int64, stream bool) *http.Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
