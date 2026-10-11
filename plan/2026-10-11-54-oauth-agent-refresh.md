@@ -221,3 +221,24 @@ Self-contained. The approved decisions:
   - The source `oauthm`, the agent `oauthagent` and the rule
     `oauth-agent` are new.
   - The login file is written as the `siphon` user.
+- **Step 6, the security review** (fresh Opus): no High findings, 2 Medium,
+  4 Low. All are fixed except one test claim that was already covered.
+  - **M1:** the proxy replaced the source url's query with the agent's.
+    Now they're merged, and the source url's keys win.
+  - **M2:** an `Upgrade` request could leave a hijacked tunnel that
+    outlives `stop`. It's now refused with 400.
+  - **L1:** the upstream transport gets `ResponseHeaderTimeout` 1m.
+    Streams are unaffected, since their headers come first.
+  - **L2:** the proxy server gets `IdleTimeout` 1m and `MaxHeaderBytes`
+    64 KiB.
+  - **L3:** an upstream 3xx is answered with a 502 that names the
+    `Location`, instead of being handed to the agent, which would then go
+    around the proxy.
+  - **L4:** the new `TestOAuthProxyBoundaries` covers:
+    - an absolute-form request with a spoofed Host: the upstream host,
+      path and query are unchanged;
+    - an upgrade gets 400;
+    - a redirect gets 502;
+    - a transport error is masked.
+  - **Not changed:** the `none`-mode stop test already checks that the
+    port refuses connections.

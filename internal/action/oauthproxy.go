@@ -3,6 +3,7 @@ package action
 import (
 	"crypto/subtle"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -20,18 +21,31 @@ import (
 // fresh access token each time. The agent only holds key.
 func oauthProxy(s MCPServer, key string, mask []string) http.Handler {
 	target, perr := url.Parse(s.URL)
+	tr := source.StreamClient(s.AllowPrivate).Transport.(*http.Transport).Clone()
+	tr.ResponseHeaderTimeout = time.Minute // a stream's headers come first; only a hung server waits this long
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL.Scheme, pr.Out.URL.Host, pr.Out.URL.Path, pr.Out.URL.RawPath = target.Scheme, target.Host, target.Path, target.RawPath
-			pr.Out.URL.RawQuery = pr.In.URL.RawQuery
+			q := pr.In.URL.Query() // the source url's own query wins
+			for k, v := range target.Query() {
+				q[k] = v
+			}
+			pr.Out.URL.RawQuery = q.Encode()
 			pr.Out.Host = target.Host
 		},
 		FlushInterval: -1,
-		Transport:     source.StreamClient(s.AllowPrivate).Transport,
+		Transport:     tr,
+		// Not followed, and not handed to the agent, which would then go around the proxy.
+		ModifyResponse: func(resp *http.Response) error {
+			if resp.StatusCode >= 300 && resp.StatusCode < 400 && resp.StatusCode != http.StatusNotModified {
+				return fmt.Errorf("the MCP server redirected (%d) to %q: set the source url to that address", resp.StatusCode, resp.Header.Get("Location"))
+			}
+			return nil
+		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			msg := string(Mask([]byte(err.Error()), mask))
-			if len(msg) > 200 {
-				msg = msg[:200]
+			if len(msg) > 300 {
+				msg = msg[:300]
 			}
 			http.Error(w, "upstream: "+msg, http.StatusBadGateway)
 		},
@@ -44,6 +58,10 @@ func oauthProxy(s MCPServer, key string, mask []string) http.Handler {
 		}
 		if r.URL.Path != "/mcp" || perr != nil {
 			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Upgrade") != "" { // a hijacked tunnel would outlive stop
+			http.Error(w, "upgrade not supported", http.StatusBadRequest)
 			return
 		}
 		tok, err := s.Token(r.Context())
@@ -69,7 +87,7 @@ func oauthProxy(s MCPServer, key string, mask []string) http.Handler {
 // run dir (systemd mode, port is 0) or on loopback (sandbox none, sock is "").
 func startOAuthProxy(o *AgentOptions, s MCPServer, key string) (sock string, port int, stop func(), err error) {
 	h := oauthProxy(s, key, append([]string{key}, o.Secrets...))
-	srv := &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 64 << 10}
 	if o.Sandbox.Mode == "none" {
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {

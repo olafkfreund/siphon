@@ -94,6 +94,48 @@ func TestOAuthProxyHandler(t *testing.T) {
 	}
 }
 
+// The upstream host, path and the source url's query can't be changed by the
+// agent; upgrades and redirects are refused; transport errors are masked.
+func TestOAuthProxyBoundaries(t *testing.T) {
+	up := &seen{}
+	redirect := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if redirect {
+			http.Redirect(w, r, "https://elsewhere.example/mcp", http.StatusFound)
+			return
+		}
+		up.handler(nil).ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	h := oauthProxy(MCPServer{URL: srv.URL + "/mcp?tenant=abc", AllowPrivate: true,
+		Token: func(context.Context) (string, error) { return "t", nil }}, "KEY", []string{"KEY"})
+	good := map[string]string{"Authorization": "Bearer KEY"}
+
+	r := httptest.NewRequest("POST", "http://evil.example/mcp?tenant=evil&x=1", nil)
+	r.Host = "evil.example"
+	r.Header.Set("Authorization", "Bearer KEY")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 200 || up.count() != 1 || up.path != "/mcp" || up.q != "tenant=abc&x=1" {
+		t.Fatalf("absolute form: %d n=%d %s?%s", w.Code, up.count(), up.path, up.q)
+	}
+
+	if c := proxyGet(t, h, "/mcp", map[string]string{"Authorization": "Bearer KEY", "Upgrade": "websocket", "Connection": "Upgrade"}).Code; c != 400 || up.count() != 1 {
+		t.Fatalf("upgrade: %d n=%d", c, up.count())
+	}
+
+	redirect = true
+	if w := proxyGet(t, h, "/mcp", good); w.Code != 502 || !strings.Contains(w.Body.String(), "elsewhere.example") || w.Header().Get("Location") != "" {
+		t.Fatalf("redirect: %d %q %v", w.Code, w.Body, w.Header())
+	}
+
+	srv.Close()
+	dead := oauthProxy(MCPServer{URL: "http://KEY.invalid/mcp", Token: func(context.Context) (string, error) { return "t", nil }}, "KEY", []string{"KEY"})
+	if w := proxyGet(t, dead, "/mcp", good); w.Code != 502 || strings.Contains(w.Body.String(), "KEY") {
+		t.Fatalf("transport error: %d %q", w.Code, w.Body)
+	}
+}
+
 func TestOAuthProxySSEFlushes(t *testing.T) {
 	release := make(chan struct{})
 	up := &seen{}
