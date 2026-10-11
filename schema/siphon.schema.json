@@ -593,6 +593,9 @@
                     "description": "env:NAME, file:/path, or (where allowed) a literal",
                     "type": "string"
                   },
+                  "issuer": {
+                    "type": "string"
+                  },
                   "scopes": {
                     "items": {
                       "type": "string"
