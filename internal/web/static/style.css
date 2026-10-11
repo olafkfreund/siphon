@@ -56,7 +56,9 @@ pre { margin: 0; background: #06111F; color: #cfe3f5; border-radius: 12px; paddi
 .nav .sep { margin: .8rem .7rem .3rem; font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted) }
 .nav .soon { margin-left: auto; font-size: .65rem; color: var(--muted); font-weight: 600 }
 .ico { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round }
-.side .foot { margin-top: auto; display: flex; gap: .4rem; padding: .5rem 0 0 }
+.side .foot { margin-top: auto; display: flex; flex-wrap: wrap; gap: .4rem; padding: .5rem 0 0 }
+/* who is signed in: its own line above the buttons, a long email cut with an ellipsis */
+.side .foot > .muted { order: -1; flex: 1 0 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem }
 .side .foot form { display: contents }
 .topbar { display: none }
 .main { padding: 1.6rem 2rem 3rem; max-width: 1200px; width: 100% }
