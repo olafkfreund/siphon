@@ -392,3 +392,11 @@ daemon are untouched. A user's demo state lives only in
   `{"headers": {"x-github-event": "workflow_run"}, "event": …}` envelope.
   The bare payload has no header. Step 8 and `docs/demo.md` use the
   envelope.
+- **Step 6, `play.sh` approvals:** interactively the presenter approves in
+  the portal only, and the script waits up to 900 s for `done`. Running
+  `siphon approve` after a portal approval would fail and abort the demo.
+  `--auto` approves with the CLI. A `denied` job ends the act like a
+  `failed` one does.
+- **Step 6, replays:** `github-ci-failure`'s `cooldown: 5m` suppresses an
+  Act 1 replay within 5 minutes, though each run stamps a fresh
+  `workflow_run.id` (epoch seconds). `docs/demo.md` says so (step 9).
