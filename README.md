@@ -70,6 +70,7 @@ devenv test         # what CI runs: vet + tests; fails on any failing test
 |---|---|---|---|
 | **NixOS module** | `services.siphon.enable = true` | **Full**: template units, DynamicUser, a private network per run, egress allowlists, polkit | real deployments on NixOS |
 | **microVM** | `nix run github:olafkfreund/siphon#microvm` | **Full** (the same module, in a small NixOS VM); the host stays untouched | trying the real thing, any Linux with KVM |
+| **Demo** | `nix run github:olafkfreund/siphon#demo` | **Full** (a microVM with its own directory); see the [demo](docs/demo.md) | showing Siphon in five minutes |
 | **Container image** | `podman run … ghcr.io/olafkfreund/siphon` | **None**: `sandbox: none`, egress not enforced; Siphon says so at start and in the portal | portal, rules, sources and commands on any container host |
 
 **microVM.**

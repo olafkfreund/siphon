@@ -13,6 +13,8 @@ baseline in **`siphon.yaml`**.
    connections, approvals, and what's sandboxed.
 3. **[Templates](templates/README.md):** about 30 ready-made tasks you can
    apply as-is.
+4. **[Demo](demo.md):** a five-minute story in a VM: a bad deploy, an agent
+   diagnosis you approve, a digest.
 
 ## How-to, by task
 
