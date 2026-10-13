@@ -50,6 +50,12 @@ either way. The terminal that runs `demo` says which one it chose.
 - See: the job's steps (`fetch`, `digest`, `notify`) and a five-bullet digest
   on the phone tab.
 
+**Close: debugging.**
+- Say: "Why doesn't the same push fire again?"
+- See: `siphon why ci-failed` says that event id already fired (`on: each`),
+  and `siphon test ci-failed --last` replays the stored push, headers
+  included.
+
 ## Replay
 
 Run `demo-play` again. Every run sends new ids, so nothing is skipped, with
@@ -64,10 +70,3 @@ Stop the VM (Ctrl-C) and delete the directory:
 ```sh
 rm -rf ~/.config/siphon-demo
 ```
-
-## Known issue
-
-`siphon test <rule> --last` and `siphon why` can say a rule doesn't match
-when it does, for rules that read a header (`ci-failed` reads
-`x-github-event`): the stored event is replayed without its headers. This
-is tracked in [#65](https://github.com/olafkfreund/siphon/issues/65). The rule itself works.

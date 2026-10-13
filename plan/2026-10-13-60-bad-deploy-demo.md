@@ -420,6 +420,11 @@ daemon are untouched. A user's demo state lives only in
   non-terminal stdin. The script now ends with where to look (the jobs
   page and the notification log). Bring the debug lines back after #65 is
   fixed.
+- **After #65 merged:** `play.sh` ends with `siphon why ci-failed` and
+  `siphon test ci-failed --last` again, with stdin from `/dev/null`, and
+  `docs/demo.md` drops its "Known issue" note for a "Close: debugging" beat.
+  `checks.demo` now prints every failed job (`siphon jobs show`) when it
+  fails, so a failing act names its cause.
 - **Review fixes (after step 9):** a fresh Opus review found the following.
   - **High:** `play.sh` honoured the CLI's own `SIPHON_URL` and
     `SIPHON_TOKEN_FILE`. The NixOS module sets `SIPHON_URL` for every user,

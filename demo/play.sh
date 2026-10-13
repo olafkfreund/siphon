@@ -160,5 +160,9 @@ id=$(wait_job morning-digest "done" 300 "act 3" "$base")
 say "Digest (job $id)"
 show_output "$id" digest
 
+say "Debugging: why does ci-failed not fire again for the same push?"
+siphon why ci-failed </dev/null || true
+siphon test ci-failed --last </dev/null || true
+
 say "That's the story: three sources, three rules, one approval, three jobs."
 echo "Look around: $SIPHON_URL/jobs, and the notification log at http://127.0.0.1:8092"

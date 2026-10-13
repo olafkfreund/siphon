@@ -93,7 +93,7 @@ pkgs.testers.runNixOSTest {
     try:
         machine.wait_until_succeeds("grep -q '^rc=' /tmp/play.log", timeout=300)
     finally:
-        out = machine.succeed("cat /tmp/play.log; echo --- approver; cat /tmp/approver.log; echo --- notify; cat /tmp/notify.log")
+        out = machine.succeed(f"cat /tmp/play.log; echo --- approver; cat /tmp/approver.log; echo --- notify; cat /tmp/notify.log; echo --- failed jobs; date; for i in $({cli} jobs ls -state failed -o json | python3 -I -c 'import json,sys; [print(j[\"id\"]) for j in json.load(sys.stdin)]'); do {cli} jobs show $i; done")
         print(out)
     assert "rc=0" in out, out
 
