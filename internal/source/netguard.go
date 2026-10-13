@@ -47,7 +47,7 @@ func guardedClient(allowPrivate bool, timeout time.Duration, maxBody int64, stre
 			if err != nil {
 				return nil, err
 			}
-			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+			return dialAddrs(ctx, dialer, network, ips, port)
 		},
 	}
 	if stream {
@@ -57,6 +57,22 @@ func guardedClient(allowPrivate bool, timeout time.Duration, maxBody int64, stre
 		maxBody = 1 << 20
 	}
 	return &http.Client{Transport: limitedTransport{base: transport, limit: maxBody}, Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+}
+
+// dialAddrs dials each checked address in turn and returns the first that connects.
+func dialAddrs(ctx context.Context, d *net.Dialer, network string, addrs []netip.Addr, port string) (net.Conn, error) {
+	var last error
+	for _, a := range addrs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		conn, err := d.DialContext(ctx, network, net.JoinHostPort(a.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		last = err
+	}
+	return nil, last
 }
 
 // Mode is how much of the private range a guarded dial may reach.

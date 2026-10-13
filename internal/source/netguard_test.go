@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -149,5 +150,39 @@ func TestStreamClientNoRedirects(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("status %d", resp.StatusCode)
+	}
+}
+
+func TestDialAddrsFallsBack(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	_, port, _ := net.SplitHostPort(l.Addr().String())
+	d := &net.Dialer{Timeout: 2 * time.Second}
+	dead, live := netip.MustParseAddr("127.0.0.2"), netip.MustParseAddr("127.0.0.1") // nothing listens on 127.0.0.2: refused at once
+
+	conn, err := dialAddrs(context.Background(), d, "tcp", []netip.Addr{dead, live}, port)
+	if err != nil {
+		t.Fatalf("want a fallback to %s, got %v", live, err)
+	}
+	conn.Close()
+	if _, err := dialAddrs(context.Background(), d, "tcp", []netip.Addr{dead}, port); err == nil {
+		t.Fatal("want an error when every address fails")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := dialAddrs(ctx, d, "tcp", []netip.Addr{live}, port); !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
 	}
 }
