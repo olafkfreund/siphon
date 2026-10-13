@@ -41,7 +41,8 @@ func Run(ctx context.Context, spec Spec) error {
 	}
 	cmd := exec.CommandContext(ctx, spec.Command[0], spec.Command[1:]...)
 	cmd.Env = []string{}
-	for _, name := range []string{"PATH", "HOME", "LANG"} {
+	// The unit's only network is the egress proxy, so the server needs its variables.
+	for _, name := range []string{"PATH", "HOME", "LANG", "HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "NO_PROXY", "no_proxy"} {
 		if v, ok := os.LookupEnv(name); ok {
 			cmd.Env = append(cmd.Env, name+"="+v)
 		}
