@@ -15,6 +15,8 @@
 {
   system,
   allowUnfreeAgents ? false,
+  # The demo VM (nix run .#demo): stub model, notification log, demo/siphon.yaml.
+  demo ? false,
 }:
 let
   vm = nixpkgs.lib.nixosSystem {
@@ -50,8 +52,17 @@ let
               {
                 from = "host";
                 host.address = "127.0.0.1";
-                host.port = 8090;
+                host.port = if demo then 8091 else 8090;
                 guest.port = 8080;
+              }
+            ]
+            # The notification log, so the audience can watch the "phone".
+            ++ lib.optionals demo [
+              {
+                from = "host";
+                host.address = "127.0.0.1";
+                host.port = 8092;
+                guest.port = 18099;
               }
             ];
             # Relative paths resolve against the runner's working directory,
@@ -94,10 +105,73 @@ let
           ];
         }
       )
+      (
+        { pkgs, lib, ... }:
+        lib.mkIf demo {
+          # A model endpoint plus MCP server, and a notification channel, in the guest.
+          systemd.services.stub-model = {
+            wantedBy = [ "multi-user.target" ];
+            before = [ "siphon.service" ];
+            serviceConfig.ExecStart = "${pkgs.python3}/bin/python3 ${./stub-model.py} ${../demo/fixtures/ci-job.log}";
+          };
+          systemd.services.notify-recv = {
+            wantedBy = [ "multi-user.target" ];
+            before = [ "siphon.service" ];
+            # All addresses: the forwarded port reaches the guest's NIC, not its loopback.
+            environment.NOTIFY_BIND = "0.0.0.0";
+            serviceConfig.ExecStart = "${pkgs.python3}/bin/python3 ${./notify-recv.py}";
+          };
+          networking.firewall.allowedTCPPorts = [ 18099 ];
+        }
+      )
     ];
   };
   pkgs = nixpkgs.legacyPackages.${system};
+  lib = nixpkgs.lib;
   runner = vm.config.microvm.declaredRunner;
+  # The demo wrapper: same directory safety as below, its own directory, the
+  # model chosen at every start (host Ollama with llama3.2, else the stub).
+  demoText = ''
+    dir=''${SIPHON_DEMO_DIR:-$HOME/.config/siphon-demo}
+    umask 077
+    set -o noclobber
+    mkdir -p "$dir/config"
+    # Never follow links planted in the directory.
+    if [ -L "$dir/config" ] || [ -n "$(find "$dir/config" "$dir/state.img" -maxdepth 1 -type l 2>/dev/null)" ]; then
+      echo "demo: refusing to start: $dir contains a symbolic link." >&2
+      exit 1
+    fi
+    chmod 700 "$dir"         # other host users stay out
+    chmod 755 "$dir/config"  # the siphon user inside the VM reads it (9p)
+    if [ ! -e "$dir/config/siphon.yaml" ]; then
+      openssl rand -hex 24 | tr -d '\n' > "$dir/config/token"
+      openssl rand -hex 16 | tr -d '\n' > "$dir/config/hook"
+      openssl rand -hex 16 | tr -d '\n' > "$dir/config/kuma"
+      printf %s http://127.0.0.1:18099/n > "$dir/config/notify-url"
+      cat ${../demo/siphon.yaml} > "$dir/config/siphon.yaml"
+      # Files are read by the siphon user inside the VM; the 0700 directory
+      # keeps other host users out.
+      find "$dir/config" -maxdepth 1 -type f -exec chmod 644 {} +
+      echo "Created $dir/config (siphon.yaml, token, hook, kuma, notify-url)."
+    fi
+    if curl -sf --max-time 2 http://127.0.0.1:11434/api/tags | grep -q '"llama3.2'; then
+      model=http://10.0.2.2:11434/v1
+      echo "Model: the host Ollama (llama3.2)"
+    else
+      model=http://127.0.0.1:8000/v1
+      echo "Model: the built-in stub (no host Ollama with llama3.2 found)"
+    fi
+    # Only the url line of ollama-local; the first run still has the placeholder.
+    sed -i -e '/^  ollama-local:/,/^[a-z]/ s#^    url: .*#    url: "'"$model"'"#' "$dir/config/siphon.yaml"
+    if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+      echo "demo needs KVM: /dev/kvm must be readable and writable by $(id -un)." >&2
+      exit 1
+    fi
+    echo "Demo: portal http://127.0.0.1:8091 (token: $dir/config/token)"
+    echo "Notification log: http://127.0.0.1:8092   Play it: demo-play   Stop: Ctrl-C"
+    cd "$dir"
+    exec ${runner}/bin/microvm-run
+  '';
 in
 {
   inherit vm;
@@ -108,59 +182,68 @@ in
       pkgs.coreutils
       pkgs.findutils
       pkgs.openssl
+    ]
+    ++ lib.optionals demo [
+      pkgs.curl
+      pkgs.gnugrep
+      pkgs.gnused
     ];
-    text = ''
-      dir=''${SIPHON_VM_DIR:-$HOME/.config/siphon-vm}
-      umask 077
-      set -o noclobber
-      mkdir -p "$dir/config"
-      # Never follow links planted in the directory.
-      if [ -L "$dir/config" ] || [ -n "$(find "$dir/config" "$dir/state.img" -maxdepth 1 -type l 2>/dev/null)" ]; then
-        echo "siphon-microvm: refusing to start: $dir contains a symbolic link." >&2
-        exit 1
-      fi
-      chmod 700 "$dir"         # other host users stay out
-      chmod 755 "$dir/config"  # the siphon user inside the VM reads it (9p)
-      if [ ! -e "$dir/config/siphon.yaml" ]; then
-        openssl rand -hex 24 | tr -d '\n' > "$dir/config/token"
-        openssl rand -hex 16 | tr -d '\n' > "$dir/config/hook"
-        cat > "$dir/config/siphon.yaml" <<'YAML'
-      # Siphon inside the microVM (full sandbox). Edit freely; restart the VM to apply.
-      server:
-        db: /var/lib/siphon/state.db
-        actions_dir: /var/lib/siphon-actions
-        token: file:/etc/siphon/token
-        egress: { socket: /run/siphon/egress.sock }
-        # A host Ollama is 10.0.2.2 from inside the VM:
-        # models: { private_endpoints: ["10.0.2.2:11434"] }
+    text =
+      if demo then
+        demoText
+      else
+        ''
+          dir=''${SIPHON_VM_DIR:-$HOME/.config/siphon-vm}
+          umask 077
+          set -o noclobber
+          mkdir -p "$dir/config"
+          # Never follow links planted in the directory.
+          if [ -L "$dir/config" ] || [ -n "$(find "$dir/config" "$dir/state.img" -maxdepth 1 -type l 2>/dev/null)" ]; then
+            echo "siphon-microvm: refusing to start: $dir contains a symbolic link." >&2
+            exit 1
+          fi
+          chmod 700 "$dir"         # other host users stay out
+          chmod 755 "$dir/config"  # the siphon user inside the VM reads it (9p)
+          if [ ! -e "$dir/config/siphon.yaml" ]; then
+            openssl rand -hex 24 | tr -d '\n' > "$dir/config/token"
+            openssl rand -hex 16 | tr -d '\n' > "$dir/config/hook"
+            cat > "$dir/config/siphon.yaml" <<'YAML'
+          # Siphon inside the microVM (full sandbox). Edit freely; restart the VM to apply.
+          server:
+            db: /var/lib/siphon/state.db
+            actions_dir: /var/lib/siphon-actions
+            token: file:/etc/siphon/token
+            egress: { socket: /run/siphon/egress.sock }
+            # A host Ollama is 10.0.2.2 from inside the VM:
+            # models: { private_endpoints: ["10.0.2.2:11434"] }
 
-      sources:
-        test:
-          type: webhook
-          secret: file:/etc/siphon/hook
-          signature: github
+          sources:
+            test:
+              type: webhook
+              secret: file:/etc/siphon/hook
+              signature: github
 
-      rules:
-        - name: echo
-          source: test
-          when: 'event.kind == "echo"'
-          on: each
-          id: event.msg
-          action: { cmd: [echo, "got: {{.event.msg}}"] }
-      YAML
-        # Files are read by the siphon user inside the VM; the 0700 directory
-        # keeps other host users out.
-        find "$dir/config" -maxdepth 1 -type f -exec chmod 644 {} +
-        echo "Created $dir/config (siphon.yaml, token, hook)."
-      fi
-      if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
-        echo "siphon-microvm needs KVM: /dev/kvm must be readable and writable by $(id -un)." >&2
-        exit 1
-      fi
-      echo "Siphon microVM: portal http://127.0.0.1:8090 (token: $dir/config/token)"
-      echo "Config: $dir/config/siphon.yaml   State: $dir/state.img   Stop: Ctrl-C"
-      cd "$dir"
-      exec ${runner}/bin/microvm-run
-    '';
+          rules:
+            - name: echo
+              source: test
+              when: 'event.kind == "echo"'
+              on: each
+              id: event.msg
+              action: { cmd: [echo, "got: {{.event.msg}}"] }
+          YAML
+            # Files are read by the siphon user inside the VM; the 0700 directory
+            # keeps other host users out.
+            find "$dir/config" -maxdepth 1 -type f -exec chmod 644 {} +
+            echo "Created $dir/config (siphon.yaml, token, hook)."
+          fi
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            echo "siphon-microvm needs KVM: /dev/kvm must be readable and writable by $(id -un)." >&2
+            exit 1
+          fi
+          echo "Siphon microVM: portal http://127.0.0.1:8090 (token: $dir/config/token)"
+          echo "Config: $dir/config/siphon.yaml   State: $dir/state.img   Stop: Ctrl-C"
+          cd "$dir"
+          exec ${runner}/bin/microvm-run
+        '';
   };
 }

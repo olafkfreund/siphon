@@ -4,6 +4,7 @@
 # GET / serves the log as text/plain (the demo's digest fetches it).
 import http.server
 import json
+import os
 
 
 class H(http.server.BaseHTTPRequestHandler):
@@ -28,4 +29,4 @@ class H(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
 
-http.server.HTTPServer(("127.0.0.1", 18099), H).serve_forever()
+http.server.HTTPServer((os.environ.get("NOTIFY_BIND", "127.0.0.1"), 18099), H).serve_forever()

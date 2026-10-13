@@ -45,6 +45,16 @@
             system = pkgs.stdenv.hostPlatform.system;
             allowUnfreeAgents = true;
           }).run;
+        # The demo, "a bad deploy, start to finish": nix run .#demo, then nix run .#demo-play
+        demo = (microvmFor { system = pkgs.stdenv.hostPlatform.system; demo = true; }).run;
+        demo-play = pkgs.writeShellApplication {
+          name = "demo-play";
+          runtimeInputs = [ siphon pkgs.python3 pkgs.curl pkgs.gnused pkgs.gnugrep pkgs.coreutils ];
+          text = ''
+            export DEMO_SHARE=${./demo}
+            exec ${pkgs.bash}/bin/bash ${./demo/play.sh} "$@"
+          '';
+        };
         # OCI image (stream: `nix build .#image && ./result | podman load`).
         image = import ./nix/image.nix { inherit pkgs siphon; };
         # AWS MCP servers for services.siphon.aws (pinned; see nix/pkgs).

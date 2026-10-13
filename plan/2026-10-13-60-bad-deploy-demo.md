@@ -400,3 +400,10 @@ daemon are untouched. A user's demo state lives only in
 - **Step 6, replays:** `github-ci-failure`'s `cooldown: 5m` suppresses an
   Act 1 replay within 5 minutes, though each run stamps a fresh
   `workflow_run.id` (epoch seconds). `docs/demo.md` says so (step 9).
+- **Step 3, result:** `checks.vm` passed on the step 2 stubs
+  (`nix build .#checks.x86_64-linux.vm`, 428 s).
+- **Step 7, `notify-recv.py`:** it binds to `NOTIFY_BIND` (default
+  `127.0.0.1`, as before). The demo VM sets `0.0.0.0` and opens 18099,
+  because the SLiRP forward for :8092 reaches the guest's NIC, not its
+  loopback. `#microvm` is unchanged: same services, and its firewall still
+  opens only 8080 (checked with `nix eval`).
