@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 72
 intent: intent/2026-10-13-72-bridge-proxy-env.md
 ---
