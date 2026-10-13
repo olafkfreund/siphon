@@ -180,6 +180,37 @@ the security notes). Put a TLS-terminating reverse proxy in front of
 
 ## CLI
 
+### Install the CLI
+
+To drive a Siphon that runs on another machine, install the CLI where you
+work. On the daemon's own NixOS host you don't need this: `cli.enable`
+already puts it on PATH (see below).
+
+```sh
+nix run github:olafkfreund/siphon -- help            # try it, nothing installed
+nix profile install github:olafkfreund/siphon        # install it for your user
+```
+
+Or declare it, with the flake as an input:
+
+```nix
+inputs.siphon.url = "github:olafkfreund/siphon";
+# NixOS:        environment.systemPackages = [ inputs.siphon.packages.${pkgs.system}.default ];
+# home-manager: home.packages              = [ inputs.siphon.packages.${pkgs.system}.default ];
+```
+
+Then log in to the daemon:
+
+```sh
+siphon login https://siphon.example.com     # the token is read from a no-echo prompt, or stdin
+siphon status
+```
+
+- Plain `http://` is accepted only to loopback, so a remote daemon needs
+  https (see [reverse proxy](docs/tasks/reverse-proxy.md)).
+- In scripts, set `SIPHON_URL` and `SIPHON_TOKEN_FILE` instead of logging in.
+- Linux only (`x86_64`, `aarch64`): the flake doesn't build for macOS.
+
 `siphon` is both a **client** of a running Siphon (`login`, `get`, `apply`,
 `connect`, `new task`, `test`, `why`, `draft`, `mcp`, …) and a set of
 **local** commands that work on a config file (`serve`, `validate`,
