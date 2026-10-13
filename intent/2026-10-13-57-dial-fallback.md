@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 57
 author: olafkfreund
 ---
@@ -48,3 +48,7 @@ approved are ever dialed, and one blocked address still rejects the host.
 - Should the five copies of the "try each address" loop become one shared
   helper in `internal/source`? The smaller change fixes only `netguard.go`.
   I'd keep it to `netguard.go` and leave the copies alone.
+
+## Decisions at approval
+
+- Fix only `netguard.go`; the other five loops stay as they are.
