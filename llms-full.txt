@@ -2338,7 +2338,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 | [GitLab](gitlab.md) | polling, webhooks | available | `siphon connect gitlab` | [`gitlab-mr-review`](../templates/gitlab-mr-review.yaml) [`gitlab-pipeline-failed`](../templates/gitlab-pipeline-failed.yaml) |
 | Bitbucket | tools, webhooks | available | `siphon connect bitbucket` | [`bitbucket-pr-review`](../templates/bitbucket-pr-review.yaml) |
 | Gitea | tools, webhooks | needs package for tools (`catalogPackages = [ "gitea" ]`) | `siphon connect gitea` | [`gitea-pr-review`](../templates/gitea-pr-review.yaml) |
-| Forgejo | tools, webhooks | needs package for tools (`catalogPackages = [ "forgejo" ]`) | `siphon connect forgejo` |  |
+| Forgejo | tools, webhooks | needs package for tools (`catalogPackages = [ "forgejo" ]`) | `siphon connect forgejo` | [`forgejo-pr-review`](../templates/forgejo-pr-review.yaml) |
 | Azure DevOps |  | not yet: service hooks use basic auth only, and the remote MCP is Entra OAuth only | — |  |
 
 ## Issue tracking
@@ -3483,6 +3483,44 @@ rules:
     repeat: 6h                      # and again every 6 h while it stays true
     action:
       cmd: [curl, -fsS, -H, "Title: Disk {{.event.used_pct}}% full", -d, "Clean up or grow the volume", https://ntfy.sh/siphon-CHANGE-ME]
+```
+
+
+---
+
+<!-- file: docs/templates/forgejo-pr-review.yaml -->
+
+```yaml
+# title:    Review every new Forgejo pull request with an agent
+# category: Code review & CI
+# needs:    sources/forgejo, sources/forgejo-hooks   (siphon connect forgejo --webhook; services.siphon.catalogPackages = [ "forgejo" ])
+#           credentials/claude-max                   (siphon connect login claude)
+# apply:    siphon apply -f forgejo-pr-review.yaml
+# The agent reads the PR through forgejo-mcp and reports findings in the job
+# output. forgejo-mcp has no read-only mode, so allowed_tools is the boundary:
+# only read tools are listed. Approval is on: you decide each run.
+agents:
+  pr-reviewer:
+    kind: claude
+    credential: claude-max
+    prompt: |
+      Review pull request #{{.event.number}} in {{.event.repository.full_name}}
+      ("{{.event.pull_request.title}}"). Read the diff, then reply with a short
+      list of concrete findings (bugs, missing tests, risky changes). Never
+      push, merge, comment or approve.
+    mcp: [forgejo]
+    allowed_tools: [mcp__forgejo__get_pull_request_by_index, mcp__forgejo__get_pull_request_diff, mcp__forgejo__list_pull_request_files]
+    max_turns: 15
+    max_budget_usd: 1
+    timeout: 15m
+rules:
+  - name: review-new-prs
+    source: forgejo-hooks
+    when: 'headers["x-forgejo-event"] == "pull_request" && event.action in ["opened", "reopened"]'
+    on: each
+    id: event.pull_request.id
+    cooldown: 1m
+    action: { agent: pr-reviewer }
 ```
 
 

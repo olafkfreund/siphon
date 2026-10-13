@@ -205,6 +205,14 @@ Step 1 checked every fact. No approved decision changes.
   `policy_id` may be missing for some alert types. **Step 6:** the header
   says so, and the `id:` expression must not fail when it's missing.
 
+- **Step 4, a code change:** `TestTemplateCommand` asks for the unknown
+  name `github-review` and expects `github-pr-review` among the five "did
+  you mean" hints. Once there were three more `*-pr-review` templates, the
+  word "review" filled the cap of five, and users lost the right hint.
+  `closeTemplates` (`cmd/siphon/describe.go`) now ranks templates by how
+  many words they share with the name (stable, so equal hits keep their
+  order). The test is unchanged.
+
 ## Tests
 
 ```sh

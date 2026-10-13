@@ -39,6 +39,8 @@ sources:
   bitbucket-hooks: { type: webhook, signature: sha256, signature_header: X-Hub-Signature, secret: env:AGW_HOOK }
   gitea: { type: mcp, url: "https://gitea.example.com/mcp", headers: { Authorization: env:AGW_HOOK } }
   gitea-hooks: { type: webhook, signature: github, secret: env:AGW_HOOK }
+  forgejo: { type: mcp, url: "https://forgejo.example.com/mcp", headers: { Authorization: env:AGW_HOOK } }
+  forgejo-hooks: { type: webhook, signature: github, secret: env:AGW_HOOK }
 rules:
   - { name: r1, source: github-hooks, when: "true", action: { cmd: [echo, one] } }
 `
