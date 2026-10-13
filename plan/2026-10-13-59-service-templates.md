@@ -188,7 +188,22 @@ fixed here.
 
 ## Deviations
 
-None yet. Step 1 records its findings here.
+Step 1 checked every fact. No approved decision changes.
+
+- **Bitbucket:** `pullrequest:created` carries `pullrequest` and
+  `repository`. `pullrequest.id` and `repository.full_name` are the
+  standard entity fields. The docs page shows no inline sample, so this is
+  not checked against a live payload.
+- **Gitea:** `X-Gitea-Event: pull_request` is confirmed in Gitea's source.
+  The pinned gitea-mcp v1.8.0 has `pull_request_read` and
+  `get_file_contents`.
+- **Forgejo:** the three tools exist. Forgejo also sends
+  `X-Hub-Signature-256`, so the catalog's `signature: github` works and no
+  separate issue is needed.
+- **Cloudflare:** `search()` and `execute()` exist. The payload has `ts`,
+  `policy_id`, `alert_type` and `alert_event`. Cloudflare's docs say
+  `policy_id` may be missing for some alert types. **Step 6:** the header
+  says so, and the `id:` expression must not fail when it's missing.
 
 ## Tests
 
