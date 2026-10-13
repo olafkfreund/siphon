@@ -1,0 +1,38 @@
+# title:    Explain Cloudflare notifications with an agent, then notify
+# category: Ops & monitoring
+# needs:    sources/cloudflare, sources/cloudflare-hooks   (siphon connect cloudflare --webhook)
+#           credentials/claude-max                         (siphon connect login claude)
+# apply:    siphon apply -f cloudflare-notification.yaml
+# Warning: the Cloudflare MCP server's execute tool can call write APIs, so
+# tool names do not make it read-only. Connect it with a read-only API token,
+# and keep approval on. The agent is told to make read-only calls only.
+# The rule id falls back to alert_type, because Cloudflare does not send
+# policy_id with every alert type.
+agents:
+  cf-explainer:
+    kind: claude
+    credential: claude-max
+    prompt: |
+      Cloudflare sent a notification: {{.event.name}} ({{.event.alert_type}}).
+      Text: {{.event.text}}
+      Use the Cloudflare API to find the likely cause and the affected zone or
+      account. Make read-only API calls only. Reply in at most five lines:
+      what happened, how bad, what to check first.
+    mcp: [cloudflare]
+    allowed_tools: [mcp__cloudflare__search, mcp__cloudflare__execute]
+    max_turns: 15
+    max_budget_usd: 1
+    timeout: 15m
+routines:
+  explain-and-notify:
+    steps:
+      - { id: explain, agent: cf-explainer, timeout: 15m }
+      - { id: notify, if: 'steps.explain.exit == 0', cmd: [curl, -fsS, -H, "Title: Cloudflare", -d, "{{.steps.explain.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+rules:
+  - name: cloudflare-alert
+    source: cloudflare-hooks
+    when: 'event.alert_event != "ALERT_STATE_EVENT_END"'
+    on: each
+    id: (event.policy_id ?? event.alert_type ?? "") + "/" + string(event.ts ?? now().Unix())
+    cooldown: 1m
+    action: { routine: explain-and-notify }

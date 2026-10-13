@@ -22,9 +22,9 @@ lists what's missing. Models and subscription logins are on their own pages:
 |---|---|---|---|---|
 | [GitHub](github.md) | tools, webhooks | available | `siphon connect github` | [`github-ci-failure`](../templates/github-ci-failure.yaml) [`github-issue-triage`](../templates/github-issue-triage.yaml) [`github-pr-review`](../templates/github-pr-review.yaml) |
 | [GitLab](gitlab.md) | polling, webhooks | available | `siphon connect gitlab` | [`gitlab-mr-review`](../templates/gitlab-mr-review.yaml) [`gitlab-pipeline-failed`](../templates/gitlab-pipeline-failed.yaml) |
-| Bitbucket | tools, webhooks | available | `siphon connect bitbucket` |  |
-| Gitea | tools, webhooks | needs package for tools (`catalogPackages = [ "gitea" ]`) | `siphon connect gitea` |  |
-| Forgejo | tools, webhooks | needs package for tools (`catalogPackages = [ "forgejo" ]`) | `siphon connect forgejo` |  |
+| Bitbucket | tools, webhooks | available | `siphon connect bitbucket` | [`bitbucket-pr-review`](../templates/bitbucket-pr-review.yaml) |
+| Gitea | tools, webhooks | needs package for tools (`catalogPackages = [ "gitea" ]`) | `siphon connect gitea` | [`gitea-pr-review`](../templates/gitea-pr-review.yaml) |
+| Forgejo | tools, webhooks | needs package for tools (`catalogPackages = [ "forgejo" ]`) | `siphon connect forgejo` | [`forgejo-pr-review`](../templates/forgejo-pr-review.yaml) |
 | Azure DevOps |  | not yet: service hooks use basic auth only, and the remote MCP is Entra OAuth only | — |  |
 
 ## Issue tracking
@@ -53,7 +53,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 | PagerDuty | webhooks | available | `siphon connect pagerduty` | [`pagerduty-incident-summary`](../templates/pagerduty-incident-summary.yaml) |
 | Grafana | tools, webhooks | needs package for tools (`catalogPackages = [ "grafana" ]`) | `siphon connect grafana` | [`grafana-alert-explain`](../templates/grafana-alert-explain.yaml) |
 | Alertmanager | webhooks | available | `siphon connect alertmanager` | [`linear-issue-from-alert`](../templates/linear-issue-from-alert.yaml) |
-| Datadog | webhooks | available | `siphon connect datadog` |  |
+| Datadog | webhooks | available | `siphon connect datadog` | [`datadog-monitor-alert`](../templates/datadog-monitor-alert.yaml) |
 | Uptime Kuma | webhooks | available | `siphon connect uptime-kuma` | [`uptime-kuma-down`](../templates/uptime-kuma-down.yaml) |
 | Opsgenie |  | not yet: end of support 2027-04-05 | — |  |
 
@@ -62,7 +62,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 | Service | Gives agents | Status | Connect | Templates |
 |---|---|---|---|---|
 | [AWS](aws.md) | tools, webhooks | needs package: enable `services.siphon.aws` in your NixOS config | `siphon connect aws` | [`aws-cloudwatch-alarm`](../templates/aws-cloudwatch-alarm.yaml) |
-| Cloudflare | tools, webhooks | available | `siphon connect cloudflare` |  |
+| Cloudflare | tools, webhooks | available | `siphon connect cloudflare` | [`cloudflare-notification`](../templates/cloudflare-notification.yaml) |
 | Kubernetes |  | not yet: needs kubeconfig wiring: coming in a later release | — |  |
 | Google Pub/Sub |  | not yet: needs a Google OIDC (RS256 JWT) push-authentication mode | — |  |
 | Azure Event Grid |  | not yet: needs the subscription validation handshake | — |  |

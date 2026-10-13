@@ -88,6 +88,7 @@ You need Siphon running somewhere. Pick one way from [Ways to run Siphon](../REA
 | NixOS | `services.siphon.enable = true;` (full sandbox; the `siphon` CLI is on your PATH) |
 | Nix + KVM, not NixOS | `nix run github:olafkfreund/siphon#microvm` (full sandbox in a VM) |
 | Docker or Podman | the `ghcr.io/olafkfreund/siphon` image (no sandbox: for trying it out) |
+| Siphon already running elsewhere, the CLI here | `nix profile install github:olafkfreund/siphon` ([Install the CLI](../README.md#install-the-cli)) |
 
 The portal and API listen on the address in your config, for example
 `http://127.0.0.1:8080`, and the portal token is the one in `server.token`.
@@ -2242,6 +2243,9 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 
 | Template | What it does | Connect first |
 |---|---|---|
+| [`bitbucket-pr-review`](bitbucket-pr-review.yaml) | Review every new Bitbucket pull request with an agent | `siphon connect bitbucket --webhook`, `siphon connect login claude` |
+| [`forgejo-pr-review`](forgejo-pr-review.yaml) | Review every new Forgejo pull request with an agent | `siphon connect forgejo --webhook`, `siphon connect login claude` |
+| [`gitea-pr-review`](gitea-pr-review.yaml) | Review every new Gitea pull request with an agent | `siphon connect gitea --webhook`, `siphon connect login claude` |
 | [`github-ci-failure`](github-ci-failure.yaml) | Diagnose a failed GitHub Actions run | `siphon connect github --webhook`, `siphon connect login claude` |
 | [`github-issue-triage`](github-issue-triage.yaml) | Suggest labels and a summary for new issues | `siphon connect github --webhook`, `siphon connect model ollama` |
 | [`github-pr-review`](github-pr-review.yaml) | Review every new pull request with an agent | `siphon connect github --webhook`, `siphon connect login claude` |
@@ -2254,6 +2258,8 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 | Template | What it does | Connect first |
 |---|---|---|
 | [`alertmanager-summary`](alertmanager-summary.yaml) | Summarise Prometheus alerts with a local model, then notify | `siphon connect model ollama` · webhook secret |
+| [`cloudflare-notification`](cloudflare-notification.yaml) | Explain Cloudflare notifications with an agent, then notify | `siphon connect cloudflare --webhook`, `siphon connect login claude` |
+| [`datadog-monitor-alert`](datadog-monitor-alert.yaml) | Summarise Datadog monitor alerts with a local model, then notify | `siphon connect datadog`, `siphon connect model ollama` |
 | [`disk-full`](disk-full.yaml) | Warn when a disk is nearly full (and again every 6 hours) | — |
 | [`grafana-alert-explain`](grafana-alert-explain.yaml) | Explain a firing Grafana alert using Grafana's own tools (read-only) | `siphon connect grafana --webhook`, `siphon connect login claude` |
 | [`linear-issue-from-alert`](linear-issue-from-alert.yaml) | Open a Linear issue for each firing alert | `siphon connect alertmanager`, `siphon connect linear`, `siphon connect login claude` |
@@ -2338,9 +2344,9 @@ lists what's missing. Models and subscription logins are on their own pages:
 |---|---|---|---|---|
 | [GitHub](github.md) | tools, webhooks | available | `siphon connect github` | [`github-ci-failure`](../templates/github-ci-failure.yaml) [`github-issue-triage`](../templates/github-issue-triage.yaml) [`github-pr-review`](../templates/github-pr-review.yaml) |
 | [GitLab](gitlab.md) | polling, webhooks | available | `siphon connect gitlab` | [`gitlab-mr-review`](../templates/gitlab-mr-review.yaml) [`gitlab-pipeline-failed`](../templates/gitlab-pipeline-failed.yaml) |
-| Bitbucket | tools, webhooks | available | `siphon connect bitbucket` |  |
-| Gitea | tools, webhooks | needs package for tools (`catalogPackages = [ "gitea" ]`) | `siphon connect gitea` |  |
-| Forgejo | tools, webhooks | needs package for tools (`catalogPackages = [ "forgejo" ]`) | `siphon connect forgejo` |  |
+| Bitbucket | tools, webhooks | available | `siphon connect bitbucket` | [`bitbucket-pr-review`](../templates/bitbucket-pr-review.yaml) |
+| Gitea | tools, webhooks | needs package for tools (`catalogPackages = [ "gitea" ]`) | `siphon connect gitea` | [`gitea-pr-review`](../templates/gitea-pr-review.yaml) |
+| Forgejo | tools, webhooks | needs package for tools (`catalogPackages = [ "forgejo" ]`) | `siphon connect forgejo` | [`forgejo-pr-review`](../templates/forgejo-pr-review.yaml) |
 | Azure DevOps |  | not yet: service hooks use basic auth only, and the remote MCP is Entra OAuth only | — |  |
 
 ## Issue tracking
@@ -2369,7 +2375,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 | PagerDuty | webhooks | available | `siphon connect pagerduty` | [`pagerduty-incident-summary`](../templates/pagerduty-incident-summary.yaml) |
 | Grafana | tools, webhooks | needs package for tools (`catalogPackages = [ "grafana" ]`) | `siphon connect grafana` | [`grafana-alert-explain`](../templates/grafana-alert-explain.yaml) |
 | Alertmanager | webhooks | available | `siphon connect alertmanager` | [`linear-issue-from-alert`](../templates/linear-issue-from-alert.yaml) |
-| Datadog | webhooks | available | `siphon connect datadog` |  |
+| Datadog | webhooks | available | `siphon connect datadog` | [`datadog-monitor-alert`](../templates/datadog-monitor-alert.yaml) |
 | Uptime Kuma | webhooks | available | `siphon connect uptime-kuma` | [`uptime-kuma-down`](../templates/uptime-kuma-down.yaml) |
 | Opsgenie |  | not yet: end of support 2027-04-05 | — |  |
 
@@ -2378,7 +2384,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 | Service | Gives agents | Status | Connect | Templates |
 |---|---|---|---|---|
 | [AWS](aws.md) | tools, webhooks | needs package: enable `services.siphon.aws` in your NixOS config | `siphon connect aws` | [`aws-cloudwatch-alarm`](../templates/aws-cloudwatch-alarm.yaml) |
-| Cloudflare | tools, webhooks | available | `siphon connect cloudflare` |  |
+| Cloudflare | tools, webhooks | available | `siphon connect cloudflare` | [`cloudflare-notification`](../templates/cloudflare-notification.yaml) |
 | Kubernetes |  | not yet: needs kubeconfig wiring: coming in a later release | — |  |
 | Google Pub/Sub |  | not yet: needs a Google OIDC (RS256 JWT) push-authentication mode | — |  |
 | Azure Event Grid |  | not yet: needs the subscription validation handshake | — |  |
@@ -3503,6 +3509,134 @@ rules:
 
 ---
 
+<!-- file: docs/templates/bitbucket-pr-review.yaml -->
+
+```yaml
+# title:    Review every new Bitbucket pull request with an agent
+# category: Code review & CI
+# needs:    sources/bitbucket, sources/bitbucket-hooks   (siphon connect bitbucket --webhook; tick "Pull request: Created")
+#           credentials/claude-max                        (siphon connect login claude)
+# apply:    siphon apply -f bitbucket-pr-review.yaml
+# The agent reads the PR through Atlassian's Rovo MCP server and reports
+# findings in the job output. Approval is on: you decide each run.
+# Warning: Rovo's bitbucketPullRequest tool can also merge, so tool names do
+# not make it read-only. Use a token with only the scopes pullrequest:read
+# and repository:read, and keep approval on.
+agents:
+  bitbucket-pr-reviewer:
+    kind: claude
+    credential: claude-max
+    prompt: |
+      Review pull request #{{.event.pullrequest.id}} in {{.event.repository.full_name}}
+      ("{{.event.pullrequest.title}}"). Read the diff, then reply with a short
+      list of concrete findings (bugs, missing tests, risky changes). Never
+      merge, approve or comment.
+    mcp: [bitbucket]
+    allowed_tools: [mcp__bitbucket__bitbucketPullRequest, mcp__bitbucket__bitbucketRepoContent]
+    max_turns: 15
+    max_budget_usd: 1
+    timeout: 15m
+rules:
+  - name: review-new-bitbucket-prs
+    source: bitbucket-hooks
+    when: 'headers["x-event-key"] == "pullrequest:created"'
+    on: each
+    id: event.repository.full_name + "/" + string(event.pullrequest.id)
+    cooldown: 1m
+    action: { agent: bitbucket-pr-reviewer }
+```
+
+
+---
+
+<!-- file: docs/templates/cloudflare-notification.yaml -->
+
+```yaml
+# title:    Explain Cloudflare notifications with an agent, then notify
+# category: Ops & monitoring
+# needs:    sources/cloudflare, sources/cloudflare-hooks   (siphon connect cloudflare --webhook)
+#           credentials/claude-max                         (siphon connect login claude)
+# apply:    siphon apply -f cloudflare-notification.yaml
+# Warning: the Cloudflare MCP server's execute tool can call write APIs, so
+# tool names do not make it read-only. Connect it with a read-only API token,
+# and keep approval on. The agent is told to make read-only calls only.
+# The rule id falls back to alert_type, because Cloudflare does not send
+# policy_id with every alert type.
+agents:
+  cf-explainer:
+    kind: claude
+    credential: claude-max
+    prompt: |
+      Cloudflare sent a notification: {{.event.name}} ({{.event.alert_type}}).
+      Text: {{.event.text}}
+      Use the Cloudflare API to find the likely cause and the affected zone or
+      account. Make read-only API calls only. Reply in at most five lines:
+      what happened, how bad, what to check first.
+    mcp: [cloudflare]
+    allowed_tools: [mcp__cloudflare__search, mcp__cloudflare__execute]
+    max_turns: 15
+    max_budget_usd: 1
+    timeout: 15m
+routines:
+  explain-and-notify:
+    steps:
+      - { id: explain, agent: cf-explainer, timeout: 15m }
+      - { id: notify, if: 'steps.explain.exit == 0', cmd: [curl, -fsS, -H, "Title: Cloudflare", -d, "{{.steps.explain.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+rules:
+  - name: cloudflare-alert
+    source: cloudflare-hooks
+    when: 'event.alert_event != "ALERT_STATE_EVENT_END"'
+    on: each
+    id: (event.policy_id ?? event.alert_type ?? "") + "/" + string(event.ts ?? now().Unix())
+    cooldown: 1m
+    action: { routine: explain-and-notify }
+```
+
+
+---
+
+<!-- file: docs/templates/datadog-monitor-alert.yaml -->
+
+```yaml
+# title:    Summarise Datadog monitor alerts with a local model, then notify
+# category: Ops & monitoring
+# needs:    sources/datadog                        (siphon connect datadog)
+#           credentials/ollama-local               (siphon connect model ollama)
+# apply:    siphon apply -f datadog-monitor-alert.yaml
+# Datadog → Integrations → Webhooks: set the Payload field to
+#   {"id":"$ID","title":"$EVENT_TITLE","transition":"$ALERT_TRANSITION","monitor":"$ALERT_ID","link":"$LINK","body":"$EVENT_MSG"}
+# and mention @webhook-<name> in the monitor's notification message.
+agents:
+  datadog-summary:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: |
+      Datadog monitor "{{.event.title}}" (monitor {{.event.monitor}}) changed to {{.event.transition}}.
+      Details: {{.event.body}}
+      Link: {{.event.link}}
+      Summarise for an on-call engineer in at most three lines: what is wrong, where, how bad.
+    max_turns: 2
+    timeout: 5m
+    approve: false                  # a read-only summary; nothing acts on it
+routines:
+  datadog-to-phone:
+    steps:
+      - { id: summary, agent: datadog-summary, timeout: 5m }
+      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: Alert", -d, "{{.steps.summary.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+rules:
+  - name: monitor-triggered
+    source: datadog
+    when: 'event.transition in ["Triggered", "Re-Triggered"]'
+    on: each
+    id: event.id
+    cooldown: 2m
+    action: { routine: datadog-to-phone }
+```
+
+
+---
+
 <!-- file: docs/templates/disk-full.yaml -->
 
 ```yaml
@@ -3524,6 +3658,82 @@ rules:
     repeat: 6h                      # and again every 6 h while it stays true
     action:
       cmd: [curl, -fsS, -H, "Title: Disk {{.event.used_pct}}% full", -d, "Clean up or grow the volume", https://ntfy.sh/siphon-CHANGE-ME]
+```
+
+
+---
+
+<!-- file: docs/templates/forgejo-pr-review.yaml -->
+
+```yaml
+# title:    Review every new Forgejo pull request with an agent
+# category: Code review & CI
+# needs:    sources/forgejo, sources/forgejo-hooks   (siphon connect forgejo --webhook; services.siphon.catalogPackages = [ "forgejo" ])
+#           credentials/claude-max                   (siphon connect login claude)
+# apply:    siphon apply -f forgejo-pr-review.yaml
+# The agent reads the PR through forgejo-mcp and reports findings in the job
+# output. forgejo-mcp has no read-only mode, so allowed_tools is the boundary:
+# only read tools are listed. Approval is on: you decide each run.
+agents:
+  forgejo-pr-reviewer:
+    kind: claude
+    credential: claude-max
+    prompt: |
+      Review pull request #{{.event.number}} in {{.event.repository.full_name}}
+      ("{{.event.pull_request.title}}"). Read the diff, then reply with a short
+      list of concrete findings (bugs, missing tests, risky changes). Never
+      push, merge, comment or approve.
+    mcp: [forgejo]
+    allowed_tools: [mcp__forgejo__get_pull_request_by_index, mcp__forgejo__get_pull_request_diff, mcp__forgejo__list_pull_request_files]
+    max_turns: 15
+    max_budget_usd: 1
+    timeout: 15m
+rules:
+  - name: review-new-forgejo-prs
+    source: forgejo-hooks
+    when: 'headers["x-forgejo-event"] == "pull_request" && event.action == "opened"'
+    on: each
+    id: event.pull_request.id
+    cooldown: 1m
+    action: { agent: forgejo-pr-reviewer }
+```
+
+
+---
+
+<!-- file: docs/templates/gitea-pr-review.yaml -->
+
+```yaml
+# title:    Review every new Gitea pull request with an agent
+# category: Code review & CI
+# needs:    sources/gitea, sources/gitea-hooks   (siphon connect gitea --webhook; services.siphon.catalogPackages = [ "gitea" ])
+#           credentials/claude-max               (siphon connect login claude)
+# apply:    siphon apply -f gitea-pr-review.yaml
+# The agent reads the PR through gitea-mcp, which the catalog runs read-only
+# (-r), and reports findings in the job output. Approval is on: you decide
+# each run.
+agents:
+  gitea-pr-reviewer:
+    kind: claude
+    credential: claude-max
+    prompt: |
+      Review pull request #{{.event.number}} in {{.event.repository.full_name}}
+      ("{{.event.pull_request.title}}"). Read the diff, then reply with a short
+      list of concrete findings (bugs, missing tests, risky changes). Never
+      push, merge, comment or approve.
+    mcp: [gitea]
+    allowed_tools: [mcp__gitea__pull_request_read, mcp__gitea__get_file_contents]
+    max_turns: 15
+    max_budget_usd: 1
+    timeout: 15m
+rules:
+  - name: review-new-gitea-prs
+    source: gitea-hooks
+    when: 'headers["x-gitea-event"] == "pull_request" && event.action == "opened"'
+    on: each
+    id: event.pull_request.id
+    cooldown: 1m
+    action: { agent: gitea-pr-reviewer }
 ```
 
 

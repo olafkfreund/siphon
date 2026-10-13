@@ -12,6 +12,7 @@ You need Siphon running somewhere. Pick one way from [Ways to run Siphon](../REA
 | NixOS | `services.siphon.enable = true;` (full sandbox; the `siphon` CLI is on your PATH) |
 | Nix + KVM, not NixOS | `nix run github:olafkfreund/siphon#microvm` (full sandbox in a VM) |
 | Docker or Podman | the `ghcr.io/olafkfreund/siphon` image (no sandbox: for trying it out) |
+| Siphon already running elsewhere, the CLI here | `nix profile install github:olafkfreund/siphon` ([Install the CLI](../README.md#install-the-cli)) |
 
 The portal and API listen on the address in your config, for example
 `http://127.0.0.1:8080`, and the portal token is the one in `server.token`.

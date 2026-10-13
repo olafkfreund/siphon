@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/olafkfreund/siphon/docs"
@@ -43,20 +44,25 @@ func buildTemplate(fs *flag.FlagSet) func(*cli, []string) error {
 	}
 }
 
-// closeTemplates names templates that share a word with name.
+// closeTemplates names templates that share a word with name, those sharing the most first.
 func closeTemplates(name string) string {
+	words := strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' || r == ' ' })
 	var near []string
+	hits := map[string]int{}
 	for _, t := range docs.Templates() {
-		for _, w := range strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' || r == ' ' }) {
+		for _, w := range words {
 			if len(w) >= 3 && strings.Contains(t.Name, strings.ToLower(w)) {
-				near = append(near, t.Name)
-				break
+				hits[t.Name]++
 			}
+		}
+		if hits[t.Name] > 0 {
+			near = append(near, t.Name)
 		}
 	}
 	if len(near) == 0 {
 		return "list them with `siphon template`"
 	}
+	sort.SliceStable(near, func(i, j int) bool { return hits[near[i]] > hits[near[j]] })
 	return "did you mean: " + strings.Join(near[:min(len(near), 5)], ", ") + "? List them all with `siphon template`"
 }
 

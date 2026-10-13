@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/olafkfreund/siphon/docs"
 )
 
@@ -56,5 +58,35 @@ func TestPage(t *testing.T) {
 	}
 	if _, ok := docs.Page("nope"); ok {
 		t.Fatal("nope")
+	}
+}
+
+// Applying a template must never overwrite what another template created:
+// apply replaces an item of the same kind and name in place.
+func TestTemplateNamesAreUnique(t *testing.T) {
+	owner := map[string]string{}
+	for _, tpl := range docs.Templates() {
+		var doc struct {
+			Agents, Routines, Sources map[string]yaml.Node
+			Rules                     []struct{ Name string }
+		}
+		if err := yaml.Unmarshal([]byte(tpl.YAML), &doc); err != nil {
+			t.Fatalf("%s: %v", tpl.Name, err)
+		}
+		var keys []string
+		for kind, m := range map[string]map[string]yaml.Node{"agent": doc.Agents, "routine": doc.Routines, "source": doc.Sources} {
+			for n := range m {
+				keys = append(keys, kind+" "+n)
+			}
+		}
+		for _, r := range doc.Rules {
+			keys = append(keys, "rule "+r.Name)
+		}
+		for _, k := range keys {
+			if o, ok := owner[k]; ok && o != tpl.Name {
+				t.Errorf("%s: %s is also in %s", tpl.Name, k, o)
+			}
+			owner[k] = tpl.Name
+		}
 	}
 }
