@@ -72,8 +72,9 @@ pkgs.testers.runNixOSTest {
     for n in ["token", "hook", "kuma"]:
         machine.succeed(f"install -m 600 /etc/siphon/{n} /root/demo/config/{n}")
 
-    env = "SIPHON_DEMO_DIR=/root/demo SIPHON_URL=http://127.0.0.1:8080"
-    cli = f"{env} SIPHON_TOKEN_FILE=/root/demo/config/token siphon"
+    # A decoy CLI login: demo-play must ignore it and talk to the demo only.
+    env = "SIPHON_DEMO_DIR=/root/demo SIPHON_DEMO_URL=http://127.0.0.1:8080 SIPHON_URL=http://127.0.0.1:9 SIPHON_TOKEN_FILE=/nonexistent"
+    cli = "SIPHON_URL=http://127.0.0.1:8080 SIPHON_TOKEN_FILE=/root/demo/config/token siphon"
     # --auto approves at once, before the notifier's 15 s scan could push the
     # approval, so this plays the presenter's way instead: demo-play waits for
     # an approval made elsewhere (the portal; here the CLI, once the "phone"

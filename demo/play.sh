@@ -2,7 +2,7 @@
 # The demo, "a bad deploy, start to finish": three acts against the demo VM.
 #   demo-play          pauses for Enter between the acts; you approve in the portal
 #   demo-play --auto   no pauses, and the CLI approves (for the VM test)
-# Env: SIPHON_URL (http://127.0.0.1:8091), SIPHON_DEMO_DIR (~/.config/siphon-demo),
+# Env: SIPHON_DEMO_URL (http://127.0.0.1:8091), SIPHON_DEMO_DIR (~/.config/siphon-demo),
 #      DEMO_SHARE (the demo/ directory; the Nix package sets it).
 # No secret is ever put on argv or printed: keys are read by python from their
 # files, and curl gets its headers from a 0600 file in a temp dir.
@@ -13,8 +13,11 @@ auto=0
 
 dir=${SIPHON_DEMO_DIR:-$HOME/.config/siphon-demo}
 share=${DEMO_SHARE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}
-export SIPHON_URL=${SIPHON_URL:-http://127.0.0.1:8091}
-export SIPHON_TOKEN_FILE=${SIPHON_TOKEN_FILE:-$dir/config/token}
+# Never the CLI's own SIPHON_URL/SIPHON_TOKEN_FILE: they point at your real Siphon,
+# and setup applies tasks with --yes.
+export SIPHON_URL=${SIPHON_DEMO_URL:-http://127.0.0.1:8091}
+export SIPHON_TOKEN_FILE=$dir/config/token
+unset SIPHON_TOKEN
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -29,6 +32,7 @@ apply_task() {
   shift 2
   siphon template "$name" | sed "$@" >"$tmp/task.yaml"
   grep -q -- "$expect" "$tmp/task.yaml" || die "template $name: the edit '$expect' did not apply"
+  ! grep -qE 'CHANGE-ME|example\.com' "$tmp/task.yaml" || die "template $name: a placeholder URL is left (a sed no longer matches)"
   apply_file "$tmp/task.yaml"
 }
 

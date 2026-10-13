@@ -420,3 +420,18 @@ daemon are untouched. A user's demo state lives only in
   non-terminal stdin. The script now ends with where to look (the jobs
   page and the notification log). Bring the debug lines back after #65 is
   fixed.
+- **Review fixes (after step 9):** a fresh Opus review found the following.
+  - **High:** `play.sh` honoured the CLI's own `SIPHON_URL` and
+    `SIPHON_TOKEN_FILE`. The NixOS module sets `SIPHON_URL` for every user,
+    so setup would have run `apply --yes` against the real daemon. It now
+    reads only `SIPHON_DEMO_URL` (default `:8091`) and
+    `$dir/config/token`, and unsets `SIPHON_TOKEN`. `checks.demo` runs it
+    with a decoy `SIPHON_URL` and `SIPHON_TOKEN_FILE` that must be ignored.
+  - **Medium:** the wrapper's Ollama probe matches `"llama3.2:latest"`
+    exactly. `llama3.2:1b` alone would have been chosen and then failed
+    with "model not found".
+  - **Low:** `apply_task` also fails when any `CHANGE-ME` or `example.com`
+    URL is left, so every sed edit is checked, not one per template.
+    Checked against the current templates.
+  - **Not changed:** the 2 s poll race on a very fast approval (the push
+    takes up to 15 s), and the plain error messages before the VM is up.

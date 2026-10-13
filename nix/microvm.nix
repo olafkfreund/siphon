@@ -154,7 +154,7 @@ let
       find "$dir/config" -maxdepth 1 -type f -exec chmod 644 {} +
       echo "Created $dir/config (siphon.yaml, token, hook, kuma, notify-url)."
     fi
-    if curl -sf --max-time 2 http://127.0.0.1:11434/api/tags | grep -q '"llama3.2'; then
+    if curl -sf --max-time 2 http://127.0.0.1:11434/api/tags | grep -q '"llama3.2:latest"'; then
       model=http://10.0.2.2:11434/v1
       echo "Model: the host Ollama (llama3.2)"
     else
