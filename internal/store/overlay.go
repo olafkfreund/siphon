@@ -118,7 +118,7 @@ const maxEventBytes = 64 << 10
 const maxHeaderBytes = 8 << 10
 
 // secretHeader is not a bare -key$: that would drop Bitbucket's x-event-key.
-var secretHeader = regexp.MustCompile(`(?i)signature|-sig$|auth|(^|-)(api|access|secret|private|siphon)-key$`)
+var secretHeader = regexp.MustCompile(`(?i)signature|-sig$|auth|hmac|(^|-)(api|access|secret|private|siphon|application|subscription|functions|webhook)-key$`)
 
 var secretKey = regexp.MustCompile(`(?i)token|secret|password|authorization|api_key|cookie`)
 

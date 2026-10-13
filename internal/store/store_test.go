@@ -696,13 +696,15 @@ func TestSourceEventHeaders(t *testing.T) {
 	defer s.Close()
 	keep := map[string]string{"x-github-event": "push", "x-event-key": "repo:push", "x-gitea-event": "push",
 		"x-forgejo-event": "push", "x-gitlab-event": "Push Hook", "content-type": "application/json",
-		"user-agent": "ua", "x-github-delivery": "d1"}
+		"user-agent": "ua", "x-github-delivery": "d1", "x-slack-request-timestamp": "1", "webhook-id": "w1"}
 	all := map[string]string{}
 	for k, v := range keep {
 		all[k] = v
 	}
 	for _, k := range []string{"x-siphon-key", "x-api-key", "stripe-signature", "x-gitlab-token",
-		"cf-webhook-auth", "authorization", "x-hub-signature", "webhook-signature"} {
+		"cf-webhook-auth", "authorization", "x-hub-signature", "webhook-signature",
+		"x-gitea-signature", "x-forgejo-signature", "x-slack-signature", "x-pagerduty-signature", "svix-signature",
+		"dd-api-key", "dd-application-key", "x-shopify-hmac-sha256", "x-functions-key", "ocp-apim-subscription-key", "x-webhook-key"} {
 		all[k] = "LEAK"
 	}
 	if err := SetSourceEvent(s.DB, "x", map[string]any{"a": 1}, all); err != nil {

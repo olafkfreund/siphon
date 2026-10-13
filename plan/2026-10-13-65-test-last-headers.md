@@ -117,6 +117,20 @@ spec: spec/2026-10-13-65-test-last-headers.md
 - **Steps 1 and 2 are committed together.** On its own, step 1 doesn't
   build: `internal/job` and the `cmd/siphon` tests (`mcp_test.go`,
   `guided_test.go`) call the old `SetSourceEvent`. Step 2 updates them too.
+- **Review fixes (after step 6):** a fresh Opus review found that some
+  secret-bearing headers got past the filter when a sender added them as
+  extras (`dd-application-key`, `x-shopify-hmac-sha256`, `x-functions-key`,
+  `ocp-apim-subscription-key`, `x-webhook-key`).
+  - `secretHeader` now also matches `hmac`, and the `-key` names
+    `application`, `subscription`, `functions` and `webhook`.
+    `x-event-key` is still kept.
+  - `TestSourceEventHeaders` now covers every vendor header the review
+    checked: Gitea, Forgejo, Slack, PagerDuty and Svix signatures, plus the
+    five above. It also checks that `x-slack-request-timestamp` and
+    `webhook-id` are kept.
+  - **Not changed:** `explain` reads the body and the headers in two
+    queries, so a webhook arriving in between could pair them wrongly for
+    one call. It's harmless, and diagnostics only.
 
 ## Tests
 
