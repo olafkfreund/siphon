@@ -4,7 +4,7 @@ issue: 64
 author: olafkfreund
 ---
 
-# Intent: templates never let event or model text become a curl file read
+# Intent: template notifications send text as is: no curl file reads, no JSON envelope
 
 ## Problem
 
@@ -26,8 +26,16 @@ can send. But the templates are what users copy, so the pattern spreads.
 - A test in `docs/templates_test.go` fails if any template puts a `{{…}}`
   value after `-d`, `--data`, `--data-binary` or `--data-urlencode`, so
   the pattern can't come back.
-- The twelve templates still apply cleanly, and the notifications look
-  the same.
+- The notification is the model's text. Today the seven summary templates
+  (`alertmanager-summary`, `cloudflare-notification`,
+  `datadog-monitor-alert`, `home-assistant-evening-check`,
+  `nightly-report`, `pagerduty-incident-summary`, `weekly-digest`) send
+  `{{.steps.<id>.output}}`. For an agent step that is the whole JSON
+  envelope (`{"result": "…", …}`, seen in the #60 demo run), so the phone
+  shows raw JSON. They send `{{.steps.<id>.json.result}}` instead. The
+  routine already parses a step's stdout into `steps.<id>.json`
+  (`internal/job/routine.go:276-281`).
+- The twelve templates still apply cleanly.
 
 ## Affected users and systems
 
