@@ -16,7 +16,7 @@ routines:
   incident-to-phone:
     steps:
       - { id: summary, agent: incident-summary, timeout: 5m }
-      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: Incident", --data-raw, "{{.steps.summary.json.result}}", https://ntfy.sh/siphon-CHANGE-ME] }
+      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: Incident", --data-raw, "Summary:\n{{.steps.summary.json.result}}", https://ntfy.sh/siphon-CHANGE-ME] }
 rules:
   - name: incident-triggered
     source: pagerduty

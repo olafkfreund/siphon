@@ -14,7 +14,7 @@ routines:
     steps:
       - { id: fetch, cmd: [curl, -fsS, https://metrics.example.com/api/summary], retry: { attempts: 3, base: 5s, factor: 2 } }
       - { id: summary, agent: reporter, if: 'steps.fetch.exit == 0', timeout: 5m }
-      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, --data-raw, "{{.steps.summary.json.result}}", https://ntfy.sh/your-topic] }
+      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, --data-raw, "Summary:\n{{.steps.summary.json.result}}", https://ntfy.sh/your-topic] }
 ```
 
 - **Earlier steps:** later steps can read `steps.<id>.exit`,
