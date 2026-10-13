@@ -29,6 +29,8 @@ demo/
   payloads/
     workflow-run-failed.json   # a GitHub workflow_run "completed / failure" event
     kuma-down.json             # an Uptime Kuma heartbeat status 0
+  tasks/
+    morning.yaml           # the morning-digest rule (Act 3's trigger)
   fixtures/
     ci-job.log             # the recorded failing job log the stub MCP serves
 docs/demo.md               # how to present it: what to click and say at each act
@@ -125,7 +127,27 @@ portal. The POST path is unchanged.
 |---|---|---|
 | `github-ci-failure` | `kind: claude` → `kind: model`, `credential: claude-max` → `credential: ollama-local`, add `model: llama3.2` | Decision 2: the agent runs on the model connection; prompt, tools and rule untouched |
 | `uptime-kuma-down` | `https://ntfy.sh/siphon-CHANGE-ME` → `http://127.0.0.1:18099/kuma` | The CHANGE-ME URL is meant to be edited |
-| `weekly-digest` | `at: "0 9 * * 1"` → `at: "* * * * *"`; the fetch URL → `http://127.0.0.1:18099/` (the night's notifications); the ntfy URL → `http://127.0.0.1:18099/digest` | Fires within a minute; `cooldown: 1h` makes it fire once; it digests what really happened in this run |
+| `weekly-digest` | the fetch URL → `http://127.0.0.1:18099/` (the night's notifications); the ntfy URL → `http://127.0.0.1:18099/digest`. The schedule stays as it is. | It digests what really happened in this run |
+
+**Act 3's trigger, added at spec approval:** the routine is started by a
+signed webhook, so Act 3 is immediate and deterministic.
+- `demo/siphon.yaml` adds `sources.morning`: `type: webhook`,
+  `signature: token`, `token_header: X-Siphon-Key`, and the same
+  `secret: file:/etc/siphon/kuma`, so there's no new secret.
+- `demo/tasks/morning.yaml` holds the rule:
+
+  ```yaml
+  rules:
+    - name: morning-digest
+      source: morning
+      when: 'true'
+      on: each
+      id: event.day
+      cooldown: 1m
+      action: { routine: weekly-digest }
+  ```
+
+  The template's Monday schedule rule stays applied and harmless.
 
 None of the template files change. Each sed is checked: `play.sh` runs
 `siphon apply --dry-run -o json` first and stops on any error, so a
@@ -159,11 +181,13 @@ on a command line.
 3. **Act 2, "The site goes down":** sends `payloads/kuma-down.json` with
    `X-Siphon-Key` (the same header-file method). It waits for
    `monitor-down` to be `done`. The notification lands on :8092.
-4. **Act 3, "The next morning":** waits up to 70 s for the
-   `weekly-digest` routine job to be `done`, then prints the digest.
+4. **Act 3, "The next morning":** sends `{"day": "<date +%F-%T>"}` (built
+   in the script, so each run is a new event for `on: each`) to `/hook/morning` with `X-Siphon-Key`. It waits
+   for the `morning-digest` routine job to be `done`, then prints the
+   digest.
 5. **Exit:** prints `siphon why ci-failed` and `siphon test ci-failed --last`
    as a closing "how to debug" note. Interactive runs leave the rules in
-   place. `--auto` runs `siphon disable weekly-digest`.
+   place.
 
 Job states are read with `siphon jobs ls -o json` and polled every 2 s,
 with a timeout per act. A timeout exits non-zero with the act's name.
@@ -180,8 +204,10 @@ with a timeout per act. A timeout exits non-zero with the act's name.
   speaks MCP. Extending it is smaller.
 - **Put `notify-recv` on the host.** Open action units deny `10.0.2.2`
   (`nix/microvm.nix`), on purpose. A forwarded port keeps that rule.
-- **A "run the routine now" CLI command.** That's a new feature. A cron of
-  every minute plus the template's own cooldown gives the same result.
+- **A "run the routine now" CLI command.** That's a new feature.
+- **The template's cron edited to every minute** (the first draft). It
+  meant a wait of up to 60 s on stage. Replaced by the `morning` webhook at
+  spec approval.
 - **Run the microVM inside the check.** That needs nested KVM. The check
   runs the same config and script on a NixOS test node instead.
 - **Have the agent's diagnosis pushed as a notification.** The template
@@ -205,9 +231,6 @@ with a timeout per act. A timeout exits non-zero with the act's name.
 - **The sed edits are fragile.** A later template change can silently
   stop a sed from matching. `play.sh` greps for each expected result
   (`kind: model`, the new URLs) before applying, and fails if one is missing.
-- **Act 3 timing.** "Every minute" means a wait of up to 60 s on stage.
-  The presenter fills it by showing `siphon why weekly-digest`, which
-  gives the next run time.
 - **Ollama on CPU** can take a minute per answer. The template's 15-minute
   timeout covers it. The wrapper prints which model it chose, so a slow
   run isn't a surprise.
@@ -230,7 +253,7 @@ with a timeout per act. A timeout exits non-zero with the act's name.
     - `/tmp/mcp-calls` has a `get_job_logs` call;
     - `/tmp/notify.log` holds one `approval` event, one `/kuma` line and
       one `/digest` line;
-    - `weekly-digest` fired once.
+    - `morning-digest` fired once.
 - **`checks.vm`** still passes after the stub change.
 - **`go test ./docs/...`** still passes (the template tests). No template
   file changes, so this is a no-op guard.
@@ -241,10 +264,10 @@ with a timeout per act. A timeout exits non-zero with the act's name.
   - `nix run .#demo-play` walks the three acts with a human approval.
   - Run it once with the host Ollama and once without.
 
-## Open questions
+## Decisions at approval
 
-1. **Act 2 is a plain notification, not a model summary.** OK to deviate
-   from the intent? The alternative is `alertmanager-summary`-style
-   summarising, which means changing `uptime-kuma-down` for everyone.
-2. **The diagnosis is shown in the portal, not pushed.** OK? Adding a
-   notify step to `github-ci-failure` would change it for everyone.
+1. Act 2 stays the template's plain notification. It shows the "instant,
+   no approval" path next to Act 1's approval.
+2. The diagnosis shows in the portal. Only the approval request is pushed.
+3. Act 3 is triggered by the `morning` webhook, not by a cron of every
+   minute (see "Act 3's trigger").
