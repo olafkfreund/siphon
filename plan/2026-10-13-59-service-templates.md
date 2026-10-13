@@ -213,6 +213,13 @@ Step 1 checked every fact. No approved decision changes.
   many words they share with the name (stable, so equal hits keep their
   order). The test is unchanged.
 
+- **Step 6, the Cloudflare rule `id:`:** it is
+  `(event.policy_id ?? event.alert_type ?? "") + "/" + string(event.ts)`,
+  not `event.policy_id + "/" + string(event.ts)`, so alerts without
+  `policy_id` still get a key. The server decodes numbers with `UseNumber`
+  (`internal/source/json.go:13`), so `string(event.ts)` is the exact
+  integer. This was checked with `rule.Eval` in a throwaway test.
+
 ## Tests
 
 ```sh

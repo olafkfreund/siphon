@@ -42,6 +42,8 @@ sources:
   forgejo: { type: mcp, url: "https://forgejo.example.com/mcp", headers: { Authorization: env:AGW_HOOK } }
   forgejo-hooks: { type: webhook, signature: github, secret: env:AGW_HOOK }
   datadog: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK }
+  cloudflare: { type: mcp, url: "https://mcp.cloudflare.com/mcp", auth: { bearer: env:AGW_HOOK } }
+  cloudflare-hooks: { type: webhook, signature: token, token_header: cf-webhook-auth, secret: env:AGW_HOOK }
 rules:
   - { name: r1, source: github-hooks, when: "true", action: { cmd: [echo, one] } }
 `

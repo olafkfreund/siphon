@@ -62,7 +62,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 | Service | Gives agents | Status | Connect | Templates |
 |---|---|---|---|---|
 | [AWS](aws.md) | tools, webhooks | needs package: enable `services.siphon.aws` in your NixOS config | `siphon connect aws` | [`aws-cloudwatch-alarm`](../templates/aws-cloudwatch-alarm.yaml) |
-| Cloudflare | tools, webhooks | available | `siphon connect cloudflare` |  |
+| Cloudflare | tools, webhooks | available | `siphon connect cloudflare` | [`cloudflare-notification`](../templates/cloudflare-notification.yaml) |
 | Kubernetes |  | not yet: needs kubeconfig wiring: coming in a later release | — |  |
 | Google Pub/Sub |  | not yet: needs a Google OIDC (RS256 JWT) push-authentication mode | — |  |
 | Azure Event Grid |  | not yet: needs the subscription validation handshake | — |  |
