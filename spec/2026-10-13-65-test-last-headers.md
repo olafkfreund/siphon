@@ -17,10 +17,13 @@ headers before building them.
 
 As a second layer, `store` drops any header whose name matches
 `secretKey` (`overlay.go:117`: token, secret, password, authorization,
-api_key, cookie) or a new `secretHeader` pattern: `signature`, `-sig$`,
-`-key$`, `auth`. The full name list is in the plan. So a token header that
-isn't the source's configured one is never kept either, for example a
-second `x-siphon-key`.
+api_key, cookie) or a new `secretHeader` pattern:
+`signature|-sig$|auth|(^|-)(api|access|secret|private|siphon)-key$`.
+So a token header that isn't the source's configured one is never kept
+either, for example a second `x-siphon-key`. The pattern deliberately
+doesn't match a bare `-key$`, because Bitbucket's event header is
+`x-event-key`, and dropping it would leave `bitbucket-pr-review` as
+broken as it is today.
 
 The stored headers are capped at 8 KiB. Above that, it stores `{}`, as the
 64 KiB event cap already does.
@@ -72,8 +75,9 @@ The stored headers are capped at 8 KiB. Above that, it stores `{}`, as the
 
 - **Store test:**
   - `SetSourceEvent` with headers that include `x-github-event`,
-    `x-siphon-key`, `stripe-signature`, `x-gitlab-token` and
-    `authorization` stores only `x-github-event`;
+    `x-siphon-key`, `x-api-key`, `stripe-signature`, `x-gitlab-token`,
+    `cf-webhook-auth` and `authorization` stores only `x-github-event`;
+  - `x-event-key`, `x-gitea-event` and `x-forgejo-event` are kept;
   - an over-cap set stores `{}`;
   - an old row with no column value reads as empty.
 - **API test** (`internal/web`):
