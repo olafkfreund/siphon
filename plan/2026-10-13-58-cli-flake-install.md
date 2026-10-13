@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 58
 spec: spec/2026-10-13-58-cli-flake-install.md
 ---
