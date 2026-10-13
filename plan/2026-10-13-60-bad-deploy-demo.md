@@ -407,3 +407,16 @@ daemon are untouched. A user's demo state lives only in
   because the SLiRP forward for :8092 reaches the guest's NIC, not its
   loopback. `#microvm` is unchanged: same services, and its firewall still
   opens only 8080 (checked with `nix eval`).
+- **Step 8, the check doesn't use `--auto`:** `--auto` approves at once,
+  before the notifier's 15 s scan can push the approval, so "one approval
+  in the notify log" can't hold. `nix/demo-test.nix` plays it as a
+  presenter would: a background watcher waits for the approval line, then
+  runs `siphon approve`. Enter keypresses come from a finite `printf`.
+  `--auto` stays in `play.sh` for quick, unattended runs.
+- **Step 8, the closing `siphon why` / `siphon test --last` are dropped
+  from `play.sh`:** `test --last` replays the stored body without headers,
+  so header-based rules such as `ci-failed` always report "no match"
+  (#65). On stage that read as a failure, and the commands also hung on a
+  non-terminal stdin. The script now ends with where to look (the jobs
+  page and the notification log). Bring the debug lines back after #65 is
+  fixed.

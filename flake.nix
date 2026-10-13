@@ -79,6 +79,8 @@
 
       checks = forAll (pkgs: {
         vm = import ./nix/vm-test.nix { inherit self pkgs; };
+        # demo-play played as a presenter would (approval after the push), the three acts, on one node.
+        demo = import ./nix/demo-test.nix { inherit self pkgs; };
         # Both pinned AWS MCP servers start over stdio and list tools, offline.
         aws-mcp-smoke = pkgs.runCommand "aws-mcp-smoke" { nativeBuildInputs = [ pkgs.python3 ]; } ''
           export HOME=$TMPDIR AWS_ACCESS_KEY_ID=AKIAFAKE AWS_SECRET_ACCESS_KEY=fake AWS_SESSION_TOKEN=fake
