@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 69
 intent: intent/2026-10-13-69-summary-leading-dash.md
 ---
