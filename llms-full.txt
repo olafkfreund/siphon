@@ -682,7 +682,7 @@ Or with flags:
 ```sh
 siphon new task --name disk-full --poll disk --url https://metrics.example.com/api/disk --every 5m \
   --when 'event.used_pct > 90' --on edge --repeat 6h \
-  --cmd '["curl","-fsS","-d","disk {{.event.used_pct}}%","https://ntfy.sh/your-topic"]' --yes
+  --cmd '["curl","-fsS","--data-raw","disk {{.event.used_pct}}%","https://ntfy.sh/your-topic"]' --yes
 ```
 
 ## `on: edge` vs `on: each`
@@ -811,7 +811,7 @@ routines:
     steps:
       - { id: fetch, cmd: [curl, -fsS, https://metrics.example.com/api/summary], retry: { attempts: 3, base: 5s, factor: 2 } }
       - { id: summary, agent: reporter, if: 'steps.fetch.exit == 0', timeout: 5m }
-      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -d, "{{.steps.summary.output}}", https://ntfy.sh/your-topic] }
+      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, --data-raw, "{{.steps.summary.json.result}}", https://ntfy.sh/your-topic] }
 ```
 
 - **Earlier steps:** later steps can read `steps.<id>.exit`,
@@ -3053,7 +3053,7 @@ at 07:30, every Monday at 09:00, every 15 minutes) without a host timer.
 
 ```sh
 siphon new task --name standup --schedule "30 7 * * 1-5" --timezone Europe/London \
-  --cmd '["curl","-fsS","-d","Standup in 30 minutes","https://ntfy.sh/your-topic"]' --yes
+  --cmd '["curl","-fsS","--data-raw","Standup in 30 minutes","https://ntfy.sh/your-topic"]' --yes
 ```
 
 Or start from a template:

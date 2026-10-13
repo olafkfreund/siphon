@@ -92,6 +92,22 @@ spec: spec/2026-10-13-64-curl-data-raw.md
 ## Deviations
 
 - Step 1: `go generate ./docs` was needed already, since `llms-full.txt` embeds the templates and `TestGeneratedFilesFresh` failed without it.
+- **Review fixes (after step 5):** a fresh Opus review found the following.
+  - **Guides outside `docs/templates/` still taught `-d` (high):**
+    `docs/tasks/routine.md` (also `.output`), `poll-threshold.md` and
+    `schedule.md`. All three now use `--data-raw`, and `routine.md` uses
+    `.json.result`.
+    - **Left as is:** `docs/drafting.md:23`, a recorded model output; the
+      `ci/*.sh` scripts and the `service-failed` header comment, which send
+      fixed bodies from a shell.
+  - **The guard test matched exact argv elements only (high).**
+    - It now checks `curl`'s arguments only, so `date -d` doesn't trip it,
+      and it matches any spelling that reads a file: `-d…`, `-fsSd`,
+      `-d@x`, `--data=…`, `--data-binary=…`, `--json`, `-F` and `--form`.
+    - The `.output` check is a regexp, so `{{ .steps.x.output }}`,
+      `{{- … -}}` and `| printf` are caught.
+    - All 16 flag spellings and 6 expressions were checked in a throwaway
+      test.
 
 ## Tests
 

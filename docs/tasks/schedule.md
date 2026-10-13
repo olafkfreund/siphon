@@ -7,7 +7,7 @@ at 07:30, every Monday at 09:00, every 15 minutes) without a host timer.
 
 ```sh
 siphon new task --name standup --schedule "30 7 * * 1-5" --timezone Europe/London \
-  --cmd '["curl","-fsS","-d","Standup in 30 minutes","https://ntfy.sh/your-topic"]' --yes
+  --cmd '["curl","-fsS","--data-raw","Standup in 30 minutes","https://ntfy.sh/your-topic"]' --yes
 ```
 
 Or start from a template:

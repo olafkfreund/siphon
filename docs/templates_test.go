@@ -1,6 +1,7 @@
 package docs_test
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -94,7 +95,9 @@ func TestTemplateNamesAreUnique(t *testing.T) {
 // `-d @x` reads a file, and an agent step's .output is its JSON envelope:
 // notifications use --data-raw and .json.result.
 func TestTemplatesUseDataRaw(t *testing.T) {
-	bad := []string{"-d", "--data", "--data-binary", "--data-ascii", "--data-urlencode"}
+	// curl flags that read a file for a leading @ (or take a form file): any spelling.
+	readsFile := regexp.MustCompile(`^(-[a-zA-Z]*[dF]|--data|--json|--form)`)
+	envelope := regexp.MustCompile(`\{\{-?\s*\.steps\.([A-Za-z0-9_-]+)\.output\b`)
 	for _, tpl := range docs.Templates() {
 		type step struct {
 			ID    string
@@ -122,17 +125,20 @@ func TestTemplatesUseDataRaw(t *testing.T) {
 			}
 			for _, s := range rt.Steps {
 				for _, a := range s.Cmd {
-					for _, id := range agentIDs {
-						if strings.Contains(a, "{{.steps."+id+".output}}") {
-							t.Errorf("%s: step %s sends the JSON envelope of %s; use .json.result", tpl.Name, s.ID, id)
+					for _, m := range envelope.FindAllStringSubmatch(a, -1) {
+						if slices.Contains(agentIDs, m[1]) {
+							t.Errorf("%s: step %s sends the JSON envelope of %s; use .json.result", tpl.Name, s.ID, m[1])
 						}
 					}
 				}
 			}
 		}
 		for _, c := range cmds {
-			for _, a := range c {
-				if slices.Contains(bad, a) {
+			if len(c) == 0 || c[0] != "curl" {
+				continue
+			}
+			for _, a := range c[1:] {
+				if a != "--data-raw" && readsFile.MatchString(a) {
 					t.Errorf("%s: curl %s; use --data-raw", tpl.Name, a)
 				}
 			}
