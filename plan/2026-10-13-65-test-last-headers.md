@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 65
 spec: spec/2026-10-13-65-test-last-headers.md
 ---
