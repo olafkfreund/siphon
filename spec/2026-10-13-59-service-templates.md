@@ -181,3 +181,15 @@ Header names are matched in lower case, as in `github-pr-review.yaml`.
 [fj-wh]: https://forgejo.org/docs/latest/user/webhooks/
 [dd-wh]: https://docs.datadoghq.com/integrations/webhooks/
 [cf-wh]: https://developers.cloudflare.com/notifications/reference/webhook-payload-schema
+
+## Decisions at approval
+
+- **Bitbucket and Cloudflare keep their agent, with `approve: true`.**
+  Neither can be limited to read-only by tool name (Rovo's
+  `bitbucketPullRequest` can merge; Cloudflare's `execute` can write). Each
+  template's header says so in one line, and tells the user to give the
+  connection a read-only token (Bitbucket: `pullrequest:read`,
+  `repository:read`; Cloudflare: a read-only API token).
+- **The Forgejo `signature: github` question is out of scope here.**
+  Implementation checks it against a real Forgejo (or the source) and opens
+  a separate issue if Forgejo doesn't send `X-Hub-Signature-256`.
