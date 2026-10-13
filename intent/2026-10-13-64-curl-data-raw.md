@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 64
 author: olafkfreund
 ---
@@ -56,3 +56,7 @@ can send. But the templates are what users copy, so the pattern spreads.
 
 - Should `docs/llm.md` (the guide agents read) also tell agents that write
   tasks to use `--data-raw`? I'd say yes: one line.
+
+## Decisions at approval
+
+- `docs/llm.md` gets one line: notify steps use `--data-raw` and `.json.result`.
