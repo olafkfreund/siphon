@@ -25,7 +25,7 @@ routines:
   evening-check:
     steps:
       - { id: check, agent: house-check, timeout: 5m }
-      - { id: notify, if: 'steps.check.exit == 0', cmd: [curl, -fsS, -H, "Title: House check", -d, "{{.steps.check.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+      - { id: notify, if: 'steps.check.exit == 0', cmd: [curl, -fsS, -H, "Title: House check", --data-raw, "{{.steps.check.json.result}}", https://ntfy.sh/siphon-CHANGE-ME] }
 rules:
   - name: evening-check
     source: evening

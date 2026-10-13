@@ -17,7 +17,7 @@ Or with flags:
 ```sh
 siphon new task --name disk-full --poll disk --url https://metrics.example.com/api/disk --every 5m \
   --when 'event.used_pct > 90' --on edge --repeat 6h \
-  --cmd '["curl","-fsS","-d","disk {{.event.used_pct}}%","https://ntfy.sh/your-topic"]' --yes
+  --cmd '["curl","-fsS","--data-raw","disk {{.event.used_pct}}%","https://ntfy.sh/your-topic"]' --yes
 ```
 
 ## `on: edge` vs `on: each`

@@ -10,4 +10,4 @@ rules:
     on: each
     id: event.data.issue.id
     action:
-      cmd: [curl, -fsS, -H, "Title: Sentry: {{.event.data.issue.title}}", -d, "{{.event.data.issue.culprit}}", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: Sentry: {{.event.data.issue.title}}", --data-raw, "{{.event.data.issue.culprit}}", https://ntfy.sh/siphon-CHANGE-ME]

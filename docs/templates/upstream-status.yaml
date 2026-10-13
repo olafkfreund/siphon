@@ -14,4 +14,4 @@ rules:
     when: 'event.status.indicator != "none"'
     on: edge
     action:
-      cmd: [curl, -fsS, -H, "Title: GitHub incident", -d, "{{.event.status.description}}", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: GitHub incident", --data-raw, "{{.event.status.description}}", https://ntfy.sh/siphon-CHANGE-ME]
