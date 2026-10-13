@@ -2367,7 +2367,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 | PagerDuty | webhooks | available | `siphon connect pagerduty` | [`pagerduty-incident-summary`](../templates/pagerduty-incident-summary.yaml) |
 | Grafana | tools, webhooks | needs package for tools (`catalogPackages = [ "grafana" ]`) | `siphon connect grafana` | [`grafana-alert-explain`](../templates/grafana-alert-explain.yaml) |
 | Alertmanager | webhooks | available | `siphon connect alertmanager` | [`linear-issue-from-alert`](../templates/linear-issue-from-alert.yaml) |
-| Datadog | webhooks | available | `siphon connect datadog` |  |
+| Datadog | webhooks | available | `siphon connect datadog` | [`datadog-monitor-alert`](../templates/datadog-monitor-alert.yaml) |
 | Uptime Kuma | webhooks | available | `siphon connect uptime-kuma` | [`uptime-kuma-down`](../templates/uptime-kuma-down.yaml) |
 | Opsgenie |  | not yet: end of support 2027-04-05 | — |  |
 
@@ -3457,6 +3457,48 @@ rules:
     id: event.repository.full_name + "/" + string(event.pullrequest.id)
     cooldown: 1m
     action: { agent: pr-reviewer }
+```
+
+
+---
+
+<!-- file: docs/templates/datadog-monitor-alert.yaml -->
+
+```yaml
+# title:    Summarise Datadog monitor alerts with a local model, then notify
+# category: Ops & monitoring
+# needs:    sources/datadog                        (siphon connect datadog)
+#           credentials/ollama-local               (siphon connect model ollama)
+# apply:    siphon apply -f datadog-monitor-alert.yaml
+# Datadog → Integrations → Webhooks: set the Payload field to
+#   {"id":"$ID","title":"$EVENT_TITLE","transition":"$ALERT_TRANSITION","monitor":"$ALERT_ID","link":"$LINK","body":"$EVENT_MSG"}
+# and mention @webhook-<name> in the monitor's notification message.
+agents:
+  alert-summary:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: |
+      Datadog monitor "{{.event.title}}" (monitor {{.event.monitor}}) changed to {{.event.transition}}.
+      Details: {{.event.body}}
+      Link: {{.event.link}}
+      Summarise for an on-call engineer in at most three lines: what is wrong, where, how bad.
+    max_turns: 2
+    timeout: 5m
+    approve: false                  # a read-only summary; nothing acts on it
+routines:
+  alert-to-phone:
+    steps:
+      - { id: summary, agent: alert-summary, timeout: 5m }
+      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: Alert", -d, "{{.steps.summary.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+rules:
+  - name: monitor-triggered
+    source: datadog
+    when: 'event.transition in ["Triggered", "Re-Triggered"]'
+    on: each
+    id: event.id
+    cooldown: 2m
+    action: { routine: alert-to-phone }
 ```
 
 

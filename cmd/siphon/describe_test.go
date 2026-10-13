@@ -41,6 +41,7 @@ sources:
   gitea-hooks: { type: webhook, signature: github, secret: env:AGW_HOOK }
   forgejo: { type: mcp, url: "https://forgejo.example.com/mcp", headers: { Authorization: env:AGW_HOOK } }
   forgejo-hooks: { type: webhook, signature: github, secret: env:AGW_HOOK }
+  datadog: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK }
 rules:
   - { name: r1, source: github-hooks, when: "true", action: { cmd: [echo, one] } }
 `
