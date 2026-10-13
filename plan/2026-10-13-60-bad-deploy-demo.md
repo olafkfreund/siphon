@@ -383,3 +383,12 @@ daemon are untouched. A user's demo state lives only in
 - **Step 2, the digest text:** the stub's digest tells the demo's night
   (the CI failure, the approved diagnosis, the outage), so it reads well on
   stage. It is canned, and doesn't summarise what it was given.
+- **Step 5, `demo/siphon.yaml`:** it also sets `server.listen: 0.0.0.0:8080`
+  (the host port forward needs it) and `server.db:
+  /var/lib/siphon/state.db`, which the field list didn't name. The
+  placeholder is quoted (`url: "@MODEL_URL@"`), so the file is valid YAML
+  before the wrapper fills it in. The wrapper's sed must keep the quotes.
+- **Step 5, `siphon rules test`:** `ci-failed` only matches with the
+  `{"headers": {"x-github-event": "workflow_run"}, "event": …}` envelope.
+  The bare payload has no header. Step 8 and `docs/demo.md` use the
+  envelope.
