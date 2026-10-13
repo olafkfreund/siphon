@@ -27,7 +27,7 @@ routines:
   explain-and-notify:
     steps:
       - { id: explain, agent: cf-explainer, timeout: 15m }
-      - { id: notify, if: 'steps.explain.exit == 0', cmd: [curl, -fsS, -H, "Title: Cloudflare", -d, "{{.steps.explain.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+      - { id: notify, if: 'steps.explain.exit == 0', cmd: [curl, -fsS, -H, "Title: Cloudflare", --data-raw, "{{.steps.explain.json.result}}", https://ntfy.sh/siphon-CHANGE-ME] }
 rules:
   - name: cloudflare-alert
     source: cloudflare-hooks

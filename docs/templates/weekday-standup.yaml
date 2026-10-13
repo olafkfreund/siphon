@@ -16,4 +16,4 @@ rules:
     on: each
     id: event.scheduled_at
     action:
-      cmd: [curl, -fsS, -H, "Title: Standup in 30 minutes", -d, "Notes: https://wiki.example.com/standup", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: Standup in 30 minutes", --data-raw, "Notes: https://wiki.example.com/standup", https://ntfy.sh/siphon-CHANGE-ME]

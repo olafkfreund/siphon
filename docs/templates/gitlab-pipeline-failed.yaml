@@ -11,4 +11,4 @@ rules:
     on: each
     id: event.object_attributes.id
     action:
-      cmd: [curl, -fsS, -H, "Title: Pipeline failed", -d, "{{.event.project.path_with_namespace}} on {{.event.object_attributes.ref}}", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: Pipeline failed", --data-raw, "{{.event.project.path_with_namespace}} on {{.event.object_attributes.ref}}", https://ntfy.sh/siphon-CHANGE-ME]

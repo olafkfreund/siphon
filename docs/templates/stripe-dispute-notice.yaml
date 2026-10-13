@@ -9,4 +9,4 @@ rules:
     on: each
     id: event.id
     action:
-      cmd: [curl, -fsS, -H, "Title: Stripe dispute", -d, "Dispute {{.event.data.object.id}} for {{.event.data.object.amount}} {{.event.data.object.currency}}", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: Stripe dispute", --data-raw, "Dispute {{.event.data.object.id}} for {{.event.data.object.amount}} {{.event.data.object.currency}}", https://ntfy.sh/siphon-CHANGE-ME]

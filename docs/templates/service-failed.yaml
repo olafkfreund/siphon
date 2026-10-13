@@ -18,4 +18,4 @@ rules:
     on: each
     id: event.host + "/" + event.unit + "/" + string(int(now().Unix() / 600))   # at most one per unit per 10 min
     action:
-      cmd: [curl, -fsS, -H, "Title: {{.event.unit}} failed", -d, "on {{.event.host}}", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: {{.event.unit}} failed", --data-raw, "on {{.event.host}}", https://ntfy.sh/siphon-CHANGE-ME]

@@ -89,6 +89,10 @@ spec: spec/2026-10-13-64-curl-data-raw.md
      the PR.
    - Traps: use the listener's PID to stop it, never `pkill -f`.
 
+## Deviations
+
+- Step 1: `go generate ./docs` was needed already, since `llms-full.txt` embeds the templates and `TestGeneratedFilesFresh` failed without it.
+
 ## Tests
 
 ```sh

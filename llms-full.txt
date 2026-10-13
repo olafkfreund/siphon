@@ -3377,7 +3377,7 @@ routines:
   alert-to-phone:
     steps:
       - { id: summary, agent: alert-summary, timeout: 5m }
-      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: Alert", -d, "{{.steps.summary.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: Alert", --data-raw, "{{.steps.summary.json.result}}", https://ntfy.sh/siphon-CHANGE-ME] }
 rules:
   - name: alerts-firing
     source: alertmanager
@@ -3500,7 +3500,7 @@ routines:
   explain-and-notify:
     steps:
       - { id: explain, agent: cf-explainer, timeout: 15m }
-      - { id: notify, if: 'steps.explain.exit == 0', cmd: [curl, -fsS, -H, "Title: Cloudflare", -d, "{{.steps.explain.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+      - { id: notify, if: 'steps.explain.exit == 0', cmd: [curl, -fsS, -H, "Title: Cloudflare", --data-raw, "{{.steps.explain.json.result}}", https://ntfy.sh/siphon-CHANGE-ME] }
 rules:
   - name: cloudflare-alert
     source: cloudflare-hooks
@@ -3542,7 +3542,7 @@ routines:
   datadog-to-phone:
     steps:
       - { id: summary, agent: datadog-summary, timeout: 5m }
-      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: Alert", -d, "{{.steps.summary.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: Alert", --data-raw, "{{.steps.summary.json.result}}", https://ntfy.sh/siphon-CHANGE-ME] }
 rules:
   - name: monitor-triggered
     source: datadog
@@ -3576,7 +3576,7 @@ rules:
     on: edge                        # fires on false -> true only
     repeat: 6h                      # and again every 6 h while it stays true
     action:
-      cmd: [curl, -fsS, -H, "Title: Disk {{.event.used_pct}}% full", -d, "Clean up or grow the volume", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: Disk {{.event.used_pct}}% full", --data-raw, "Clean up or grow the volume", https://ntfy.sh/siphon-CHANGE-ME]
 ```
 
 
@@ -3816,7 +3816,7 @@ rules:
     on: each
     id: event.object_attributes.id
     action:
-      cmd: [curl, -fsS, -H, "Title: Pipeline failed", -d, "{{.event.project.path_with_namespace}} on {{.event.object_attributes.ref}}", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: Pipeline failed", --data-raw, "{{.event.project.path_with_namespace}} on {{.event.object_attributes.ref}}", https://ntfy.sh/siphon-CHANGE-ME]
 ```
 
 
@@ -3887,7 +3887,7 @@ routines:
   evening-check:
     steps:
       - { id: check, agent: house-check, timeout: 5m }
-      - { id: notify, if: 'steps.check.exit == 0', cmd: [curl, -fsS, -H, "Title: House check", -d, "{{.steps.check.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+      - { id: notify, if: 'steps.check.exit == 0', cmd: [curl, -fsS, -H, "Title: House check", --data-raw, "{{.steps.check.json.result}}", https://ntfy.sh/siphon-CHANGE-ME] }
 rules:
   - name: evening-check
     source: evening
@@ -3925,7 +3925,7 @@ rules:
     on: each
     id: event.entity + string(now().Unix() / 300)
     action:
-      cmd: [curl, -fsS, -H, "Title: Front door", -d, "Opened late at night", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: Front door", --data-raw, "Opened late at night", https://ntfy.sh/siphon-CHANGE-ME]
 ```
 
 
@@ -4129,7 +4129,7 @@ routines:
     steps:
       - { id: fetch, cmd: [curl, -fsS, https://metrics.example.com/api/summary], retry: { attempts: 3, base: 5s, factor: 2 } }
       - { id: summary, agent: reporter, if: 'steps.fetch.exit == 0', timeout: 5m }
-      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: Morning report", -d, "{{.steps.summary.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: Morning report", --data-raw, "{{.steps.summary.json.result}}", https://ntfy.sh/siphon-CHANGE-ME] }
 rules:
   - name: nightly
     source: nightly
@@ -4164,7 +4164,7 @@ routines:
   incident-to-phone:
     steps:
       - { id: summary, agent: incident-summary, timeout: 5m }
-      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: Incident", -d, "{{.steps.summary.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: Incident", --data-raw, "{{.steps.summary.json.result}}", https://ntfy.sh/siphon-CHANGE-ME] }
 rules:
   - name: incident-triggered
     source: pagerduty
@@ -4193,7 +4193,7 @@ rules:
     on: each
     id: event.data.issue.id
     action:
-      cmd: [curl, -fsS, -H, "Title: Sentry: {{.event.data.issue.title}}", -d, "{{.event.data.issue.culprit}}", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: Sentry: {{.event.data.issue.title}}", --data-raw, "{{.event.data.issue.culprit}}", https://ntfy.sh/siphon-CHANGE-ME]
 ```
 
 
@@ -4222,7 +4222,7 @@ rules:
     on: each
     id: event.host + "/" + event.unit + "/" + string(int(now().Unix() / 600))   # at most one per unit per 10 min
     action:
-      cmd: [curl, -fsS, -H, "Title: {{.event.unit}} failed", -d, "on {{.event.host}}", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: {{.event.unit}} failed", --data-raw, "on {{.event.host}}", https://ntfy.sh/siphon-CHANGE-ME]
 ```
 
 
@@ -4296,7 +4296,7 @@ rules:
     on: each
     id: event.id
     action:
-      cmd: [curl, -fsS, -H, "Title: Stripe dispute", -d, "Dispute {{.event.data.object.id}} for {{.event.data.object.amount}} {{.event.data.object.currency}}", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: Stripe dispute", --data-raw, "Dispute {{.event.data.object.id}} for {{.event.data.object.amount}} {{.event.data.object.currency}}", https://ntfy.sh/siphon-CHANGE-ME]
 ```
 
 
@@ -4355,7 +4355,7 @@ rules:
     when: 'event.status.indicator != "none"'
     on: edge
     action:
-      cmd: [curl, -fsS, -H, "Title: GitHub incident", -d, "{{.event.status.description}}", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: GitHub incident", --data-raw, "{{.event.status.description}}", https://ntfy.sh/siphon-CHANGE-ME]
 ```
 
 
@@ -4375,7 +4375,7 @@ rules:
     on: each
     id: string(event.monitor.id) + "/" + event.heartbeat.time
     action:
-      cmd: [curl, -fsS, -H, "Title: {{.event.monitor.name}} is down", -d, "{{.event.msg}}", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: {{.event.monitor.name}} is down", --data-raw, "{{.event.msg}}", https://ntfy.sh/siphon-CHANGE-ME]
 ```
 
 
@@ -4428,7 +4428,7 @@ rules:
     on: each
     id: event.title + event.message
     action:
-      cmd: [curl, -fsS, -H, "Title: {{.event.title}}", -d, "{{.event.message}}", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: {{.event.title}}", --data-raw, "{{.event.message}}", https://ntfy.sh/siphon-CHANGE-ME]
 ```
 
 
@@ -4455,7 +4455,7 @@ rules:
     on: each
     id: event.scheduled_at
     action:
-      cmd: [curl, -fsS, -H, "Title: Standup in 30 minutes", -d, "Notes: https://wiki.example.com/standup", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: Standup in 30 minutes", --data-raw, "Notes: https://wiki.example.com/standup", https://ntfy.sh/siphon-CHANGE-ME]
 ```
 
 
@@ -4490,7 +4490,7 @@ routines:
     steps:
       - { id: fetch, cmd: [curl, -fsS, https://metrics.example.com/api/last-week], retry: { attempts: 3, base: 10s, factor: 2 } }
       - { id: digest, agent: digest-writer, if: 'steps.fetch.exit == 0', timeout: 5m }
-      - { id: notify, if: 'steps.digest.exit == 0', cmd: [curl, -fsS, -H, "Title: Weekly digest", -d, "{{.steps.digest.output}}", https://ntfy.sh/siphon-CHANGE-ME] }
+      - { id: notify, if: 'steps.digest.exit == 0', cmd: [curl, -fsS, -H, "Title: Weekly digest", --data-raw, "{{.steps.digest.json.result}}", https://ntfy.sh/siphon-CHANGE-ME] }
 rules:
   - name: weekly-digest
     source: weekly
