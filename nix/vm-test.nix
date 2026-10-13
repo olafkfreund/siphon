@@ -54,6 +54,8 @@ pkgs.testers.runNixOSTest {
       environment.etc."siphon/metrics-token".text = "scrape-token-0123456789abcdef0123456789";
 
       environment.etc."siphon/stub-token".text = stubToken;
+      # Source env values must be env:/file: refs and are masked in output, so the flag is a file with a distinctive value.
+      environment.etc."siphon/stub-fetch".text = "stub-fetch-on";
       # A normal user for the CLI walkthrough (docs/getting-started.md).
       users.users.alice.isNormalUser = true;
       # AWS: a base key pair for AssumeRole against a fake STS on loopback.
@@ -94,7 +96,11 @@ pkgs.testers.runNixOSTest {
         mcpPackages.stub = {
           package = stubMcp;
           args = [ ];
-          env = [ "STUB_TOKEN" ];
+          env = [
+            "STUB_TOKEN"
+            "STUB_FETCH"
+          ];
+          hosts = [ "external:8080" ];
         };
         credentials = {
           token = "/etc/siphon/token";
@@ -200,6 +206,7 @@ pkgs.testers.runNixOSTest {
             type = "mcp";
             package = "stub";
             env.STUB_TOKEN = "file:/etc/siphon/stub-token";
+            env.STUB_FETCH = "file:/etc/siphon/stub-fetch";
             read.tool = "whoami";
             poll = "1h";
           };
@@ -767,6 +774,10 @@ pkgs.testers.runNixOSTest {
         assert f"token-sha={want}" in out, f"the bridged server didn't get its secret: {out}"
         assert "${stubToken}" not in out, f"the secret leaked into the job output: {out}"
         machine.fail("systemctl list-units --no-legend --plain 'siphon-mcp@*' | grep -q running")
+        assert "proxy-env=set" in out, f"the bridged server got no proxy variables: {out}"
+        assert "fetch=external-ok" in out, f"the bridged server couldn't reach its API through the proxy: {out}"
+        assert "fetch-blocked=refused" in out, f"the proxy let a request to an unlisted port through: {out}"
+        assert "run-" not in out, f"the proxy's per-job token leaked into the job output: {out}"
 
     with subtest("AWS: a run's bridge gets short-lived keys from STS; the base key goes nowhere"):
         import hashlib

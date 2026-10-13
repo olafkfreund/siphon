@@ -6,15 +6,14 @@ import json
 import os
 import sys
 import time
+import urllib.request
 
 tok = os.environ.get("STUB_TOKEN", "")
 digest = hashlib.sha256(tok.encode()).hexdigest()[:16] if tok else "missing"
 
-
 def sha(name):
     v = os.environ.get(name, "")
     return hashlib.sha256(v.encode()).hexdigest()[:16] if v else "missing"
-
 
 # As an AWS bridge: hashes of the keys it got (never the keys), and the
 # settings that stop it falling back to other credentials.
@@ -22,6 +21,25 @@ aws = "aws-akid-sha=%s aws-secret-sha=%s aws-token-sha=%s aws-region=%s aws-imds
     sha("AWS_ACCESS_KEY_ID"), sha("AWS_SECRET_ACCESS_KEY"), sha("AWS_SESSION_TOKEN"),
     os.environ.get("AWS_REGION", "missing"), os.environ.get("AWS_EC2_METADATA_DISABLED", "missing"),
     os.environ.get("AWS_CONFIG_FILE", "missing"), os.environ.get("AWS_SHARED_CREDENTIALS_FILE", "missing"))
+
+def fetch(url):
+    # urllib reads http_proxy itself. Returns the body, or None on any failure.
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            return r.read().decode().strip() if 200 <= r.status < 300 else None
+    except Exception:
+        return None
+
+def proxy_report():
+    # Only with STUB_FETCH=stub-fetch-on. Never prints a variable's value.
+    if os.environ.get("STUB_FETCH") != "stub-fetch-on":
+        return ""
+    body = fetch("http://external:8080/")
+    blocked = fetch("http://external:8000/")
+    return " proxy-env=%s fetch=%s fetch-blocked=%s" % (
+        "set" if os.environ.get("http_proxy") else "missing",
+        body if body is not None else "error",
+        "ok" if blocked is not None else "refused")
 
 for line in sys.stdin:
     try:
@@ -40,7 +58,7 @@ for line in sys.stdin:
     elif m == "tools/call":
         # Hold the run open so the VM test can inspect it while it's live.
         time.sleep(float(os.environ.get("STUB_SLOW", "0")))
-        res = {"content": [{"type": "text", "text": "token-sha=%s uid=%d %s" % (digest, os.getuid(), aws)}]}
+        res = {"content": [{"type": "text", "text": "token-sha=%s uid=%d %s%s" % (digest, os.getuid(), aws, proxy_report())}]}
     elif m == "ping":
         res = {}
     else:

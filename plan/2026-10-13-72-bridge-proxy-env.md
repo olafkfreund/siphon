@@ -113,3 +113,10 @@ There are 4 files: `bridge.go`, `bridge_test.go`, `vm-test.nix` and
 `stub-mcp-stdio.py`. That meets the model split's "three or more files", so
 a `coder` agent writes steps 1-3 and a fresh Opus agent reviews them. Step 4
 and the VM runs are mine.
+
+## Deviations
+
+- **Step 1:** source `env` values must be `env:` or `file:` refs
+  (`config.go:1075`), and they're masked in job output. So `STUB_FETCH`
+  comes from `/etc/siphon/stub-fetch`, and its value is `stub-fetch-on`,
+  not `1`. A one-character secret would mask every `1` in the output.
