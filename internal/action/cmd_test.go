@@ -36,6 +36,15 @@ func TestRender(t *testing.T) {
 	if err != nil || argv[1] != "1700000000" {
 		t.Fatalf("rendered integer: %q, %v", argv, err)
 	}
+	res := []string{"curl", "--data-raw", "{{.steps.s.json.result}}"}
+	argv, err = Render(res, map[string]any{"steps": map[string]any{"s": map[string]any{"json": map[string]any{"result": "hi"}}}})
+	if err != nil || argv[2] != "hi" {
+		t.Fatalf("json.result: %q, %v", argv, err)
+	}
+	_, err = Render(res, map[string]any{"steps": map[string]any{"s": map[string]any{"json": nil}}})
+	if err == nil {
+		t.Fatal("missing json.result accepted")
+	}
 }
 
 func TestRunCommandNoneWriteback(t *testing.T) {
