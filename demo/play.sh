@@ -114,6 +114,10 @@ import json, sys
 out = json.load(sys.stdin).get("output", "")
 if len(sys.argv) > 2:
     out = json.loads(out)["steps"][sys.argv[2]]["output"]
+try:  # agent output is a JSON envelope: show the text
+    out = json.loads(out).get("result", out)
+except (ValueError, AttributeError):
+    pass
 print(out)
 ' "$@"
 }
@@ -131,7 +135,7 @@ say "Act 1: a CI run fails on main (GitHub workflow_run webhook)"
 base=$(last_id)
 send github-hooks "$share/payloads/workflow-run-failed.json" github
 id=$(wait_job ci-failed pending_approval 120 "act 1" "$base")
-echo "Job $id is waiting for approval; the phone got the notification."
+echo "Job $id is waiting for approval; the phone gets a notification within 15 s."
 if [ "$auto" = 1 ]; then
   siphon approve "$id"
 else

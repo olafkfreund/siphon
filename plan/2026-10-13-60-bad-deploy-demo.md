@@ -435,3 +435,18 @@ daemon are untouched. A user's demo state lives only in
     Checked against the current templates.
   - **Not changed:** the 2 s poll race on a very fast approval (the push
     takes up to 15 s), and the plain error messages before the VM is up.
+- **Step 10, automated half (the session model):** I ran the real
+  `nix run .#demo` VM from the pushed branch with a fresh
+  `SIPHON_DEMO_DIR`, then `demo-play --auto`. No host Ollama had
+  llama3.2, so it used the stub.
+  - The first run created the secrets, and the portal answered on :8091
+    after about 4 s. All three acts finished (rc=0), and :8092 showed the
+    `/kuma` and `/digest` lines.
+  - Found: the diagnosis and the digest printed as the agent's JSON
+    envelope (`{"result": "…"}`). `show_output` now prints `.result`. The
+    same envelope reaches the phone in every summary template's notify
+    step. That's a template bug, now in the scope of #64.
+  - The "phone got the notification" line wasn't true in `--auto` mode
+    (the approval comes before the 15 s push). It now says "within 15 s".
+  - **Still for the owner:** watching it as a presenter (approve in the
+    portal, read the pages).
