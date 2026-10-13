@@ -18,6 +18,9 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 
 | Template | What it does | Connect first |
 |---|---|---|
+| [`bitbucket-pr-review`](bitbucket-pr-review.yaml) | Review every new Bitbucket pull request with an agent | `siphon connect bitbucket --webhook`, `siphon connect login claude` |
+| [`forgejo-pr-review`](forgejo-pr-review.yaml) | Review every new Forgejo pull request with an agent | `siphon connect forgejo --webhook`, `siphon connect login claude` |
+| [`gitea-pr-review`](gitea-pr-review.yaml) | Review every new Gitea pull request with an agent | `siphon connect gitea --webhook`, `siphon connect login claude` |
 | [`github-ci-failure`](github-ci-failure.yaml) | Diagnose a failed GitHub Actions run | `siphon connect github --webhook`, `siphon connect login claude` |
 | [`github-issue-triage`](github-issue-triage.yaml) | Suggest labels and a summary for new issues | `siphon connect github --webhook`, `siphon connect model ollama` |
 | [`github-pr-review`](github-pr-review.yaml) | Review every new pull request with an agent | `siphon connect github --webhook`, `siphon connect login claude` |
@@ -30,6 +33,8 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 | Template | What it does | Connect first |
 |---|---|---|
 | [`alertmanager-summary`](alertmanager-summary.yaml) | Summarise Prometheus alerts with a local model, then notify | `siphon connect model ollama` · webhook secret |
+| [`cloudflare-notification`](cloudflare-notification.yaml) | Explain Cloudflare notifications with an agent, then notify | `siphon connect cloudflare --webhook`, `siphon connect login claude` |
+| [`datadog-monitor-alert`](datadog-monitor-alert.yaml) | Summarise Datadog monitor alerts with a local model, then notify | `siphon connect datadog`, `siphon connect model ollama` |
 | [`disk-full`](disk-full.yaml) | Warn when a disk is nearly full (and again every 6 hours) | — |
 | [`grafana-alert-explain`](grafana-alert-explain.yaml) | Explain a firing Grafana alert using Grafana's own tools (read-only) | `siphon connect grafana --webhook`, `siphon connect login claude` |
 | [`linear-issue-from-alert`](linear-issue-from-alert.yaml) | Open a Linear issue for each firing alert | `siphon connect alertmanager`, `siphon connect linear`, `siphon connect login claude` |
