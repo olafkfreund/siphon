@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 60
 author: olafkfreund
 ---
@@ -76,3 +76,10 @@ so it also proves that the templates work.
    or leave it out entirely? I'd leave it out of this task.
 4. **Recording:** do you also want an asciinema or GIF capture, or only a
    script you can run live?
+
+## Decisions at approval
+
+1. Model: the host's Ollama when it answers, else a stub with believable per-prompt answers.
+2. The CI agent runs on the model connection, with GitHub's tools served by a stub MCP server and a recorded failing log.
+3. No live mode in this task.
+4. A script run live; no recording in this task.
