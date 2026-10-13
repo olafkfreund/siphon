@@ -7,7 +7,7 @@
 # output. forgejo-mcp has no read-only mode, so allowed_tools is the boundary:
 # only read tools are listed. Approval is on: you decide each run.
 agents:
-  pr-reviewer:
+  forgejo-pr-reviewer:
     kind: claude
     credential: claude-max
     prompt: |
@@ -21,10 +21,10 @@ agents:
     max_budget_usd: 1
     timeout: 15m
 rules:
-  - name: review-new-prs
+  - name: review-new-forgejo-prs
     source: forgejo-hooks
-    when: 'headers["x-forgejo-event"] == "pull_request" && event.action in ["opened", "reopened"]'
+    when: 'headers["x-forgejo-event"] == "pull_request" && event.action == "opened"'
     on: each
     id: event.pull_request.id
     cooldown: 1m
-    action: { agent: pr-reviewer }
+    action: { agent: forgejo-pr-reviewer }

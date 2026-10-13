@@ -220,6 +220,27 @@ Step 1 checked every fact. No approved decision changes.
   (`internal/source/json.go:13`), so `string(event.ts)` is the exact
   integer. This was checked with `rule.Eval` in a throwaway test.
 
+- **Review fixes (after step 8):** a fresh Opus review found the following.
+  - **Name collisions (high).** Four templates reused names
+    (`pr-reviewer`, `review-new-prs`, `alert-summary`, `alert-to-phone`).
+    Apply replaces an item with the same name, so applying
+    `gitea-pr-review` would have silently retargeted an existing GitHub
+    review rule. The names are now per service (`gitea-pr-reviewer`,
+    `review-new-gitea-prs`, `datadog-summary`, `datadog-to-phone`, …).
+    The new `TestTemplateNamesAreUnique` (`docs/templates_test.go`) fails
+    on any agent, routine, source or rule name shared between templates.
+    Checked by reintroducing a collision.
+  - **Gitea and Forgejo** match `opened` only. With `on: each` keyed on
+    the PR id, `reopened` could never fire.
+  - **Cloudflare:** the `id:` falls back to `now().Unix()` when `ts` is
+    missing too, so payloads without fields, such as a "Test" ping, aren't
+    deduplicated forever. Checked with `rule.Eval` in a throwaway test.
+    The cooldown is now `1m` rather than `10m`, since the rule-wide
+    cooldown hid unrelated alerts.
+  - **Not done:** an `@`-prefixed model output reaching `curl -d` is a
+    pattern inherited from `alertmanager-summary` and every summary
+    template. It belongs in its own issue.
+
 ## Tests
 
 ```sh

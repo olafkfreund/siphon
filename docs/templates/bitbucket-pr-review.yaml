@@ -9,7 +9,7 @@
 # not make it read-only. Use a token with only the scopes pullrequest:read
 # and repository:read, and keep approval on.
 agents:
-  pr-reviewer:
+  bitbucket-pr-reviewer:
     kind: claude
     credential: claude-max
     prompt: |
@@ -23,10 +23,10 @@ agents:
     max_budget_usd: 1
     timeout: 15m
 rules:
-  - name: review-new-prs
+  - name: review-new-bitbucket-prs
     source: bitbucket-hooks
     when: 'headers["x-event-key"] == "pullrequest:created"'
     on: each
     id: event.repository.full_name + "/" + string(event.pullrequest.id)
     cooldown: 1m
-    action: { agent: pr-reviewer }
+    action: { agent: bitbucket-pr-reviewer }

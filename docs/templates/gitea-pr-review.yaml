@@ -7,7 +7,7 @@
 # (-r), and reports findings in the job output. Approval is on: you decide
 # each run.
 agents:
-  pr-reviewer:
+  gitea-pr-reviewer:
     kind: claude
     credential: claude-max
     prompt: |
@@ -21,10 +21,10 @@ agents:
     max_budget_usd: 1
     timeout: 15m
 rules:
-  - name: review-new-prs
+  - name: review-new-gitea-prs
     source: gitea-hooks
-    when: 'headers["x-gitea-event"] == "pull_request" && event.action in ["opened", "reopened"]'
+    when: 'headers["x-gitea-event"] == "pull_request" && event.action == "opened"'
     on: each
     id: event.pull_request.id
     cooldown: 1m
-    action: { agent: pr-reviewer }
+    action: { agent: gitea-pr-reviewer }
