@@ -58,7 +58,7 @@ func TestExplainReasons(t *testing.T) {
 	db := e.st.DB
 	now := e.now
 	event := func(data any) { // an event arriving "now" on the test clock
-		store.SetSourceEvent(db, "disk", data)
+		store.SetSourceEvent(db, "disk", data, nil)
 		db.Exec(`UPDATE source_state SET event_at=? WHERE source='disk'`, now.UnixMilli())
 	}
 
@@ -168,7 +168,7 @@ func TestRuleTestAndLastEventAPI(t *testing.T) {
 	if w := e.do("GET", "/api/sources/disk/last-event", nil, bearer); w.Code != 404 {
 		t.Fatalf("last-event none: %d", w.Code)
 	}
-	store.SetSourceEvent(e.st.DB, "disk", map[string]any{"v": 7, "secret": "s-LEAK"})
+	store.SetSourceEvent(e.st.DB, "disk", map[string]any{"v": 7, "secret": "s-LEAK"}, nil)
 	if code, out = post("big", `{"use_last":true}`); code != 200 || !strings.Contains(out, `"key":"7"`) || strings.Contains(out, "s-LEAK") {
 		t.Fatalf("use_last: %d %s", code, out)
 	}
@@ -229,7 +229,7 @@ func TestExplainHeldBackByCooldown(t *testing.T) {
 	store.PutRuleState(tx, "cd", "8", true, T)
 	tx.Commit()
 	arrive := func(v int, at time.Time) {
-		store.SetSourceEvent(db, "disk", map[string]any{"v": v})
+		store.SetSourceEvent(db, "disk", map[string]any{"v": v}, nil)
 		db.Exec(`UPDATE source_state SET event_at=? WHERE source='disk'`, at.UnixMilli())
 	}
 	// the event that fired it arrived just before the fire: not held back

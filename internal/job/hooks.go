@@ -101,7 +101,7 @@ func (p *Pipeline) hookLimiters(name string) *hookLimit {
 // deliver records the replay key and enqueues in one transaction, so a
 // crash can neither lose an accepted webhook nor accept it twice.
 func (p *Pipeline) deliver(ctx context.Context, ev source.Event, key string) (bool, error) {
-	if serr := store.SetSourceEvent(p.Store.DB, ev.Source, ev.Data); serr != nil {
+	if serr := store.SetSourceEvent(p.Store.DB, ev.Source, ev.Data, ev.Headers); serr != nil {
 		slog.Warn("store last event", "source", ev.Source, "err", serr)
 	}
 	_, ids, dup, ruleErr, err := p.handleEvent(ctx, p.Config(), rule.Event{Source: ev.Source, Headers: ev.Headers, Data: ev.Data},

@@ -25,7 +25,7 @@ func TestOpenTwiceIdempotent(t *testing.T) {
 		}
 		var m int
 		s.DB.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&m)
-		if m != 5 {
+		if m != 6 {
 			t.Fatalf("migrations recorded: %d", m)
 		}
 		var fk int
@@ -268,7 +268,7 @@ func TestSetSourceEvent(t *testing.T) {
 		return
 	}
 	ev := map[string]any{"n": 1, "Api_Key": "k", "a": []any{map[string]any{"PASSWORD": "p", "ok": "v"}}}
-	if err := SetSourceEvent(s.DB, "x", ev); err != nil {
+	if err := SetSourceEvent(s.DB, "x", ev, nil); err != nil {
 		t.Fatal(err)
 	}
 	if want := `{"Api_Key":"[redacted]","a":[{"PASSWORD":"[redacted]","ok":"v"}],"n":1}`; get() != want {
@@ -279,7 +279,7 @@ func TestSetSourceEvent(t *testing.T) {
 	if get() == "" {
 		t.Fatal("PutSourceState clobbered json")
 	}
-	SetSourceEvent(s.DB, "x", map[string]string{"big": strings.Repeat("a", 70<<10)})
+	SetSourceEvent(s.DB, "x", map[string]string{"big": strings.Repeat("a", 70<<10)}, nil)
 	if get() != `{"_truncated":true}` {
 		t.Fatalf("cap: %.40s", get())
 	}
@@ -642,7 +642,7 @@ func TestCleanupCustomRetention(t *testing.T) {
 }
 
 func TestNewestMigration(t *testing.T) {
-	if got := NewestMigration(); got != "0005_notifications.sql" {
+	if got := NewestMigration(); got != "0006_event_headers.sql" {
 		t.Fatal(got)
 	}
 }
@@ -688,5 +688,45 @@ func TestGetMetrics(t *testing.T) {
 	}
 	if !m.RuleError["r1"] || m.Notifications[[2]string{"c", "pending"}] != 1 {
 		t.Fatalf("%v %v", m.RuleError, m.Notifications)
+	}
+}
+
+func TestSourceEventHeaders(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	keep := map[string]string{"x-github-event": "push", "x-event-key": "repo:push", "x-gitea-event": "push",
+		"x-forgejo-event": "push", "x-gitlab-event": "Push Hook", "content-type": "application/json",
+		"user-agent": "ua", "x-github-delivery": "d1"}
+	all := map[string]string{}
+	for k, v := range keep {
+		all[k] = v
+	}
+	for _, k := range []string{"x-siphon-key", "x-api-key", "stripe-signature", "x-gitlab-token",
+		"cf-webhook-auth", "authorization", "x-hub-signature", "webhook-signature"} {
+		all[k] = "LEAK"
+	}
+	if err := SetSourceEvent(s.DB, "x", map[string]any{"a": 1}, all); err != nil {
+		t.Fatal(err)
+	}
+	got, err := SourceEventHeaders(s.DB, "x")
+	if err != nil || len(got) != len(keep) {
+		t.Fatalf("got %v, %v", got, err)
+	}
+	for k, v := range keep {
+		if got[k] != v {
+			t.Fatalf("%s: got %q", k, got[k])
+		}
+	}
+	SetSourceEvent(s.DB, "x", map[string]any{"a": 1}, map[string]string{"big": strings.Repeat("a", 9<<10)})
+	if got, _ := SourceEventHeaders(s.DB, "x"); len(got) != 0 {
+		t.Fatalf("over cap: %d headers", len(got))
+	}
+	SetSourceEvent(s.DB, "x", map[string]any{"a": 1}, keep)
+	s.DB.Exec(`UPDATE source_state SET headers='{}' WHERE source='x'`)
+	if got, err := SourceEventHeaders(s.DB, "x"); err != nil || len(got) != 0 {
+		t.Fatalf("old row: %v %v", got, err)
+	}
+	if got, err := SourceEventHeaders(s.DB, "none"); err != nil || len(got) != 0 {
+		t.Fatalf("no row: %v %v", got, err)
 	}
 }

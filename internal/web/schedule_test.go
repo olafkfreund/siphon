@@ -23,7 +23,7 @@ func TestScheduleSourceView(t *testing.T) {
 	e := scheduleEnv(t)
 	last := time.Date(2027, 1, 15, 6, 0, 0, 0, time.UTC)
 	store.PutSourceState(e.st.DB, "tick", last, "")
-	store.SetSourceEvent(e.st.DB, "tick", map[string]any{"scheduled_at": "2027-01-15T06:00:00Z"})
+	store.SetSourceEvent(e.st.DB, "tick", map[string]any{"scheduled_at": "2027-01-15T06:00:00Z"}, nil)
 	w := e.do("GET", "/api/sources", nil, bearer)
 	var rows []map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &rows); err != nil {
@@ -76,7 +76,7 @@ func TestScheduleTestAtAndWhy(t *testing.T) {
 func TestScheduleWhyShowsMissed(t *testing.T) {
 	e := scheduleEnv(t)
 	store.PutSourceState(e.st.DB, "tick", e.now, "")
-	store.SetSourceEvent(e.st.DB, "tick", map[string]any{"scheduled_at": "2027-01-15T06:00:00Z"})
+	store.SetSourceEvent(e.st.DB, "tick", map[string]any{"scheduled_at": "2027-01-15T06:00:00Z"}, nil)
 	tx, _ := e.st.DB.Begin()
 	store.Audit(tx, e.now, "system", "schedule_skipped", 0, `{"source":"tick","count":3,"from":"2027-01-13T06:00:00Z","to":"2027-01-14T06:00:00Z"}`)
 	tx.Commit()

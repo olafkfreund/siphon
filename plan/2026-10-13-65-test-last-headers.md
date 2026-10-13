@@ -109,6 +109,15 @@ spec: spec/2026-10-13-65-test-last-headers.md
      generate.
    - Traps: `llms-full.txt` is generated.
 
+## Deviations
+
+- **Step 1:** two store tests pin the migration state, so they now expect
+  `0006`: `TestNewestMigration` expects `0006_event_headers.sql`, and
+  `TestOpenTwiceIdempotent` expects 6 migrations. Neither is weakened.
+- **Steps 1 and 2 are committed together.** On its own, step 1 doesn't
+  build: `internal/job` and the `cmd/siphon` tests (`mcp_test.go`,
+  `guided_test.go`) call the old `SetSourceEvent`. Step 2 updates them too.
+
 ## Tests
 
 ```sh

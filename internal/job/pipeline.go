@@ -204,7 +204,7 @@ func (p *Pipeline) tick(ctx context.Context, cfg *config.Config, name string) ([
 	if err != nil {
 		return nil, err
 	}
-	if serr := store.SetSourceEvent(p.Store.DB, name, ev.Data); serr != nil {
+	if serr := store.SetSourceEvent(p.Store.DB, name, ev.Data, nil); serr != nil {
 		slog.Warn("store last event", "source", name, "err", serr)
 	}
 	_, ids, _, ruleErr, err := p.handleEvent(ctx, cfg, ev, false, "", "")
