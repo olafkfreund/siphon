@@ -92,6 +92,54 @@ func TestTemplateNamesAreUnique(t *testing.T) {
 	}
 }
 
+type tplStep struct {
+	ID    string
+	Agent string
+	Cmd   []string
+}
+
+type tplDoc struct {
+	Routines map[string]struct{ Steps []tplStep }
+	Rules    []struct{ Action struct{ Cmd []string } }
+}
+
+// parseTemplate returns a template's document and every rule and routine-step cmd.
+func parseTemplate(t *testing.T, tpl docs.Template) (tplDoc, [][]string) {
+	t.Helper()
+	var doc tplDoc
+	if err := yaml.Unmarshal([]byte(tpl.YAML), &doc); err != nil {
+		t.Fatalf("%s: %v", tpl.Name, err)
+	}
+	var cmds [][]string
+	for _, r := range doc.Rules {
+		cmds = append(cmds, r.Action.Cmd)
+	}
+	for _, rt := range doc.Routines {
+		for _, s := range rt.Steps {
+			cmds = append(cmds, s.Cmd)
+		}
+	}
+	return doc, cmds
+}
+
+// A guard rejects an argument that renders to a leading dash, so each
+// templated argument starts with literal text.
+func TestTemplateArgsStartLiteral(t *testing.T) {
+	for _, tpl := range docs.Templates() {
+		_, cmds := parseTemplate(t, tpl)
+		for _, c := range cmds {
+			if len(c) == 0 {
+				continue
+			}
+			for _, a := range c[1:] {
+				if strings.HasPrefix(a, "{{") {
+					t.Errorf("%s: argument %q starts with a template action: the guard rejects a value that renders to a leading dash; put a literal label first", tpl.Name, a)
+				}
+			}
+		}
+	}
+}
+
 // `-d @x` reads a file, and an agent step's .output is its JSON envelope:
 // notifications use --data-raw and .json.result.
 func TestTemplatesUseDataRaw(t *testing.T) {
@@ -99,26 +147,10 @@ func TestTemplatesUseDataRaw(t *testing.T) {
 	readsFile := regexp.MustCompile(`^(-[a-zA-Z]*[dF]|--data|--json|--form)`)
 	envelope := regexp.MustCompile(`\{\{-?\s*\.steps\.([A-Za-z0-9_-]+)\.output\b`)
 	for _, tpl := range docs.Templates() {
-		type step struct {
-			ID    string
-			Agent string
-			Cmd   []string
-		}
-		var doc struct {
-			Routines map[string]struct{ Steps []step }
-			Rules    []struct{ Action struct{ Cmd []string } }
-		}
-		if err := yaml.Unmarshal([]byte(tpl.YAML), &doc); err != nil {
-			t.Fatalf("%s: %v", tpl.Name, err)
-		}
-		var cmds [][]string
-		for _, r := range doc.Rules {
-			cmds = append(cmds, r.Action.Cmd)
-		}
+		doc, cmds := parseTemplate(t, tpl)
 		for _, rt := range doc.Routines {
 			var agentIDs []string
 			for _, s := range rt.Steps {
-				cmds = append(cmds, s.Cmd)
 				if s.Agent != "" {
 					agentIDs = append(agentIDs, s.ID)
 				}
