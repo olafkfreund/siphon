@@ -126,3 +126,9 @@ and the VM runs are mine.
     the stub counted as "refused" even if the proxy let it through.
   - The bridge subtest also checks that the bridge's journal has no
     `run-` token, as the AWS subtest does for its keys.
+- **Step 4, after the fix:** the VM run showed `proxy-env=set` but
+  `fetch=error`. Siphon's egress proxy only accepts CONNECT
+  (`internal/egress/proxy.go:203`), and Python `urllib` sends `http://`
+  URLs as a forward-proxy GET. So the stub now tunnels with `http.client`
+  `set_tunnel` and the run's proxy credential, as a real HTTPS client does.
+  This changes only the test stub.
