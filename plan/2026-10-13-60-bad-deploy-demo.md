@@ -352,3 +352,25 @@ All the changes are additive: new `demo/`, `nix/demo-test.nix`,
 and stub additions. Revert the PR. `#microvm`, the templates and the
 daemon are untouched. A user's demo state lives only in
 `~/.config/siphon-demo`: delete it.
+
+## Step 1 findings
+
+- **a. Payloads: confirmed.** Webhook headers are lower-cased
+  (`internal/source/webhook.go:233`), so `x-github-event` matches. Every
+  field `github-ci-failure` reads is in GitHub's `workflow_run` payload.
+  Uptime Kuma's `server/notification-providers/webhook.js` sends
+  `{heartbeat, monitor, msg}`, which is what `uptime-kuma-down` reads.
+  No template issue to raise.
+- **b. Job output: confirmed.** `GET /api/jobs` rows (`JobRow`) carry
+  `id, rule, state, attempt, created_at, exit_code`; `siphon jobs show <id>
+  -o json` is the raw `/api/jobs/{id}` map, so it has `output`.
+  `play.sh` uses `jobs ls -o json` plus `jobs show`.
+- **c. Routine output: on the routine job itself,** no child jobs. A routine's
+  `output` is the JSON progress `{"steps":{"<id>":{"exit","output",…}}}`
+  (`internal/job/routine.go:36-41,141`). Act 3 prints
+  `.output | fromjson | .steps.digest.output` (python3, no jq needed).
+- **d. Literal `notify.phone.url`: refused.** `siphon validate` says
+  `inline secret: values must be env:NAME or file:/path`. **Deviation:** the
+  wrapper writes `config/notify-url` (`http://127.0.0.1:18099/n`, not a
+  secret) and `demo/siphon.yaml` uses `url: file:/etc/siphon/notify-url`.
+  Steps 5, 7 and 8 (the test node's `/etc/siphon` files) follow this.
