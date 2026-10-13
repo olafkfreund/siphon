@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 58
 author: olafkfreund
 ---
@@ -45,3 +45,7 @@ Each command is checked against the real flake before it goes in.
 - Is the CLI-only path also meant for macOS (`aarch64-darwin`)? `forAll`
   decides which systems the package builds on. If darwin isn't in it, that
   is a flake change and grows this task.
+
+## Decisions at approval
+
+- Linux only (the flake's current systems). macOS is out of scope; the README says so.
