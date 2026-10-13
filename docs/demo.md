@@ -52,9 +52,10 @@ either way. The terminal that runs `demo` says which one it chose.
 
 **Close: debugging.**
 - Say: "Why doesn't the same push fire again?"
-- See: `siphon why ci-failed` says that event id already fired (`on: each`),
-  and `siphon test ci-failed --last` replays the stored push, headers
-  included.
+- See: `siphon why ci-failed` checks the rule step by step: the last push
+  matches, and the rule fired seconds ago, so it's in its cooldown.
+  `siphon test ci-failed --last` replays the stored push, headers included,
+  and shows it would run `ci-doctor` after an approval.
 
 ## Replay
 
