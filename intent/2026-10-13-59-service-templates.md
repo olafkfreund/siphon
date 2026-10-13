@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 59
 author: olafkfreund
 ---
@@ -53,3 +53,7 @@ Each one passes `siphon apply --dry-run` and the existing template tests.
   (PR review and CI failure)?
 - Gitea and Forgejo send near-identical payloads. Two templates, or one
   that covers both? I'd write two, so each is found by name.
+
+## Decisions at approval
+
+- One template per service; Gitea and Forgejo get one each, so each is found by name.
