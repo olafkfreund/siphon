@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 65
 author: olafkfreund
 ---
@@ -59,3 +59,7 @@ this.
   `x-event-key`, `content-type`)? I'd go with a denylist, plus the source's
   own `token_header` and `signature_header`. Rules can read any header,
   and an allowlist would quietly miss custom ones.
+
+## Decisions at approval
+
+- A denylist: drop secret-looking headers plus the source's own `token_header` and `signature_header`, and keep the rest.
