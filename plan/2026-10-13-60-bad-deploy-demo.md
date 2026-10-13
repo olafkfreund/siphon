@@ -374,3 +374,12 @@ daemon are untouched. A user's demo state lives only in
   wrapper writes `config/notify-url` (`http://127.0.0.1:18099/n`, not a
   secret) and `demo/siphon.yaml` uses `url: file:/etc/siphon/notify-url`.
   Steps 5, 7 and 8 (the test node's `/etc/siphon` files) follow this.
+
+## Deviations
+
+- **Step 2, `/tmp/mcp-calls`:** each line now has ` tool=<name>` before
+  `auth-sha=`, so step 8 can assert on `get_job_logs`. The existing
+  `vm-test.nix` greps (`hi from the model`, `auth-sha=`) still match.
+- **Step 2, the digest text:** the stub's digest tells the demo's night
+  (the CI failure, the approved diagnosis, the outage), so it reads well on
+  stage. It is canned, and doesn't summarise what it was given.
