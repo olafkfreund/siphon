@@ -132,3 +132,13 @@ and the VM runs are mine.
   URLs as a forward-proxy GET. So the stub now tunnels with `http.client`
   `set_tunnel` and the run's proxy credential, as a real HTTPS client does.
   This changes only the test stub.
+- **Step 4, second finding:** with the tunnel in place, the proxy answered
+  `403` for `external:8080`. Package `hosts` are public-only
+  (`HostPort.AllowPrivate` is false), and `external` has a private IP in
+  the VM. So the right route to a private host is `url_env` plus
+  `server.services.private_endpoints` (`urlEnvHosts`), the same route the
+  ServiceNow server (#74) uses. The stub package drops `hosts`, gets
+  `urlEnv = [ "STUB_URL" ]`, the source sets `STUB_URL` from
+  `/etc/siphon/stub-url`, and `external:8080` is listed. The stub also
+  reports why a fetch failed (the exception class and the tunnel status,
+  never the URL), so a failure names its cause.

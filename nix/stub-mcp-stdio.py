@@ -26,7 +26,7 @@ aws = "aws-akid-sha=%s aws-secret-sha=%s aws-token-sha=%s aws-region=%s aws-imds
 
 def fetch(host, port, path):
     # Siphon's egress proxy only tunnels (CONNECT), as clients do for https.
-    # Returns the body of a 2xx answer, or None on any failure.
+    # Returns (body of a 2xx answer, "") or (None, why).
     try:
         p = urllib.parse.urlsplit(os.environ.get("http_proxy", ""))
         auth = base64.b64encode(("%s:%s" % (urllib.parse.unquote(p.username or ""), urllib.parse.unquote(p.password or ""))).encode()).decode()
@@ -34,21 +34,28 @@ def fetch(host, port, path):
         c.set_tunnel(host, port, headers={"Proxy-Authorization": "Basic " + auth})
         c.request("GET", path)
         r = c.getresponse()
-        return r.read().decode().strip() if 200 <= r.status < 300 else None
-    except Exception:
-        return None
+        if 200 <= r.status < 300:
+            return r.read().decode().strip(), ""
+        return None, "status-%d" % r.status
+    except Exception as e:
+        # The class, and the tunnel's status line: never the URL (it holds the token).
+        why = type(e).__name__
+        if str(e).startswith("Tunnel connection failed"):
+            why += ":" + str(e).split(":", 1)[1].strip().replace(" ", "-")
+        return None, why
 
 
 def proxy_report():
     # Only with STUB_FETCH=stub-fetch-on. Never prints a variable's value.
     if os.environ.get("STUB_FETCH") != "stub-fetch-on":
         return ""
-    body = fetch("external", 8080, "/")
-    blocked = fetch("external", 8000, "/v1/models")  # 200 if reachable, so a leak shows
+    api = urllib.parse.urlsplit(os.environ.get("STUB_URL", ""))
+    body, why = fetch(api.hostname, api.port, "/")
+    blocked, bwhy = fetch("external", 8000, "/v1/models")  # 200 if reachable, so a leak shows
     return " proxy-env=%s fetch=%s fetch-blocked=%s" % (
         "set" if os.environ.get("http_proxy") else "missing",
-        body if body is not None else "error",
-        "ok" if blocked is not None else "refused")
+        body if body is not None else "error(%s)" % why,
+        "ok" if blocked is not None else "refused(%s)" % bwhy)
 
 for line in sys.stdin:
     try:

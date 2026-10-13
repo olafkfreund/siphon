@@ -56,6 +56,7 @@ pkgs.testers.runNixOSTest {
       environment.etc."siphon/stub-token".text = stubToken;
       # Source env values must be env:/file: refs and are masked in output, so the flag is a file with a distinctive value.
       environment.etc."siphon/stub-fetch".text = "stub-fetch-on";
+      environment.etc."siphon/stub-url".text = "http://external:8080";
       # A normal user for the CLI walkthrough (docs/getting-started.md).
       users.users.alice.isNormalUser = true;
       # AWS: a base key pair for AssumeRole against a fake STS on loopback.
@@ -99,8 +100,11 @@ pkgs.testers.runNixOSTest {
           env = [
             "STUB_TOKEN"
             "STUB_FETCH"
+            "STUB_URL"
           ];
-          hosts = [ "external:8080" ];
+          # The server's own API, a private host: reachable only through url_env
+          # plus server.services.private_endpoints (package hosts are public-only).
+          urlEnv = [ "STUB_URL" ];
         };
         credentials = {
           token = "/etc/siphon/token";
@@ -163,7 +167,10 @@ pkgs.testers.runNixOSTest {
             };
           };
           server.models.private_endpoints = [ "external:8000" ];
-          server.services.private_endpoints = [ "127.0.0.1:18099" ];
+          server.services.private_endpoints = [
+            "127.0.0.1:18099"
+            "external:8080"
+          ];
           sources.extm = {
             type = "mcp";
             url = "http://external:8000/mcp";
@@ -207,6 +214,7 @@ pkgs.testers.runNixOSTest {
             package = "stub";
             env.STUB_TOKEN = "file:/etc/siphon/stub-token";
             env.STUB_FETCH = "file:/etc/siphon/stub-fetch";
+            env.STUB_URL = "file:/etc/siphon/stub-url";
             read.tool = "whoami";
             poll = "1h";
           };
@@ -776,7 +784,7 @@ pkgs.testers.runNixOSTest {
         machine.fail("systemctl list-units --no-legend --plain 'siphon-mcp@*' | grep -q running")
         assert "proxy-env=set" in out, f"the bridged server got no proxy variables: {out}"
         assert "fetch=external-ok" in out, f"the bridged server couldn't reach its API through the proxy: {out}"
-        assert "fetch-blocked=refused" in out, f"the proxy let a request to an unlisted port through: {out}"
+        assert "fetch-blocked=refused(" in out, f"the proxy let a request to an unlisted port through: {out}"
         assert "run-" not in out, f"the proxy's per-job token leaked into the job output: {out}"
         bridge_logs = machine.succeed("journalctl -u 'siphon-mcp@*' --no-pager")
         assert "run-" not in bridge_logs, "the proxy's per-job token is in the bridge's journal"
