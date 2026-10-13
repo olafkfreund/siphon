@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 73
 author: olafkfreund
 ---
@@ -77,3 +77,9 @@ This is Phase 1 of the ServiceNow integration (#71).
 - **Which ServiceNow release do we assume?** The guide targets current
   releases (Washington DC and later). Can you confirm your licensed
   instance's release, so the guide is tested on it?
+
+## Decisions (owner, at approval)
+
+- **Event shape A:** the small envelope.
+- **Release:** not known yet. The guide targets Washington DC and later,
+  and is checked on the owner's instance before the PR is marked ready.
