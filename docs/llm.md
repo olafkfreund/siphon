@@ -122,7 +122,9 @@ approval: otherwise nobody is told that a job is waiting.
   value may not start with `-`.
 - **Notify with `curl --data-raw`, never `-d`:** `-d @x` reads a file. A claude
   or model agent step's text is `{{.steps.<id>.json.result}}` (`.output` is
-  its JSON envelope).
+  its JSON envelope). Start each templated argument with literal text
+  (`"Summary:\n{{…}}"`): an argument that renders to a leading `-` is
+  rejected.
 - **Templates are Go templates:** `{{.event.field}}` and `{{.item.field}}`.
   The `when:` field is an expression, not a template:
   `event.status == "failed"`, `headers["x-github-event"] == "push"`.

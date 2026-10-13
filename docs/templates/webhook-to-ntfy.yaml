@@ -16,4 +16,4 @@ rules:
     on: each
     id: event.title + event.message
     action:
-      cmd: [curl, -fsS, -H, "Title: {{.event.title}}", --data-raw, "{{.event.message}}", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: {{.event.title}}", --data-raw, "Message: {{.event.message}}", https://ntfy.sh/siphon-CHANGE-ME]

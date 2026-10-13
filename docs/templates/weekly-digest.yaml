@@ -24,7 +24,7 @@ routines:
     steps:
       - { id: fetch, cmd: [curl, -fsS, https://metrics.example.com/api/last-week], retry: { attempts: 3, base: 10s, factor: 2 } }
       - { id: digest, agent: digest-writer, if: 'steps.fetch.exit == 0', timeout: 5m }
-      - { id: notify, if: 'steps.digest.exit == 0', cmd: [curl, -fsS, -H, "Title: Weekly digest", --data-raw, "{{.steps.digest.json.result}}", https://ntfy.sh/siphon-CHANGE-ME] }
+      - { id: notify, if: 'steps.digest.exit == 0', cmd: [curl, -fsS, -H, "Title: Weekly digest", --data-raw, "This week:\n{{.steps.digest.json.result}}", https://ntfy.sh/siphon-CHANGE-ME] }
 rules:
   - name: weekly-digest
     source: weekly
