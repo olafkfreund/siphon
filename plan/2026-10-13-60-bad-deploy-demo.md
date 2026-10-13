@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 60
 spec: spec/2026-10-13-60-bad-deploy-demo.md
 ---
