@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 64
 intent: intent/2026-10-13-64-curl-data-raw.md
 ---
