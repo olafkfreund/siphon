@@ -2337,7 +2337,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 | [GitHub](github.md) | tools, webhooks | available | `siphon connect github` | [`github-ci-failure`](../templates/github-ci-failure.yaml) [`github-issue-triage`](../templates/github-issue-triage.yaml) [`github-pr-review`](../templates/github-pr-review.yaml) |
 | [GitLab](gitlab.md) | polling, webhooks | available | `siphon connect gitlab` | [`gitlab-mr-review`](../templates/gitlab-mr-review.yaml) [`gitlab-pipeline-failed`](../templates/gitlab-pipeline-failed.yaml) |
 | Bitbucket | tools, webhooks | available | `siphon connect bitbucket` | [`bitbucket-pr-review`](../templates/bitbucket-pr-review.yaml) |
-| Gitea | tools, webhooks | needs package for tools (`catalogPackages = [ "gitea" ]`) | `siphon connect gitea` |  |
+| Gitea | tools, webhooks | needs package for tools (`catalogPackages = [ "gitea" ]`) | `siphon connect gitea` | [`gitea-pr-review`](../templates/gitea-pr-review.yaml) |
 | Forgejo | tools, webhooks | needs package for tools (`catalogPackages = [ "forgejo" ]`) | `siphon connect forgejo` |  |
 | Azure DevOps |  | not yet: service hooks use basic auth only, and the remote MCP is Entra OAuth only | — |  |
 
@@ -3483,6 +3483,44 @@ rules:
     repeat: 6h                      # and again every 6 h while it stays true
     action:
       cmd: [curl, -fsS, -H, "Title: Disk {{.event.used_pct}}% full", -d, "Clean up or grow the volume", https://ntfy.sh/siphon-CHANGE-ME]
+```
+
+
+---
+
+<!-- file: docs/templates/gitea-pr-review.yaml -->
+
+```yaml
+# title:    Review every new Gitea pull request with an agent
+# category: Code review & CI
+# needs:    sources/gitea, sources/gitea-hooks   (siphon connect gitea --webhook; services.siphon.catalogPackages = [ "gitea" ])
+#           credentials/claude-max               (siphon connect login claude)
+# apply:    siphon apply -f gitea-pr-review.yaml
+# The agent reads the PR through gitea-mcp, which the catalog runs read-only
+# (-r), and reports findings in the job output. Approval is on: you decide
+# each run.
+agents:
+  pr-reviewer:
+    kind: claude
+    credential: claude-max
+    prompt: |
+      Review pull request #{{.event.number}} in {{.event.repository.full_name}}
+      ("{{.event.pull_request.title}}"). Read the diff, then reply with a short
+      list of concrete findings (bugs, missing tests, risky changes). Never
+      push, merge, comment or approve.
+    mcp: [gitea]
+    allowed_tools: [mcp__gitea__pull_request_read, mcp__gitea__get_file_contents]
+    max_turns: 15
+    max_budget_usd: 1
+    timeout: 15m
+rules:
+  - name: review-new-prs
+    source: gitea-hooks
+    when: 'headers["x-gitea-event"] == "pull_request" && event.action in ["opened", "reopened"]'
+    on: each
+    id: event.pull_request.id
+    cooldown: 1m
+    action: { agent: pr-reviewer }
 ```
 
 

@@ -37,6 +37,8 @@ sources:
   uptime-kuma: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK }
   bitbucket: { type: mcp, url: "https://mcp.atlassian.com/v2/mcp", headers: { Authorization: env:AGW_HOOK } }
   bitbucket-hooks: { type: webhook, signature: sha256, signature_header: X-Hub-Signature, secret: env:AGW_HOOK }
+  gitea: { type: mcp, url: "https://gitea.example.com/mcp", headers: { Authorization: env:AGW_HOOK } }
+  gitea-hooks: { type: webhook, signature: github, secret: env:AGW_HOOK }
 rules:
   - { name: r1, source: github-hooks, when: "true", action: { cmd: [echo, one] } }
 `
