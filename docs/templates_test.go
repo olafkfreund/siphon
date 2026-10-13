@@ -90,3 +90,52 @@ func TestTemplateNamesAreUnique(t *testing.T) {
 		}
 	}
 }
+
+// `-d @x` reads a file, and an agent step's .output is its JSON envelope:
+// notifications use --data-raw and .json.result.
+func TestTemplatesUseDataRaw(t *testing.T) {
+	bad := []string{"-d", "--data", "--data-binary", "--data-ascii", "--data-urlencode"}
+	for _, tpl := range docs.Templates() {
+		type step struct {
+			ID    string
+			Agent string
+			Cmd   []string
+		}
+		var doc struct {
+			Routines map[string]struct{ Steps []step }
+			Rules    []struct{ Action struct{ Cmd []string } }
+		}
+		if err := yaml.Unmarshal([]byte(tpl.YAML), &doc); err != nil {
+			t.Fatalf("%s: %v", tpl.Name, err)
+		}
+		var cmds [][]string
+		for _, r := range doc.Rules {
+			cmds = append(cmds, r.Action.Cmd)
+		}
+		for _, rt := range doc.Routines {
+			var agentIDs []string
+			for _, s := range rt.Steps {
+				cmds = append(cmds, s.Cmd)
+				if s.Agent != "" {
+					agentIDs = append(agentIDs, s.ID)
+				}
+			}
+			for _, s := range rt.Steps {
+				for _, a := range s.Cmd {
+					for _, id := range agentIDs {
+						if strings.Contains(a, "{{.steps."+id+".output}}") {
+							t.Errorf("%s: step %s sends the JSON envelope of %s; use .json.result", tpl.Name, s.ID, id)
+						}
+					}
+				}
+			}
+		}
+		for _, c := range cmds {
+			for _, a := range c {
+				if slices.Contains(bad, a) {
+					t.Errorf("%s: curl %s; use --data-raw", tpl.Name, a)
+				}
+			}
+		}
+	}
+}
