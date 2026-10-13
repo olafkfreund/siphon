@@ -53,8 +53,9 @@ either way. The terminal that runs `demo` says which one it chose.
 ## Replay
 
 Run `demo-play` again. Every run sends new ids, so nothing is skipped, with
-one exception: the `ci-failed` rule has a 5-minute cooldown, so Act 1 does
-nothing if you replay within 5 minutes of the last run.
+one exception: the `ci-failed` rule has a 5-minute cooldown. Replay within 5
+minutes and Act 1 starts no job, so `demo-play` waits and then stops with a
+timeout. Wait 5 minutes between runs, or reset (below).
 
 ## Reset
 
@@ -69,4 +70,4 @@ rm -rf ~/.config/siphon-demo
 `siphon test <rule> --last` and `siphon why` can say a rule doesn't match
 when it does, for rules that read a header (`ci-failed` reads
 `x-github-event`): the stored event is replayed without its headers. This
-is tracked in #65. The rule itself works.
+is tracked in [#65](https://github.com/olafkfreund/siphon/issues/65). The rule itself works.
