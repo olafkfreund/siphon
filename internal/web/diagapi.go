@@ -33,6 +33,7 @@ func (s *server) diagAPI(mux *http.ServeMux) {
 			return nil, 400, errMsg("bad JSON body")
 		}
 		var raw string
+		headers := map[string]string{}
 		if body.At != "" {
 			ev, err := s.scheduleTestEvent(rl, body.At)
 			if err != nil {
@@ -51,6 +52,9 @@ func (s *server) diagAPI(mux *http.ServeMux) {
 			if raw == "" {
 				return nil, 404, errMsg("no event stored for source " + rl.Source + " yet")
 			}
+			if headers, err = store.SourceEventHeaders(s.Store.DB, rl.Source); err != nil {
+				return nil, 0, err
+			}
 		} else if len(body.Event) == 0 {
 			return nil, 400, errMsg("give an event, or use_last")
 		} else {
@@ -60,7 +64,6 @@ func (s *server) diagAPI(mux *http.ServeMux) {
 		if err != nil {
 			return nil, 400, errMsg("event: " + err.Error())
 		}
-		headers := map[string]string{}
 		for k, v := range body.Headers {
 			headers[lower(k)] = v
 		}
@@ -82,7 +85,11 @@ func (s *server) diagAPI(mux *http.ServeMux) {
 		if err != nil {
 			return nil, 0, err
 		}
-		return map[string]any{"source": name, "at": d.EventAt, "event": json.RawMessage(raw)}, 200, nil
+		h, err := store.SourceEventHeaders(s.Store.DB, name)
+		if err != nil {
+			return nil, 0, err
+		}
+		return map[string]any{"source": name, "at": d.EventAt, "event": json.RawMessage(raw), "headers": h}, 200, nil
 	})
 	route("GET /api/rules/{name}/explain", func(r *http.Request) (any, int, error) {
 		rl, ok := s.rule(r.PathValue("name"))
@@ -189,6 +196,10 @@ func (s *server) explain(r *http.Request, rl config.Rule) (map[string]any, error
 	if err != nil {
 		return nil, err
 	}
+	hdrs, err := store.SourceEventHeaders(db, rl.Source)
+	if err != nil {
+		return nil, err
+	}
 	evalMsg, evalAt, err := store.RuleError(db, rl.Name)
 	if err != nil {
 		return nil, err
@@ -245,7 +256,7 @@ func (s *server) explain(r *http.Request, rl config.Rule) (map[string]any, error
 	var test *testView
 	if raw != "" {
 		if data, derr := source.DecodeJSON([]byte(raw)); derr == nil {
-			test = ruleTest(r.Context(), cfg, rl, data, nil)
+			test = ruleTest(r.Context(), cfg, rl, data, hdrs)
 			m := len(test.Fires) > 0
 			matches = &m
 			out["test"] = test

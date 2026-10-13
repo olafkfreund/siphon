@@ -176,7 +176,7 @@ func TestTestLastWhy(t *testing.T) {
 		t.Fatalf("--last without an event: %d", code)
 	}
 	// condition false
-	store.SetSourceEvent(e.st.DB, "gh", map[string]any{"v": 1})
+	store.SetSourceEvent(e.st.DB, "gh", map[string]any{"v": 1}, nil)
 	out = e.ok("why", "big")
 	if !strings.Contains(out, "✗ the last event does not satisfy the condition") || !strings.Contains(out, "Likely reason: The last event does not satisfy") || !strings.Contains(out, "Next: siphon test big --last") || !strings.Contains(out, "✓ enabled") {
 		t.Fatalf("condition false:\n%s", out)
@@ -185,7 +185,7 @@ func TestTestLastWhy(t *testing.T) {
 		t.Fatalf("test --last no fire: %s", out)
 	}
 	// would fire; test with --last and with a file and stdin
-	store.SetSourceEvent(e.st.DB, "gh", map[string]any{"v": 9, "token": "tok-LEAK"})
+	store.SetSourceEvent(e.st.DB, "gh", map[string]any{"v": 9, "token": "tok-LEAK"}, nil)
 	out = e.ok("test", "big", "--last")
 	if !strings.Contains(out, "echo 9") || strings.Contains(out, "LEAK") {
 		t.Fatalf("test --last: %s", out)
@@ -368,7 +368,7 @@ func TestWhyHeldBackAndLocalTimes(t *testing.T) {
 	tx, _ := e.st.DB.Begin()
 	store.PutRuleState(tx, "cd", "8", true, now.Add(-60*time.Second))
 	tx.Commit()
-	store.SetSourceEvent(e.st.DB, "gh", map[string]any{"v": 9})
+	store.SetSourceEvent(e.st.DB, "gh", map[string]any{"v": 9}, nil)
 	e.st.DB.Exec(`UPDATE source_state SET event_at=? WHERE source='gh'`, now.Add(-38*time.Second).UnixMilli()) // 22s after the fire
 	out := e.ok("why", "cd")
 	if !strings.Contains(out, "✗ the last event was held back by the cooldown") || !strings.Contains(out, "Likely reason: The last event arrived 22s after the rule fired, inside its 30s cooldown") {

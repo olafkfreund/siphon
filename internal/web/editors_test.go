@@ -77,7 +77,7 @@ func TestRuleTesterEvents(t *testing.T) {
 		t.Fatalf("bad json: %s", w.Body.String())
 	}
 	// The source's last event is the default.
-	store.SetSourceEvent(ce.st.DB, "gh", map[string]any{"id": 1, "kind": "ask", "q": "from the store", "token": "tok-LEAK"})
+	store.SetSourceEvent(ce.st.DB, "gh", map[string]any{"id": 1, "kind": "ask", "q": "from the store", "token": "tok-LEAK"}, nil)
 	w := ce.post("/rules/test", last)
 	if !strings.Contains(html.UnescapeString(w.Body.String()), "Q: from the store") || strings.Contains(w.Body.String(), "tok-LEAK") {
 		t.Fatalf("last event: %s", w.Body.String())
@@ -122,7 +122,7 @@ func TestEgressPreviewMatchesAgentEgress(t *testing.T) {
 func TestEditorPages(t *testing.T) {
 	ce := newCfgEnv(t)
 	ce.saveYAML("routines", "ro", `{steps: [{id: build, cmd: [make]}, {id: ship, cmd: [deploy], approve: true, if: "steps.build.exit == 0"}]}`)
-	store.SetSourceEvent(ce.st.DB, "gh", map[string]any{"n": 1, "secret": "s-LEAK"})
+	store.SetSourceEvent(ce.st.DB, "gh", map[string]any{"n": 1, "secret": "s-LEAK"}, nil)
 	if b := ce.get("/config/routines/ro").Body.String(); !strings.Contains(b, "build") || !strings.Contains(b, "ship") || !strings.Contains(b, "approval") {
 		t.Errorf("step list: %s", b)
 	}

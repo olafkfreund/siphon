@@ -1,14 +1,20 @@
 package web
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/job"
 	"github.com/olafkfreund/siphon/internal/store"
 )
 
@@ -58,7 +64,7 @@ func TestExplainReasons(t *testing.T) {
 	db := e.st.DB
 	now := e.now
 	event := func(data any) { // an event arriving "now" on the test clock
-		store.SetSourceEvent(db, "disk", data)
+		store.SetSourceEvent(db, "disk", data, nil)
 		db.Exec(`UPDATE source_state SET event_at=? WHERE source='disk'`, now.UnixMilli())
 	}
 
@@ -168,7 +174,7 @@ func TestRuleTestAndLastEventAPI(t *testing.T) {
 	if w := e.do("GET", "/api/sources/disk/last-event", nil, bearer); w.Code != 404 {
 		t.Fatalf("last-event none: %d", w.Code)
 	}
-	store.SetSourceEvent(e.st.DB, "disk", map[string]any{"v": 7, "secret": "s-LEAK"})
+	store.SetSourceEvent(e.st.DB, "disk", map[string]any{"v": 7, "secret": "s-LEAK"}, nil)
 	if code, out = post("big", `{"use_last":true}`); code != 200 || !strings.Contains(out, `"key":"7"`) || strings.Contains(out, "s-LEAK") {
 		t.Fatalf("use_last: %d %s", code, out)
 	}
@@ -229,7 +235,7 @@ func TestExplainHeldBackByCooldown(t *testing.T) {
 	store.PutRuleState(tx, "cd", "8", true, T)
 	tx.Commit()
 	arrive := func(v int, at time.Time) {
-		store.SetSourceEvent(db, "disk", map[string]any{"v": v})
+		store.SetSourceEvent(db, "disk", map[string]any{"v": v}, nil)
 		db.Exec(`UPDATE source_state SET event_at=? WHERE source='disk'`, at.UnixMilli())
 	}
 	// the event that fired it arrived just before the fire: not held back
@@ -260,5 +266,71 @@ func TestExplainHeldBackByCooldown(t *testing.T) {
 	arrive(10, T.Add(time.Minute))
 	if got, c = e.explain(t, "cd"); hasCode(c, "cooldown") || got["held_back_by_cooldown"] != false {
 		t.Fatalf("after the window: %v", c)
+	}
+}
+
+// A webhook's headers are stored with its last event, so --last, explain and
+// the portal tester see what the rules saw; secret headers are never stored.
+func TestLastEventHeaders(t *testing.T) {
+	const cfgYAML = `server: { sandbox: none, db: DIR/s.db }
+sources:
+  gh: { type: webhook, secret: env:AGW_HOOK, signature: github }
+rules:
+  - { name: push, source: gh, when: 'headers["x-github-event"] == "push"', action: { cmd: [echo, hi] } }
+`
+	ce := newCfgEnvFile(t, cfgYAML)
+	p := job.New(ce.cur.Load(), ce.st, func() time.Time { return ce.now })
+	body := `{"ref":"main"}`
+	mac := hmac.New(sha256.New, []byte("s3cret"))
+	mac.Write([]byte(body))
+	r := httptest.NewRequest(http.MethodPost, "/hook/gh", strings.NewReader(body))
+	r.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+	r.Header.Set("X-GitHub-Event", "push")
+	r.Header.Set("X-Siphon-Key", "s-LEAK")
+	w := httptest.NewRecorder()
+	p.Webhooks()("gh").ServeHTTP(w, r)
+	if w.Code != 202 {
+		t.Fatalf("hook: %d %s", w.Code, w.Body.String())
+	}
+	clean := func(what, out string) {
+		t.Helper()
+		if strings.Contains(out, "s-LEAK") || strings.Contains(out, "sha256=") {
+			t.Fatalf("%s leaks a secret header: %s", what, out)
+		}
+	}
+
+	w = ce.do("POST", "/api/rules/push/test", nil, func(r *http.Request) {
+		bearer(r)
+		r.Body = io.NopCloser(strings.NewReader(`{"use_last":true}`))
+		r.ContentLength = int64(len(`{"use_last":true}`))
+	})
+	if w.Code != 200 || strings.Contains(w.Body.String(), `"fires":[]`) || !strings.Contains(w.Body.String(), `"fires":[`) {
+		t.Fatalf("use_last: %d %s", w.Code, w.Body.String())
+	}
+	clean("use_last", w.Body.String())
+
+	got, _ := ce.explain(t, "push")
+	if got["last_event_matches"] != true {
+		t.Fatalf("explain: last_event_matches = %v", got["last_event_matches"])
+	}
+	b, _ := json.Marshal(got)
+	clean("explain", string(b))
+
+	w = ce.do("GET", "/api/sources/gh/last-event", nil, bearer)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"x-github-event":"push"`) {
+		t.Fatalf("last-event: %d %s", w.Code, w.Body.String())
+	}
+	clean("last-event", w.Body.String())
+
+	// The portal tester replays them too, and its form headers win.
+	form := ruleForm(url.Values{"event_src": {"last"}, "f.id": {`"k"`}, "f.when": {`headers["x-github-event"] == "push"`}})
+	if w := ce.post("/rules/test", form); !strings.Contains(w.Body.String(), "Matches") {
+		t.Fatalf("portal: %s", w.Body.String())
+	} else {
+		clean("portal", w.Body.String())
+	}
+	form.Set("headers_json", `{"X-GitHub-Event": "ping"}`)
+	if w := ce.post("/rules/test", form); strings.Contains(w.Body.String(), "Matches") {
+		t.Fatalf("portal override ignored: %s", w.Body.String())
 	}
 }

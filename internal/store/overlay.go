@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -114,6 +115,11 @@ func LatestRevision(db *sql.DB) (r ConfigRevision, ok bool, err error) {
 
 const maxEventBytes = 64 << 10
 
+const maxHeaderBytes = 8 << 10
+
+// secretHeader is not a bare -key$: that would drop Bitbucket's x-event-key.
+var secretHeader = regexp.MustCompile(`(?i)signature|-sig$|auth|hmac|(^|-)(api|access|secret|private|siphon|application|subscription|functions|webhook)-key$`)
+
 var secretKey = regexp.MustCompile(`(?i)token|secret|password|authorization|api_key|cookie`)
 
 // RedactKeys returns v with the value of every map key that looks secret
@@ -142,7 +148,8 @@ func RedactKeys(v any) any {
 
 // SetSourceEvent stores a source's last event (redacted, capped at 64 KiB) for
 // the rule tester. data is any JSON-marshalable value.
-func SetSourceEvent(db *sql.DB, source string, data any) error {
+// headers are filtered by name (secretKey, secretHeader) and capped at 8 KiB.
+func SetSourceEvent(db *sql.DB, source string, data any, headers map[string]string) error {
 	b, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -158,9 +165,37 @@ func SetSourceEvent(db *sql.DB, source string, data any) error {
 	if len(b) > maxEventBytes {
 		b = []byte(`{"_truncated":true}`)
 	}
-	_, err = db.Exec(`INSERT INTO source_state(source,json,event_at) VALUES (?,?,?)
-		ON CONFLICT(source) DO UPDATE SET json=excluded.json, event_at=excluded.event_at`, source, string(b), time.Now().UnixMilli())
+	kept := map[string]string{}
+	for k, v := range headers {
+		if n := strings.ToLower(k); !secretKey.MatchString(n) && !secretHeader.MatchString(n) {
+			kept[k] = v
+		}
+	}
+	hb, err := json.Marshal(kept)
+	if err != nil {
+		return err
+	}
+	if len(hb) > maxHeaderBytes {
+		hb = []byte(`{}`)
+	}
+	_, err = db.Exec(`INSERT INTO source_state(source,json,event_at,headers) VALUES (?,?,?,?)
+		ON CONFLICT(source) DO UPDATE SET json=excluded.json, event_at=excluded.event_at, headers=excluded.headers`, source, string(b), time.Now().UnixMilli(), string(hb))
 	return err
+}
+
+// SourceEventHeaders is the filtered headers stored with the last event
+// (empty if none).
+func SourceEventHeaders(db *sql.DB, source string) (map[string]string, error) {
+	var j string
+	err := db.QueryRow(`SELECT headers FROM source_state WHERE source=?`, source).Scan(&j)
+	h := map[string]string{}
+	if err == sql.ErrNoRows {
+		return h, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return h, json.Unmarshal([]byte(j), &h)
 }
 
 // SourceEvent is the last event JSON stored for source ("" if none yet).
