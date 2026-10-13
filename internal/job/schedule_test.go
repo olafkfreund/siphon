@@ -96,7 +96,7 @@ func putScheduleState(t *testing.T, p *Pipeline, last time.Time) {
 		t.Fatal(err)
 	}
 	ev := map[string]any{"schedule": "x", "scheduled_at": last.Format(time.RFC3339), "fired_at": last.Format(time.RFC3339)}
-	if err := store.SetSourceEvent(p.Store.DB, "tick", ev); err != nil {
+	if err := store.SetSourceEvent(p.Store.DB, "tick", ev, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -306,7 +306,7 @@ func TestScheduleStateFromOldSourceIsNew(t *testing.T) {
 	clk := newClock(utc("2026-03-04T07:00:00Z"))
 	p, cfg := schedPipeline(t, schedYAML("0 6 * * *", "UTC", ""), clk)
 	store.PutSourceState(p.Store.DB, "tick", utc("2026-03-01T06:00:00Z"), "")
-	store.SetSourceEvent(p.Store.DB, "tick", map[string]any{"title": "old http event"})
+	store.SetSourceEvent(p.Store.DB, "tick", map[string]any{"title": "old http event"}, nil)
 	stop := startLoop(p, cfg)
 	defer stop()
 	clk.wait(t)
@@ -429,7 +429,7 @@ func TestScheduleForeignStateIsNew(t *testing.T) {
 			p, cfg := schedPipeline(t, schedYAML("0 6 * * *", "UTC", ""), clk)
 			store.PutSourceState(p.Store.DB, "tick", utc("2026-03-01T06:00:00Z"), "")
 			if ev != nil {
-				store.SetSourceEvent(p.Store.DB, "tick", ev)
+				store.SetSourceEvent(p.Store.DB, "tick", ev, nil)
 			}
 			stop := startLoop(p, cfg)
 			defer stop()

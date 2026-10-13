@@ -15,4 +15,4 @@ rules:
     on: edge                        # fires on false -> true only
     repeat: 6h                      # and again every 6 h while it stays true
     action:
-      cmd: [curl, -fsS, -H, "Title: Disk {{.event.used_pct}}% full", -d, "Clean up or grow the volume", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: Disk {{.event.used_pct}}% full", --data-raw, "Clean up or grow the volume", https://ntfy.sh/siphon-CHANGE-ME]

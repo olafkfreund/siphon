@@ -178,17 +178,6 @@ func (s *server) runRuleTest(r *http.Request) *testView {
 			tv.Err = "event: " + err.Error()
 			return tv
 		}
-		if h := strings.TrimSpace(r.PostFormValue("headers_json")); h != "" {
-			var in map[string]string
-			if err := json.Unmarshal([]byte(h), &in); err != nil {
-				tv.Err = "headers: want a JSON object of strings"
-				return tv
-			}
-			headers = map[string]string{}
-			for k, v := range in {
-				headers[strings.ToLower(k)] = v
-			}
-		}
 	} else {
 		raw, err := store.SourceEvent(s.Store.DB, rl.Source)
 		if err != nil {
@@ -202,6 +191,24 @@ func (s *server) runRuleTest(r *http.Request) *testView {
 		if data, err = source.DecodeJSON([]byte(raw)); err != nil {
 			tv.Err = "stored event: " + err.Error()
 			return tv
+		}
+		if headers, err = store.SourceEventHeaders(s.Store.DB, rl.Source); err != nil {
+			tv.Err = "internal error"
+			return tv
+		}
+	}
+	// form headers win, key by key, over the stored ones
+	if h := strings.TrimSpace(r.PostFormValue("headers_json")); h != "" {
+		var in map[string]string
+		if err := json.Unmarshal([]byte(h), &in); err != nil {
+			tv.Err = "headers: want a JSON object of strings"
+			return tv
+		}
+		if headers == nil {
+			headers = map[string]string{}
+		}
+		for k, v := range in {
+			headers[strings.ToLower(k)] = v
 		}
 	}
 	return ruleTest(r.Context(), cfg, rl, data, headers)

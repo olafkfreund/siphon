@@ -9,4 +9,4 @@ rules:
     on: each
     id: string(event.monitor.id) + "/" + event.heartbeat.time
     action:
-      cmd: [curl, -fsS, -H, "Title: {{.event.monitor.name}} is down", -d, "{{.event.msg}}", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: {{.event.monitor.name}} is down", --data-raw, "{{.event.msg}}", https://ntfy.sh/siphon-CHANGE-ME]

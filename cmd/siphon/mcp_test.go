@@ -115,7 +115,7 @@ func TestMCPReadTools(t *testing.T) {
 	if out, _ = m.call(t, "test", map[string]any{"rule": "r1", "event": map[string]any{"v": 1}}); !strings.Contains(out, `"fires"`) {
 		t.Fatalf("test: %s", out)
 	}
-	store.SetSourceEvent(m.st.DB, "gh", map[string]any{"v": 2})
+	store.SetSourceEvent(m.st.DB, "gh", map[string]any{"v": 2}, nil)
 	if out, isErr := m.call(t, "test", map[string]any{"rule": "r1", "use_last": true}); isErr || !strings.Contains(out, `"fires"`) {
 		t.Fatalf("test use_last: %s", out)
 	}

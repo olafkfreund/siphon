@@ -19,4 +19,4 @@ rules:
     on: each
     id: event.entity + string(now().Unix() / 300)
     action:
-      cmd: [curl, -fsS, -H, "Title: Front door", -d, "Opened late at night", https://ntfy.sh/siphon-CHANGE-ME]
+      cmd: [curl, -fsS, -H, "Title: Front door", --data-raw, "Opened late at night", https://ntfy.sh/siphon-CHANGE-ME]

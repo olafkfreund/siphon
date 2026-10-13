@@ -149,7 +149,7 @@ func (p *Pipeline) scheduleFire(ctx context.Context, cfg *config.Config, name st
 	if serr := store.PutSourceState(p.Store.DB, name, at, ""); serr != nil {
 		return serr
 	}
-	if serr := store.SetSourceEvent(p.Store.DB, name, data); serr != nil {
+	if serr := store.SetSourceEvent(p.Store.DB, name, data, nil); serr != nil {
 		slog.Warn("store last event", "source", name, "err", serr)
 	}
 	for range ids {

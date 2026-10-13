@@ -120,6 +120,9 @@ approval: otherwise nobody is told that a job is waiting.
   `cmd: [echo, "hi {{.event.x}}"]`, not `cmd: "echo hi"`. There's no `sh -c`,
   no pipes, no `&&`. Templates are filled in per element, and a templated
   value may not start with `-`.
+- **Notify with `curl --data-raw`, never `-d`:** `-d @x` reads a file. A claude
+  or model agent step's text is `{{.steps.<id>.json.result}}` (`.output` is
+  its JSON envelope).
 - **Templates are Go templates:** `{{.event.field}}` and `{{.item.field}}`.
   The `when:` field is an expression, not a template:
   `event.status == "failed"`, `headers["x-github-event"] == "push"`.

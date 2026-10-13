@@ -1,6 +1,7 @@
 package docs_test
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -87,6 +88,60 @@ func TestTemplateNamesAreUnique(t *testing.T) {
 				t.Errorf("%s: %s is also in %s", tpl.Name, k, o)
 			}
 			owner[k] = tpl.Name
+		}
+	}
+}
+
+// `-d @x` reads a file, and an agent step's .output is its JSON envelope:
+// notifications use --data-raw and .json.result.
+func TestTemplatesUseDataRaw(t *testing.T) {
+	// curl flags that read a file for a leading @ (or take a form file): any spelling.
+	readsFile := regexp.MustCompile(`^(-[a-zA-Z]*[dF]|--data|--json|--form)`)
+	envelope := regexp.MustCompile(`\{\{-?\s*\.steps\.([A-Za-z0-9_-]+)\.output\b`)
+	for _, tpl := range docs.Templates() {
+		type step struct {
+			ID    string
+			Agent string
+			Cmd   []string
+		}
+		var doc struct {
+			Routines map[string]struct{ Steps []step }
+			Rules    []struct{ Action struct{ Cmd []string } }
+		}
+		if err := yaml.Unmarshal([]byte(tpl.YAML), &doc); err != nil {
+			t.Fatalf("%s: %v", tpl.Name, err)
+		}
+		var cmds [][]string
+		for _, r := range doc.Rules {
+			cmds = append(cmds, r.Action.Cmd)
+		}
+		for _, rt := range doc.Routines {
+			var agentIDs []string
+			for _, s := range rt.Steps {
+				cmds = append(cmds, s.Cmd)
+				if s.Agent != "" {
+					agentIDs = append(agentIDs, s.ID)
+				}
+			}
+			for _, s := range rt.Steps {
+				for _, a := range s.Cmd {
+					for _, m := range envelope.FindAllStringSubmatch(a, -1) {
+						if slices.Contains(agentIDs, m[1]) {
+							t.Errorf("%s: step %s sends the JSON envelope of %s; use .json.result", tpl.Name, s.ID, m[1])
+						}
+					}
+				}
+			}
+		}
+		for _, c := range cmds {
+			if len(c) == 0 || c[0] != "curl" {
+				continue
+			}
+			for _, a := range c[1:] {
+				if a != "--data-raw" && readsFile.MatchString(a) {
+					t.Errorf("%s: curl %s; use --data-raw", tpl.Name, a)
+				}
+			}
 		}
 	}
 }
