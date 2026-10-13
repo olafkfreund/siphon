@@ -1,0 +1,32 @@
+# title:    Review every new Bitbucket pull request with an agent
+# category: Code review & CI
+# needs:    sources/bitbucket, sources/bitbucket-hooks   (siphon connect bitbucket --webhook; tick "Pull request: Created")
+#           credentials/claude-max                        (siphon connect login claude)
+# apply:    siphon apply -f bitbucket-pr-review.yaml
+# The agent reads the PR through Atlassian's Rovo MCP server and reports
+# findings in the job output. Approval is on: you decide each run.
+# Warning: Rovo's bitbucketPullRequest tool can also merge, so tool names do
+# not make it read-only. Use a token with only the scopes pullrequest:read
+# and repository:read, and keep approval on.
+agents:
+  bitbucket-pr-reviewer:
+    kind: claude
+    credential: claude-max
+    prompt: |
+      Review pull request #{{.event.pullrequest.id}} in {{.event.repository.full_name}}
+      ("{{.event.pullrequest.title}}"). Read the diff, then reply with a short
+      list of concrete findings (bugs, missing tests, risky changes). Never
+      merge, approve or comment.
+    mcp: [bitbucket]
+    allowed_tools: [mcp__bitbucket__bitbucketPullRequest, mcp__bitbucket__bitbucketRepoContent]
+    max_turns: 15
+    max_budget_usd: 1
+    timeout: 15m
+rules:
+  - name: review-new-bitbucket-prs
+    source: bitbucket-hooks
+    when: 'headers["x-event-key"] == "pullrequest:created"'
+    on: each
+    id: event.repository.full_name + "/" + string(event.pullrequest.id)
+    cooldown: 1m
+    action: { agent: bitbucket-pr-reviewer }

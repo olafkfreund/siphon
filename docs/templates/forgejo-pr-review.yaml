@@ -1,0 +1,30 @@
+# title:    Review every new Forgejo pull request with an agent
+# category: Code review & CI
+# needs:    sources/forgejo, sources/forgejo-hooks   (siphon connect forgejo --webhook; services.siphon.catalogPackages = [ "forgejo" ])
+#           credentials/claude-max                   (siphon connect login claude)
+# apply:    siphon apply -f forgejo-pr-review.yaml
+# The agent reads the PR through forgejo-mcp and reports findings in the job
+# output. forgejo-mcp has no read-only mode, so allowed_tools is the boundary:
+# only read tools are listed. Approval is on: you decide each run.
+agents:
+  forgejo-pr-reviewer:
+    kind: claude
+    credential: claude-max
+    prompt: |
+      Review pull request #{{.event.number}} in {{.event.repository.full_name}}
+      ("{{.event.pull_request.title}}"). Read the diff, then reply with a short
+      list of concrete findings (bugs, missing tests, risky changes). Never
+      push, merge, comment or approve.
+    mcp: [forgejo]
+    allowed_tools: [mcp__forgejo__get_pull_request_by_index, mcp__forgejo__get_pull_request_diff, mcp__forgejo__list_pull_request_files]
+    max_turns: 15
+    max_budget_usd: 1
+    timeout: 15m
+rules:
+  - name: review-new-forgejo-prs
+    source: forgejo-hooks
+    when: 'headers["x-forgejo-event"] == "pull_request" && event.action == "opened"'
+    on: each
+    id: event.pull_request.id
+    cooldown: 1m
+    action: { agent: forgejo-pr-reviewer }

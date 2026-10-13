@@ -1,0 +1,30 @@
+# title:    Review every new Gitea pull request with an agent
+# category: Code review & CI
+# needs:    sources/gitea, sources/gitea-hooks   (siphon connect gitea --webhook; services.siphon.catalogPackages = [ "gitea" ])
+#           credentials/claude-max               (siphon connect login claude)
+# apply:    siphon apply -f gitea-pr-review.yaml
+# The agent reads the PR through gitea-mcp, which the catalog runs read-only
+# (-r), and reports findings in the job output. Approval is on: you decide
+# each run.
+agents:
+  gitea-pr-reviewer:
+    kind: claude
+    credential: claude-max
+    prompt: |
+      Review pull request #{{.event.number}} in {{.event.repository.full_name}}
+      ("{{.event.pull_request.title}}"). Read the diff, then reply with a short
+      list of concrete findings (bugs, missing tests, risky changes). Never
+      push, merge, comment or approve.
+    mcp: [gitea]
+    allowed_tools: [mcp__gitea__pull_request_read, mcp__gitea__get_file_contents]
+    max_turns: 15
+    max_budget_usd: 1
+    timeout: 15m
+rules:
+  - name: review-new-gitea-prs
+    source: gitea-hooks
+    when: 'headers["x-gitea-event"] == "pull_request" && event.action == "opened"'
+    on: each
+    id: event.pull_request.id
+    cooldown: 1m
+    action: { agent: gitea-pr-reviewer }
