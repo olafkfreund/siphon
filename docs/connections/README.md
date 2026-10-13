@@ -22,7 +22,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 |---|---|---|---|---|
 | [GitHub](github.md) | tools, webhooks | available | `siphon connect github` | [`github-ci-failure`](../templates/github-ci-failure.yaml) [`github-issue-triage`](../templates/github-issue-triage.yaml) [`github-pr-review`](../templates/github-pr-review.yaml) |
 | [GitLab](gitlab.md) | polling, webhooks | available | `siphon connect gitlab` | [`gitlab-mr-review`](../templates/gitlab-mr-review.yaml) [`gitlab-pipeline-failed`](../templates/gitlab-pipeline-failed.yaml) |
-| Bitbucket | tools, webhooks | available | `siphon connect bitbucket` |  |
+| Bitbucket | tools, webhooks | available | `siphon connect bitbucket` | [`bitbucket-pr-review`](../templates/bitbucket-pr-review.yaml) |
 | Gitea | tools, webhooks | needs package for tools (`catalogPackages = [ "gitea" ]`) | `siphon connect gitea` |  |
 | Forgejo | tools, webhooks | needs package for tools (`catalogPackages = [ "forgejo" ]`) | `siphon connect forgejo` |  |
 | Azure DevOps |  | not yet: service hooks use basic auth only, and the remote MCP is Entra OAuth only | — |  |
