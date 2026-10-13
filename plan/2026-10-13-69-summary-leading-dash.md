@@ -108,3 +108,9 @@ Applied tasks are the users' own and aren't touched either way.
 Steps 1-4 edit four files or groups of files, so a `coder` agent writes
 them under the model split, and a fresh Opus agent reviews them. Step 5 is
 mine.
+
+## Deviations
+
+- **Review fix (step 1):** the test trims whitespace before checking for
+  `{{`. A `" {{- .x}}"` argument renders exactly as `.x`, so a plain
+  prefix check missed it.

@@ -132,7 +132,7 @@ func TestTemplateArgsStartLiteral(t *testing.T) {
 				continue
 			}
 			for _, a := range c[1:] {
-				if strings.HasPrefix(a, "{{") {
+				if strings.HasPrefix(strings.TrimSpace(a), "{{") { // " {{- .x}}" trims the space
 					t.Errorf("%s: argument %q starts with a template action: the guard rejects a value that renders to a leading dash; put a literal label first", tpl.Name, a)
 				}
 			}
