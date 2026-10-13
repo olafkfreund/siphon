@@ -778,6 +778,8 @@ pkgs.testers.runNixOSTest {
         assert "fetch=external-ok" in out, f"the bridged server couldn't reach its API through the proxy: {out}"
         assert "fetch-blocked=refused" in out, f"the proxy let a request to an unlisted port through: {out}"
         assert "run-" not in out, f"the proxy's per-job token leaked into the job output: {out}"
+        bridge_logs = machine.succeed("journalctl -u 'siphon-mcp@*' --no-pager")
+        assert "run-" not in bridge_logs, "the proxy's per-job token is in the bridge's journal"
 
     with subtest("AWS: a run's bridge gets short-lived keys from STS; the base key goes nowhere"):
         import hashlib

@@ -120,3 +120,9 @@ and the VM runs are mine.
   (`config.go:1075`), and they're masked in job output. So `STUB_FETCH`
   comes from `/etc/siphon/stub-fetch`, and its value is `stub-fetch-on`,
   not `1`. A one-character secret would mask every `1` in the output.
+- **Review fixes (step 1):**
+  - The refused-host fetch now targets `http://external:8000/v1/models`,
+    which answers 200 when reachable. Before, `GET /` answered 405, which
+    the stub counted as "refused" even if the proxy let it through.
+  - The bridge subtest also checks that the bridge's journal has no
+    `run-` token, as the AWS subtest does for its keys.

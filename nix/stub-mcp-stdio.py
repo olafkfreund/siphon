@@ -35,7 +35,7 @@ def proxy_report():
     if os.environ.get("STUB_FETCH") != "stub-fetch-on":
         return ""
     body = fetch("http://external:8080/")
-    blocked = fetch("http://external:8000/")
+    blocked = fetch("http://external:8000/v1/models")  # 200 if reachable, so a leak shows
     return " proxy-env=%s fetch=%s fetch-blocked=%s" % (
         "set" if os.environ.get("http_proxy") else "missing",
         body if body is not None else "error",
