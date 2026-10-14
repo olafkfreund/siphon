@@ -19,7 +19,9 @@ type JobAction struct {
 	JobRow
 	Kind     string // agent | cmd | unit | routine
 	Target   string // agent name, argv[0], unit or routine name
-	Provider string // agent runs: claude | codex | agy (from the job's agent snapshot)
+	Provider string // agent runs: claude | codex | agy | model (from the job's agent snapshot)
+	// Credential is a model agent's credential name, from the same snapshot.
+	Credential string `json:"-"`
 }
 
 func GetDashboard(db *sql.DB, since time.Time) (Dashboard, error) {
@@ -70,7 +72,8 @@ func jobActions(db *sql.DB, where string, args []any, limit int) ([]JobAction, e
 		COALESCE(json_extract(action_json,'$.action.Routine'),''),
 		COALESCE(json_extract(action_json,'$.action.ServiceNow.Op'),''),
 		COALESCE(json_extract(action_json,'$.action.ServiceNow.Table'),''),
-		COALESCE(json_extract(action_json,'$.agents."' || json_extract(action_json,'$.action.Agent') || '".Kind'),'')
+		COALESCE(json_extract(action_json,'$.agents."' || json_extract(action_json,'$.action.Agent') || '".Kind'),''),
+		COALESCE(json_extract(action_json,'$.agents."' || json_extract(action_json,'$.action.Agent') || '".Credential'),'')
 		FROM jobs WHERE ` + where + ` ORDER BY id DESC LIMIT ?`
 	args = append(args, limit)
 	rows, err := db.Query(q, args...)
@@ -84,7 +87,7 @@ func jobActions(db *sql.DB, where string, args []any, limit int) ([]JobAction, e
 		var created int64
 		var exit sql.NullInt64
 		var agent, cmd, unit, routine, snOp, snTable string
-		if err := rows.Scan(&j.ID, &j.Rule, &j.State, &j.Attempt, &created, &exit, &agent, &cmd, &unit, &routine, &snOp, &snTable, &j.Provider); err != nil {
+		if err := rows.Scan(&j.ID, &j.Rule, &j.State, &j.Attempt, &created, &exit, &agent, &cmd, &unit, &routine, &snOp, &snTable, &j.Provider, &j.Credential); err != nil {
 			return nil, err
 		}
 		j.CreatedAt = time.UnixMilli(created)

@@ -185,17 +185,29 @@ func actionSummary(a config.Action) string {
 // providerOf is the provider an agent runs on: its kind, or for a model agent
 // its credential's preset (groq, openrouter, …) else its provider (ollama, openai, …).
 func providerOf(cfg *config.Config, agent string) string {
-	a := cfg.Agents[agent]
-	if agent == "" || a == nil {
+	if agent == "" {
 		return ""
 	}
-	if cr := cfg.Credentials[a.Credential]; a.Kind == "model" && cr != nil {
+	return agentProvider(cfg.Agents[agent], cfg.Credentials)
+}
+
+// agentProvider is the provider an agent runs on: a model agent's credential
+// preset (groq, openrouter, …) or provider (ollama, openai, …), else its kind.
+func agentProvider(a *config.Agent, creds map[string]*config.Credential) string {
+	if a == nil {
+		return ""
+	}
+	return modelProvider(a.Kind, a.Credential, creds)
+}
+
+func modelProvider(kind, credential string, creds map[string]*config.Credential) string {
+	if cr := creds[credential]; kind == "model" && cr != nil {
 		if cr.Preset != "" {
 			return cr.Preset
 		}
 		return cr.Provider
 	}
-	return a.Kind
+	return kind
 }
 
 func (s *server) rules() ([]ruleView, error) {

@@ -21,13 +21,18 @@ func TestSourceHot(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		found := false
 		for _, s := range srcs {
+			found = found || s.Name == "gh"
 			if s.Name == "gh" && s.Hot != want {
 				t.Errorf("%v ago: hot=%v want %v", ago, s.Hot, want)
 			}
 			if s.Name == "disk" && s.Hot {
 				t.Error("a never-polled source is hot")
 			}
+		}
+		if !found {
+			t.Fatal("no source gh")
 		}
 	}
 }
@@ -54,14 +59,26 @@ func TestJobDetailLineage(t *testing.T) {
 // runs() resolves a model agent's provider like the rules page does.
 func TestRunsModelProvider(t *testing.T) {
 	e := newEnv(t, func(o *Options) {
-		o.Cfg.Credentials = map[string]*config.Credential{"o": {Provider: "ollama"}}
+		o.Cfg.Credentials = map[string]*config.Credential{"o": {Provider: "ollama"}, "g": {Provider: "openai", Preset: "groq"}}
 		o.Cfg.Agents = map[string]*config.Agent{"mo": {Kind: "model", Credential: "o"}}
 	})
-	tx, _ := e.st.DB.Begin()
-	store.InsertJob(tx, store.Job{Rule: "r", State: "queued", ActionJSON: `{"action":{"Agent":"mo"}}`}, e.now)
-	tx.Commit()
+	tx, err := e.st.DB.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// a run from before snapshots: the live agent decides
+	if _, err := store.InsertJob(tx, store.Job{Rule: "r", State: "queued", ActionJSON: `{"action":{"Agent":"mo"}}`}, e.now); err != nil {
+		t.Fatal(err)
+	}
+	// a real run carries a snapshot (kind model): its credential decides, even though the agent is gone now
+	if _, err := store.InsertJob(tx, store.Job{Rule: "r", State: "queued", ActionJSON: `{"action":{"Agent":"gone"},"agents":{"gone":{"Kind":"model","Credential":"g"}}}`}, e.now); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 	js, err := e.srv.runs("", 10)
-	if err != nil || len(js) != 1 || js[0].Provider != "ollama" {
+	if err != nil || len(js) != 2 || js[0].Provider != "groq" || js[1].Provider != "ollama" { // newest first
 		t.Fatalf("%v %+v", err, js)
 	}
 }

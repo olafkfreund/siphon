@@ -100,7 +100,8 @@ func (s *server) jobDetail(id int64) (*jobView, bool, error) {
 			v.Argv = a.Cmd
 		}
 	}
-	for _, r := range s.Config().Rules {
+	cfg := s.Config() // one config for the whole lookup
+	for _, r := range cfg.Rules {
 		if r.Name != j.Rule {
 			continue
 		}
@@ -108,7 +109,7 @@ func (s *server) jobDetail(id int64) (*jobView, bool, error) {
 		if v.On == "" {
 			v.On = "edge"
 		}
-		if src := s.Config().Sources[r.Source]; src != nil {
+		if src := cfg.Sources[r.Source]; src != nil {
 			v.SourceType = src.Type
 		} else if r.Source == "agent-result" {
 			v.SourceType = "agent results"
@@ -116,7 +117,7 @@ func (s *server) jobDetail(id int64) (*jobView, bool, error) {
 		break
 	}
 	if v.Kind == "agent" {
-		v.Provider = providerOf(s.Config(), v.Target)
+		v.Provider = agentProvider(v.Agent, cfg.Credentials) // v.Agent is the job's snapshot when it has one
 	}
 	if ev, ok := p.Env["event"]; ok {
 		if b, err := json.MarshalIndent(store.RedactKeys(ev), "", "  "); err == nil {
@@ -282,8 +283,12 @@ func (s *server) egress() (*egressView, error) {
 func (s *server) runs(state string, limit int) ([]store.JobAction, error) {
 	js, err := store.ListJobActions(s.Store.DB, state, limit)
 	for i := range js {
-		if js[i].Kind == "agent" && js[i].Provider == "" {
+		switch {
+		case js[i].Kind != "agent":
+		case js[i].Provider == "": // a run from before snapshots
 			js[i].Provider = providerOf(s.Config(), js[i].Target)
+		case js[i].Provider == "model": // the snapshot's credential names the real provider
+			js[i].Provider = modelProvider("model", js[i].Credential, s.Config().Credentials)
 		}
 	}
 	return js, err
