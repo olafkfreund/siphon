@@ -88,6 +88,25 @@ spec: spec/2026-10-14-118-portal-refresh-slice3.md
   - **The login-radio fix** in `app.js` has no automated test. It's
     checked by hand: Claude with a setup token, then switch to Codex or
     agy.
+- **The Opus review:** no HIGH. Two MEDIUM, fixed.
+  1. **Polled mcp services** (with `read:`) said "agent tools" and hid
+     their last event. `HasEvents` now also follows `src.Polled()`.
+  2. **"asks approval" on routine rows** missed agent steps, which pause by
+     default. A new `config.(*Config).StepNeedsApproval` applies the
+     runner's rule to the live config.
+  - **LOW, fixed:**
+    - "egress limited" only shows when a sandbox enforces it;
+    - the filter state is scoped per kind (`cfg-<kind>`);
+    - an expiring login is `.is-wait`, not green;
+    - the duplicate status word is dropped from the connection card
+      footers, which now say only "used by …".
+  - **LOW, moved to slice 4:** the Notifications Test uses the same
+    dotted `#ntest-<name>` id as the bug fixed here.
+  - **LOW, accepted:**
+    - after a Test, the card status stays as it was until reload, as
+      before;
+    - "unused" doesn't know about `siphon draft`'s default model;
+    - some markup assertions are loose.
 
 ## Tests
 

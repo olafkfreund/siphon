@@ -161,7 +161,7 @@ func (s *server) cfgDetail(kind string, r cfgRow) cfgRow {
 			return r
 		}
 		r.Provider, r.Model, r.Credential, r.MCP = agentProvider(a, cfg.Credentials), a.Model, a.Credential, a.MCP
-		r.Egress = a.Egress.Enabled != nil && *a.Egress.Enabled
+		r.Egress = a.Egress.Enabled != nil && *a.Egress.Enabled && cfg.Server.Sandbox != "none" // not enforced without a sandbox
 		for _, ru := range cfg.Rules {
 			if ru.Action.Agent == r.Name {
 				r.Rules++
@@ -183,7 +183,7 @@ func (s *server) cfgDetail(kind string, r cfgRow) cfgRow {
 				k = "servicenow"
 			}
 			r.Steps = append(r.Steps, k)
-			r.Approval = r.Approval || st.Approve
+			r.Approval = r.Approval || cfg.StepNeedsApproval(st)
 		}
 		for _, ru := range cfg.Rules {
 			if ru.Action.Routine == r.Name {

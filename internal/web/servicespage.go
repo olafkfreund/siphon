@@ -143,6 +143,7 @@ func (s *server) connectedRows() []connRow {
 				r.CanTest = true
 			}
 			r.Items = append(r.Items, connItem{"sources", n, "/config/sources/" + url.PathEscape(n)})
+			r.HasEvents = r.HasEvents || src.Polled() // an mcp source with read: polls too
 			if d, err := store.SourceDiagnostics(s.Store.DB, n); err == nil && d.EventAt != nil && (newest == nil || d.EventAt.After(*newest.EventAt)) {
 				newest = &d
 			}

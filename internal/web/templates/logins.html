@@ -3,7 +3,7 @@
 
 <h2 class="section-h">{{template "icon" "key"}} Subscriptions <span class="muted small">Claude · Codex · agy</span></h2>
 <div class="grid g3 mb">
-{{range .Logins}}<article class="card item-card acct s-{{.Status}}{{if eq .Status "expired"}} is-err{{else if eq .Status "connected" "expiring"}} is-ok{{end}}" aria-label="Login {{.Name}}">
+{{range .Logins}}<article class="card item-card acct s-{{.Status}}{{if eq .Status "expired"}} is-err{{else if eq .Status "expiring"}} is-wait{{else if eq .Status "connected"}} is-ok{{end}}" aria-label="Login {{.Name}}">
   <div class="acct-head">{{template "provider" .Key}}<span class="sp"></span>
     {{if eq .Status "connected"}}<span class="pill done">{{template "icon" "check"}} Connected</span>
     {{else if eq .Status "expiring"}}<span class="pill pending_approval">Expires {{.Expiry}}</span>
@@ -17,7 +17,7 @@
     {{if can $.Role "admin"}}{{if eq .Status "missing" "expired"}}<a class="btn sm primary" href="/connections?connect={{pe .Name}}#add">Connect</a>{{else if ne .Status "apikey"}}<a class="btn sm" href="/connections?connect={{pe .Name}}#add">Replace</a>{{end}}{{end}}
     {{if can $.Role "admin"}}<form method="post" action="/logins/{{pe .Name}}/delete" data-confirm="Delete the login {{.Name}}? Agents using it will stop until you connect it again."><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm no">Delete</button></form>{{end}}
   </div>
-  <p class="acct-foot small muted"><span class="dot {{if eq .Status "expired"}}error{{else if eq .Status "connected" "expiring"}}ok{{else}}idle{{end}}" aria-hidden="true"></span>{{if eq .Status "expired"}}Expired{{else if eq .Status "connected" "expiring"}}Working{{else if eq .Status "apikey"}}API key{{else}}Not connected{{end}} · {{template "usedby" .Agents}}</p>
+  <p class="acct-foot small muted">{{template "usedby" .Agents}}</p>
 </article>
 {{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>No logins yet. Add one below so your agents can run.</section>{{end}}
 </div>
@@ -62,7 +62,7 @@
     {{if can $.Role "admin"}}<form method="post" action="/logins/{{pe .Name}}/delete" data-confirm="Delete the connection {{.Name}}? Agents using it will stop until you add it again."><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm no">Delete</button></form>{{end}}
   </div>
   <div class="conn-test" aria-live="polite">{{with .Test}}{{template "conntest" .}}{{end}}</div>
-  <p class="acct-foot small muted"><span class="dot {{with .Test}}{{if .Err}}error{{else}}ok{{end}}{{else}}idle{{end}}" aria-hidden="true"></span>{{with .Test}}{{if .Err}}Unreachable{{else}}Working{{end}}{{else}}Not tested{{end}} · {{template "usedby" .Agents}}</p>
+  <p class="acct-foot small muted">{{template "usedby" .Agents}}</p>
 </article>
 {{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>No model endpoints yet. Add Ollama or any OpenAI-compatible API below.</section>{{end}}
 </div>
