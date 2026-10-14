@@ -30,6 +30,9 @@ type jobView struct {
 	Summary      string               // failed jobs: the last meaningful output line
 	Connect      string               // a login the job needed but which isn't connected
 	Notes        []store.Notification // notifications about this job
+
+	// the rule's lineage, from the live config
+	Source, SourceType, When, On, Provider string
 }
 
 var notImported = regexp.MustCompile(`credential (\S+) is not imported`)
@@ -96,6 +99,25 @@ func (s *server) jobDetail(id int64) (*jobView, bool, error) {
 		} else {
 			v.Argv = a.Cmd
 		}
+	}
+	cfg := s.Config() // one config for the whole lookup
+	for _, r := range cfg.Rules {
+		if r.Name != j.Rule {
+			continue
+		}
+		v.Source, v.When, v.On = r.Source, r.When, r.On
+		if v.On == "" {
+			v.On = "edge"
+		}
+		if src := cfg.Sources[r.Source]; src != nil {
+			v.SourceType = src.Type
+		} else if r.Source == "agent-result" {
+			v.SourceType = "agent results"
+		}
+		break
+	}
+	if v.Kind == "agent" {
+		v.Provider = agentProvider(v.Agent, cfg.Credentials) // v.Agent is the job's snapshot when it has one
 	}
 	if ev, ok := p.Env["event"]; ok {
 		if b, err := json.MarshalIndent(store.RedactKeys(ev), "", "  "); err == nil {
@@ -261,10 +283,12 @@ func (s *server) egress() (*egressView, error) {
 func (s *server) runs(state string, limit int) ([]store.JobAction, error) {
 	js, err := store.ListJobActions(s.Store.DB, state, limit)
 	for i := range js {
-		if js[i].Kind == "agent" && js[i].Provider == "" {
-			if a := s.Config().Agents[js[i].Target]; a != nil {
-				js[i].Provider = a.Kind
-			}
+		switch {
+		case js[i].Kind != "agent":
+		case js[i].Provider == "": // a run from before snapshots
+			js[i].Provider = providerOf(s.Config(), js[i].Target)
+		case js[i].Provider == "model": // the snapshot's credential names the real provider
+			js[i].Provider = modelProvider("model", js[i].Credential, s.Config().Credentials)
 		}
 	}
 	return js, err

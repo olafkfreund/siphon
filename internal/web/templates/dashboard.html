@@ -1,31 +1,30 @@
 {{define "dashboard"}}{{with .Dash}}
-<div class="top"><div><h1>{{.Greeting}}</h1><div class="muted">{{if .Pending}}{{len .Pending}} waiting for approval{{else}}No approvals waiting{{end}}{{if .RecentFailed}} · <span class="err">{{len .RecentFailed}} failed in the last day</span>{{end}} · {{if .SourcesErr}}{{.SourcesErr}} of {{len $.Sources}} sources with errors{{else}}{{len $.Sources}} source{{if ne (len $.Sources) 1}}s{{end}}, all healthy{{end}}</div></div></div>
+<div class="top"><div><h1>{{.Greeting}}</h1><div class="muted">{{if .Pending}}<a href="/approvals">{{len .Pending}} waiting for approval</a>{{else}}No approvals waiting{{end}}{{if .RecentFailed}} · <a class="err" href="/jobs?state=failed">{{len .RecentFailed}} failed in the last day</a>{{end}} · <a href="/sources">{{if .SourcesErr}}{{.SourcesErr}} of {{len $.Sources}} sources with errors{{else}}{{len $.Sources}} source{{if ne (len $.Sources) 1}}s{{end}}, all healthy{{end}}</a></div></div></div>
 <div class="grid g4 mb">
-  <div class="card stat"><span class="muted">Runs · 24 h</span><b class="g">{{.Total}}</b><span class="muted small">{{.Running}} running now</span></div>
-  <div class="card stat"><span class="muted">Success rate</span><b>{{.SuccessRate}}</b><span class="muted small">{{.Failed}} failed</span></div>
-  <div class="card stat"><span class="muted">Agent runs · 24 h</span><b>{{.AgentRuns}}<small> / {{.AgentCap}}</small></b><div class="bar"><i class="{{.AgentBar}}"></i></div></div>
-  <div class="card stat"><span class="muted">Sources</span><b>{{len $.Sources}}</b><span class="muted small">{{if .SourcesErr}}<span class="dot error"></span>{{.SourcesErr}} with errors{{else}}<span class="dot ok"></span>all healthy{{end}}</span></div>
+  <div class="card item-card stat{{if .Running}} is-hot{{end}}"><span class="muted">Runs · 24 h</span><b class="g">{{.Total}}</b><span class="muted small">{{.Running}} running now</span></div>
+  <div class="card item-card stat{{if .Failed}} is-err{{end}}"><span class="muted">Success rate</span><b>{{.SuccessRate}}</b><span class="muted small">{{.Failed}} failed</span></div>
+  <div class="card item-card stat"><span class="muted">Agent runs · 24 h</span><b>{{.AgentRuns}}{{if .AgentCap}}<small> / {{.AgentCap}}</small>{{end}}</b>{{if .AgentCap}}<div class="bar" role="progressbar" aria-label="Agent runs against the daily cap" aria-valuemin="0" aria-valuemax="{{.AgentCap}}" aria-valuenow="{{.AgentRuns}}"><i class="{{.AgentBar}}"></i></div>{{end}}</div>
+  <div class="card item-card stat{{if .SourcesErr}} is-err{{end}}"><span class="muted">Sources</span><b>{{len $.Sources}}</b><span class="muted small">{{if .SourcesErr}}<span class="dot error"></span>{{.SourcesErr}} with errors{{else}}<span class="dot ok"></span>all healthy{{end}}</span></div>
 </div>
 <div class="grid g2">
   <section class="card" aria-labelledby="needs"><h2 id="needs">{{if .RecentFailed}}Needs attention{{else}}Needs you{{end}}</h2>
-    {{range .Pending}}<div class="need">{{template "pill" .State}}<div class="what"><a href="/jobs/{{.ID}}"><b>{{.Rule}}</b></a> {{template "run" .}} <span class="muted small">· {{ago .CreatedAt}}</span></div><span class="sp"></span>
+    {{range .Pending}}<div class="card item-card need is-wait" data-kind="{{.Kind}}">{{template "pill" .State}}<div class="what"><a href="/jobs/{{.ID}}"><b>{{.Rule}}</b></a> <span class="muted small">#{{.ID}}</span> {{template "run" .}} <span class="stamp wait">{{ago .CreatedAt}}</span></div><span class="sp"></span>
       <div class="acts">
         {{if can $.Role "operator"}}<form method="post" action="/approvals/{{.ID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/"><button class="btn sm ok">Approve</button></form>{{end}}
         {{if can $.Role "operator"}}<form method="post" action="/approvals/{{.ID}}/deny"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/"><button class="btn sm no">Deny</button></form>{{end}}
       </div></div>{{end}}
-    {{range .RecentFailed}}<div class="need">{{template "pill" .State}}<div class="what"><a href="/jobs/{{.ID}}"><b>{{.Rule}}</b></a> {{template "run" .}} <span class="muted small">·{{if .ExitCode}} exited {{exit .ExitCode}} ·{{end}} {{ago .CreatedAt}}</span></div><span class="sp"></span><a class="btn sm" href="/jobs/{{.ID}}">Open</a></div>{{end}}
+    {{range .RecentFailed}}<div class="card item-card need is-err" data-kind="{{.Kind}}">{{template "pill" .State}}<div class="what"><a href="/jobs/{{.ID}}"><b>{{.Rule}}</b></a> <span class="muted small">#{{.ID}}</span> {{template "run" .}} <span class="stamp err">{{if .ExitCode}}exit {{exit .ExitCode}} · {{end}}{{ago .CreatedAt}}</span></div><span class="sp"></span><a class="btn sm" href="/jobs/{{.ID}}">Open</a></div>{{end}}
     {{if and (not .Pending) (not .RecentFailed)}}<div class="empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>All clear. Nothing waiting, nothing failed in the last day.</div>{{end}}
   </section>
   <section class="card" aria-labelledby="srcs"><h2 id="srcs">Sources</h2>
-    <div class="health">{{range $.Sources}}<div><span class="dot {{.Health}}" title="{{.Health}}"></span><b>{{.Name}}</b> <span class="pill tag">{{.Type}}</span>
-      <div class="meta small {{if .LastError}}err{{else}}muted{{end}}">{{if .LastError}}{{.LastError}}{{else if .LastPollAt}}{{if eq .Type "webhook"}}last delivery{{else}}polled{{end}} {{agop .LastPollAt}}{{if .Poll}} · every {{.Poll}}{{end}}{{else}}{{if eq .Type "webhook"}}waiting for a delivery{{else}}not polled yet{{end}}{{end}}</div></div>
+    <div class="health">{{range $.Sources}}<div><div class="item-head">{{template "srcicon" .Type}}<span class="dot {{.Health}}" title="{{.Health}}"></span><b>{{.Name}}</b><span class="pill tag">{{.Type}}</span><span class="sp"></span>
+      <span class="stamp{{if .LastError}} err{{else if .Hot}} hot{{end}}">{{if .LastError}}error{{else if eq .Type "webhook"}}{{if .LastEventAt}}last delivery {{agop .LastEventAt}}{{else}}waiting for a delivery{{end}}{{else if eq .Type "schedule"}}{{if .NextRunAt}}next run {{zoned .NextRunAt .Timezone}}{{else}}not scheduled{{end}}{{else if .ToolsOnly}}agent tools{{else if .LastPollAt}}polled {{agop .LastPollAt}}{{if .Poll}} · every {{.Poll}}{{end}}{{else}}not polled yet{{end}}</span></div>
+      {{if .LastError}}<div class="meta small err">{{.LastError}}</div>{{end}}</div>
     {{else}}<div class="empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>Nothing in the current yet. Add a source in <code>siphon.yaml</code>.</div>{{end}}</div>
   </section>
 </div>
-<section class="card mt" aria-labelledby="recent"><h2 id="recent">Recent runs</h2>
-  <table class="cards"><thead><tr><th>#</th><th>Rule</th><th>Runs</th><th>State</th><th class="hide-sm">Created</th><th>Exit</th></tr></thead><tbody>
-  {{range $.Jobs}}<tr><td data-label="#"><a href="/jobs/{{.ID}}">{{.ID}}</a></td><td data-label="Rule">{{.Rule}}</td><td data-label="Runs">{{template "run" .}}</td><td data-label="State">{{template "pill" .State}}</td><td class="hide-sm muted" data-label="Created">{{ago .CreatedAt}}</td><td data-label="Exit">{{exit .ExitCode}}</td></tr>
-  {{else}}<tr><td colspan="6"><div class="empty">No runs yet. When a rule fires, its runs show up here.</div></td></tr>{{end}}
-  </tbody></table>
+<section class="card mt" aria-labelledby="recent"><div class="top tight"><h2 id="recent">Recent runs</h2><span class="sp"></span><a class="btn sm" href="/jobs">All jobs</a></div>
+  {{range $.Jobs}}{{template "jobrow" .}}
+  {{else}}<div class="empty">No runs yet. When a rule fires, its runs show up here.</div>{{end}}
 </section>
 {{end}}{{end}}
