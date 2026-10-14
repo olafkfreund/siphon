@@ -336,6 +336,7 @@ type Source struct {
 	SigPrefix    string            `yaml:"signature_prefix"`    // sha256: e.g. "v1="; the header may list several
 	TimestampSep string            `yaml:"timestamp_separator"` // sha256 with timestamp_header: "." (default) or ":"
 	ID           string            `yaml:"id"`                  // delivery id, e.g. header.X-GitHub-Delivery
+	Format       string            `yaml:"format"`              // webhook: eventgrid (Azure Event Grid handshakes and batches)
 	Env          map[string]Secret `yaml:"env"`                 // stdio MCP child env; values are env:/file: refs
 	Package      string            `yaml:"package"`             // name in server.mcp_packages; fills Command
 	AWS          string            `yaml:"aws"`                 // provider: aws credential; the daemon injects short-lived keys
@@ -1538,6 +1539,15 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 		}
 		if (s.TokenField != "" || s.ReplyText != "") && s.Signature != "body-token" {
 			add("%s: token_field and reply_text are only for signature body-token", p)
+		}
+		switch {
+		case s.Format == "":
+		case s.Format != "eventgrid":
+			add("%s: format must be eventgrid, got %q", p, s.Format)
+		case s.Signature != "token":
+			add("%s: format eventgrid needs signature token", p)
+		case s.ID != "":
+			add("%s: id is not allowed with format eventgrid (each event carries its own id)", p)
 		}
 		if s.SigPrefix != "" && s.Signature != "sha256" {
 			add("%s: signature_prefix is only for signature sha256", p)

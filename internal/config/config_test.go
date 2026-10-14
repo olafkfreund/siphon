@@ -338,6 +338,22 @@ func TestBodyTokenValidation(t *testing.T) {
 	}
 }
 
+func TestEventGridFormatValidation(t *testing.T) {
+	t.Setenv("AGW_W", "x")
+	for _, tc := range []struct{ extra, want string }{
+		{"signature: token, token_header: X-Siphon-Key, format: eventgrid", ""},
+		{"signature: sha256, signature_header: X-S, format: eventgrid", "needs signature token"},
+		{"signature: token, token_header: X-K, format: eventgrid, id: header.X-Id", "not allowed with format eventgrid"},
+		{"signature: token, token_header: X-K, format: cloudevents", "format must be eventgrid"},
+	} {
+		c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, " + tc.extra + "}}"))
+		err := c.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%q: %v", tc.extra, err)
+		}
+	}
+}
+
 func TestRetryValidation(t *testing.T) {
 	for retry, want := range map[string]string{
 		"{attempts: 3, base: 5s, factor: 2}": "",
