@@ -176,3 +176,13 @@ standard-webhooks sources.
 
 Steps 1-6 edit about 12 files, so a `coder` agent writes them and a fresh
 Opus agent reviews them. Step 7 and the instance check are mine.
+
+## Deviations
+
+- **Step 1:** the test asserts exactly 202 (as `TestWebhookStandard`
+  does) where the plan said "2xx". The `webhook-id` is derived from the
+  key's random bytes rather than drawing more randomness.
+- **Step 3:** the rendered item YAML holds a write-only file reference, not
+  the secret. The `whsec_` prefix is therefore asserted on
+  `res.Secrets[0].Value` (as in `TestSecretAndGeneratedPrefix`), along with
+  `Value == "whsec_" + Done.HookSecret`.
