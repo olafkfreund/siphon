@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 115
 author: olafkfreund
 ---
@@ -91,3 +91,10 @@ the code) found the concrete causes:
    cmd, unit, routine, servicenow) and status (enabled, disabled, fired
    recently). Filtering by source kind is left out, because the search box
    already matches the source name. OK?
+
+## Decisions (at approval)
+
+1. **"Recently fired"** means fired within the last 15 minutes.
+2. **The filter chips** filter by action kind (agent, cmd, unit, routine,
+   servicenow) and by status (enabled, disabled, fired recently). The
+   search box covers source names.
