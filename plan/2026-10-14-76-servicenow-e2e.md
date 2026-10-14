@@ -134,3 +134,13 @@ OAuth app on the demo instance can be deleted by hand.
 A `coder` agent does steps 1, 2, 4 and 5, which edit about 6 files. Steps 3
 and 6 are mine. Step 3 needs the owner for the login, and step 4 only runs
 if step 3 succeeds. A fresh Opus agent reviews before the PR.
+
+## Deviations
+
+- **Step 1:**
+  - **`STUB_SN_PORT`:** the stub takes this optional port (default 8081),
+    for local runs.
+  - **Client credentials:** accepted in the form body (what
+    `internal/servicenow` sends) or as HTTP Basic.
+  - **A PATCH with a bad bearer** is recorded with `bearer_ok: false` and
+    answered 401.
