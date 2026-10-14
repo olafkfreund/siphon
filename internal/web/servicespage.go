@@ -134,7 +134,7 @@ func (s *server) connectedRows() []connRow {
 			case "webhook":
 				caps["webhooks"] = true
 			}
-			if src.AWS != "" {
+			if src.AWS != "" || src.Package == "servicenow" {
 				r.CanTest = true
 			}
 			r.Items = append(r.Items, connItem{"sources", n, "/config/sources/" + url.PathEscape(n)})
