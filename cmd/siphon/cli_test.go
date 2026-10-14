@@ -51,6 +51,7 @@ func newCLIEnvFile(t *testing.T, content string) *cliEnv {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("AGW_HOOK", "s3cret")
+	t.Setenv("AGW_DISCORD_KEY", strings.Repeat("ab", 32)) // an ed25519 public key
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
 	for _, k := range []string{"SIPHON_URL", "SIPHON_TOKEN", "SIPHON_TOKEN_FILE"} {
 		t.Setenv(k, "")

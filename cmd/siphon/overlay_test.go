@@ -23,6 +23,7 @@ rules:
 func overlayFixture(t *testing.T, items ...store.ConfigItem) string {
 	t.Helper()
 	t.Setenv("AGW_HOOK", "s3cret")
+	t.Setenv("AGW_DISCORD_KEY", strings.Repeat("ab", 32)) // an ed25519 public key
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "siphon.yaml")
 	if err := os.WriteFile(cfgPath, []byte(overlayBase), 0o600); err != nil {

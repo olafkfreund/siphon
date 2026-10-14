@@ -48,6 +48,7 @@ sources:
   servicenow: { type: mcp, package: servicenow, env: { SERVICENOW_INSTANCE_URL: env:AGW_HOOK, SERVICENOW_API_KEY: env:AGW_HOOK } }
   alerts: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
   deploys: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
+  discord-hooks: { type: webhook, signature: ed25519, format: discord, secret: env:AGW_DISCORD_KEY }
   mattermost-hooks: { type: webhook, signature: body-token, secret: env:AGW_HOOK }
   servicenow-hooks: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
 rules:
@@ -130,7 +131,7 @@ func TestExplainCommand(t *testing.T) {
 			t.Errorf("explain rules lacks %q:\n%s", want, out)
 		}
 	}
-	if out = e.ok("explain", "source"); !strings.Contains(out, "read.tool") || !strings.Contains(out, "[github|sha256|token|body-token|standard-webhooks|slack|stripe]") {
+	if out = e.ok("explain", "source"); !strings.Contains(out, "read.tool") || !strings.Contains(out, "[github|sha256|token|body-token|standard-webhooks|slack|stripe|ed25519]") {
 		t.Errorf("explain source:\n%s", out)
 	}
 	if out = e.ok("explain", "routine"); !strings.Contains(out, "steps[].retry.attempts") {

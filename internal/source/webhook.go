@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -31,7 +32,7 @@ type WebhookOptions struct {
 	SigPrefix       string // sha256: the header may hold a comma-separated list of PREFIX+hex; any match counts
 	TimestampSep    string // sha256 with a timestamp: what joins timestamp and body (default ".")
 	IDHeader        string
-	Format          string // "eventgrid": answer Azure Event Grid's handshakes and deliver each event of a batch
+	Format          string // "eventgrid": answer Azure Event Grid's handshakes and deliver each event of a batch; "discord" (signature ed25519): answer Discord's PING and interactions
 	MaxBody         int64
 	Now             func() time.Time
 	// PreLimit counts every request before it is read or verified (a flood of
@@ -179,6 +180,21 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 				reject(http.StatusUnauthorized, "signature or timestamp invalid")
 				return
 			}
+		case "ed25519":
+			// https://discord.com/developers/docs/interactions/overview#setting-up-an-endpoint
+			header = "X-Signature-Ed25519"
+			pub, err := hex.DecodeString(o.Secret)
+			if err != nil || len(pub) != ed25519.PublicKeySize {
+				reject(http.StatusInternalServerError, "public key misconfigured") // never echo the key
+				return
+			}
+			ts := r.Header.Get("X-Signature-Timestamp")
+			sig, err := hex.DecodeString(r.Header.Get(header))
+			if err != nil || len(sig) != ed25519.SignatureSize || !freshTS(ts, now) || !ed25519.Verify(pub, append([]byte(ts), body...), sig) {
+				reject(http.StatusUnauthorized, "signature or timestamp invalid")
+				return
+			}
+			signed = body
 		case "standard-webhooks":
 			header = "Webhook-Signature"
 			var ok bool
@@ -234,7 +250,7 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 			reject(http.StatusBadRequest, "delivery id header missing")
 			return
 		}
-		if o.Format != "eventgrid" && !o.Limit.Allow(now) { // eventgrid counts per event
+		if o.Format != "eventgrid" && o.Format != "discord" && !o.Limit.Allow(now) { // those count per event
 			reject(http.StatusTooManyRequests, "rate limited")
 			return
 		}
@@ -266,6 +282,10 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 		}
 		if o.Format == "eventgrid" {
 			serveEventGrid(w, r, o, now, body, headers, deliver, reject)
+			return
+		}
+		if o.Format == "discord" {
+			serveDiscord(w, r, o, now, body, headers, deliver, reject)
 			return
 		}
 		if data == nil {
@@ -349,6 +369,57 @@ func serveEventGrid(w http.ResponseWriter, r *http.Request, o WebhookOptions, no
 			return
 		}
 	}
+}
+
+// serveDiscord handles an authenticated Discord interaction: PING and
+// autocomplete are answered and not delivered; the rest are delivered keyed by
+// the interaction id and acknowledged (or answered with reply_text) inside
+// Discord's 3-second window. A duplicate gets the same response.
+func serveDiscord(w http.ResponseWriter, r *http.Request, o WebhookOptions, now time.Time, body []byte, headers map[string]string, deliver Deliver, reject func(int, string)) {
+	var v struct {
+		Type *int    `json:"type"`
+		ID   *string `json:"id"`
+	}
+	if json.Unmarshal(body, &v) != nil || v.Type == nil {
+		reject(http.StatusBadRequest, "not an interaction")
+		return
+	}
+	var resp any
+	switch *v.Type {
+	case 1: // PING
+		resp = map[string]int{"type": 1}
+	case 4: // autocomplete: no choices
+		resp = map[string]any{"type": 8, "data": map[string]any{"choices": []string{}}}
+	}
+	if resp == nil {
+		if v.ID == nil || *v.ID == "" {
+			reject(http.StatusBadRequest, "interaction without id")
+			return
+		}
+		if !o.Limit.Allow(now) {
+			reject(http.StatusTooManyRequests, "rate limited")
+			return
+		}
+		data, err := DecodeJSON(body)
+		if err == nil {
+			_, err = deliver(r.Context(), Event{Source: o.Name, ReceivedAt: now, Headers: headers, Data: data}, *v.ID)
+		}
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		switch {
+		case o.ReplyText != "":
+			resp = map[string]any{"type": 4, "data": map[string]string{"content": o.ReplyText}}
+		case *v.Type == 3:
+			resp = map[string]int{"type": 6}
+		default:
+			resp = map[string]int{"type": 5}
+		}
+	}
+	out, _ := json.Marshal(resp) // fixed shapes always encode
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(out)
 }
 
 // decodeBody reads JSON first, so a JSON body sent with a form Content-Type

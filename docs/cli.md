@@ -310,6 +310,7 @@ siphon connect <service>|model|login [--<field> value ...]
 | `--no-wait` | `false` | oauth: print the login URL and return |
 | `--profile` |  | AWS: Profile |
 | `--project` |  | GitLab: Project |
+| `--public-key` |  | Discord: Public key |
 | `--region` |  | AWS: Region |
 | `--reply` |  | Mattermost: Immediate reply |
 | `--role-arn` |  | AWS: Role ARN |

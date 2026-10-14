@@ -327,7 +327,7 @@ type Source struct {
 	Headers      map[string]Secret `yaml:"headers"` // values may be env:/file: refs or plain literals
 	Body         string            `yaml:"body"`
 	Secret       Secret            `yaml:"secret"`           // webhook HMAC key
-	Signature    string            `yaml:"signature"`        // github|sha256|token|body-token|standard-webhooks|slack|stripe
+	Signature    string            `yaml:"signature"`        // github|sha256|token|body-token|standard-webhooks|slack|stripe|ed25519
 	SigHeader    string            `yaml:"signature_header"` // sha256 preset
 	TokenHeader  string            `yaml:"token_header"`     // token preset
 	TimestampHdr string            `yaml:"timestamp_header"`
@@ -1075,6 +1075,13 @@ func secretHeader(name string) bool {
 }
 
 // Validate returns every problem at once, joined.
+// ed25519Key is a hex ed25519 public key (Discord shows it that way).
+var ed25519Key = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// StubSecret stands in for a pasted secret that is not on disk yet, when the
+// portal validates an edit before committing it (a valid URL, for notify).
+const StubSecret = "https://placeholder.invalid/"
+
 func (c *Config) Validate() error {
 	var errs []error
 	add := func(f string, a ...any) { errs = append(errs, fmt.Errorf(f, a...)) }
@@ -1534,16 +1541,35 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 			if s.SigHeader != "" || s.TimestampHdr != "" {
 				add("%s: signature_header and timestamp_header are not allowed with signature %s", p, s.Signature)
 			}
+		case "ed25519":
+			if s.SigHeader != "" || s.TimestampHdr != "" || s.TokenHeader != "" || s.TokenField != "" || s.ID != "" {
+				add("%s: signature_header, timestamp_header, token_header, token_field and id are not allowed with signature ed25519", p)
+			}
+			// The portal first validates with StubSecret in place of pasted secrets,
+			// then again with the real value before committing.
+			if v := s.Secret.Value; v != "" && v != StubSecret && !ed25519Key.MatchString(v) {
+				add("%s: secret must be a public key of 64 lowercase hex characters", p)
+			}
 		default:
-			add("%s: signature must be github, sha256, token, body-token, standard-webhooks, slack or stripe, got %q", p, s.Signature)
+			add("%s: signature must be github, sha256, token, body-token, standard-webhooks, slack, stripe or ed25519, got %q", p, s.Signature)
 		}
-		if (s.TokenField != "" || s.ReplyText != "") && s.Signature != "body-token" {
-			add("%s: token_field and reply_text are only for signature body-token", p)
+		if s.TokenField != "" && s.Signature != "body-token" {
+			add("%s: token_field is only for signature body-token", p)
+		}
+		if s.ReplyText != "" && s.Signature != "body-token" && s.Format != "discord" {
+			add("%s: reply_text is only for signature body-token or format discord", p)
 		}
 		switch {
 		case s.Format == "":
+		case s.Format == "discord":
+			if s.Signature != "ed25519" {
+				add("%s: format discord needs signature ed25519", p)
+			}
+			if n := utf8.RuneCountInString(s.ReplyText); n > 500 {
+				add("%s: reply_text is %d characters; the limit is 500", p, n)
+			}
 		case s.Format != "eventgrid":
-			add("%s: format must be eventgrid, got %q", p, s.Format)
+			add("%s: format must be eventgrid or discord, got %q", p, s.Format)
 		case s.Signature != "token":
 			add("%s: format eventgrid needs signature token", p)
 		case s.ID != "":

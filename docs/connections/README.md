@@ -42,7 +42,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 |---|---|---|---|---|
 | Slack | webhooks | available | `siphon connect slack` | [`slack-mention-agent`](../templates/slack-mention-agent.yaml) |
 | Mattermost | webhooks | available | `siphon connect mattermost` | [`mattermost-command-agent`](../templates/mattermost-command-agent.yaml) |
-| Discord |  | not yet: needs an ed25519 signature mode and the PING handshake, and does not cover channel messages | — |  |
+| Discord | webhooks | available | `siphon connect discord` | [`discord-ask-agent`](../templates/discord-ask-agent.yaml) |
 | Microsoft Teams |  | not yet: needs a teams-hmac signature mode with a synchronous reply within 5 seconds | — |  |
 | Matrix |  | not yet: needs PUT requests and a {} reply | — |  |
 

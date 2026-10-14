@@ -61,6 +61,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 
 | Template | What it does | Connect first |
 |---|---|---|
+| [`discord-ask-agent`](discord-ask-agent.yaml) | A Discord /ask command answered by a local model, posted back to the interaction | `siphon connect discord`, `siphon connect model ollama` |
 | [`mattermost-command-agent`](mattermost-command-agent.yaml) | A Mattermost /ask command answered by a local model, posted back to the channel | `siphon connect mattermost`, `siphon connect model ollama` |
 | [`servicenow-change-on-deploy`](servicenow-change-on-deploy.yaml) | Note a deploy on its ServiceNow change request | a webhook source `deploys`, `siphon connect servicenow --instance …` |
 | [`servicenow-incident-notify`](servicenow-incident-notify.yaml) | Get notified when a P1 or P2 ServiceNow incident is created | `siphon connect servicenow` |
