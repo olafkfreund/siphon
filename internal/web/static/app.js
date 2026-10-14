@@ -75,7 +75,8 @@
   // Rules page: search box + chips narrow the cards; state lives for the session.
   function rulesFilter() {
     var bar = document.querySelector(".rules-bar");
-    if (!bar) return;
+    if (!bar || bar.dataset.bound) return; // bound once per rendered bar
+    bar.dataset.bound = "1";
     var q = bar.querySelector(".rules-search"), chips = bar.querySelectorAll(".chip"), cards = document.querySelectorAll(".rule-card");
     var none = document.querySelector(".rules-none"), chip = "all";
     try { var st = JSON.parse(sessionStorage.getItem("siphon-rules") || "{}"); q.value = st.q || ""; chip = st.chip || "all"; } catch (e) {}
@@ -84,6 +85,8 @@
       var f = c.dataset.filter;
       if (f !== "all" && f !== "on" && f !== "off" && f !== "hot" && !document.querySelector('.rule-card[data-kind="' + f + '"]')) c.hidden = true;
     });
+    var saved = bar.querySelector('.chip[data-filter="' + chip + '"]');
+    if (!saved || saved.hidden) chip = "all"; // the saved kind may have no rules any more
     function apply() {
       var words = q.value.toLowerCase().split(/\s+/).filter(Boolean), shown = 0;
       cards.forEach(function (c) {
@@ -99,7 +102,7 @@
     q.addEventListener("input", apply);
     bar.addEventListener("click", function (e) { var c = e.target.closest(".chip"); if (c) { chip = c.dataset.filter; apply(); } });
     if (none) none.addEventListener("click", function (e) {
-      if (e.target.closest("[data-action=clear-filter]")) { q.value = ""; chip = "all"; apply(); }
+      if (e.target.closest("[data-action=clear-filter]")) { q.value = ""; chip = "all"; apply(); q.focus(); }
     });
     apply();
   }

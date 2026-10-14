@@ -602,7 +602,9 @@ func TestRulesPageMarkup(t *testing.T) {
 	})
 	for rule, ago := range map[string]time.Duration{"ag": 5 * time.Minute, "cmd": 20 * time.Minute} {
 		at := e.now.Add(-ago).UnixMilli()
-		e.st.DB.Exec(`INSERT INTO rule_state(rule,key,last_value,last_fired_at,last_seen_at) VALUES (?,'k',1,?,?)`, rule, at, at)
+		if _, err := e.st.DB.Exec(`INSERT INTO rule_state(rule,key,last_value,last_fired_at,last_seen_at) VALUES (?,'k',1,?,?)`, rule, at, at); err != nil {
+			t.Fatal(err)
+		}
 	}
 	e.do("POST", "/api/rules/off/disable", nil, bearer)
 	c, _ := e.asRole(roleAdmin, "u")
@@ -620,5 +622,24 @@ func TestRulesPageMarkup(t *testing.T) {
 	b = e2.do("GET", "/rules", nil, func(r *http.Request) { r.AddCookie(c) }).Body.String()
 	if !strings.Contains(b, `href="/help/templates"`) || !strings.Contains(b, `href="/config/rules/new"`) || strings.Contains(b, "rules-bar") {
 		t.Error("empty state")
+	}
+}
+
+// A model agent shows the provider it runs on: the credential's preset if it has one, else its provider.
+func TestRulesViewModelProvider(t *testing.T) {
+	e := newEnv(t, func(o *Options) {
+		o.Cfg.Credentials = map[string]*config.Credential{"g": {Provider: "openai", Preset: "groq"}, "o": {Provider: "ollama"}}
+		o.Cfg.Agents = map[string]*config.Agent{"mg": {Kind: "model", Credential: "g"}, "mo": {Kind: "model", Credential: "o"}}
+		o.Cfg.Rules = []config.Rule{
+			{Name: "g", Source: "disk", When: "true", Action: config.Action{Agent: "mg"}},
+			{Name: "o", Source: "disk", When: "true", Action: config.Action{Agent: "mo"}},
+		}
+	})
+	rules, err := e.srv.rules()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rules[0].Provider != "groq" || rules[1].Provider != "ollama" {
+		t.Fatalf("providers: %q %q", rules[0].Provider, rules[1].Provider)
 	}
 }

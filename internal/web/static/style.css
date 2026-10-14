@@ -156,7 +156,7 @@ dt { color: var(--muted) } dd { margin: 0 }
 .rule-card[hidden] { display: none }
 .rule-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap }
 .rule-head form { display: flex }
-.flow { display: grid; grid-template-columns: minmax(6.5rem,.85fr) 30px minmax(10rem,1.5fr) 30px minmax(8rem,1.1fr); align-items: stretch; margin: .5rem 0 }
+.flow { display: grid; grid-template-columns: minmax(6.5rem,.85fr) 44px minmax(10rem,1.5fr) 44px minmax(8rem,1.1fr); align-items: stretch; margin: .5rem 0 } /* 44px = the pipe (30px) + its margins: the arrowhead stops short of the next node */
 .node { flex: 1 1 auto; min-width: 6.5rem; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: .55rem .7rem; font-size: .84rem }
 .node small { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: .2rem }
 .node small .prov { text-transform: none; letter-spacing: 0; white-space: nowrap } /* a provider name, not a label */

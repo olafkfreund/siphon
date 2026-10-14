@@ -165,6 +165,18 @@ spec: spec/2026-10-14-115-rules-page-refresh.md
     ("OPENAI-" / "COMPATIBLE"). `.node small .prov` resets it;
   - a `model` agent now shows its credential's provider (Ollama) instead
     of "OpenAI-compatible".
+- **The Opus review:** no HIGH and no MEDIUM. LOW, fixed:
+  - **The arrowhead overlapped the next node:** the pipe columns are now
+    44px, the pipe plus its margins.
+  - **A saved chip for a kind with no rules any more** falls back to All.
+  - **Clear filter** returns focus to the search box.
+  - **The bind-once guard** is added.
+  - **A model agent** shows its credential's `preset` (groq, openrouter, …)
+    before its provider, with a test.
+  - **The markup test** checks its `Exec` error.
+
+  Not changed: two links per card to the editor (the name and Edit).
+  That's accepted.
 
 ## Tests
 

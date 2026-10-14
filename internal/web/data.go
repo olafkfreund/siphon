@@ -195,6 +195,9 @@ func (s *server) rules() ([]ruleView, error) {
 			v.Provider = a.Kind
 			if cr := s.Config().Credentials[a.Credential]; a.Kind == "model" && cr != nil {
 				v.Provider = cr.Provider // a model agent runs on its credential's provider (ollama, openai, …)
+				if cr.Preset != "" {
+					v.Provider = cr.Preset // the openai-compatible tile it was set up from (groq, openrouter, …)
+				}
 			}
 		}
 		if r.Repeat > 0 {
