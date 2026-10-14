@@ -9,8 +9,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/rule"
+	"github.com/olafkfreund/siphon/internal/store"
 )
 
 const snID = "0123456789abcdef0123456789abcdef"
@@ -175,5 +178,89 @@ func TestRunServiceNowOAuth(t *testing.T) {
 	a := &config.ServiceNowAction{Connection: "sn", Op: "get", SysID: snID}
 	if exit, out, _ := snRun(cfg, a, nil); exit != 0 {
 		t.Fatalf("exit %d: %s", exit, out)
+	}
+}
+
+// snPipeline is a pipeline over the fake instance with the given rule and routine YAML.
+func snPipeline(t *testing.T, url, rest string) *Pipeline {
+	t.Helper()
+	snConfig(t, url, true, snKeyAuth) // sets the SN_* env
+	cfg2, err := config.Parse([]byte("server: { sandbox: none, services: { private_endpoints: [" + strings.TrimPrefix(url, "http://") + "] } }\n" +
+		"sources:\n  s: { type: http, url: 'http://x' }\n  sn: { type: mcp, package: servicenow, read: { tool: t }, env: { SERVICENOW_INSTANCE_URL: env:SN_URL, " + snKeyAuth + " } }\n" + rest))
+	if err != nil || cfg2.Validate() != nil {
+		t.Fatalf("%v %v", err, cfg2.Validate())
+	}
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	now := time.Unix(1_800_000_000, 0)
+	return New(cfg2, st, func() time.Time { return now })
+}
+
+func snFire(t *testing.T, p *Pipeline) store.JobDetail {
+	t.Helper()
+	_, ids, err := p.HandleEvent(context.Background(), rule.Event{Source: "s", Data: map[string]any{"id": snID}}, false)
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("fire: %v %v", ids, err)
+	}
+	if _, err := p.RunQueued(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	j, err := store.GetJob(p.Store.DB, ids[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return j
+}
+
+func TestServiceNowRuleJob(t *testing.T) {
+	old := serviceNowHTTP
+	t.Cleanup(func() { serviceNowHTTP = old })
+	serviceNowHTTP = func(bool) *http.Client { return http.DefaultClient }
+	f := newSNFake(t, `{"result":{"sys_id":"`+snID+`","number":"INC0010001"}}`)
+	p := snPipeline(t, f.URL, `rules:
+  - { name: go, source: s, when: "true", on: each, id: "string(event.id)", cooldown: 1s, action: { servicenow: { connection: sn, op: add_work_note, sys_id: "{{.event.id}}", fields: { text: hi } } } }
+`)
+	j := snFire(t, p)
+	if j.State != "done" || !strings.Contains(j.Output, "servicenow add_work_note incident") {
+		t.Fatalf("%s: %s", j.State, j.Output)
+	}
+	if r := f.last(t); r.Method != "PATCH" || r.Path != "/api/now/table/incident/"+snID {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestServiceNowRoutine(t *testing.T) {
+	old := serviceNowHTTP
+	t.Cleanup(func() { serviceNowHTTP = old })
+	serviceNowHTTP = func(bool) *http.Client { return http.DefaultClient }
+	f := newSNFake(t, `{"result":{"sys_id":"`+snID+`","number":"INC0010001"}}`)
+	p := snPipeline(t, f.URL, `rules:
+  - { name: go, source: s, when: "true", on: each, id: "string(event.id)", cooldown: 1s, action: { routine: r } }
+routines:
+  r:
+    steps:
+      - { id: get, servicenow: { connection: sn, op: get, sys_id: "{{.event.id}}" } }
+      - { id: note, servicenow: { connection: sn, op: add_work_note, sys_id: "{{.event.id}}", fields: { text: "seen {{.steps.get.json.number}}" } } }
+`)
+	j := snFire(t, p)
+	if j.State != "done" || !strings.Contains(f.last(t).Body, `"work_notes":"seen INC0010001"`) {
+		t.Fatalf("%s: %s body=%s", j.State, j.Output, f.last(t).Body)
+	}
+}
+
+// A queued job keeps its servicenow action: the payload JSON round-trips it.
+func TestServiceNowPayloadRoundTrip(t *testing.T) {
+	in := Payload{Action: config.Action{ServiceNow: &config.ServiceNowAction{Connection: "sn", Op: "create", Fields: map[string]string{"a": "b"}}},
+		Steps: []config.Step{{ID: "s", ServiceNow: &config.ServiceNowAction{Op: "get", SysID: "x"}}}}
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := decodePayload(string(b))
+	if err != nil || out.Action.ServiceNow == nil || out.Action.ServiceNow.Fields["a"] != "b" || out.Steps[0].ServiceNow.SysID != "x" {
+		t.Fatalf("%+v %v", out, err)
 	}
 }
