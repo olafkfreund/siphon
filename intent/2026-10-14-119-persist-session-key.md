@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 119
 author: olafkfreund
 ---
@@ -61,3 +61,11 @@ that accidental revocation.
 2. **Backups.** Should `siphon backup` include the key file? I'd **leave it
    out**. A restored host then makes a fresh key and signs everyone out
    once, which is the safe default after a restore. OK?
+
+## Decisions (at approval)
+
+1. **The signing key is tied to the token.** It's derived from the stored
+   random key and the hash of `server.token`, so rotating the token signs
+   everyone out. There's no separate button.
+2. **Backups:** `siphon backup` leaves the key file out, so a restored host
+   makes a fresh key and signs everyone out once.
