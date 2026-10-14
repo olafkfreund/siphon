@@ -67,6 +67,17 @@ pkgs.testers.runNixOSTest {
         before = [ "siphon.service" ];
         serviceConfig.ExecStart = "${pkgs.python3}/bin/python3 ${./stub-sts.py}";
       };
+      # A stand-in ServiceNow instance (OAuth token + incident PATCH, #76). On
+      # loopback: the client allows plain http only there.
+      systemd.services.stub-servicenow = {
+        wantedBy = [ "multi-user.target" ];
+        before = [ "siphon.service" ];
+        environment = {
+          STUB_SN_CLIENT_ID = "sn-client-id-vm";
+          STUB_SN_CLIENT_SECRET = "sn-client-SECRET-vm";
+        };
+        serviceConfig.ExecStart = "${pkgs.python3}/bin/python3 ${./stub-servicenow.py}";
+      };
       systemd.services.siphon.environment.AWS_ENDPOINT_URL_STS = "http://127.0.0.1:8099";
       # A webhook notification channel on loopback (docs/tasks/notifications.md).
       systemd.services.notify-recv = {
@@ -76,6 +87,11 @@ pkgs.testers.runNixOSTest {
       environment.etc."siphon/gl-token".text = "gl-hook-token-123";
       # Standard Webhooks secret: whsec_ + base64 of the key bytes.
       environment.etc."siphon/std-secret".text = "whsec_c2lwaG9uLXN0YW5kYXJkLXdlYmhvb2tzLWtleQ==";
+      # ServiceNow: instance URL and OAuth client for the stub, and the hook key.
+      environment.etc."siphon/sn-url".text = "http://127.0.0.1:8081";
+      environment.etc."siphon/sn-client-id".text = "sn-client-id-vm";
+      environment.etc."siphon/sn-client-secret".text = "sn-client-SECRET-vm";
+      environment.etc."siphon/sn-hook".text = "whsec_c2lwaG9uLXNlcnZpY2Vub3ctaG9vay1rZXk=";
       services.siphon = {
         enable = true;
         backup.enable = true;
@@ -170,6 +186,7 @@ pkgs.testers.runNixOSTest {
           server.services.private_endpoints = [
             "127.0.0.1:18099"
             "external:8080"
+            "127.0.0.1:8081"
           ];
           sources.extm = {
             type = "mcp";
@@ -192,6 +209,20 @@ pkgs.testers.runNixOSTest {
             type = "webhook";
             signature = "standard-webhooks";
             secret = "file:/etc/siphon/std-secret";
+          };
+          # ServiceNow: the built-in MCP package (its credentials also serve the
+          # rule action) and the signed webhook a Business Rule posts to (#76).
+          sources.servicenow = {
+            type = "mcp";
+            package = "servicenow";
+            env.SERVICENOW_INSTANCE_URL = "file:/etc/siphon/sn-url";
+            env.SERVICENOW_CLIENT_ID = "file:/etc/siphon/sn-client-id";
+            env.SERVICENOW_CLIENT_SECRET = "file:/etc/siphon/sn-client-secret";
+          };
+          sources.servicenow-hooks = {
+            type = "webhook";
+            signature = "standard-webhooks";
+            secret = "file:/etc/siphon/sn-hook";
           };
           # An OAuth MCP source with no login and nothing listening (#44).
           sources.oauthsrc = {
@@ -397,6 +428,20 @@ pkgs.testers.runNixOSTest {
                 "echo"
                 "standard {{.event.n}}"
               ];
+            }
+            {
+              name = "sn-note";
+              source = "servicenow-hooks";
+              when = ''event.table == "incident"'';
+              on = "each";
+              id = ''event.sys_id + ":" + event.sys_mod_count'';
+              cooldown = "1m";
+              action.servicenow = {
+                connection = "servicenow";
+                op = "add_work_note";
+                sys_id = "{{.event.sys_id}}";
+                fields.text = "seen {{.event.number}}";
+              };
             }
             {
               name = "aws-agent";
@@ -756,7 +801,7 @@ pkgs.testers.runNixOSTest {
         assert post("stdhook", body, {**hdr, "webhook-signature": "v1,AAAA"}) == "401"
         assert post("stdhook", body, {**hdr, "webhook-timestamp": str(int(time.time()) - 900)}) == "401"
         assert post("stdhook", body, hdr) == "202"
-        assert post("stdhook", body, hdr) != "202", "replayed delivery accepted"
+        assert post("stdhook", body, hdr) == "409", "replayed delivery not a duplicate"
         for rule, text in [("gl-event", "gitlab mr 801"), ("std-event", "standard 802")]:
             machine.wait_until_succeeds(
                 f"sqlite3 /var/lib/siphon/state.db \"select output from jobs where rule='{rule}' and state='done'\" | grep -q '{text}'",
@@ -764,6 +809,46 @@ pkgs.testers.runNixOSTest {
             )
         logs = machine.succeed("journalctl -u siphon --no-pager")
         assert "gl-hook-token-123" not in logs, "webhook token in the logs"
+
+    with subtest("ServiceNow: a signed Business Rule delivery becomes a work note (#76)"):
+        snkey = base64.b64decode("c2lwaG9uLXNlcnZpY2Vub3ctaG9vay1rZXk=")
+        sys_id = "0123456789abcdef0123456789abcdef"
+        snbody = '{"event":"insert","table":"incident","sys_id":"' + sys_id + '","number":"INC0000001","sys_mod_count":"0","short_description":"vm"}'
+        def snsign(mid, ts):
+            sig = "v1," + base64.b64encode(hmac.new(snkey, f"{mid}.{ts}.{snbody}".encode(), hashlib.sha256).digest()).decode()
+            return {"webhook-id": mid, "webhook-timestamp": ts, "webhook-signature": sig}
+        # the Business Rule's delivery id is sys_id:sys_mod_count
+        snhdr = snsign(sys_id + ":0", str(int(time.time())))
+        assert post("servicenow-hooks", snbody, snhdr) == "202"
+        try:
+            machine.wait_until_succeeds(
+                "sqlite3 /var/lib/siphon/state.db \"select state from jobs where rule='sn-note'\" | grep -qx done",
+                timeout=120,
+            )
+        except Exception:
+            dump()
+            print(machine.execute("sqlite3 /var/lib/siphon/state.db \"select rule, state, output from jobs\"")[1])
+            print(machine.execute("curl -s http://127.0.0.1:8081/_seen")[1])
+            raise
+        snout = machine.succeed("sqlite3 /var/lib/siphon/state.db \"select output from jobs where rule='sn-note'\"")
+        assert "servicenow add_work_note incident INC0000001" in snout, snout
+        seen = json.loads(machine.succeed("curl -s http://127.0.0.1:8081/_seen"))
+        assert len(seen) == 1, seen
+        assert seen[0]["method"] == "PATCH" and seen[0]["path"].endswith("/incident/" + sys_id), seen
+        assert seen[0]["body"] == {"work_notes": "seen INC0000001"} and seen[0]["bearer_ok"] is True, seen
+        njobs = "sqlite3 /var/lib/siphon/state.db \"select count(*) from jobs where rule='sn-note'\""
+        # an exact resend is a duplicate delivery (409)
+        assert post("servicenow-hooks", snbody, snhdr) == "409", "resend not a duplicate"
+        # a new delivery of the same change passes the webhook replay check; the rule's id dedupes it
+        assert post("servicenow-hooks", snbody, snsign("msg_sn_2", str(int(time.time())))) == "202"
+        time.sleep(5)
+        assert machine.succeed(njobs).strip() == "1", "the same change made a second job"
+        assert len(json.loads(machine.succeed("curl -s http://127.0.0.1:8081/_seen"))) == 1, "a resend patched twice"
+        # the client secret and the token stay out of the jobs and the journal
+        alljobs = machine.succeed("sqlite3 /var/lib/siphon/state.db 'select output from jobs'")
+        logs = machine.succeed("journalctl -u siphon --no-pager")
+        for leak in ("sn-client-SECRET-vm", "stub-tok", "whsec_c2lwaG9uLXNlcnZpY2Vub3ctaG9vay1rZXk"):
+            assert leak not in snout and leak not in alljobs and leak not in logs, f"{leak} leaked"
 
     with subtest("MCP bridge: a stdio server's secret reaches the server, never the agent"):
         assert hook('{"kind":"bridge","n":700}') == "202"

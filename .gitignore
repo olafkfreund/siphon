@@ -11,3 +11,4 @@ siphon.db
 devenv.local.nix
 devenv.local.yaml
 .direnv
+__pycache__/
