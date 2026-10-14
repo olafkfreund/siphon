@@ -430,6 +430,7 @@ services:
     summary: "Outgoing webhooks and slash commands from Mattermost, verified by the token Mattermost generates."
     capabilities: [webhooks]
     status: available
+    templates: [mattermost-command-agent]
     fields:
       - {<<: *f_name, default: mattermost}
       - {key: token, label: Token, type: secret, required: true, help: 'Mattermost shows it after you save the outgoing webhook or slash command (Integrations).', section: 2}

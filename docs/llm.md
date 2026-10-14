@@ -57,6 +57,7 @@ Always follow this order. Every step has `-o json`.
    for example:
    - `github-pr-review`, `github-ci-failure`;
    - `disk-full`, `upstream-status`, `alertmanager-summary`;
+   - `mattermost-command-agent` (a chat slash command, `signature: body-token`),
    - `webhook-to-ntfy`, `local-summariser`, `nightly-report`,
      `aws-cloudwatch-alarm`.
 
