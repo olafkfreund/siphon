@@ -279,3 +279,46 @@ func TestNotionEntry(t *testing.T) {
 		t.Fatalf("secrets %+v setup %q", res.Secrets, e.Setup)
 	}
 }
+
+func TestMatrixEntry(t *testing.T) {
+	e := Get("matrix")
+	if e == nil || e.Status != "available" {
+		t.Fatalf("entry: %+v", e)
+	}
+	env := Env{HookURL: func(n string) string { return "https://s.example/hook/" + n }}
+	res, err := e.Render(map[string]string{"name": "mx", "homeserver_name": "example.org"}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	y := res.Items[0].YAML
+	if res.Items[0].Name != "mx-hooks" || !strings.Contains(y, "format: matrix") || !strings.Contains(y, "token_header: Authorization") {
+		t.Fatalf("%+v", res.Items)
+	}
+	if len(res.Secrets) != 1 {
+		t.Fatalf("secrets %+v", res.Secrets)
+	}
+	hs, reg := res.Secrets[0].Value, res.Done.Registration
+	var as string
+	for _, l := range strings.Split(reg, "\n") {
+		if v, ok := strings.CutPrefix(l, "as_token: "); ok {
+			as = v
+		}
+	}
+	if hs == "" || as == "" || as == hs || !strings.Contains(reg, "hs_token: "+hs) || !strings.Contains(reg, `url: "https://s.example/hook/mx-hooks"`) ||
+		!strings.Contains(reg, `regex: "#.*:example.org"`) || !strings.Contains(reg, `sender_localpart: "siphon"`) {
+		t.Fatalf("registration:\n%s", reg)
+	}
+	for _, it := range res.Items {
+		if strings.Contains(it.YAML, as) || strings.Contains(it.YAML, "as_token") {
+			t.Fatal("as_token stored in an item")
+		}
+	}
+	for _, s := range res.Secrets {
+		if s.Value == as {
+			t.Fatal("as_token stored as a secret")
+		}
+	}
+	if _, err := e.Render(map[string]string{"name": "mx"}, env); err == nil {
+		t.Fatal("homeserver_name is required")
+	}
+}

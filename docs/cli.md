@@ -302,7 +302,9 @@ siphon connect <service>|model|login [--<field> value ...]
 | `--external-id` |  | AWS: External ID |
 | `--file` |  | login: a login file (kind login), or - for stdin |
 | `--header` |  | Webhook: Header |
+| `--homeserver-name` |  | Matrix: Homeserver name |
 | `--instance` |  | ServiceNow: Instance URL |
+| `--localpart` |  | Matrix: Bot user localpart |
 | `--logout` | `false` | oauth: delete the source's login |
 | `--mode` |  | GitHub: MCP server |
 | `--name` |  | name of the connection (default: the service or preset) |
@@ -314,6 +316,7 @@ siphon connect <service>|model|login [--<field> value ...]
 | `--region` |  | AWS: Region |
 | `--reply` |  | Mattermost: Immediate reply |
 | `--role-arn` |  | AWS: Role ARN |
+| `--rooms` |  | Matrix: Room aliases |
 | `--secret` |  | Webhook: Secret as - (stdin) or @file |
 | `--secret-access-key` |  | AWS: Base secret access key as - (stdin) or @file |
 | `--servers` |  | AWS: Servers |

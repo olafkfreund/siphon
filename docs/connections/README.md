@@ -43,8 +43,8 @@ lists what's missing. Models and subscription logins are on their own pages:
 | Slack | webhooks | available | `siphon connect slack` | [`slack-mention-agent`](../templates/slack-mention-agent.yaml) |
 | Mattermost | webhooks | available | `siphon connect mattermost` | [`mattermost-command-agent`](../templates/mattermost-command-agent.yaml) |
 | Discord | webhooks | available | `siphon connect discord` | [`discord-ask-agent`](../templates/discord-ask-agent.yaml) |
+| Matrix | webhooks | available | `siphon connect matrix` | [`matrix-deploy-command`](../templates/matrix-deploy-command.yaml) |
 | Microsoft Teams |  | not yet: needs a teams-hmac signature mode with a synchronous reply within 5 seconds | — |  |
-| Matrix |  | not yet: needs PUT requests and a {} reply | — |  |
 
 ## Monitoring & alerting
 
