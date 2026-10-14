@@ -32,6 +32,21 @@ spec: spec/2026-10-14-121-notify-unpolled-recovery.md
 
    → verify: `go test -race ./internal/notify`.
 
+## Deviations
+
+- **The Opus review:** no HIGH and no MEDIUM.
+  - **LOW, accepted:** a source removed or switched off while failing,
+    then restored while still failing, keeps its old `failing_since`
+    key. Its episode already has a `source_ok` row, so no new "Source
+    failing" is sent until it recovers once.
+  - It's rare: it needs a config change in both directions while the
+    source keeps failing.
+  - Clearing `failing_since` for sources that don't poll would be a store
+    change, beyond this plan.
+- **The test env** now configures `feed` and `blip` as polled http
+  sources. Without them the new filter would make the existing recovery
+  test pass for the wrong reason.
+
 ## Tests
 
 ```sh
