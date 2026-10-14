@@ -3,6 +3,7 @@ package web
 import (
 	"database/sql"
 	"encoding/json"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -143,7 +144,7 @@ func (s *server) sources() ([]sourceView, error) {
 		default:
 			switch {
 			case src.URL != "":
-				v.Target = src.URL
+				v.Target = displayURL(src.URL) // no query, fragment or userinfo: they can carry keys
 			case src.Package != "":
 				v.Target = "stdio: " + src.Package
 			case len(src.Command) > 0:
@@ -314,7 +315,7 @@ type dashView struct {
 	store.Dashboard
 	Greeting                                    string
 	Total, Running, Failed, AgentCap, SourcesOK int
-	SourcesErr                                  int
+	SourcesErr, SourcesStale                    int
 	SuccessRate, AgentBar                       string
 }
 
@@ -354,6 +355,8 @@ func (s *server) dashboard(srcs []sourceView) (*dashView, error) {
 			v.SourcesOK++
 		case "error":
 			v.SourcesErr++
+		case "stale": // late polls, a refusing webhook, an expired login
+			v.SourcesStale++
 		}
 	}
 	return v, nil
@@ -387,4 +390,15 @@ func left(now, t time.Time) string {
 		return strconv.Itoa(int(d.Minutes())) + " min"
 	}
 	return strconv.Itoa(int(d.Hours())) + " h"
+}
+
+// displayURL is a source URL safe to show any portal user: scheme, host and
+// path only. A query string (?api_key=…), fragment or userinfo is dropped.
+func displayURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "(unparseable URL)"
+	}
+	u.User, u.RawQuery, u.Fragment, u.RawFragment = nil, "", "", ""
+	return u.String()
 }

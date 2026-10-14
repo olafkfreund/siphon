@@ -32,7 +32,7 @@ func TestApprovalsCard(t *testing.T) {
 	b := e.page("/approvals")
 	for _, want := range []string{
 		"item-card is-wait", `data-kind="agent"`, "#" + id, "flow flow-2", `<code class="node-target" title="disk">disk</code>`,
-		"fixer", "claude", `stamp err`, "expires in 10 min",
+		"fixer", ">Claude<", `stamp err`, "expires in 10 min",
 		`data-confirm="Deny job ` + id + `? It will be cancelled."`,
 		`aria-label="Deny job ` + id + ` (disk-full)"`, `aria-label="Approve job ` + id + ` (disk-full)"`,
 		`action="/approvals/` + id + `/approve"`,

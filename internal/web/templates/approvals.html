@@ -14,7 +14,7 @@
 {{end}}<div class="stack" data-filter-list="approvals">
 {{range $a := .Approvals}}{{$p := index $.ActionOf $a.JobID}}<section class="card item-card is-wait" data-filter-item data-kind="{{$p.Kind}}" data-text="{{$a.JobID}} {{$a.Rule}} {{$p.Target}} {{$p.Provider}} {{$p.Source}}" aria-label="Approval for job {{$a.JobID}}, rule {{$a.Rule}}">
   <div class="item-head"><a class="item-title" href="/jobs/{{$a.JobID}}"><b>{{$a.Rule}}</b></a><span class="muted small">#{{$a.JobID}}</span><span class="sp"></span>
-    <span class="stamp {{if $p.Soon}}err{{else}}wait{{end}}">asked {{ago $a.CreatedAt}} · expires in {{left $a.ExpiresAt}}</span></div>
+    <span class="stamp {{if $p.Soon}}err{{else}}wait{{end}}">asked {{ago $a.CreatedAt}} · {{$l := left $a.ExpiresAt}}{{if eq $l "expired"}}expired{{else}}expires in {{$l}}{{end}}</span></div>
   <div class="flow flow-2">
     <div class="node"><small><span class="sr-only">Trigger: </span>{{template "srcicon" $p.SourceType}}<span>{{if $p.SourceType}}{{$p.SourceType}}{{else}}trigger{{end}}</span></small>{{if $p.Source}}<code class="node-target" title="{{$p.Source}}">{{$p.Source}}</code>{{else}}<span class="muted">unknown</span>{{end}}</div>
     <span class="pipe" aria-hidden="true"></span>

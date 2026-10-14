@@ -62,3 +62,16 @@ func TestSourcesHotViaLastRun(t *testing.T) {
 		t.Error("a recent schedule run is hot")
 	}
 }
+
+// A key in a source URL's query string never reaches the page.
+func TestDisplayURLDropsSecrets(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://api.vendor.com/v1/alerts?api_key=XYZ#frag": "https://api.vendor.com/v1/alerts",
+		"https://u:p@host.example/path":                     "https://host.example/path",
+		"http://127.0.0.1:9000/feed":                        "http://127.0.0.1:9000/feed",
+	} {
+		if got := displayURL(in); got != want {
+			t.Errorf("%s: %q, want %q", in, got, want)
+		}
+	}
+}

@@ -16,7 +16,7 @@
 {{end}}<div class="grid g2e" data-filter-list="sources">
 {{range .Sources}}{{$wait := or .LastReject (eq .OAuth "expired")}}<section data-filter-item class="card item-card{{if .Hot}} is-hot{{end}}{{if eq .Health "error"}} is-err{{else if $wait}} is-wait{{end}}" aria-label="Source {{.Name}}" data-kind="{{.Type}}" data-health="{{.Health}}" data-hot="{{.Hot}}" data-text="{{.Name}} {{.Type}} {{.Target}}">
   <div class="item-head"><span class="dot {{.Health}}" aria-hidden="true"></span>{{if can $.Role "admin"}}<a class="item-title" href="/config/sources/{{pe .Name}}">{{.Name}}</a>{{else}}<b class="item-title">{{.Name}}</b>{{end}}<span class="muted small">{{template "srcicon" .Type}} {{.Type}}</span><span class="sp"></span>
-    <span class="stamp{{if eq .Health "error"}} err{{else if $wait}} wait{{else if .Hot}} hot{{end}}">{{if eq .Health "error"}}error{{else if .LastReject}}refusing{{else if eq .OAuth "expired"}}login expired{{else}}{{.Health}}{{end}}</span>
+    <span class="stamp{{if eq .Health "error"}} err{{else if $wait}} wait{{else if .Hot}} hot{{end}}">{{if eq .Health "error"}}error{{else if .LastReject}}refusing{{else if eq .OAuth "expired"}}login expired{{else if .Hot}}active{{else}}{{.Health}}{{end}}</span>
     {{if can $.Role "admin"}}<a class="btn sm" href="/config/sources/{{pe .Name}}">Edit</a>{{end}}</div>
   <div class="node"><small><span class="sr-only">Endpoint: </span>{{template "srcicon" .Type}}<span>{{if eq .Type "webhook"}}receives at{{else if eq .Type "schedule"}}runs at{{else}}reads from{{end}}</span></small>
     {{if eq .Type "webhook"}}<code id="src-{{.Name}}" class="wrap">{{.Target}}</code> <button type="button" class="btn sm" data-action="copy" data-target="src-{{.Name}}">{{template "icon" "copy"}}Copy</button>

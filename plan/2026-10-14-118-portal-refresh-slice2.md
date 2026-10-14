@@ -79,6 +79,22 @@ spec: spec/2026-10-14-118-portal-refresh-slice2.md
     `store.JobAction` with `Source`, `SourceType` and `Soon`. A pending
     job outside the dashboard's 24-hour window shows "unknown" as its
     trigger, with "see details".
+- **The Opus review:** no HIGH. One MEDIUM, fixed.
+  - **MEDIUM:** http and mcp source URLs were shown in full, so a key in a
+    query string (`?api_key=…`) reached every viewer. `displayURL` keeps
+    the scheme, host and path only, with a test.
+  - **LOW, fixed:**
+    - **The approvals page** loads every waiting job through `runs()`,
+      not the dashboard's newest 20. (The "outside the 24 h window"
+      deviation above had the cause wrong.)
+    - **The Dashboard** counts `stale` sources ("N need a look"), so it no
+      longer says "all healthy" next to a refusing webhook.
+    - **An expired approval** reads "expired", not "expires in expired".
+    - **`approvalSoon`** is its own constant.
+    - **A hot source's stamp** says "active", not colour alone.
+    - **The provider assertion** matches `>Claude<`.
+  - **LOW, accepted:** the approval card's trigger comes from the live
+    rule (the spec's choice).
 
 ## Tests
 

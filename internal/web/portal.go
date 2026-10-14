@@ -54,6 +54,9 @@ type approvalAction struct {
 	Soon               bool // expires in under 15 minutes
 }
 
+// approvalSoon is when a waiting approval's expiry turns red.
+const approvalSoon = 15 * time.Minute
+
 func (s *server) approvalActions(pending []store.JobAction, as []store.PendingApproval) map[int64]approvalAction {
 	acts := map[int64]store.JobAction{}
 	for _, p := range pending {
@@ -61,7 +64,7 @@ func (s *server) approvalActions(pending []store.JobAction, as []store.PendingAp
 	}
 	out := map[int64]approvalAction{}
 	for _, a := range as {
-		v := approvalAction{JobAction: acts[a.JobID], Soon: a.ExpiresAt.Sub(s.Now()) < hotWindow}
+		v := approvalAction{JobAction: acts[a.JobID], Soon: a.ExpiresAt.Sub(s.Now()) < approvalSoon}
 		for _, r := range s.Config().Rules {
 			if r.Name == a.Rule {
 				v.Source = r.Source
@@ -134,14 +137,14 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 		return ok, err
 	})
 	page("/approvals", "approvals", func(_ *http.Request, v *view) (ok bool, err error) {
-		d, err := store.GetDashboard(s.Store.DB, s.Now().Add(-24*time.Hour))
+		waiting, err := s.runs("pending_approval", 1000) // every waiting job, not the dashboard's newest 20
 		if err != nil {
 			return true, err
 		}
 		if v.Approvals, err = store.PendingApprovals(s.Store.DB); err != nil {
 			return true, err
 		}
-		v.ActionOf = s.approvalActions(d.Pending, v.Approvals)
+		v.ActionOf = s.approvalActions(waiting, v.Approvals)
 		return true, nil
 	})
 	page("/connections", "logins", func(r *http.Request, v *view) (bool, error) {
