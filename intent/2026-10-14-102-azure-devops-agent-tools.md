@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 102
 author: olafkfreund
 ---
@@ -113,3 +113,12 @@ requests, with the read-only, toolset or domain filters set at connect time.
    the template's `allowed_tools`)? Or expose writes too and rely on
    approvals? **I'd default to read-only tools, with writes opt-in,** as
    ServiceNow does.
+
+## Decisions (at approval)
+
+1. **Scope:** the local PAT path now. The remote Entra path is a follow-up
+   issue.
+2. **The test organization:** none was provided. Verification uses a stub
+   in the VM test, and the owner does the live check.
+3. **Tools:** read-only by default, and writes are opt-in, as with
+   ServiceNow.
