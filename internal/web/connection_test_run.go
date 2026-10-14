@@ -118,6 +118,22 @@ func (s *server) runConnectionTest(ctx context.Context, conn string) (*connTestR
 			secrets = append(secrets, maskParts(src.Env[k].Value)...)
 		}
 		t = s.testServiceNow(ctx, cfg, conn, src)
+	case azureDevOpsSource(cfg, names) != nil:
+		src := azureDevOpsSource(cfg, names)
+		org, pat := src.Env["AZURE_DEVOPS_ORG"].Value, src.Env["AZURE_DEVOPS_PAT"].Value
+		b64 := base64.StdEncoding.EncodeToString([]byte(":" + pat))
+		secrets = append(secrets, maskParts(pat)...)
+		secrets = append(secrets, b64, "Basic "+b64)
+		t = svcTest{Name: conn}
+		switch {
+		case org == "":
+			t.Err = "no organization is stored for this connection"
+		case pat == "":
+			t.Err = "no token is stored for this connection"
+		default:
+			u := testTarget("https://dev.azure.com/" + url.PathEscape(org) + "/_apis/connectionData")
+			t = s.runHTTPTest(ctx, t, "GET", u, "Authorization", "Basic "+b64, "", "authenticatedUser.providerDisplayName")
+		}
 	default:
 		for _, n := range names {
 			if cfg.Sources[n].AWS != "" {
@@ -229,6 +245,16 @@ var testTarget = func(u string) string { return u }
 func serviceNowSource(cfg *config.Config, names []string) *config.Source {
 	for _, n := range names {
 		if src := cfg.Sources[n]; src.Package == "servicenow" {
+			return src
+		}
+	}
+	return nil
+}
+
+// azureDevOpsSource is the connection's azure-devops MCP source, if it has one.
+func azureDevOpsSource(cfg *config.Config, names []string) *config.Source {
+	for _, n := range names {
+		if src := cfg.Sources[n]; src.Package == "azure-devops" {
 			return src
 		}
 	}

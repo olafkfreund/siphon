@@ -1,4 +1,18 @@
 {
+  "azure-devops": {
+    "package": "siphon-azure-devops-mcp",
+    "args": [],
+    "env": [
+      "AZURE_DEVOPS_ORG",
+      "AZURE_DEVOPS_PAT"
+    ],
+    "hosts": [
+      "dev.azure.com",
+      "vssps.dev.azure.com",
+      "almsearch.dev.azure.com"
+    ],
+    "url_env": []
+  },
   "forgejo": {
     "package": "forgejo-mcp",
     "args": [

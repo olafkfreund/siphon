@@ -18,6 +18,7 @@ var order = []string{
 	"tasks/mcp-watch.md", "tasks/routine.md", "tasks/approvals.md",
 	"connections/models.md", "connections/logins.md", "connections/github.md",
 	"connections/gitlab.md", "connections/aws.md", "connections/servicenow.md",
+	"connections/azure-devops.md",
 	"troubleshooting.md", "drafting.md", "cli.md", "templates/README.md",
 }
 

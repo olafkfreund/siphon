@@ -311,6 +311,8 @@ siphon connect <service>|model|login [--<field> value ...]
 | `--name` |  | name of the connection (default: the service or preset) |
 | `--no-test` | `false` | skip the connection test |
 | `--no-wait` | `false` | oauth: print the login URL and return |
+| `--organization` |  | Azure DevOps: Organization |
+| `--pat` |  | Azure DevOps: Personal access token as - (stdin) or @file |
 | `--profile` |  | AWS: Profile |
 | `--project` |  | GitLab: Project |
 | `--public-key` |  | Discord: Public key |
