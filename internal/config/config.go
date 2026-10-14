@@ -3,6 +3,7 @@ package config
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -327,7 +328,7 @@ type Source struct {
 	Headers         map[string]Secret `yaml:"headers"` // values may be env:/file: refs or plain literals
 	Body            string            `yaml:"body"`
 	Secret          Secret            `yaml:"secret"`           // webhook HMAC key
-	Signature       string            `yaml:"signature"`        // github|sha256|token|body-token|standard-webhooks|slack|stripe|ed25519|google-oidc
+	Signature       string            `yaml:"signature"`        // github|sha256|token|body-token|standard-webhooks|slack|stripe|ed25519|google-oidc|teams-hmac
 	SigHeader       string            `yaml:"signature_header"` // sha256 preset
 	TokenHeader     string            `yaml:"token_header"`     // token preset
 	TimestampHdr    string            `yaml:"timestamp_header"`
@@ -1569,8 +1570,21 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 			if s.Audience == "" && c.Server.PublicURL == "" {
 				add("%s: signature google-oidc needs audience or server.public_url", p)
 			}
+		case "teams-hmac":
+			if s.SigHeader != "" || s.TimestampHdr != "" || s.TokenHeader != "" || s.TokenField != "" || s.ID != "" {
+				add("%s: signature_header, timestamp_header, token_header, token_field and id are not allowed with signature teams-hmac", p)
+			}
+			// Teams shows the key as base64; StubSecret is the portal's stand-in.
+			if v := s.Secret.Value; v != "" && v != StubSecret {
+				if k, err := base64.StdEncoding.DecodeString(v); err != nil || len(k) < 16 {
+					add("%s: secret must be the base64 security token Teams shows (at least 16 bytes)", p)
+				}
+			}
+			if n := utf8.RuneCountInString(s.ReplyText); n > 500 {
+				add("%s: reply_text is %d characters; the limit is 500", p, n)
+			}
 		default:
-			add("%s: signature must be github, sha256, token, body-token, standard-webhooks, slack, stripe, ed25519 or google-oidc, got %q", p, s.Signature)
+			add("%s: signature must be github, sha256, token, body-token, standard-webhooks, slack, stripe, ed25519, google-oidc or teams-hmac, got %q", p, s.Signature)
 		}
 		if (s.Audience != "" || s.ServiceAccount != "") && s.Signature != "google-oidc" {
 			add("%s: audience and service_account are only for signature google-oidc", p)
@@ -1578,8 +1592,8 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 		if s.TokenField != "" && s.Signature != "body-token" {
 			add("%s: token_field is only for signature body-token", p)
 		}
-		if s.ReplyText != "" && s.Signature != "body-token" && s.Format != "discord" {
-			add("%s: reply_text is only for signature body-token or format discord", p)
+		if s.ReplyText != "" && s.Signature != "body-token" && s.Signature != "teams-hmac" && s.Format != "discord" {
+			add("%s: reply_text is only for signature body-token, signature teams-hmac or format discord", p)
 		}
 		switch {
 		case s.Format == "":
