@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 111
 intent: intent/2026-10-14-111-poll-error-and-each-prune.md
 ---
