@@ -36,6 +36,7 @@
 </div></form>{{end}}
 {{if .Steps}}<section class="card mb"><h2>Steps</h2><ol class="small">{{range .Steps}}<li><b>{{.ID}}</b> · {{.Kind}} <code>{{.Target}}</code>{{if .Flags}} <span class="muted">· {{.Flags}}</span>{{end}}</li>{{end}}</ol></section>{{end}}
 {{if .Recipe}}<p class="banner" role="status">Started from the <b>{{.Recipe.Title}}</b> recipe. {{if .Recipe.Others}}It also needs {{range $i, $o := .Recipe.Others}}{{if $i}}, {{end}}<code>{{$o}}</code>{{end}}: add those separately. {{end}}<a href="/help/templates#{{.Recipe.Name}}">See the whole template</a>.</p>{{end}}
+{{if .NoRecipe}}<p class="muted small" role="status">Unknown recipe "{{.NoRecipe}}": starting from the starter instead.</p>{{end}}
 {{if and .New .Recipes}}<section class="card mb recipes"><h2>Start from a recipe</h2><ul class="small">{{range .Recipes}}<li><a href="/config/routines/new?recipe={{pe .Name}}">{{.Title}}</a></li>{{end}}</ul></section>{{end}}
 {{if .HasForm}}<details class="card mb yaml-edit"><summary>Edit as YAML</summary>
 {{template "yamlform" $}}</details>

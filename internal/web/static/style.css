@@ -545,6 +545,6 @@ pre .add { color: #5ef0b4 } pre .del { color: #ff8fa0 }
 section.yaml-edit textarea { width: 100%; min-height: 16rem }
 .ref { align-self: start }
 .ref dt { margin-top: .6rem } .ref dd { margin: 0; color: var(--muted) }
-.token { padding: .15rem .6rem; font-size: .8rem; font-weight: 500; border-radius: 6px; background: var(--surface-2) }
+.token { padding: .15rem .6rem; font-size: .8rem; font-weight: 500; border-radius: 6px; background: var(--surface-2); user-select: text } /* copyable without JS */
 .tokens { display: flex; flex-wrap: wrap; gap: .4rem }
 .recipes ul { margin: 0; padding-left: 1.2rem }

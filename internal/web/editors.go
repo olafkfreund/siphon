@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -180,7 +181,7 @@ func (s *server) editExtras(v *cfgView) error {
 				r.Flags = strings.Join(fl, " · ")
 				v.Steps = append(v.Steps, r)
 				if st.ID != "" {
-					v.Tokens = append(v.Tokens, "{{.steps."+st.ID+".output}}", "{{.steps."+st.ID+".json.KEY}}", "steps."+st.ID+".exit == 0")
+					v.Tokens = append(v.Tokens, stepTokens(st.ID)...)
 				}
 			}
 		}
@@ -442,4 +443,16 @@ func (s *server) egressPreview(w http.ResponseWriter, r *http.Request, _ string)
 		ev.Hosts, ev.On = cfg.AgentEgress(&a)
 	}
 	s.render(w, "egresspreview", ev)
+}
+
+var goIdent = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// stepTokens are the references to a step's results. An ID that is not a Go
+// identifier (fetch-data) needs index, or the template fails to parse.
+func stepTokens(id string) []string {
+	if goIdent.MatchString(id) {
+		return []string{"{{.steps." + id + ".output}}", "{{.steps." + id + ".json.KEY}}", "steps." + id + ".exit == 0"}
+	}
+	q := strconv.Quote(id)
+	return []string{"{{index .steps " + q + " \"output\"}}", "{{index .steps " + q + " \"json\" \"KEY\"}}", "steps[" + q + "].exit == 0"}
 }

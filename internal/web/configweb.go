@@ -44,6 +44,7 @@ type cfgView struct {
 	Steps      []stepRow
 	Recipes    []recipe
 	Recipe     *recipeView
+	NoRecipe   string // a ?recipe= that names no template
 	RefFields  []config.ExplainField
 	Tokens     []string
 }
@@ -163,7 +164,7 @@ func (s *server) editView(kind, name string, isNew bool, y string) (*cfgView, er
 		return nil, err
 	}
 	p, exists := prov[itemKey{Kind: kind, Name: name}]
-	v := &cfgView{Kinds: sortedKinds(), Kind: kind, Name: name, New: isNew, Exists: exists, Prov: string(p), YAML: y,
+	v := &cfgView{Kinds: sortedKinds(), Kind: kind, Name: name, New: isNew, Exists: exists && !isNew, Prov: string(p), YAML: y,
 		Rev: rev, Fields: formFields(kind, y)}
 	v.ServiceNow = hasServiceNow(kind, y)
 	v.HasForm = len(v.Fields) > 0 && !v.ServiceNow
@@ -181,9 +182,11 @@ func (s *server) cfgEdit(w http.ResponseWriter, r *http.Request, csrf string) {
 	isNew := name == ""
 	y := ""
 	var rv *recipeView
+	noRecipe := ""
 	if isNew && kind == "routines" {
-		if rv, name, y, _ = recipeFor(r.URL.Query().Get("recipe")); rv == nil {
-			name, y = "", ""
+		q := r.URL.Query().Get("recipe")
+		if rv, name, y, _ = recipeFor(q); rv == nil {
+			name, y, noRecipe = "", "", q
 		}
 	}
 	if !isNew {
@@ -203,7 +206,7 @@ func (s *server) cfgEdit(w http.ResponseWriter, r *http.Request, csrf string) {
 		s.fail(w, err)
 		return
 	}
-	v.Recipe = rv
+	v.Recipe, v.NoRecipe = rv, noRecipe
 	s.page(w, r, "cfgedit", view{CSRF: csrf, Cfg: v})
 }
 
@@ -266,6 +269,11 @@ func (s *server) cfgPost(w http.ResponseWriter, r *http.Request, csrf, verb stri
 		return
 	}
 	_, exists := prov[itemKey{Kind: kind, Name: name}]
+	if isNew && exists && (verb == "check" || verb == "validate" || verb == "save") {
+		// the "new" page never replaces an item: a recipe prefills a name that may already be taken
+		bad(r.PostFormValue("yaml"), fmt.Sprintf("%s %q already exists: open it to edit it, or choose another name", strings.TrimSuffix(kind, "s"), name), http.StatusConflict)
+		return
+	}
 	switch verb {
 	case "check", "validate", "save":
 		if y, pending, err = s.itemYAMLFromRequest(r, kind, name); err != nil {

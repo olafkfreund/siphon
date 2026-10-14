@@ -82,6 +82,28 @@ spec: spec/2026-10-14-116-routine-editor.md
     routine page has exactly one.
   - **The session added** the `.json.KEY` and `steps.ID.exit == 0` tokens
     per step, which the spec asks for and the coder had left out.
+- **The Opus review:** no HIGH. One MEDIUM, fixed.
+  - **MEDIUM:** a recipe prefills its routine's name, and Save on the
+    "new" page silently replaced an existing routine with that name.
+    - The "new" page now refuses (409) to check, validate or save a name
+      that already exists ("routine X already exists: open it to edit it,
+      or choose another name").
+    - `editView` no longer marks a new item as existing, so the stray
+      Reset and Delete buttons on /new are gone.
+    - There's a test.
+  - **LOW, fixed:**
+    - an unknown recipe shows a note;
+    - `.token` text can be selected without JS;
+    - step IDs that aren't Go identifiers get `{{index .steps "ID" …}}`
+      tokens;
+    - a test checks that a page with a form keeps its collapsible YAML
+      editor and its `/validate`.
+  - **LOW, accepted:**
+    - inserting a token can't be undone, which is consistent with
+      `setRangeText` elsewhere;
+    - the recipe list doesn't show each routine's name or `needs:`
+      credentials;
+    - recipe bodies are indented with 4 spaces.
 
 ## Tests
 
