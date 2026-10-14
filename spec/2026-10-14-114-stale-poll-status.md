@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 114
 intent: intent/2026-10-14-114-stale-poll-status.md
 ---
