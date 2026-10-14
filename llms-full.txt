@@ -460,6 +460,7 @@ Always follow this order. Every step has `-o json`.
    - `github-pr-review`, `github-ci-failure`;
    - `disk-full`, `upstream-status`, `alertmanager-summary`;
    - `mattermost-command-agent` (a chat slash command, `signature: body-token`),
+   - `azure-keyvault-secret-expiry` (Azure Event Grid, `signature: token` with `format: eventgrid`),
    - `webhook-to-ntfy`, `local-summariser`, `nightly-report`,
      `aws-cloudwatch-alarm`.
 
@@ -624,6 +625,7 @@ siphon apply -f deploy.yaml --secret sources/deploy-hook.secret=@hook.key
 | `standard-webhooks` | signs per the Standard Webhooks spec (`whsec_…`) | Svix, Clerk, Resend, … |
 | `token` | sends the secret itself in a header you name | GitLab, EventBridge, Alertmanager, Home Assistant, scripts |
 | `body-token` | puts the secret in the request body (JSON or form field `token`, or `token_field:`); Siphon removes it from the event, and `reply_text:` answers 200 `{"text": …}` | Mattermost outgoing webhooks and slash commands |
+| `token` + `format: eventgrid` | as `token`, and answers Azure Event Grid's `OPTIONS` and validation handshakes and delivers each event of a batch (keyed by its `id`; `validationUrl` is never fetched) | Azure Event Grid (put the secret in a delivery property) |
 | `slack` | signs `v0:<timestamp>:<body>` (HMAC-SHA256, `X-Slack-Signature`, ±5 min); Siphon also answers Slack's signed `url_verification` with its challenge | Slack (paste the app's Signing Secret) |
 | `stripe` | signs `<t>.<body>` in `Stripe-Signature` (`t=…,v1=…`; any `v1` may match, so rotation works; ±5 min) | Stripe (paste the endpoint's signing secret) |
 
@@ -2550,6 +2552,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 |---|---|---|
 | [`alert-to-servicenow-incident`](alert-to-servicenow-incident.yaml) | Open a ServiceNow incident for each alert, with no agent | a webhook source `alerts`, `siphon connect servicenow --instance …` |
 | [`alertmanager-summary`](alertmanager-summary.yaml) | Summarise Prometheus alerts with a local model, then notify | `siphon connect model ollama` · webhook secret |
+| [`azure-keyvault-secret-expiry`](azure-keyvault-secret-expiry.yaml) | Push a notification when an Azure Key Vault secret is near expiry | `siphon connect azure-eventgrid` |
 | [`cloudflare-notification`](cloudflare-notification.yaml) | Explain Cloudflare notifications with an agent, then notify | `siphon connect cloudflare --webhook`, `siphon connect login claude` |
 | [`datadog-monitor-alert`](datadog-monitor-alert.yaml) | Summarise Datadog monitor alerts with a local model, then notify | `siphon connect datadog`, `siphon connect model ollama` |
 | [`disk-full`](disk-full.yaml) | Warn when a disk is nearly full (and again every 6 hours) | — |
@@ -2681,10 +2684,10 @@ lists what's missing. Models and subscription logins are on their own pages:
 | Service | Gives agents | Status | Connect | Templates |
 |---|---|---|---|---|
 | [AWS](aws.md) | tools, webhooks | needs package: enable `services.siphon.aws` in your NixOS config | `siphon connect aws` | [`aws-cloudwatch-alarm`](../templates/aws-cloudwatch-alarm.yaml) |
+| Azure Event Grid | webhooks | available | `siphon connect azure-eventgrid` | [`azure-keyvault-secret-expiry`](../templates/azure-keyvault-secret-expiry.yaml) |
 | Cloudflare | tools, webhooks | available | `siphon connect cloudflare` | [`cloudflare-notification`](../templates/cloudflare-notification.yaml) |
 | Kubernetes |  | not yet: needs kubeconfig wiring: coming in a later release | — |  |
 | Google Pub/Sub |  | not yet: needs a Google OIDC (RS256 JWT) push-authentication mode | — |  |
-| Azure Event Grid |  | not yet: needs the subscription validation handshake | — |  |
 
 ## Payments
 
@@ -3753,6 +3756,26 @@ rules:
     id: event.id
     cooldown: 5m
     action: { agent: alarm-investigator }
+```
+
+
+---
+
+<!-- file: docs/templates/azure-keyvault-secret-expiry.yaml -->
+
+```yaml
+# title:    Push a notification when an Azure Key Vault secret is near expiry
+# category: Ops & monitoring
+# needs:    sources/azure-eventgrid-hooks         (siphon connect azure-eventgrid)
+# apply:    siphon apply -f azure-keyvault-secret-expiry.yaml
+rules:
+  - name: keyvault-secret-near-expiry
+    source: azure-eventgrid-hooks
+    when: '(event.eventType ?? event.type) == "Microsoft.KeyVault.SecretNearExpiry"'
+    on: each
+    id: event.id
+    action:
+      cmd: [curl, -fsS, -H, "Title: Key Vault secret near expiry", --data-raw, "Azure Key Vault: {{.event.subject}} is near expiry", https://ntfy.sh/siphon-CHANGE-ME]
 ```
 
 

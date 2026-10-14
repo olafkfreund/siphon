@@ -620,6 +620,35 @@ services:
       Turn on additional headers: {"X-Siphon-Key": "<the secret above>"}.
 
   # ---- cloud
+  - id: azure-eventgrid
+    name: Azure Event Grid
+    mark: EG
+    category: cloud
+    summary: Azure Event Grid event subscriptions, with the validation handshake answered and each event of a batch delivered.
+    capabilities: [webhooks]
+    status: available
+    templates: [azure-keyvault-secret-expiry]
+    fields:
+      - {<<: *f_name, default: azure-eventgrid}
+    creates:
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: 'true'
+        hook_header: X-Siphon-Key
+        yaml: |
+          type: webhook
+          signature: token
+          token_header: X-Siphon-Key
+          secret: {{generated "secret"}}
+          format: eventgrid
+    setup: |
+      In Azure: Event Grid topic or system topic → Event Subscriptions → Create.
+      Endpoint type = Web Hook, endpoint = the URL above (must be https).
+      Under Delivery properties add a header X-Siphon-Key with the secret
+      above, and tick "Is secret". Azure validates the endpoint when you save.
+      A batch larger than limits.http_max_body (1 MiB by default) is refused
+      with 413; raise it if your events are large.
+
   - id: cloudflare
     name: Cloudflare
     mark: CF
@@ -822,5 +851,4 @@ services:
   - {id: matrix, name: Matrix, mark: MX, category: chat, summary: Matrix application-service events., status: not-yet, reason: 'needs PUT requests and a {} reply'}
   - {id: notion, name: Notion, mark: NO, category: issues, summary: Notion page and database events., status: not-yet, reason: 'needs the verification_token handshake; the remote MCP is OAuth only'}
   - {id: google-pubsub, name: Google Pub/Sub, mark: GP, category: cloud, summary: Google Cloud Pub/Sub push subscriptions., status: not-yet, reason: 'needs a Google OIDC (RS256 JWT) push-authentication mode'}
-  - {id: azure-eventgrid, name: Azure Event Grid, mark: EG, category: cloud, summary: Azure Event Grid event subscriptions., status: not-yet, reason: 'needs the subscription validation handshake'}
   - {id: azure-devops, name: Azure DevOps, mark: AD, category: code, summary: Azure DevOps service hooks and work items., status: not-yet, reason: 'service hooks use basic auth only, and the remote MCP is Entra OAuth only'}

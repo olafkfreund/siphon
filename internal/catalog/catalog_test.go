@@ -190,6 +190,24 @@ func TestServiceNowEntry(t *testing.T) {
 	}
 }
 
+func TestAzureEventGridEntry(t *testing.T) {
+	e := Get("azure-eventgrid")
+	if e == nil || e.Status != "available" {
+		t.Fatalf("entry: %+v", e)
+	}
+	res, err := e.Render(map[string]string{"name": "eg"}, Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	y := res.Items[0].YAML
+	if len(res.Items) != 1 || res.Items[0].Name != "eg-hooks" || !strings.Contains(y, "signature: token") || !strings.Contains(y, "token_header: X-Siphon-Key") || !strings.Contains(y, "format: eventgrid") {
+		t.Fatalf("%+v", res.Items)
+	}
+	if len(res.Secrets) != 1 || res.Secrets[0].Value == "" || !strings.Contains(e.Setup, "http_max_body") {
+		t.Fatalf("secrets %+v", res.Secrets)
+	}
+}
+
 func TestMattermostEntry(t *testing.T) {
 	e := Get("mattermost")
 	if e == nil {

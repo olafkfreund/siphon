@@ -137,3 +137,7 @@ Opus agent reviews them. Steps 0 and 4 are mine.
     against the live docs here. `noid.json` was made up for the
     missing-id case.
   - **An empty batch** gets 400 as well.
+- **Step 3:**
+  - **The catalog entry** sits at the top of the cloud section.
+  - **The template's rule** has `id: event.id`. Its notification uses
+    `{{.event.subject}}`, which both schemas carry.
