@@ -60,6 +60,7 @@ Always follow this order. Every step has `-o json`.
    - `mattermost-command-agent` (a chat slash command, `signature: body-token`),
    - `discord-ask-agent` (Discord slash command, `signature: ed25519` with `format: discord`),
    - `azure-keyvault-secret-expiry` (Azure Event Grid, `signature: token` with `format: eventgrid`),
+   - `notion-page-summary` (Notion, `format: notion`: the source starts with no secret; accept the verification token it captures on the Sources page),
    - `webhook-to-ntfy`, `local-summariser`, `nightly-report`,
      `aws-cloudwatch-alarm`.
 

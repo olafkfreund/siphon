@@ -1,0 +1,27 @@
+# title:    Summarise Notion pages and ask an agent about them
+# category: Notifications & glue
+# needs:    sources/notion                         (siphon connect notion; then log in on the Sources page)
+#           sources/notion-hooks                   (siphon connect notion --webhook)
+#           credentials/claude-max                 (siphon connect login claude)
+# apply:    siphon apply -f notion-page-summary.yaml
+agents:
+  notion-summary:
+    kind: claude
+    credential: claude-max
+    mcp: [notion]
+    # Read-only: Notion's hosted server names its tools notion-fetch, notion-search, …
+    # (check with the source's tool list). A wrong name means no tool, never a write.
+    allowed_tools: [mcp__notion__notion-fetch, mcp__notion__notion-search]
+    prompt: |
+      Notion event {{.event.type}} on page {{.event.entity.id}}.
+      Read the page with the Notion tools and summarise what changed in three lines.
+    max_turns: 6
+    timeout: 10m
+rules:
+  - name: notion-page-summary
+    source: notion-hooks
+    when: 'event.type == "page.created" || event.type == "page.content_updated"'
+    on: each
+    id: event.id
+    cooldown: 5m
+    action: { agent: notion-summary }

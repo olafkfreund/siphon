@@ -877,9 +877,48 @@ services:
           allow_private: true
           {{end -}}
 
+  - id: notion
+    name: Notion
+    mark: NO
+    category: issues
+    summary: Notion's remote MCP server for agents (OAuth login), and page and database events by webhook.
+    capabilities: [tools, webhooks]
+    status: available
+    templates: [notion-page-summary]
+    fields:
+      - {<<: *f_name, default: notion}
+      - *f_webhook
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          type: mcp
+          url: https://mcp.notion.com/mcp
+          auth:
+            oauth: {}
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: '{{.webhook}}'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: sha256
+          signature_header: X-Notion-Signature
+          signature_prefix: "sha256="
+          format: notion
+    setup: |
+      Agent tools: open Sources and log in to the Notion MCP server (OAuth).
+      Not yet verified against Notion's real MCP OAuth: please report problems (issue #85).
+      Webhooks: Notion → Settings → Connections → your integration → Webhooks →
+      Create a subscription. URL as above. Notion then POSTs a one-time
+      verification token: Siphon holds it, and the Sources page shows it with a
+      "Use this token" button. Press it, then paste the token into Notion's
+      "Verify subscription" dialog. Until then the webhook accepts nothing else.
+      Later deliveries are checked with that token as the signing secret.
+
   # ---- not yet: listed so people know, with the reason
   - {id: teams, name: Microsoft Teams, mark: MT, category: chat, summary: Microsoft Teams outgoing webhooks., status: not-yet, reason: 'needs a teams-hmac signature mode with a synchronous reply within 5 seconds'}
   - {id: matrix, name: Matrix, mark: MX, category: chat, summary: Matrix application-service events., status: not-yet, reason: 'needs PUT requests and a {} reply'}
-  - {id: notion, name: Notion, mark: NO, category: issues, summary: Notion page and database events., status: not-yet, reason: 'needs the verification_token handshake; the remote MCP is OAuth only'}
   - {id: google-pubsub, name: Google Pub/Sub, mark: GP, category: cloud, summary: Google Cloud Pub/Sub push subscriptions., status: not-yet, reason: 'needs a Google OIDC (RS256 JWT) push-authentication mode'}
   - {id: azure-devops, name: Azure DevOps, mark: AD, category: code, summary: Azure DevOps service hooks and work items., status: not-yet, reason: 'service hooks use basic auth only, and the remote MCP is Entra OAuth only'}

@@ -34,7 +34,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 | Linear | tools, webhooks | available | `siphon connect linear` | [`linear-issue-from-alert`](../templates/linear-issue-from-alert.yaml) |
 | Jira | tools, webhooks | available | `siphon connect jira` | [`jira-new-issue-summary`](../templates/jira-new-issue-summary.yaml) |
 | [ServiceNow](servicenow.md) | tools, webhooks | available | `siphon connect servicenow` | [`alert-to-servicenow-incident`](../templates/alert-to-servicenow-incident.yaml) [`servicenow-incident-summary`](../templates/servicenow-incident-summary.yaml) [`servicenow-incident-triage`](../templates/servicenow-incident-triage.yaml) [`servicenow-change-on-deploy`](../templates/servicenow-change-on-deploy.yaml) [`servicenow-incident-notify`](../templates/servicenow-incident-notify.yaml) |
-| Notion |  | not yet: needs the verification_token handshake; the remote MCP is OAuth only | — |  |
+| Notion | tools, webhooks | available | `siphon connect notion` | [`notion-page-summary`](../templates/notion-page-summary.yaml) |
 
 ## Chat
 

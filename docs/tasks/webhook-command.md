@@ -39,6 +39,7 @@ siphon apply -f deploy.yaml --secret sources/deploy-hook.secret=@hook.key
 | `ed25519` | verifies `X-Signature-Ed25519` over `X-Signature-Timestamp` + body with a hex public key as the secret (5-minute window) | Discord (a public key is not a secret) |
 | `ed25519` + `format: discord` | as `ed25519`, and answers Discord's PING, ignores autocomplete, and delivers each interaction keyed by its `id` with a deferred reply (or `reply_text:` as the message) | Discord slash commands and components |
 | `token` + `format: eventgrid` | as `token`, and answers Azure Event Grid's `OPTIONS` and validation handshakes and delivers each event of a batch (keyed by its `id`; `validationUrl` is never fetched) | Azure Event Grid (put the secret in a delivery property) |
+| `sha256` + `format: notion` | as `sha256` with `X-Notion-Signature` and prefix `sha256=`. With no `secret:` the source only accepts Notion's one-time `{"verification_token": …}` POST and delivers nothing; an operator accepts the token on the Sources page (or `POST /api/sources/<name>/notion-verification`), which stores it as the secret | Notion |
 | `slack` | signs `v0:<timestamp>:<body>` (HMAC-SHA256, `X-Slack-Signature`, ±5 min); Siphon also answers Slack's signed `url_verification` with its challenge | Slack (paste the app's Signing Secret) |
 | `stripe` | signs `<t>.<body>` in `Stripe-Signature` (`t=…,v1=…`; any `v1` may match, so rotation works; ±5 min) | Stripe (paste the endpoint's signing secret) |
 
