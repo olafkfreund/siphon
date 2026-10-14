@@ -160,6 +160,11 @@ spec: spec/2026-10-14-115-rules-page-refresh.md
   - **Screen-reader labels** use the existing `.sr-only` class. The
     plan's new `.sr` duplicated it, so it's dropped.
   - **The egress pill** reads "egress limited".
+- **Step 5, the visual check:**
+  - the provider badge inherited the label's uppercase style and wrapped
+    ("OPENAI-" / "COMPATIBLE"). `.node small .prov` resets it;
+  - a `model` agent now shows its credential's provider (Ollama) instead
+    of "OpenAI-compatible".
 
 ## Tests
 

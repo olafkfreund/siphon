@@ -193,6 +193,9 @@ func (s *server) rules() ([]ruleView, error) {
 			Approval: s.Config().NeedsApproval(r), ForEach: r.ForEach != "", Egress: r.Egress.Enabled}
 		if a := s.Config().Agents[r.Action.Agent]; r.Action.Agent != "" && a != nil {
 			v.Provider = a.Kind
+			if cr := s.Config().Credentials[a.Credential]; a.Kind == "model" && cr != nil {
+				v.Provider = cr.Provider // a model agent runs on its credential's provider (ollama, openai, …)
+			}
 		}
 		if r.Repeat > 0 {
 			v.Repeat = time.Duration(r.Repeat).String()
