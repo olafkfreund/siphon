@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -176,6 +177,38 @@ func TestMCPStructuredContentPreservesInteger(t *testing.T) {
 	ev, err := (MCP{Options: MCPOptions{Tool: "id"}, Transport: clientSide}).Poll(ctx)
 	if err != nil || ev.Data.(map[string]any)["id"] != int64(9007199254740993) {
 		t.Fatalf("event=%+v err=%v", ev, err)
+	}
+}
+
+func TestMCPToolError(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content []mcp.Content
+		check   func(string) bool
+	}{
+		{"text", []mcp.Content{&mcp.TextContent{Text: "boom: 403 ACL"}}, func(m string) bool {
+			return strings.Contains(m, "MCP tool fail returned an error: boom: 403 ACL")
+		}},
+		{"clipped", []mcp.Content{&mcp.TextContent{Text: strings.Repeat("é", 500)}}, func(m string) bool {
+			_, text, _ := strings.Cut(m, "an error: ")
+			return utf8.ValidString(text) && strings.HasSuffix(text, "…") && len(text) <= 300+len("…")
+		}},
+		{"empty", nil, func(m string) bool { return strings.HasSuffix(m, "an error: (no message)") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			serverSide, clientSide := mcp.NewInMemoryTransports()
+			server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+			server.AddTool(&mcp.Tool{Name: "fail", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				return &mcp.CallToolResult{IsError: true, Content: tc.content}, nil
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go server.Run(ctx, serverSide)
+			_, err := (MCP{Options: MCPOptions{Tool: "fail"}, Transport: clientSide}).Poll(ctx)
+			if err == nil || !tc.check(err.Error()) {
+				t.Fatalf("err=%v", err)
+			}
+		})
 	}
 }
 

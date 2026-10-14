@@ -12,7 +12,9 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -79,7 +81,7 @@ func (s MCP) Poll(ctx context.Context) (Event, error) {
 			return Event{}, err
 		}
 		if result.IsError {
-			return Event{}, fmt.Errorf("MCP tool %q returned an error", o.Tool)
+			return Event{}, fmt.Errorf("MCP tool %s returned an error: %s", o.Tool, toolErrText(result.Content))
 		}
 		// Prefer the TextContent copy of structured output (the MCP spec says a
 		// tool SHOULD send both, and go-sdk does): it decodes exactly, whereas
@@ -293,4 +295,27 @@ func jsonText(content []mcp.Content) (any, bool) {
 	}
 	v, err := DecodeJSON([]byte(t.Text))
 	return v, err == nil
+}
+
+// toolErrText joins the TextContent of an error result with "; ", collapses
+// whitespace and clips to 300 bytes (on a rune boundary, plus "…").
+func toolErrText(content []mcp.Content) string {
+	var parts []string
+	for _, c := range content {
+		if t, ok := c.(*mcp.TextContent); ok {
+			parts = append(parts, t.Text)
+		}
+	}
+	text := strings.Join(strings.Fields(strings.Join(parts, "; ")), " ")
+	if text == "" {
+		return "(no message)"
+	}
+	if len(text) > 300 {
+		n := 300
+		for n > 0 && !utf8.RuneStart(text[n]) {
+			n--
+		}
+		text = text[:n] + "…"
+	}
+	return text
 }
