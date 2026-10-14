@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -208,5 +209,37 @@ func TestMCPStdioEnv(t *testing.T) {
 	got := string(b)
 	if !strings.Contains(got, "GITHUB_TOKEN=tok-123") || strings.Contains(got, "must-not-leak") {
 		t.Fatalf("child env:\n%s", got)
+	}
+}
+
+func TestRedirectChallenge(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ok" {
+			w.Write([]byte("hi"))
+			return
+		}
+		http.Redirect(w, r, "/login", http.StatusFound)
+	}))
+	defer srv.Close()
+	rt := RedirectChallenge(http.DefaultTransport, srv.URL+"/mcp/x?q=1")
+	get := func(path string) *http.Response {
+		req, _ := http.NewRequest("GET", srv.URL+path, nil)
+		resp, err := rt.RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp
+	}
+	r := get("/mcp/x")
+	if r.StatusCode != 401 || r.Header.Get("Siphon-Redirected") != "1" ||
+		r.Header.Get("WWW-Authenticate") != `Bearer resource_metadata="`+srv.URL+`/.well-known/oauth-protected-resource/mcp/x"` {
+		t.Fatalf("endpoint 302: %d %v", r.StatusCode, r.Header)
+	}
+	if r := get("/other"); r.StatusCode != 302 || r.Header.Get("Siphon-Redirected") != "" {
+		t.Fatalf("other path: %d", r.StatusCode)
+	}
+	if r := get("/ok"); r.StatusCode != 200 {
+		t.Fatalf("200: %d", r.StatusCode)
 	}
 }
