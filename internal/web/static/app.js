@@ -93,8 +93,9 @@
         if (f === "all" || f === "hot") return;
         if (!Array.prototype.some.call(items, function (it) { return has(it, f); }) && f !== "on" && f !== "off") c.hidden = true;
       });
+      var wanted = chip; // remembered even while a poll leaves it matching nothing
       var saved = bar.querySelector('.chip[data-filter="' + chip + '"]');
-      if (!saved || saved.hidden) chip = "all"; // the saved chip may match nothing any more
+      if (!saved || saved.hidden) chip = "all";
       function apply() {
         var words = q.value.toLowerCase().split(/\s+/).filter(Boolean), shown = 0;
         items.forEach(function (it) {
@@ -105,12 +106,12 @@
         });
         chips.forEach(function (c) { c.setAttribute("aria-pressed", c.dataset.filter === chip ? "true" : "false"); });
         if (none) none.hidden = shown > 0;
-        try { sessionStorage.setItem(key, JSON.stringify({ q: q.value, chip: chip })); } catch (e) {}
+        try { sessionStorage.setItem(key, JSON.stringify({ q: q.value, chip: wanted })); } catch (e) {}
       }
       q.addEventListener("input", apply);
-      bar.addEventListener("click", function (e) { var c = e.target.closest(".chip"); if (c) { chip = c.dataset.filter; apply(); } });
+      bar.addEventListener("click", function (e) { var c = e.target.closest(".chip"); if (c) { chip = wanted = c.dataset.filter; apply(); } });
       if (none) none.addEventListener("click", function (e) {
-        if (e.target.closest("[data-action=clear-filter]")) { q.value = ""; chip = "all"; apply(); q.focus(); }
+        if (e.target.closest("[data-action=clear-filter]")) { q.value = ""; chip = wanted = "all"; apply(); q.focus(); }
       });
       apply();
       if (kept && kept.scope === scope) { q.focus(); try { q.setSelectionRange(kept.s, kept.e); } catch (e) {} kept = null; }

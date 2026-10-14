@@ -200,6 +200,9 @@ func (p *Pipeline) Tick(ctx context.Context, name string) ([]int64, error) {
 
 func (p *Pipeline) tick(ctx context.Context, cfg *config.Config, name string) ([]int64, error) {
 	ev, err := p.poll(ctx, cfg, name)
+	if err != nil && ctx.Err() != nil {
+		return nil, err // cut short by a reload or shutdown: not a source failure, keep the old status
+	}
 	msg := ""
 	if err != nil {
 		msg = pollErrText(cfg, err)

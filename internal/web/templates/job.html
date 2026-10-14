@@ -9,7 +9,7 @@
   <div class="flow">
     <div class="node"><small><span class="sr-only">Source: </span>{{template "srcicon" .SourceType}}<span>{{if .SourceType}}{{.SourceType}}{{else}}source{{end}}</span></small><code class="node-target" title="{{.Source}}">{{if .Source}}{{.Source}}{{else}}unknown{{end}}</code></div>
     <span class="pipe" aria-hidden="true"></span>
-    <div class="node cond"><small><span class="sr-only">Rule: </span><span>rule</span>{{if .On}}<span class="mode">{{if eq .On "each"}}each event{{else}}on edge{{end}}</span>{{end}}</small><a class="item-title" href="/config/rules/{{pe .Rule}}">{{.Rule}}</a></div>
+    <div class="node cond"><small><span class="sr-only">Rule: </span><span>rule</span>{{if .On}}<span class="mode">{{if eq .On "each"}}each event{{else}}on edge{{end}}</span>{{end}}</small>{{if .Source}}<a class="item-title" href="/config/rules/{{pe .Rule}}">{{.Rule}}</a>{{else}}<span class="item-title" title="this rule no longer exists">{{.Rule}}</span>{{end}}</div>
     <span class="pipe" aria-hidden="true"></span>
     <div class="node"><small><span class="sr-only">Action: </span>{{if .Kind}}{{.Kind}}{{else}}action{{end}}</small>{{if .Kind}}{{template "run" .}}{{else}}<span class="muted">not stored</span>{{end}}</div>
   </div>

@@ -182,6 +182,28 @@ spec: spec/2026-10-14-118-portal-refresh-slice1.md
   4. **The job page's Details card** is folded into the hero's stamps.
   5. **A shared `jobrow` template** (in `jobs.html`) is reused by the
      Dashboard's recent runs.
+- **The Opus review:** no HIGH, and two MEDIUM, both fixed.
+  - **M1:** real model-agent jobs carry an agent snapshot with kind
+    `model`, so `runs()` never resolved the provider, and Jobs and the
+    Dashboard showed "OpenAI-compatible".
+    - `store.JobAction` now reads the snapshot's `Credential`.
+    - `runs()` resolves `model` through it (`modelProvider`).
+    - The test uses a real snapshot payload, for an agent that has since
+      been deleted.
+  - **M2:** the job page now takes the provider from the job's snapshot
+    (`agentProvider(v.Agent, …)`), not the live config. The config is
+    read once per lookup.
+  - **LOW, fixed:**
+    - reduced motion also stops `::before` animations;
+    - the topbar approvals pill has an `aria-label`;
+    - job rows have an `exit` label for screen readers;
+    - a deleted rule on the job page is plain text, not a dead link;
+    - `.stamp.err` uses a 12% tint, for dark-mode contrast;
+    - the filter keeps the chosen chip across polls that leave it
+      matching nothing;
+    - `TestSourceHot` checks that its source exists.
+  - **LOW, accepted (per the spec):** the lineage comes from the live rule
+    by name.
 
 ## Tests
 

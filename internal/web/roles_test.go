@@ -209,3 +209,22 @@ func TestSessionFollowsLiveConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestSessionKeyPersistsAcrossServers(t *testing.T) {
+	stored := []byte("0123456789abcdef0123456789abcdef")
+	cookie := newEnv(t, func(o *Options) { o.SessionKey = stored }).srv.sessionValue(roleAdmin, "u")
+	for _, tc := range []struct {
+		name string
+		mod  func(*Options)
+		ok   bool
+	}{
+		{"same key and token", func(o *Options) { o.SessionKey = stored }, true},
+		{"other token", func(o *Options) { o.SessionKey = stored; o.Token = tok + "x" }, false},
+		{"no key", func(o *Options) {}, false},
+	} {
+		_, ok := newEnv(t, tc.mod).srv.parseSession(cookie)
+		if ok != tc.ok {
+			t.Errorf("%s: accepted=%v", tc.name, ok)
+		}
+	}
+}
