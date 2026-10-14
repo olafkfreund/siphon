@@ -372,6 +372,31 @@ func TestMatrixFormatValidation(t *testing.T) {
 	}
 }
 
+func TestGoogleOIDCValidation(t *testing.T) {
+	const sa = "service_account: push@p.iam.gserviceaccount.com"
+	for _, tc := range []struct{ pub, src, want string }{
+		{"", "signature: google-oidc, format: pubsub, audience: https://x/hook/w, " + sa, ""},
+		{"https://siphon.example.com", "signature: google-oidc, format: pubsub, " + sa, ""},
+		{"", "signature: google-oidc, " + sa, "audience or server.public_url"},
+		{"", "signature: google-oidc, audience: a", "needs service_account"},
+		{"", "signature: google-oidc, audience: a, service_account: nobody", "needs service_account"},
+		{"", "signature: google-oidc, audience: a, secret: env:AGW_W, " + sa, "not allowed with signature google-oidc"},
+		{"", "signature: sha256, signature_header: X-S, secret: env:AGW_W, format: pubsub", "format pubsub needs signature google-oidc"},
+		{"", "signature: sha256, signature_header: X-S, secret: env:AGW_W, " + sa, "only for signature google-oidc"},
+	} {
+		t.Setenv("AGW_W", "x")
+		y := "server: {public_url: \"" + tc.pub + "\"}\n"
+		if tc.pub == "" {
+			y = ""
+		}
+		c, _ := Parse([]byte(y + "sources: {w: {type: webhook, " + tc.src + "}}"))
+		err := c.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%q: %v", tc.src, err)
+		}
+	}
+}
+
 func TestDiscordValidation(t *testing.T) {
 	for _, tc := range []struct{ extra, key, want string }{
 		{"signature: ed25519, format: discord", strings.Repeat("ab", 32), ""},

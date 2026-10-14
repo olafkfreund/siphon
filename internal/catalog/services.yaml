@@ -968,5 +968,45 @@ services:
 
   # ---- not yet: listed so people know, with the reason
   - {id: teams, name: Microsoft Teams, mark: MT, category: chat, summary: Microsoft Teams outgoing webhooks., status: not-yet, reason: 'needs a teams-hmac signature mode with a synchronous reply within 5 seconds'}
-  - {id: google-pubsub, name: Google Pub/Sub, mark: GP, category: cloud, summary: Google Cloud Pub/Sub push subscriptions., status: not-yet, reason: 'needs a Google OIDC (RS256 JWT) push-authentication mode'}
+  - id: google-pubsub
+    name: Google Pub/Sub
+    mark: GP
+    category: cloud
+    summary: Google Cloud Pub/Sub push subscriptions, verified by the OIDC token Google signs, each message delivered once.
+    capabilities: [webhooks]
+    status: available
+    templates: [gcp-cloud-build-failed]
+    fields:
+      - {<<: *f_name, default: google-pubsub}
+      - {key: service_account, label: Service account, type: text, required: true, pattern: '[^@\s{}]+@[^@\s{}]+', pattern_error: 'an email address, like push@my-project.iam.gserviceaccount.com', help: 'The service account the push subscription signs its token as.'}
+      - {key: audience, label: Audience, type: text, pattern: '[^\s{}]*', pattern_error: 'no spaces', help: "Leave empty to use this hook's URL, which is Pub/Sub's default."}
+    creates:
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: google-oidc
+          format: pubsub
+          service_account: {{q .service_account}}
+          {{if .audience -}}
+          audience: {{q .audience}}
+          {{end -}}
+    setup: |
+      server.public_url must be set: the audience defaults to the URL above.
+      Whoever creates the subscription needs roles/iam.serviceAccountUser
+      (iam.serviceAccounts.actAs) on the push service account.
+      Only for projects created before 8 April 2021: also grant the Pub/Sub
+      service agent (service-<project number>@gcp-sa-pubsub.iam.gserviceaccount.com)
+      roles/iam.serviceAccountTokenCreator on that service account.
+      Then create the subscription (leave payload wrapping on: a
+      --push-no-wrapper subscription gets 400):
+        gcloud pubsub subscriptions create <sub> --topic=<topic> \
+          --push-endpoint=<the URL above> \
+          --push-auth-service-account=<service account>
+      With a custom audience, add --push-auth-token-audience=<audience>.
+      For Cloud Build failures, subscribe to the topic cloud-builds.
+      A message larger than limits.http_max_body (1 MiB by default) is refused
+      with 413; raise it if your messages are large.
   - {id: azure-devops, name: Azure DevOps, mark: AD, category: code, summary: Azure DevOps service hooks and work items., status: not-yet, reason: 'service hooks use basic auth only, and the remote MCP is Entra OAuth only'}

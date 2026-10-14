@@ -294,6 +294,7 @@ siphon connect <service>|model|login [--<field> value ...]
 |---|---|---|
 | `--access-key-id` |  | AWS: Base access key ID as - (stdin) or @file |
 | `--api-key` |  | model, login: API key as - (stdin) or @file |
+| `--audience` |  | Google Pub/Sub: Audience |
 | `--auth` |  | ServiceNow: Authentication |
 | `--base` |  | GitLab: GitLab URL |
 | `--client-id` |  | ServiceNow: OAuth client ID |
@@ -320,6 +321,7 @@ siphon connect <service>|model|login [--<field> value ...]
 | `--secret` |  | Webhook: Secret as - (stdin) or @file |
 | `--secret-access-key` |  | AWS: Base secret access key as - (stdin) or @file |
 | `--servers` |  | AWS: Servers |
+| `--service-account` |  | Google Pub/Sub: Service account |
 | `--setup-token` |  | login claude: a setup token as - (stdin) or @file (kind token) |
 | `--signing-secret` |  | Linear: Webhook signing secret as - (stdin) or @file |
 | `--site` |  | Jira: Jira site URL |

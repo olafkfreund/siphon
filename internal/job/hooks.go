@@ -29,9 +29,18 @@ func (p *Pipeline) Webhooks() func(source string) http.Handler {
 			return nil
 		}
 		lim := p.hookLimiters(name)
+		var google *source.GoogleVerifier
+		audience := s.Audience
+		if s.Signature == "google-oidc" {
+			google = p.googleVerifier()
+			if audience == "" {
+				audience = strings.TrimRight(cfg.Server.PublicURL, "/") + "/hook/" + name
+			}
+		}
 		return source.NewWebhook(source.WebhookOptions{
 			Name: name, Secret: s.Secret.Value, Signature: s.Signature, SigHeader: s.SigHeader, TokenHeader: s.TokenHeader,
 			TimestampHeader: s.TimestampHdr, TokenField: s.TokenField, ReplyText: s.ReplyText, SigPrefix: s.SigPrefix, TimestampSep: s.TimestampSep, IDHeader: strings.TrimPrefix(s.ID, "header."), Format: s.Format, AllowQueryToken: s.AllowQueryToken,
+			Audience: audience, ServiceAccount: s.ServiceAccount, Google: google,
 			MaxBody: int64(cfg.Limits.HTTPMaxBody), Now: p.Now, PreLimit: lim.pre, Limit: lim.post,
 			OnReject: p.rejectThrottle(name).note,
 			OnVerificationToken: func(tok string) {
@@ -44,6 +53,14 @@ func (p *Pipeline) Webhooks() func(source string) http.Handler {
 			},
 		}, p.deliver)
 	}
+}
+
+// googleVerifier returns the daemon's one Google token verifier, made on first use.
+func (p *Pipeline) googleVerifier() *source.GoogleVerifier {
+	p.googleOnce.Do(func() {
+		p.google = source.NewGoogleVerifier(source.HTTPClient(false, 10*time.Second, 1<<20), p.Now)
+	})
+	return p.google
 }
 
 // rejectEvery is the least gap between database writes of one source's refused

@@ -305,7 +305,7 @@ func alertText(page string) string {
 
 // dummyValues fills every field of an entry with something valid.
 func dummyValues(e *catalog.Entry, sentinel string) map[string]string {
-	v := map[string]string{"name": "t-" + e.ID, "project": "g/p", "profile": "p", "webhook": "on", "region": "eu-west-1", "public_key": strings.Repeat("ab", 32)}
+	v := map[string]string{"name": "t-" + e.ID, "project": "g/p", "profile": "p", "webhook": "on", "region": "eu-west-1", "public_key": strings.Repeat("ab", 32), "service_account": "push@p.iam.gserviceaccount.com"}
 	for _, f := range e.Fields {
 		if _, ok := v[f.Key]; ok {
 			continue

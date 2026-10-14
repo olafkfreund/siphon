@@ -208,6 +208,31 @@ func TestAzureEventGridEntry(t *testing.T) {
 	}
 }
 
+func TestGooglePubSubEntry(t *testing.T) {
+	e := Get("google-pubsub")
+	if e == nil || e.Status != "available" {
+		t.Fatalf("entry: %+v", e)
+	}
+	res, err := e.Render(map[string]string{"name": "gp", "service_account": "push@p.iam.gserviceaccount.com"}, Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	y := res.Items[0].YAML
+	if len(res.Items) != 1 || res.Items[0].Name != "gp-hooks" || len(res.Secrets) != 0 || strings.Contains(y, "audience") ||
+		!strings.Contains(y, "signature: google-oidc") || !strings.Contains(y, "format: pubsub") || !strings.Contains(y, "push@p.iam.gserviceaccount.com") {
+		t.Fatalf("%+v %+v", res.Items, res.Secrets)
+	}
+	res, err = e.Render(map[string]string{"name": "gp", "service_account": "push@p.iam.gserviceaccount.com", "audience": "https://x/hook/gp"}, Env{})
+	if err != nil || !strings.Contains(res.Items[0].YAML, "audience:") {
+		t.Fatalf("%v %+v", err, res.Items)
+	}
+	for _, want := range []string{"server.public_url", "serviceAccountTokenCreator", "http_max_body"} {
+		if !strings.Contains(e.Setup, want) {
+			t.Errorf("setup lacks %q", want)
+		}
+	}
+}
+
 func TestMattermostEntry(t *testing.T) {
 	e := Get("mattermost")
 	if e == nil {

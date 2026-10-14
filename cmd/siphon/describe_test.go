@@ -36,6 +36,7 @@ sources:
   grafana-hooks: { type: webhook, signature: sha256, signature_header: X-Grafana-Alerting-Signature, secret: env:AGW_HOOK }
   stripe-hooks: { type: webhook, signature: stripe, secret: env:AGW_HOOK }
   home-assistant: { type: mcp, url: "https://ha.example.com/api/mcp", headers: { Authorization: env:AGW_HOOK } }
+  google-pubsub-hooks: { type: webhook, signature: google-oidc, format: pubsub, service_account: push@p.iam.gserviceaccount.com, audience: https://siphon.example.com/hook/google-pubsub-hooks }
   azure-eventgrid-hooks: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK, format: eventgrid }
   uptime-kuma: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK }
   bitbucket: { type: mcp, url: "https://mcp.atlassian.com/v2/mcp", headers: { Authorization: env:AGW_HOOK } }
@@ -134,7 +135,7 @@ func TestExplainCommand(t *testing.T) {
 			t.Errorf("explain rules lacks %q:\n%s", want, out)
 		}
 	}
-	if out = e.ok("explain", "source"); !strings.Contains(out, "read.tool") || !strings.Contains(out, "[github|sha256|token|body-token|standard-webhooks|slack|stripe|ed25519]") {
+	if out = e.ok("explain", "source"); !strings.Contains(out, "read.tool") || !strings.Contains(out, "[github|sha256|token|body-token|standard-webhooks|slack|stripe|ed25519|google-oidc]") {
 		t.Errorf("explain source:\n%s", out)
 	}
 	if out = e.ok("explain", "routine"); !strings.Contains(out, "steps[].retry.attempts") {

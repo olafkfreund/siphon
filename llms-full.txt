@@ -463,6 +463,7 @@ Always follow this order. Every step has `-o json`.
    - `discord-ask-agent` (Discord slash command, `signature: ed25519` with `format: discord`),
    - `matrix-deploy-command` (Matrix application service, `signature: token` with `token_header: Authorization` and `format: matrix`; unencrypted rooms only),
    - `azure-keyvault-secret-expiry` (Azure Event Grid, `signature: token` with `format: eventgrid`),
+   - `gcp-cloud-build-failed` (Google Pub/Sub, `signature: google-oidc` with `format: pubsub`, no secret),
    - `notion-page-summary` (Notion, `format: notion`: the source starts with no secret; accept the verification token it captures on the Sources page),
    - `webhook-to-ntfy`, `local-summariser`, `nightly-report`,
      `aws-cloudwatch-alarm`.
@@ -632,6 +633,8 @@ siphon apply -f deploy.yaml --secret sources/deploy-hook.secret=@hook.key
 | `ed25519` | verifies `X-Signature-Ed25519` over `X-Signature-Timestamp` + body with a hex public key as the secret (5-minute window) | Discord (a public key is not a secret) |
 | `ed25519` + `format: discord` | as `ed25519`, and answers Discord's PING, ignores autocomplete, and delivers each interaction keyed by its `id` with a deferred reply (or `reply_text:` as the message) | Discord slash commands and components |
 | `token` + `format: eventgrid` | as `token`, and answers Azure Event Grid's `OPTIONS` and validation handshakes and delivers each event of a batch (one rate-limit charge per request; keyed by its `id`; `validationUrl` is never fetched) | Azure Event Grid (put the secret in a delivery property) |
+| `google-oidc` | verifies the `Authorization: Bearer` OIDC token Google signs: issuer, `audience:` (default `server.public_url` + `/hook/<name>`), the required `service_account:` email, expiry; no secret | Google Cloud Pub/Sub push, other Google OIDC senders |
+| `google-oidc` + `format: pubsub` | as `google-oidc`, and unwraps the push envelope (base64 `data` as JSON or text, `attributes`, `message_id`, …), keyed by `messageId`, answering 204 (a duplicate too) | Google Cloud Pub/Sub (needs `server.public_url`; keep payload wrapping on, since `--push-no-wrapper` gets 400; the creator needs `roles/iam.serviceAccountUser` on the push service account; large messages need `limits.http_max_body`) |
 | `sha256` + `format: notion` | as `sha256` with `X-Notion-Signature` and prefix `sha256=`. With no `secret:` the source only accepts Notion's one-time `{"verification_token": …}` POST and delivers nothing; an operator accepts the token on the Sources page (or `POST /api/sources/<name>/notion-verification` with `{"token": …}`, the token that was shown), which stores it as the secret. Order: create the subscription in Notion, copy the token from the Sources page, paste it into Notion and Verify, then press "Use this token". A wrong token that was accepted: delete `secret:` from the source's YAML and use "Resend token" in Notion; a restart loses an unaccepted token, so resend it too | Notion |
 | `slack` | signs `v0:<timestamp>:<body>` (HMAC-SHA256, `X-Slack-Signature`, ±5 min); Siphon also answers Slack's signed `url_verification` with its challenge | Slack (paste the app's Signing Secret) |
 | `stripe` | signs `<t>.<body>` in `Stripe-Signature` (`t=…,v1=…`; any `v1` may match, so rotation works; ±5 min) | Stripe (paste the endpoint's signing secret) |
@@ -2052,6 +2055,7 @@ siphon connect <service>|model|login [--<field> value ...]
 |---|---|---|
 | `--access-key-id` |  | AWS: Base access key ID as - (stdin) or @file |
 | `--api-key` |  | model, login: API key as - (stdin) or @file |
+| `--audience` |  | Google Pub/Sub: Audience |
 | `--auth` |  | ServiceNow: Authentication |
 | `--base` |  | GitLab: GitLab URL |
 | `--client-id` |  | ServiceNow: OAuth client ID |
@@ -2078,6 +2082,7 @@ siphon connect <service>|model|login [--<field> value ...]
 | `--secret` |  | Webhook: Secret as - (stdin) or @file |
 | `--secret-access-key` |  | AWS: Base secret access key as - (stdin) or @file |
 | `--servers` |  | AWS: Servers |
+| `--service-account` |  | Google Pub/Sub: Service account |
 | `--setup-token` |  | login claude: a setup token as - (stdin) or @file (kind token) |
 | `--signing-secret` |  | Linear: Webhook signing secret as - (stdin) or @file |
 | `--site` |  | Jira: Jira site URL |
@@ -2564,6 +2569,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 | [`alert-to-servicenow-incident`](alert-to-servicenow-incident.yaml) | Open a ServiceNow incident for each alert, with no agent | a webhook source `alerts`, `siphon connect servicenow --instance …` |
 | [`alertmanager-summary`](alertmanager-summary.yaml) | Summarise Prometheus alerts with a local model, then notify | `siphon connect model ollama` · webhook secret |
 | [`azure-keyvault-secret-expiry`](azure-keyvault-secret-expiry.yaml) | Push a notification when an Azure Key Vault secret is near expiry | `siphon connect azure-eventgrid` |
+| [`gcp-cloud-build-failed`](gcp-cloud-build-failed.yaml) | Push a notification when a Google Cloud Build fails | `siphon connect google-pubsub` |
 | [`cloudflare-notification`](cloudflare-notification.yaml) | Explain Cloudflare notifications with an agent, then notify | `siphon connect cloudflare --webhook`, `siphon connect login claude` |
 | [`datadog-monitor-alert`](datadog-monitor-alert.yaml) | Summarise Datadog monitor alerts with a local model, then notify | `siphon connect datadog`, `siphon connect model ollama` |
 | [`disk-full`](disk-full.yaml) | Warn when a disk is nearly full (and again every 6 hours) | — |
@@ -2701,7 +2707,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 | Azure Event Grid | webhooks | available | `siphon connect azure-eventgrid` | [`azure-keyvault-secret-expiry`](../templates/azure-keyvault-secret-expiry.yaml) |
 | Cloudflare | tools, webhooks | available | `siphon connect cloudflare` | [`cloudflare-notification`](../templates/cloudflare-notification.yaml) |
 | Kubernetes |  | not yet: needs kubeconfig wiring: coming in a later release | — |  |
-| Google Pub/Sub |  | not yet: needs a Google OIDC (RS256 JWT) push-authentication mode | — |  |
+| Google Pub/Sub | webhooks | available | `siphon connect google-pubsub` | [`gcp-cloud-build-failed`](../templates/gcp-cloud-build-failed.yaml) |
 
 ## Payments
 
@@ -4029,6 +4035,27 @@ rules:
     id: event.pull_request.id
     cooldown: 1m
     action: { agent: forgejo-pr-reviewer }
+```
+
+
+---
+
+<!-- file: docs/templates/gcp-cloud-build-failed.yaml -->
+
+```yaml
+# title:    Push a notification when a Google Cloud Build fails
+# category: Ops & monitoring
+# needs:    sources/google-pubsub-hooks         (siphon connect google-pubsub)
+#           (push subscription on the Pub/Sub topic cloud-builds)
+# apply:    siphon apply -f gcp-cloud-build-failed.yaml
+rules:
+  - name: cloud-build-failed
+    source: google-pubsub-hooks
+    when: 'event.data.status in ["FAILURE", "TIMEOUT", "INTERNAL_ERROR"]'
+    on: each
+    id: event.message_id
+    action:
+      cmd: [curl, -fsS, -H, "Title: Cloud Build failed", --data-raw, "Cloud Build {{.event.data.id}} {{.event.data.status}}", https://ntfy.sh/siphon-CHANGE-ME]
 ```
 
 
