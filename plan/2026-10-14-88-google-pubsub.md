@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 88
 spec: spec/2026-10-14-88-google-pubsub.md
 ---
