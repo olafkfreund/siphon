@@ -72,42 +72,56 @@
     if (e.key === "g") { g = true; setTimeout(function () { g = false; }, 800); }
   });
 
-  // Rules page: search box + chips narrow the cards; state lives for the session.
-  function rulesFilter() {
-    var bar = document.querySelector(".rules-bar");
-    if (!bar || bar.dataset.bound) return; // bound once per rendered bar
-    bar.dataset.bound = "1";
-    var q = bar.querySelector(".rules-search"), chips = bar.querySelectorAll(".chip"), cards = document.querySelectorAll(".rule-card");
-    var none = document.querySelector(".rules-none"), chip = "all";
-    try { var st = JSON.parse(sessionStorage.getItem("siphon-rules") || "{}"); q.value = st.q || ""; chip = st.chip || "all"; } catch (e) {}
-    bar.hidden = false;
-    chips.forEach(function (c) {
-      var f = c.dataset.filter;
-      if (f !== "all" && f !== "on" && f !== "off" && f !== "hot" && !document.querySelector('.rule-card[data-kind="' + f + '"]')) c.hidden = true;
-    });
-    var saved = bar.querySelector('.chip[data-filter="' + chip + '"]');
-    if (!saved || saved.hidden) chip = "all"; // the saved kind may have no rules any more
-    function apply() {
-      var words = q.value.toLowerCase().split(/\s+/).filter(Boolean), shown = 0;
-      cards.forEach(function (c) {
-        var ok = chip === "all" || c.dataset.kind === chip || c.dataset.status === chip || (chip === "hot" && c.dataset.hot === "true");
-        var text = (c.dataset.text || "").toLowerCase();
-        c.hidden = !(ok && words.every(function (w) { return text.indexOf(w) >= 0; }));
-        if (!c.hidden) shown++;
+  // List filters: a bar[data-filter-scope=X] (search + chips) narrows the items of
+  // [data-filter-list=X] ([data-filter-item]); state lives per scope for the session.
+  var kept = null; // the focused search across an htmx swap
+  function initFilters() {
+    document.querySelectorAll(".filter-bar[data-filter-scope]").forEach(function (bar) {
+      if (bar.dataset.bound) return; // bound once per rendered bar
+      bar.dataset.bound = "1";
+      var scope = bar.dataset.filterScope, key = "siphon-filter-" + scope;
+      var list = document.querySelector('[data-filter-list="' + scope + '"]');
+      var none = document.querySelector('.filter-none[data-filter-scope="' + scope + '"]');
+      var q = bar.querySelector(".filter-search"), chips = bar.querySelectorAll(".chip"), chip = "all";
+      var items = list ? list.querySelectorAll("[data-filter-item]") : [];
+      try { var st = JSON.parse(sessionStorage.getItem(key) || "{}"); q.value = st.q || ""; chip = st.chip || "all"; } catch (e) {}
+      bar.hidden = false;
+      var fields = ["kind", "status", "state", "health"];
+      function has(it, f) { return fields.some(function (k) { return it.dataset[k] === f; }); }
+      chips.forEach(function (c) {
+        var f = c.dataset.filter;
+        if (f === "all" || f === "hot") return;
+        if (!Array.prototype.some.call(items, function (it) { return has(it, f); }) && f !== "on" && f !== "off") c.hidden = true;
       });
-      chips.forEach(function (c) { c.setAttribute("aria-pressed", c.dataset.filter === chip ? "true" : "false"); });
-      if (none) none.hidden = shown > 0;
-      try { sessionStorage.setItem("siphon-rules", JSON.stringify({ q: q.value, chip: chip })); } catch (e) {}
-    }
-    q.addEventListener("input", apply);
-    bar.addEventListener("click", function (e) { var c = e.target.closest(".chip"); if (c) { chip = c.dataset.filter; apply(); } });
-    if (none) none.addEventListener("click", function (e) {
-      if (e.target.closest("[data-action=clear-filter]")) { q.value = ""; chip = "all"; apply(); q.focus(); }
+      var saved = bar.querySelector('.chip[data-filter="' + chip + '"]');
+      if (!saved || saved.hidden) chip = "all"; // the saved chip may match nothing any more
+      function apply() {
+        var words = q.value.toLowerCase().split(/\s+/).filter(Boolean), shown = 0;
+        items.forEach(function (it) {
+          var ok = chip === "all" || has(it, chip) || (chip === "hot" && it.dataset.hot === "true");
+          var text = (it.dataset.text || "").toLowerCase();
+          it.hidden = !(ok && words.every(function (w) { return text.indexOf(w) >= 0; }));
+          if (!it.hidden) shown++;
+        });
+        chips.forEach(function (c) { c.setAttribute("aria-pressed", c.dataset.filter === chip ? "true" : "false"); });
+        if (none) none.hidden = shown > 0;
+        try { sessionStorage.setItem(key, JSON.stringify({ q: q.value, chip: chip })); } catch (e) {}
+      }
+      q.addEventListener("input", apply);
+      bar.addEventListener("click", function (e) { var c = e.target.closest(".chip"); if (c) { chip = c.dataset.filter; apply(); } });
+      if (none) none.addEventListener("click", function (e) {
+        if (e.target.closest("[data-action=clear-filter]")) { q.value = ""; chip = "all"; apply(); q.focus(); }
+      });
+      apply();
+      if (kept && kept.scope === scope) { q.focus(); try { q.setSelectionRange(kept.s, kept.e); } catch (e) {} kept = null; }
     });
-    apply();
   }
-  document.addEventListener("DOMContentLoaded", rulesFilter);
-  document.addEventListener("htmx:afterSwap", rulesFilter);
+  document.addEventListener("DOMContentLoaded", initFilters);
+  document.addEventListener("htmx:beforeSwap", function () {
+    var a = document.activeElement, bar = a && a.closest && a.closest(".filter-bar[data-filter-scope]");
+    kept = bar && a.classList.contains("filter-search") ? { scope: bar.dataset.filterScope, s: a.selectionStart, e: a.selectionEnd } : null;
+  });
+  document.addEventListener("htmx:afterSwap", initFilters);
 
   // Announce htmx swaps for screen readers.
   document.addEventListener("htmx:afterSwap", function (e) {

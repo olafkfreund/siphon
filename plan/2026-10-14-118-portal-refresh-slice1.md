@@ -157,6 +157,17 @@ spec: spec/2026-10-14-118-portal-refresh-slice1.md
      - a narrow window;
      - both themes.
 
+## Deviations
+
+- **Step 1:**
+  - **`sources.html`** also used `rule-head`, so it's renamed to
+    `item-head`.
+  - **`.is-err` and `.is-wait`** use the theme-aware `--bad-text` and
+    `--wait-text` tokens, so the contrast holds in dark mode.
+  - **`.stamp.err` and `.stamp.wait`** follow `.stamp.hot`.
+  - **A chip is hidden** when no item has its value in any filter
+    attribute. `all`, `hot`, `on` and `off` always show.
+
 ## Tests
 
 ```sh
