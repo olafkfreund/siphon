@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"strconv"
@@ -659,6 +660,45 @@ func TestCleanupCustomRetention(t *testing.T) {
 	if count(`SELECT COUNT(*) FROM audit WHERE event='old'`) != 0 || count(`SELECT COUNT(*) FROM audit WHERE event='new'`) != 1 ||
 		count(`SELECT COUNT(*) FROM seen_event`) != 1 {
 		t.Fatal("custom cutoff")
+	}
+}
+
+func TestCleanupEachRules(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	now := time.UnixMilli(1_800_000_000_000)
+	day := 24 * time.Hour
+	tx, _ := s.DB.Begin()
+	for i, d := range []time.Duration{10, 9, 1} {
+		PutRuleState(tx, "e", fmt.Sprint("k", i), true, now.Add(-d*day))
+	}
+	PutRuleState(tx, "e", "unfired", true, time.Time{})
+	PutRuleState(tx, "old", "k", true, now.Add(-30*day))
+	PutRuleState(tx, "g", "a", true, now.Add(-30*day))
+	PutRuleState(tx, "g", "b", true, now.Add(-31*day))
+	before, _ := RuleLastFired(tx, "e")
+	tx.Commit()
+	count := func(rule string) (n int) {
+		s.DB.QueryRow(`SELECT COUNT(*) FROM rule_state WHERE rule=?`, rule).Scan(&n)
+		return
+	}
+	if err := Cleanup(s.DB, now, Retention{}); err != nil {
+		t.Fatal(err)
+	}
+	if count("e") != 4 || count("old") != 1 || count("g") != 2 {
+		t.Fatal("nil EachRules must prune nothing")
+	}
+	if err := Cleanup(s.DB, now, Retention{EachRules: []string{"e", "old"}}); err != nil {
+		t.Fatal(err)
+	}
+	// e keeps k2 (1 day) and the unfired row; old keeps its only row; g is an edge rule.
+	if count("e") != 2 || count("old") != 1 || count("g") != 2 {
+		t.Fatalf("e=%d old=%d g=%d", count("e"), count("old"), count("g"))
+	}
+	tx, _ = s.DB.Begin()
+	defer tx.Rollback()
+	if after, _ := RuleLastFired(tx, "e"); !after.Equal(before) {
+		t.Fatalf("RuleLastFired %v -> %v", before, after)
 	}
 }
 
