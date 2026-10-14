@@ -56,7 +56,6 @@ lists what's missing. Models and subscription logins are on their own pages:
 | Alertmanager | webhooks | available | `siphon connect alertmanager` | [`linear-issue-from-alert`](../templates/linear-issue-from-alert.yaml) |
 | Datadog | webhooks | available | `siphon connect datadog` | [`datadog-monitor-alert`](../templates/datadog-monitor-alert.yaml) |
 | Uptime Kuma | webhooks | available | `siphon connect uptime-kuma` | [`uptime-kuma-down`](../templates/uptime-kuma-down.yaml) |
-| Opsgenie |  | not yet: end of support 2027-04-05 | — |  |
 
 ## Cloud
 

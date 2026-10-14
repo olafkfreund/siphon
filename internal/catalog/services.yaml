@@ -796,4 +796,3 @@ services:
   - {id: google-pubsub, name: Google Pub/Sub, mark: GP, category: cloud, summary: Google Cloud Pub/Sub push subscriptions., status: not-yet, reason: 'needs a Google OIDC (RS256 JWT) push-authentication mode'}
   - {id: azure-eventgrid, name: Azure Event Grid, mark: EG, category: cloud, summary: Azure Event Grid event subscriptions., status: not-yet, reason: 'needs the subscription validation handshake'}
   - {id: azure-devops, name: Azure DevOps, mark: AD, category: code, summary: Azure DevOps service hooks and work items., status: not-yet, reason: 'service hooks use basic auth only, and the remote MCP is Entra OAuth only'}
-  - {id: opsgenie, name: Opsgenie, mark: OG, category: monitoring, summary: Opsgenie alert callbacks., status: not-yet, reason: 'end of support 2027-04-05'}
