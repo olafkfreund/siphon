@@ -336,7 +336,7 @@ type Source struct {
 	SigPrefix    string            `yaml:"signature_prefix"`    // sha256: e.g. "v1="; the header may list several
 	TimestampSep string            `yaml:"timestamp_separator"` // sha256 with timestamp_header: "." (default) or ":"
 	ID           string            `yaml:"id"`                  // delivery id, e.g. header.X-GitHub-Delivery
-	Format       string            `yaml:"format"`              // webhook: eventgrid (Azure Event Grid handshakes and batches)
+	Format       string            `yaml:"format"`              // webhook: eventgrid (Azure Event Grid handshakes and batches) | notion
 	Env          map[string]Secret `yaml:"env"`                 // stdio MCP child env; values are env:/file: refs
 	Package      string            `yaml:"package"`             // name in server.mcp_packages; fills Command
 	AWS          string            `yaml:"aws"`                 // provider: aws credential; the daemon injects short-lived keys
@@ -905,6 +905,9 @@ func (c *Config) Warnings() []string {
 		}
 		if s := c.Sources[name]; s != nil && s.Type == "webhook" && s.Signature == "body-token" {
 			w = append(w, fmt.Sprintf("source %s: signature body-token sends the secret in the body: weaker than an HMAC, and a captured delivery can be replayed", name))
+		}
+		if s := c.Sources[name]; s != nil && s.Type == "webhook" && s.Format == "notion" && !s.Secret.isSet() {
+			w = append(w, fmt.Sprintf("source %s: format notion has no secret: it only accepts Notion's verification token until one is set", name))
 		}
 		if s := c.Sources[name]; s != nil && s.Auth != nil && s.Auth.OAuth != nil && s.Auth.OAuth.ClientSecret.isSet() && s.Auth.OAuth.Issuer == "" {
 			w = append(w, fmt.Sprintf("source %s: auth.oauth.client_secret without auth.oauth.issuer: the first login trusts whichever authorization server the MCP server names", name))
@@ -1506,7 +1509,7 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 			add("%s: method must be GET or POST", p)
 		}
 	case "webhook":
-		if !s.Secret.isSet() {
+		if !s.Secret.isSet() && s.Format != "notion" { // notion: empty means awaiting the verification token
 			add("%s: secret is required", p)
 		}
 		if s.ID != "" && !webhookID.MatchString(s.ID) {
@@ -1568,8 +1571,12 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 			if n := utf8.RuneCountInString(s.ReplyText); n > 500 {
 				add("%s: reply_text is %d characters; the limit is 500", p, n)
 			}
+		case s.Format == "notion":
+			if s.Signature != "sha256" || !strings.EqualFold(s.SigHeader, "X-Notion-Signature") || s.SigPrefix != "sha256=" {
+				add("%s: format notion needs signature sha256, signature_header X-Notion-Signature and signature_prefix sha256=", p)
+			}
 		case s.Format != "eventgrid":
-			add("%s: format must be eventgrid or discord, got %q", p, s.Format)
+			add("%s: format must be eventgrid, discord or notion, got %q", p, s.Format)
 		case s.Signature != "token":
 			add("%s: format eventgrid needs signature token", p)
 		case s.ID != "":
