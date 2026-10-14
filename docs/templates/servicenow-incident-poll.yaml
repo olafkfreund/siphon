@@ -1,0 +1,14 @@
+# title:    Get notified of ServiceNow incident changes by polling, without a webhook
+# category: Notifications & glue
+# needs:    sources/servicenow                     (siphon connect servicenow ... --poll-incidents, or add the read block with siphon edit sources servicenow)
+# apply:    siphon apply -f servicenow-incident-poll.yaml
+rules:
+  - name: servicenow-incident-poll
+    source: servicenow
+    for_each: event
+    # "true" fires on every change. For new incidents only: item.sys_mod_count == "0"
+    when: 'true'
+    on: each
+    id: 'item.sys_id + ":" + item.sys_mod_count'
+    action:
+      cmd: [curl, -fsS, -H, "Title: ServiceNow {{.item.number}}", --data-raw, "Incident {{.item.number}}: {{.item.short_description}}", https://ntfy.sh/siphon-CHANGE-ME]

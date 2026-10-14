@@ -106,6 +106,58 @@ rules:
 Ready-made: `siphon template servicenow-incident-notify` and
 `siphon template servicenow-incident-summary`.
 
+## Polling instead of webhooks
+
+Use this when the instance has no path to Siphon (no outbound HTTP to it).
+When it can reach Siphon, prefer the webhook: it is immediate and sends
+inserts, updates and deletes.
+
+Turn it on with the Poll incidents option (`siphon connect servicenow ...
+--poll-incidents`), or add this to the connection's source with
+`siphon edit sources servicenow`:
+
+```yaml
+poll: 2m
+read:
+  tool: search_records
+  args:
+    table: incident
+    query: "sys_updated_on>=javascript:gs.minutesAgoStart(10)^ORDERBYDESCsys_updated_on"
+    fields: [number, sys_id, sys_mod_count, short_description, state, priority, urgency, assigned_to, sys_updated_on]
+    limit: 50
+```
+
+The event is the list of records, so a rule uses `for_each: event`,
+`on: each` and `id: 'item.sys_id + ":" + item.sys_mod_count'`. See the
+`servicenow-incident-poll` template. Its `when: 'true'` fires on every
+change; for new incidents only, use `item.sys_mod_count == "0"`. For another
+table, such as `change_request`, change `table` (and the fields).
+
+What to know:
+
+- **Latency:** up to one interval (2 minutes here).
+- **The window must be longer than the interval.** Changes older than the
+  window when polling resumes are missed, and nothing reports it. That
+  happens after Siphon was down, or polls failed, for longer than the
+  window minus the interval: about 8 minutes here. A wider window costs
+  nothing extra, because the rule's `id` drops repeats, and it buys a
+  longer catch-up.
+- **At most 50 records per poll,** newest first. Records are dropped only
+  when more than 50 change between two successful polls.
+- **Deletes aren't seen.**
+- **A record changed several times between polls** fires once, at its
+  latest `sys_mod_count`.
+- **`sys_mod_count` is a display value** (`5,551`).
+- **The cost per interval:** one Table API call, plus an OAuth token
+  request with OAuth authentication.
+- **Turning polling on fires for every incident changed in the last
+  window,** up to 50 at once.
+- **Polling as well as the webhook:** if you also apply the webhook
+  templates, the same incident can notify twice, once from each path.
+- **`javascript:` in the query** needs script in encoded queries, which is
+  on by default. If nothing ever fires, paste the query into an incident
+  list view filter to check it returns rows.
+
 ## Agent tools
 
 Give `siphon connect` the instance URL and Siphon adds a `servicenow` MCP
@@ -256,6 +308,7 @@ Ready-made: `siphon template alert-to-servicenow-incident` and
 | You want | Use |
 |---|---|
 | ServiceNow to trigger rules | webhooks: the Business Rule ([section 4](#4-the-business-rule)) |
+| ServiceNow to trigger rules, but it cannot reach Siphon | polling ([Polling instead of webhooks](#polling-instead-of-webhooks)) |
 | A deterministic write, with no LLM | the `servicenow:` action ([Writes without an agent](#writes-without-an-agent)) |
 | An agent to read or update records | the built-in tools (`package: servicenow`), with no Now Assist licence |
 | ServiceNow's own maintained tools | the official MCP server: Siphon logs in to it, but on our demo instance the server itself didn't answer MCP ([below](#the-official-mcp-server)) |
