@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"os"
 	"regexp"
@@ -281,6 +282,25 @@ func TestDiscordEntry(t *testing.T) {
 	}
 	if _, err := e.Render(map[string]string{"name": "dc", "public_key": "not-a-key"}, Env{}); err == nil {
 		t.Fatal("a bad public key was accepted")
+	}
+}
+
+func TestTeamsEntry(t *testing.T) {
+	e := Get("teams")
+	if e == nil || e.Status != "available" {
+		t.Fatalf("entry: %+v", e)
+	}
+	tok := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))
+	res, err := e.Render(map[string]string{"name": "tm", "token": tok, "reply": "Working on it"}, Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	y := res.Items[0].YAML
+	if res.Items[0].Name != "tm-hooks" || !strings.Contains(y, "signature: teams-hmac") || !strings.Contains(y, `reply_text: "Working on it"`) {
+		t.Fatalf("%+v", res.Items)
+	}
+	if len(res.Secrets) != 1 || res.Secrets[0].Value != tok {
+		t.Fatalf("secrets %+v", res.Secrets)
 	}
 }
 

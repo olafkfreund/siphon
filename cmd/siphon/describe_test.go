@@ -52,6 +52,7 @@ sources:
   alerts: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
   deploys: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
   matrix-hooks: { type: webhook, signature: token, token_header: Authorization, format: matrix, secret: env:AGW_HOOK }
+  teams-hooks: { type: webhook, signature: teams-hmac, secret: env:AGW_TEAMS_KEY }
   discord-hooks: { type: webhook, signature: ed25519, format: discord, secret: env:AGW_DISCORD_KEY }
   mattermost-hooks: { type: webhook, signature: body-token, secret: env:AGW_HOOK }
   servicenow-hooks: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
@@ -135,7 +136,7 @@ func TestExplainCommand(t *testing.T) {
 			t.Errorf("explain rules lacks %q:\n%s", want, out)
 		}
 	}
-	if out = e.ok("explain", "source"); !strings.Contains(out, "read.tool") || !strings.Contains(out, "[github|sha256|token|body-token|standard-webhooks|slack|stripe|ed25519|google-oidc]") {
+	if out = e.ok("explain", "source"); !strings.Contains(out, "read.tool") || !strings.Contains(out, "[github|sha256|token|body-token|standard-webhooks|slack|stripe|ed25519|google-oidc|teams-hmac]") {
 		t.Errorf("explain source:\n%s", out)
 	}
 	if out = e.ok("explain", "routine"); !strings.Contains(out, "steps[].retry.attempts") {

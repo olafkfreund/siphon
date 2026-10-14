@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"slices"
@@ -406,6 +407,27 @@ func TestDiscordValidation(t *testing.T) {
 		{"signature: sha256, signature_header: X-S, reply_text: hi", "x", "reply_text is only for"},
 		{"signature: ed25519, format: discord", "not-a-key", "64 lowercase hex"},
 		{"signature: ed25519, format: discord", StubSecret, ""}, // the portal's pre-commit stand-in
+	} {
+		t.Setenv("AGW_W", tc.key)
+		c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, " + tc.extra + "}}"))
+		err := c.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%q: %v", tc.extra, err)
+		}
+	}
+}
+
+func TestTeamsHMACValidation(t *testing.T) {
+	good := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))
+	short := base64.StdEncoding.EncodeToString([]byte("short"))
+	for _, tc := range []struct{ extra, key, want string }{
+		{"signature: teams-hmac", good, ""},
+		{"signature: teams-hmac, reply_text: hi", good, ""},
+		{"signature: teams-hmac", StubSecret, ""},
+		{"signature: teams-hmac", "!!not base64!!", "base64 security token"},
+		{"signature: teams-hmac", short, "at least 16 bytes"},
+		{"signature: teams-hmac, token_header: X-T", good, "not allowed with signature teams-hmac"},
+		{"signature: teams-hmac, reply_text: " + strings.Repeat("x", 501), good, "limit is 500"},
 	} {
 		t.Setenv("AGW_W", tc.key)
 		c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, " + tc.extra + "}}"))

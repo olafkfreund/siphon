@@ -257,6 +257,26 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 				return
 			}
 			signed = body
+		case "teams-hmac":
+			// Teams outgoing webhook: Authorization: HMAC <base64 HMAC-SHA256(base64-decoded token, body)>
+			header = "Authorization"
+			k, err := base64.StdEncoding.DecodeString(o.Secret)
+			if err != nil || len(k) == 0 {
+				reject(http.StatusInternalServerError, "secret misconfigured") // never echo the key
+				return
+			}
+			sig, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(r.Header.Get(header), "HMAC "))
+			mac := hmac.New(sha256.New, k)
+			mac.Write(body)
+			if !strings.HasPrefix(r.Header.Get(header), "HMAC ") || err != nil || !hmac.Equal(sig, mac.Sum(nil)) {
+				reject(http.StatusUnauthorized, "signature invalid")
+				return
+			}
+			signed = body
+			var v struct{ ID string }
+			if json.Unmarshal(body, &v) == nil {
+				key = v.ID // a non-string id fails the decode, so the body hash is used
+			}
 		case "standard-webhooks":
 			header = "Webhook-Signature"
 			var ok bool
@@ -362,7 +382,18 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 			data = decodeBody(r, body)
 		}
 		dup, err := deliver(r.Context(), Event{Source: o.Name, ReceivedAt: now, Headers: headers, Data: data}, id)
-		if err != nil {
+		if o.Signature == "teams-hmac" && err == nil { // Teams shows whatever we answer, so a duplicate gets the same 200
+			text := o.ReplyText
+			if text == "" {
+				text = "Received." // an empty text may show as an empty bubble or an error in Teams
+			}
+			reply, _ := json.Marshal(struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			}{"message", text}) // field order: type first
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(reply)
+		} else if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 		} else if dup {
 			w.WriteHeader(http.StatusConflict)

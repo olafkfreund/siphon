@@ -328,6 +328,9 @@ func dummyValues(e *catalog.Entry, sentinel string) map[string]string {
 			}
 		}
 	}
+	if e.ID == "teams" { // the secret must be a base64 key of at least 16 bytes
+		v["token"] = base64.StdEncoding.EncodeToString([]byte(sentinel))
+	}
 	if e.ID == "aws" { // profile mode: no base keys
 		delete(v, "access_key_id")
 		delete(v, "secret_access_key")
