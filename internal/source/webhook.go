@@ -32,8 +32,11 @@ type WebhookOptions struct {
 	SigPrefix       string // sha256: the header may hold a comma-separated list of PREFIX+hex; any match counts
 	TimestampSep    string // sha256 with a timestamp: what joins timestamp and body (default ".")
 	IDHeader        string
-	AllowQueryToken bool   // matrix: also accept ?access_token= as the token
-	Format          string // "eventgrid": answer Azure Event Grid's handshakes and deliver each event of a batch; "discord" (signature ed25519): answer Discord's PING and interactions; "notion": capture Notion's verification token until a secret is set
+	AllowQueryToken bool            // matrix: also accept ?access_token= as the token
+	Format          string          // "eventgrid": answer Azure Event Grid's handshakes and deliver each event of a batch; "discord" (signature ed25519): answer Discord's PING and interactions; "notion": capture Notion's verification token until a secret is set
+	Audience        string          // google-oidc: the token's aud
+	ServiceAccount  string          // google-oidc: the email the token must carry
+	Google          *GoogleVerifier // google-oidc
 	// OnVerificationToken receives Notion's verification token (format notion, no secret).
 	OnVerificationToken func(string)
 	MaxBody             int64
@@ -239,6 +242,21 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 				return
 			}
 			signed = body
+		case "google-oidc":
+			// https://cloud.google.com/pubsub/docs/authenticate-push-subscriptions
+			header = "Authorization"
+			tok, ok := strings.CutPrefix(r.Header.Get(header), "Bearer ")
+			var email string
+			if ok && o.Google != nil {
+				ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+				email, err = o.Google.Verify(ctx, tok, o.Audience)
+				cancel()
+			}
+			if !ok || o.Google == nil || err != nil || !strings.EqualFold(email, o.ServiceAccount) {
+				reject(http.StatusUnauthorized, "token invalid")
+				return
+			}
+			signed = body
 		case "standard-webhooks":
 			header = "Webhook-Signature"
 			var ok bool
@@ -332,6 +350,10 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 			serveMatrix(w, r, o, now, body, headers, deliver)
 			return
 		}
+		if o.Format == "pubsub" {
+			servePubSub(w, r, o, now, body, headers, deliver, reject)
+			return
+		}
 		if o.Format == "discord" {
 			serveDiscord(w, r, o, now, body, headers, deliver, reject)
 			return
@@ -411,6 +433,43 @@ func serveEventGrid(w http.ResponseWriter, r *http.Request, o WebhookOptions, no
 			return
 		}
 	}
+}
+
+// servePubSub handles an authenticated Pub/Sub push: it unwraps the envelope
+// and delivers the message keyed by its messageId. A duplicate gets 204 too,
+// so Pub/Sub stops redelivering. The caller has already counted Limit.
+func servePubSub(w http.ResponseWriter, r *http.Request, o WebhookOptions, now time.Time, body []byte, headers map[string]string, deliver Deliver, reject func(int, string)) {
+	var env struct {
+		Message struct {
+			Data        string            `json:"data"`
+			Attributes  map[string]string `json:"attributes"`
+			MessageID   string            `json:"messageId"`
+			PublishTime string            `json:"publishTime"`
+		} `json:"message"`
+		Subscription string `json:"subscription"`
+	}
+	if json.Unmarshal(body, &env) != nil || env.Message.MessageID == "" {
+		reject(http.StatusBadRequest, "not a Pub/Sub push")
+		return
+	}
+	raw, err := base64.StdEncoding.DecodeString(env.Message.Data)
+	if err != nil {
+		reject(http.StatusBadRequest, "message data is not base64")
+		return
+	}
+	var data any = string(raw)
+	if j, err := DecodeJSON(raw); err == nil {
+		data = j
+	}
+	ev := Event{Source: o.Name, ReceivedAt: now, Headers: headers, Data: map[string]any{
+		"data": data, "attributes": env.Message.Attributes, "message_id": env.Message.MessageID,
+		"publish_time": env.Message.PublishTime, "subscription": env.Subscription,
+	}}
+	if _, err := deliver(r.Context(), ev, env.Message.MessageID); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // serveDiscord handles an authenticated Discord interaction: PING and

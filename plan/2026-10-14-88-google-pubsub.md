@@ -131,3 +131,8 @@ Opus agent reviews them. Step 4 is mine.
 - **Step 1:** `TestExplainCommand`'s expected signature list gains
   `google-oidc`. Matrix (#99) wasn't on main yet, so its format case is
   merged at rebase.
+- **Step 2:**
+  - **One verifier for every source:** `Verify` takes the audience as an
+    argument.
+  - **The key set** gets a background context carrying the guarded client,
+    because go-oidc keeps that context for later key fetches.

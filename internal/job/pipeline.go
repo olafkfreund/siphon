@@ -56,6 +56,9 @@ type Pipeline struct {
 	hookRejects sync.Map // source name -> *rejects
 	hookLimits  sync.Map // source name -> *hookLimit; webhook rate limits survive requests and Apply
 
+	googleOnce sync.Once
+	google     *source.GoogleVerifier // Pub/Sub push tokens; see googleVerifier
+
 	notionMu      sync.Mutex
 	notionPending map[string]pendingToken // latest Notion verification token per source; memory only
 
