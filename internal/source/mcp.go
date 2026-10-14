@@ -12,7 +12,9 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -79,7 +81,7 @@ func (s MCP) Poll(ctx context.Context) (Event, error) {
 			return Event{}, err
 		}
 		if result.IsError {
-			return Event{}, fmt.Errorf("MCP tool %q returned an error", o.Tool)
+			return Event{}, fmt.Errorf("MCP tool %s returned an error: %s", o.Tool, toolErrText(result.Content))
 		}
 		// Prefer the TextContent copy of structured output (the MCP spec says a
 		// tool SHOULD send both, and go-sdk does): it decodes exactly, whereas
@@ -294,3 +296,35 @@ func jsonText(content []mcp.Content) (any, bool) {
 	v, err := DecodeJSON([]byte(t.Text))
 	return v, err == nil
 }
+
+// toolErrText joins the TextContent of an error result with "; ", capped at
+// 4 KiB on a rune boundary. The caller masks it before clipping it for display,
+// so a secret is never cut in half before Mask sees it.
+func toolErrText(content []mcp.Content) string {
+	var parts []string
+	for _, c := range content {
+		if t, ok := c.(*mcp.TextContent); ok {
+			parts = append(parts, t.Text)
+		}
+	}
+	text := strings.TrimSpace(strings.Join(parts, "; "))
+	if text == "" {
+		return "(no message)"
+	}
+	return clipRunes(text, 4096)
+}
+
+// clipRunes cuts s to at most n bytes on a rune boundary, adding "…" if it cut.
+func clipRunes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "…"
+}
+
+// OneLine collapses whitespace and clips to n bytes: for a masked error shown
+// in one line (a source status or a log line).
+func OneLine(s string, n int) string { return clipRunes(strings.Join(strings.Fields(s), " "), n) }

@@ -168,14 +168,6 @@ func Evaluate(ctx context.Context, tx *sql.Tx, r config.Rule, ev Event, now time
 }
 
 func evalItem(ctx context.Context, tx *sql.Tx, r config.Rule, env map[string]any, now time.Time) (Fire, bool, error) {
-	v, err := run(ctx, r.When, env)
-	if err != nil {
-		return Fire{}, false, err
-	}
-	cur, ok := v.(bool)
-	if !ok {
-		return Fire{}, false, fmt.Errorf("when returned %T, want bool", v)
-	}
 	key := "-"
 	if r.ID != "" {
 		idv, err := run(ctx, r.ID, env)
@@ -194,9 +186,22 @@ func evalItem(ctx context.Context, tx *sql.Tx, r config.Rule, env map[string]any
 		return f, false, err
 	}
 
+	// Already fired: the row has a fire time (deferred ids have no row yet). Still in
+	// the result, so note it before when runs: retention keeps it even while when errors.
+	if r.On == "each" && !st.LastFired.IsZero() {
+		return f, false, store.TouchRuleSeen(tx, r.Name, key, now)
+	}
+	v, err := run(ctx, r.When, env)
+	if err != nil {
+		return f, false, err
+	}
+	cur, ok := v.(bool)
+	if !ok {
+		return f, false, fmt.Errorf("when returned %T, want bool", v)
+	}
+
 	if r.On == "each" {
-		// Already fired: the row has a fire time. Deferred ids have no row yet.
-		if !cur || !st.LastFired.IsZero() {
+		if !cur {
 			return f, false, nil
 		}
 		ok, err := admit(tx, r, key, now)

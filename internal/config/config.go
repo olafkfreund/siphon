@@ -119,6 +119,8 @@ type Server struct {
 	// Only siphon.yaml can list them; the portal picks from the list.
 	MCPPackages map[string]MCPPackage `yaml:"mcp_packages"`
 	// Retention is how long finished jobs, the audit log and seen events are kept. 0 means the default.
+	// Seen events include the ids of "on: each" rules: one not seen (fired, or returned again by a polled source)
+	// for longer than this, counted against the rule's own latest activity, can fire again if it comes back.
 	Retention Retention `yaml:"retention"`
 	// Metrics holds the scrape-only credential for GET /metrics.
 	Metrics MetricsServer `yaml:"metrics"`

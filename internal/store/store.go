@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -121,6 +122,13 @@ func PutRuleState(tx *sql.Tx, rule, key string, value bool, firedAt time.Time) e
 	_, err := tx.Exec(`INSERT INTO rule_state(rule,key,last_value,last_fired_at) VALUES (?,?,?,?)
 		ON CONFLICT(rule,key) DO UPDATE SET last_value=excluded.last_value,
 		last_fired_at=COALESCE(excluded.last_fired_at, last_fired_at)`, rule, key, value, fired)
+	return err
+}
+
+// TouchRuleSeen records that an already-fired on: each key was seen again, at most once an hour.
+func TouchRuleSeen(tx *sql.Tx, rule, key string, now time.Time) error {
+	_, err := tx.Exec(`UPDATE rule_state SET last_seen_at=? WHERE rule=? AND key=? AND (last_seen_at IS NULL OR last_seen_at < ?)`,
+		ms(now), rule, key, ms(now.Add(-time.Hour)))
 	return err
 }
 
@@ -285,7 +293,12 @@ const (
 )
 
 // Retention is how long Cleanup keeps rows; a zero field uses the default (30d, 30d, 7d).
-type Retention struct{ Jobs, Audit, Seen time.Duration }
+// EachRules names the "on: each" rules whose rule_state keys are pruned after Seen,
+// except each rule's newest row (it keeps RuleLastFired and cooldown); nil prunes none.
+type Retention struct {
+	Jobs, Audit, Seen time.Duration
+	EachRules         []string
+}
 
 // NewestMigration is the name of the last embedded migration, e.g. "0005_notifications.sql".
 func NewestMigration() string {
@@ -315,10 +328,7 @@ func Cleanup(db *sql.DB, now time.Time, r Retention) error {
 	defer tx.Rollback()
 	old := `SELECT id FROM jobs WHERE state IN ('done','failed','cancelled') AND finished_at < ?`
 	cut := ms(now.Add(-r.Jobs))
-	for _, q := range []struct {
-		sql  string
-		args []any
-	}{
+	for _, q := range append([]stmt{
 		{`UPDATE jobs SET parent_id=NULL WHERE parent_id IN (` + old + `)`, []any{cut}},
 		{`DELETE FROM approvals WHERE job_id IN (` + old + `)`, []any{cut}},
 		// Job ids are reused once the newest is deleted, so a job's notifications go with it
@@ -331,12 +341,38 @@ func Cleanup(db *sql.DB, now time.Time, r Retention) error {
 		{`DELETE FROM jobs WHERE id IN (` + old + `)`, []any{cut}},
 		{`DELETE FROM audit WHERE at < ?`, []any{ms(now.Add(-r.Audit))}},
 		{`DELETE FROM seen_event WHERE seen_at < ?`, []any{ms(now.Add(-r.Seen))}},
-	} {
+	}, eachPrune(r.EachRules, ms(now.Add(-r.Seen)), r.Seen)...) {
 		if _, err := tx.Exec(q.sql, q.args...); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
+}
+
+type stmt struct {
+	sql  string
+	args []any
+}
+
+// eachPrune deletes rule_state rows of the named rules not seen (last_seen_at, else
+// last_fired_at) for seen before the rule's own latest activity, and before cut,
+// keeping each rule's newest-fired row. Measured against the rule's activity, not the
+// clock: a disabled rule, a failing source, a stopped host or a restored backup
+// freezes it, so ids the source still returns are never pruned. NULL last_fired_at
+// never compares true, so those stay.
+func eachPrune(rules []string, cut int64, seen time.Duration) []stmt {
+	if len(rules) == 0 {
+		return nil
+	}
+	args := make([]any, 0, len(rules)+2)
+	for _, n := range rules {
+		args = append(args, n)
+	}
+	args = append(args, cut, seen.Milliseconds())
+	return []stmt{{`DELETE FROM rule_state WHERE rule IN (` + strings.TrimSuffix(strings.Repeat("?,", len(rules)), ",") + `)
+		AND COALESCE(last_seen_at, last_fired_at) < ?
+		AND COALESCE(last_seen_at, last_fired_at) < (SELECT MAX(COALESCE(r2.last_seen_at, r2.last_fired_at)) FROM rule_state r2 WHERE r2.rule = rule_state.rule) - ?
+		AND last_fired_at < (SELECT MAX(r2.last_fired_at) FROM rule_state r2 WHERE r2.rule = rule_state.rule)`, args}}
 }
 
 // CountAgentJobsSince counts agent jobs created at or after since (daily cap):

@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"strconv"
@@ -25,7 +26,7 @@ func TestOpenTwiceIdempotent(t *testing.T) {
 		}
 		var m int
 		s.DB.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&m)
-		if m != 6 {
+		if m != 7 {
 			t.Fatalf("migrations recorded: %d", m)
 		}
 		var fk int
@@ -662,8 +663,115 @@ func TestCleanupCustomRetention(t *testing.T) {
 	}
 }
 
+func TestCleanupEachRules(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.UnixMilli(1_800_000_000_000)
+	day := 24 * time.Hour
+	tx, err := s.DB.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	put := func(rule, key string, fired time.Time) {
+		if err := PutRuleState(tx, rule, key, true, fired); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, d := range []time.Duration{10, 9, 1} {
+		put("e", fmt.Sprint("k", i), now.Add(-d*day))
+	}
+	put("e", "unfired", time.Time{})
+	put("old", "k", now.Add(-30*day))
+	put("g", "a", now.Add(-30*day))
+	put("g", "b", now.Add(-31*day))
+	before, err := RuleLastFired(tx, "e")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	count := func(rule string) (n int) {
+		s.DB.QueryRow(`SELECT COUNT(*) FROM rule_state WHERE rule=?`, rule).Scan(&n)
+		return
+	}
+	if err := Cleanup(s.DB, now, Retention{}); err != nil {
+		t.Fatal(err)
+	}
+	if count("e") != 4 || count("old") != 1 || count("g") != 2 {
+		t.Fatal("nil EachRules must prune nothing")
+	}
+	if err := Cleanup(s.DB, now, Retention{EachRules: []string{"e", "old"}}); err != nil {
+		t.Fatal(err)
+	}
+	// e keeps k2 (1 day) and the unfired row; old keeps its only row; g is an edge rule.
+	if count("e") != 2 || count("old") != 1 || count("g") != 2 {
+		t.Fatalf("e=%d old=%d g=%d", count("e"), count("old"), count("g"))
+	}
+	tx, _ = s.DB.Begin()
+	defer tx.Rollback()
+	if after, _ := RuleLastFired(tx, "e"); !after.Equal(before) {
+		t.Fatalf("RuleLastFired %v -> %v", before, after)
+	}
+}
+
+func TestCleanupEachSeen(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.UnixMilli(1_800_000_000_000)
+	day := 24 * time.Hour
+	tx, _ := s.DB.Begin()
+	for _, k := range []string{"seen1", "seen10", "never"} {
+		if err := PutRuleState(tx, "e", k, true, now.Add(-30*day)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// newest-fired row, never touched: kept for cooldown.
+	if err := PutRuleState(tx, "e", "newest", true, now.Add(-20*day)); err != nil {
+		t.Fatal(err)
+	}
+	if err := TouchRuleSeen(tx, "e", "seen1", now.Add(-day)); err != nil {
+		t.Fatal(err)
+	}
+	if err := TouchRuleSeen(tx, "e", "seen10", now.Add(-10*day)); err != nil {
+		t.Fatal(err)
+	}
+	// throttled: a touch within the hour keeps the first time.
+	if err := TouchRuleSeen(tx, "e", "seen10", now.Add(-10*day+time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	var seen int64
+	tx.QueryRow(`SELECT last_seen_at FROM rule_state WHERE key='seen10'`).Scan(&seen)
+	if seen != ms(now.Add(-10*day)) {
+		t.Fatalf("throttle: %d", seen)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := Cleanup(s.DB, now, Retention{EachRules: []string{"e"}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := s.DB.Query(`SELECT key FROM rule_state WHERE rule='e' ORDER BY key`)
+	var got []string
+	for rows.Next() {
+		var k string
+		rows.Scan(&k)
+		got = append(got, k)
+	}
+	rows.Close()
+	if fmt.Sprint(got) != "[newest seen1]" {
+		t.Fatalf("kept %v", got)
+	}
+}
+
 func TestNewestMigration(t *testing.T) {
-	if got := NewestMigration(); got != "0006_event_headers.sql" {
+	if got := NewestMigration(); got != "0007_rule_state_seen.sql" {
 		t.Fatal(got)
 	}
 }
@@ -782,5 +890,45 @@ func TestSourceStatesEventAndReject(t *testing.T) {
 		if st.LastReject != "bad signature (401)" {
 			t.Fatalf("reject = %q", st.LastReject)
 		}
+	}
+}
+
+// A rule whose activity froze (disabled, its source failing, the host down, or a
+// restored backup) keeps the ids it last saw: the prune is measured against the
+// rule's own latest activity, not the clock.
+func TestCleanupEachFrozenRule(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.UnixMilli(1_800_000_000_000)
+	day := 24 * time.Hour
+	for _, row := range []struct {
+		key  string
+		seen time.Duration // days ago
+	}{{"newest", 20}, {"near", 25}, {"far", 30}} {
+		at := now.Add(-row.seen * day).UnixMilli()
+		if _, err := s.DB.Exec(`INSERT INTO rule_state(rule,key,last_value,last_fired_at,last_seen_at) VALUES ('f',?,1,?,?)`, row.key, at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := Cleanup(s.DB, now, Retention{EachRules: []string{"f"}}); err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	rows, err := s.DB.Query(`SELECT key FROM rule_state WHERE rule='f' ORDER BY key`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k string
+		rows.Scan(&k)
+		keys = append(keys, k)
+	}
+	// 7 days before its last activity (20 days ago) is 27 days ago: far goes, near stays.
+	if strings.Join(keys, ",") != "near,newest" {
+		t.Fatalf("kept %v", keys)
 	}
 }

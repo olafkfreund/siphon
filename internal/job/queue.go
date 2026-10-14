@@ -129,7 +129,7 @@ func (p *Pipeline) tickAndNudge(ctx context.Context, cfg *config.Config, name st
 	start := p.Now()
 	ids, err := p.tick(ctx, cfg, name)
 	if err != nil && ctx.Err() == nil {
-		slog.Warn("poll failed", "source", name, "err", err)
+		slog.Warn("poll failed", "source", name, "err", pollErrText(cfg, err)) // the tool's text may hold a secret
 	}
 	for range ids {
 		p.nudgeWorkers()
@@ -156,12 +156,23 @@ func (p *Pipeline) worker(ctx context.Context, nudge <-chan struct{}) {
 	}
 }
 
+// eachRules names the "on: each" rules, whose rule_state keys Cleanup prunes.
+func eachRules(cfg *config.Config) []string {
+	var out []string
+	for _, r := range cfg.Rules {
+		if r.On == "each" {
+			out = append(out, r.Name)
+		}
+	}
+	return out
+}
+
 func (p *Pipeline) retention(ctx context.Context) {
 	t := time.NewTicker(24 * time.Hour)
 	defer t.Stop()
 	for {
 		r := p.Config().Server.Retention // read each run: a reload applies at the next one
-		if err := store.Cleanup(p.Store.DB, p.Now(), store.Retention{Jobs: time.Duration(r.Jobs), Audit: time.Duration(r.Audit), Seen: time.Duration(r.SeenEvents)}); err != nil {
+		if err := store.Cleanup(p.Store.DB, p.Now(), store.Retention{Jobs: time.Duration(r.Jobs), Audit: time.Duration(r.Audit), Seen: time.Duration(r.SeenEvents), EachRules: eachRules(p.Config())}); err != nil {
 			slog.Error("retention", "err", err)
 		}
 		select {
