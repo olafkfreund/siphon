@@ -649,15 +649,21 @@ func newSNEnv(t *testing.T) (*env, *fakeAS) {
 }
 
 func TestServiceNowShapeLogin(t *testing.T) {
-	e, sn := newSNEnv(t)
-	e.pin(sn.URL)
-	e.login1(e.m)
-	raw, _ := os.ReadFile(e.file())
-	var st stored
-	json.Unmarshal(raw, &st)
-	if st.Issuer != sn.URL || st.Resource != sn.URL+snPath {
-		t.Fatalf("stored: %s", raw)
+	for _, slash := range []string{"", "/"} { // a pin's trailing / is ignored
+		e, sn := newSNEnv(t)
+		e.pin(sn.URL + slash)
+		e.login1(e.m)
+		raw, _ := os.ReadFile(e.file())
+		var st stored
+		json.Unmarshal(raw, &st)
+		if strings.TrimSuffix(st.Issuer, "/") != sn.URL || st.Resource != sn.URL+snPath {
+			t.Fatalf("stored: %s", raw)
+		}
+		listTools(t, e, sn)
 	}
+}
+
+func listTools(t *testing.T, e *env, sn *fakeAS) {
 	tr := &mcp.StreamableClientTransport{Endpoint: sn.URL + snPath, HTTPClient: http.DefaultClient, MaxRetries: -1, DisableStandaloneSSE: true, OAuthHandler: e.m.Handler("s")}
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "c", Version: "1"}, nil).Connect(context.Background(), tr, nil)
 	if err != nil {

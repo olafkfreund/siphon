@@ -422,7 +422,7 @@ func (t *issuerAlias) RoundTrip(req *http.Request) (*http.Response, error) {
 			b, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			var meta struct{ Issuer string }
-			if resp.StatusCode == http.StatusOK && json.Unmarshal(b, &meta) == nil && meta.Issuer == t.pin {
+			if resp.StatusCode == http.StatusOK && json.Unmarshal(b, &meta) == nil && strings.TrimSuffix(meta.Issuer, "/") == t.pin {
 				resp.Body = io.NopCloser(bytes.NewReader(b))
 				return resp, nil
 			}
@@ -475,7 +475,7 @@ func (m *Manager) run(ctx context.Context, name string, s *config.Source, redire
 	oc := s.Auth.OAuth
 	disc := *hc // by value: hc is shared with other logins
 	if oc.Issuer != "" {
-		disc.Transport = &issuerAlias{base: hc.Transport, pin: oc.Issuer}
+		disc.Transport = &issuerAlias{base: hc.Transport, pin: strings.TrimSuffix(oc.Issuer, "/")} // the pin's trailing / is ignored
 	}
 	mc := *hc
 	mc.Transport = source.RedirectChallenge(hc.Transport, s.URL)
