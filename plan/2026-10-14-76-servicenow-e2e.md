@@ -169,3 +169,17 @@ if step 3 succeeds. A fresh Opus agent reviews before the PR.
   - **The rest is unchanged:** the call still goes through the guarded
     client, with `127.0.0.1:8081` in `server.services.private_endpoints`.
   - **The check** is `checks.x86_64-linux.vm`. It passes.
+- **Review (fresh Opus, one HIGH):**
+  - **HIGH, fixed:** a committed `nix/__pycache__/*.pyc` was removed, and
+    `.gitignore` now ignores `__pycache__/`.
+  - **MEDIUM, fixed:** the subtest signs with `webhook-id = sys_id:0`, as
+    the Business Rule does.
+    - An exact resend asserts `409`, in this subtest and the older
+      Standard Webhooks one.
+    - A new delivery of the same change (a new webhook-id, the same
+      `sys_id`/`sys_mod_count`) gets 202 but still gives one job and one
+      PATCH, which proves the rule's `on: each` id dedupe.
+  - **LOW, fixed:** the leak check also covers the `whsec_` key, and the
+    stub's import moved to the top.
+  - **A known limit:** the dedupe check waits 5 seconds. A job that showed
+    up later than that wouldn't be caught.

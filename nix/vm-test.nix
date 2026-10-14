@@ -801,7 +801,7 @@ pkgs.testers.runNixOSTest {
         assert post("stdhook", body, {**hdr, "webhook-signature": "v1,AAAA"}) == "401"
         assert post("stdhook", body, {**hdr, "webhook-timestamp": str(int(time.time()) - 900)}) == "401"
         assert post("stdhook", body, hdr) == "202"
-        assert post("stdhook", body, hdr) != "202", "replayed delivery accepted"
+        assert post("stdhook", body, hdr) == "409", "replayed delivery not a duplicate"
         for rule, text in [("gl-event", "gitlab mr 801"), ("std-event", "standard 802")]:
             machine.wait_until_succeeds(
                 f"sqlite3 /var/lib/siphon/state.db \"select output from jobs where rule='{rule}' and state='done'\" | grep -q '{text}'",
@@ -814,9 +814,11 @@ pkgs.testers.runNixOSTest {
         snkey = base64.b64decode("c2lwaG9uLXNlcnZpY2Vub3ctaG9vay1rZXk=")
         sys_id = "0123456789abcdef0123456789abcdef"
         snbody = '{"event":"insert","table":"incident","sys_id":"' + sys_id + '","number":"INC0000001","sys_mod_count":"0","short_description":"vm"}'
-        snmid, snts = "msg_sn_1", str(int(time.time()))
-        snsig = "v1," + base64.b64encode(hmac.new(snkey, f"{snmid}.{snts}.{snbody}".encode(), hashlib.sha256).digest()).decode()
-        snhdr = {"webhook-id": snmid, "webhook-timestamp": snts, "webhook-signature": snsig}
+        def snsign(mid, ts):
+            sig = "v1," + base64.b64encode(hmac.new(snkey, f"{mid}.{ts}.{snbody}".encode(), hashlib.sha256).digest()).decode()
+            return {"webhook-id": mid, "webhook-timestamp": ts, "webhook-signature": sig}
+        # the Business Rule's delivery id is sys_id:sys_mod_count
+        snhdr = snsign(sys_id + ":0", str(int(time.time())))
         assert post("servicenow-hooks", snbody, snhdr) == "202"
         try:
             machine.wait_until_succeeds(
@@ -834,14 +836,18 @@ pkgs.testers.runNixOSTest {
         assert len(seen) == 1, seen
         assert seen[0]["method"] == "PATCH" and seen[0]["path"].endswith("/incident/" + sys_id), seen
         assert seen[0]["body"] == {"work_notes": "seen INC0000001"} and seen[0]["bearer_ok"] is True, seen
-        # a resend is a duplicate: no second job, no second PATCH
-        assert post("servicenow-hooks", snbody, snhdr) != "202", "replayed delivery accepted"
-        time.sleep(3)
+        njobs = "sqlite3 /var/lib/siphon/state.db \"select count(*) from jobs where rule='sn-note'\""
+        # an exact resend is a duplicate delivery (409)
+        assert post("servicenow-hooks", snbody, snhdr) == "409", "resend not a duplicate"
+        # a new delivery of the same change passes the webhook replay check; the rule's id dedupes it
+        assert post("servicenow-hooks", snbody, snsign("msg_sn_2", str(int(time.time())))) == "202"
+        time.sleep(5)
+        assert machine.succeed(njobs).strip() == "1", "the same change made a second job"
         assert len(json.loads(machine.succeed("curl -s http://127.0.0.1:8081/_seen"))) == 1, "a resend patched twice"
         # the client secret and the token stay out of the jobs and the journal
         alljobs = machine.succeed("sqlite3 /var/lib/siphon/state.db 'select output from jobs'")
         logs = machine.succeed("journalctl -u siphon --no-pager")
-        for leak in ("sn-client-SECRET-vm", "stub-tok"):
+        for leak in ("sn-client-SECRET-vm", "stub-tok", "whsec_c2lwaG9uLXNlcnZpY2Vub3ctaG9vay1rZXk"):
             assert leak not in snout and leak not in alljobs and leak not in logs, f"{leak} leaked"
 
     with subtest("MCP bridge: a stdio server's secret reaches the server, never the agent"):

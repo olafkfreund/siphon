@@ -5,6 +5,7 @@
 #   GET   /_seen                         -> the recorded PATCH calls
 # Records hold {method, path, body, bearer_ok}, never the token or the secret.
 # Env: STUB_SN_CLIENT_ID, STUB_SN_CLIENT_SECRET, optional STUB_SN_PORT.
+import base64
 import json
 import os
 import re
@@ -44,7 +45,6 @@ class H(BaseHTTPRequestHandler):
         auth = self.headers.get("Authorization", "")
         cid, sec = (form.get("client_id") or [""])[0], (form.get("client_secret") or [""])[0]
         if auth.startswith("Basic "):  # the client may send them as Basic auth instead
-            import base64
             try:
                 cid, _, sec = base64.b64decode(auth[6:]).decode().partition(":")
             except Exception:
