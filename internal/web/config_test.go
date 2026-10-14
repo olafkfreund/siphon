@@ -460,14 +460,15 @@ func TestNotionVerification(t *testing.T) {
 	if b := ce.get("/sources").Body.String(); !strings.Contains(b, "Awaiting Notion") {
 		t.Fatalf("no waiting text")
 	}
-	if w := ce.api("POST", "/api/sources/n/notion-verification", ""); w.Code != 404 {
+	if w := ce.api("POST", "/api/sources/n/notion-verification", `{"token":"x"}`); w.Code != 404 {
 		t.Fatalf("nothing pending: %d", w.Code)
 	}
+	body := `{"token":"` + tok + `"}`
 	set(tok)
-	if w := ce.api("POST", "/api/sources/gh/notion-verification", ""); w.Code != 404 {
+	if w := ce.api("POST", "/api/sources/gh/notion-verification", body); w.Code != 404 {
 		t.Fatalf("not notion: %d", w.Code)
 	}
-	if w := ce.api("POST", "/api/sources/n/notion-verification?dry_run=1", ""); w.Code != 200 || pending.Load() == nil {
+	if w := ce.api("POST", "/api/sources/n/notion-verification?dry_run=1", body); w.Code != 200 || pending.Load() == nil {
 		t.Fatalf("dry run: %d", w.Code)
 	}
 
@@ -483,15 +484,30 @@ func TestNotionVerification(t *testing.T) {
 	if b := page(vc); strings.Contains(b, tok) || strings.Contains(b, "Use this token") {
 		t.Fatalf("viewer sees the token")
 	}
-	if code := ce.postAs(vc, vcsrf, "/sources/n/notion-verification"); code != 403 || pending.Load() == nil {
+	if code := ce.do("POST", "/sources/n/notion-verification", url.Values{"csrf": {vcsrf}, "token": {tok}}, func(r *http.Request) { r.AddCookie(vc) }).Code; code != 403 || pending.Load() == nil {
 		t.Fatalf("viewer accept: %d", code)
 	}
 	if w := ce.api("GET", "/api/sources", ""); strings.Contains(w.Body.String(), tok) {
 		t.Fatalf("token in the source listing")
 	}
 
+	// A stale or missing token stores nothing: another capture arrived after the page was shown.
+	rev := ce.latest()
+	other := tok + "x"
+	for _, b := range []string{`{"token":"` + other + `"}`, ``, `{}`} {
+		if w := ce.api("POST", "/api/sources/n/notion-verification", b); w.Code != 409 || pending.Load() == nil || ce.latest() != rev {
+			t.Fatalf("stale %q: %d %s", b, w.Code, w.Body.String())
+		}
+	}
+	// An accept that commits but does not apply leaves the token pending.
+	ce.applyFail.Store(true)
+	if w := ce.api("POST", "/api/sources/n/notion-verification", body); w.Code != 200 || pending.Load() == nil {
+		t.Fatalf("not applied: %d %s", w.Code, w.Body.String())
+	}
+	ce.applyFail.Store(false)
+
 	// Accept through the API: a file: ref holds the token, pending is cleared.
-	if w := ce.api("POST", "/api/sources/n/notion-verification", ""); w.Code != 200 || pending.Load() != nil {
+	if w := ce.api("POST", "/api/sources/n/notion-verification", body); w.Code != 200 || pending.Load() != nil {
 		t.Fatalf("accept: %d %s", w.Code, w.Body.String())
 	}
 	src := ce.cur.Load().Sources["n"]
@@ -502,7 +518,7 @@ func TestNotionVerification(t *testing.T) {
 		t.Fatalf("secret file: %q %v", b, err)
 	}
 	set(tok)
-	if w := ce.api("POST", "/api/sources/n/notion-verification", ""); w.Code != 409 {
+	if w := ce.api("POST", "/api/sources/n/notion-verification", body); w.Code != 409 {
 		t.Fatalf("secret already set: %d", w.Code)
 	}
 }
@@ -514,7 +530,13 @@ func TestNotionVerificationPortalAccept(t *testing.T) {
 	ce.srv.NotionPending = func(string) (string, time.Time, bool) { return tok, time.Now(), !taken }
 	ce.srv.TakeNotionPending = func(string) (string, bool) { taken = true; return tok, true }
 	c, csrf := ce.asRole(roleOperator, "o")
-	if code := ce.postAs(c, csrf, "/sources/n/notion-verification"); code != 303 || !taken || ce.cur.Load().Sources["n"].Secret.Value != tok {
+	post := func(token string) int {
+		return ce.do("POST", "/sources/n/notion-verification", url.Values{"csrf": {csrf}, "token": {token}}, func(r *http.Request) { r.AddCookie(c) }).Code
+	}
+	if code := post(tok + "x"); code != 409 || taken {
+		t.Fatalf("stale portal accept: %d taken=%v", code, taken)
+	}
+	if code := post(tok); code != 303 || !taken || ce.cur.Load().Sources["n"].Secret.Value != tok {
 		t.Fatalf("portal accept: %d taken=%v", code, taken)
 	}
 }

@@ -1,6 +1,9 @@
 package web
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/json"
 	"net/http"
 )
 
@@ -11,8 +14,10 @@ func (s *server) notionAwaiting(name string) bool {
 }
 
 // acceptNotion stores the pending verification token as the source's secret.
-// The token leaves the pending store only once the change is committed.
-func (s *server) acceptNotion(r *http.Request, actor, name string) (any, int, error) {
+// seen is the token the operator was shown: if another capture replaced it
+// since, nothing is stored. The token leaves the pending store only once the
+// change is committed and applied.
+func (s *server) acceptNotion(r *http.Request, actor, name, seen string) (any, int, error) {
 	if s.ConfigPath == "" {
 		return nil, 503, errMsg(errNoEditing.Error())
 	}
@@ -30,9 +35,13 @@ func (s *server) acceptNotion(r *http.Request, actor, name string) (any, int, er
 	if !ok {
 		return nil, 404, errMsg("no verification token pending")
 	}
+	a, b := sha256.Sum256([]byte(seen)), sha256.Sum256([]byte(tok))
+	if seen == "" || subtle.ConstantTimeCompare(a[:], b[:]) != 1 {
+		return nil, 409, errMsg("the pending token changed; reload and check it again")
+	}
 	eff, _, _, _, err := s.state()
 	if err != nil {
-		return nil, 0, err
+		return nil, 500, err
 	}
 	y, found := itemYAML(eff, "sources", name)
 	if !found {
@@ -40,13 +49,14 @@ func (s *server) acceptNotion(r *http.Request, actor, name string) (any, int, er
 	}
 	y, pending, err := withSecrets("sources", name, y, map[string]string{"secret": tok}, s.Config().Server.DB)
 	if err != nil {
-		return nil, 0, err
+		code, err := apiError(err)
+		return nil, code, err
 	}
 	out, code, err := s.write(r, actor, "accept Notion verification token", nil, putItem("sources", name, y), pending)
 	if err != nil && code == 0 {
 		code, err = apiError(err)
 	}
-	if err == nil && r.URL.Query().Get("dry_run") == "" {
+	if m, _ := out.(map[string]any); err == nil && m["applied"] == true {
 		s.TakeNotionPending(name)
 		s.audit(actor, "notion_token_accepted", name)
 	}
@@ -60,11 +70,19 @@ func (s *server) notionRoutes(mux *http.ServeMux) {
 			if err != nil {
 				return nil, 400, err
 			}
-			return s.acceptNotion(r, actor, r.PathValue("name"))
+			var body struct {
+				Token string `json:"token"`
+			}
+			if r.ContentLength != 0 {
+				if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 4096)).Decode(&body); err != nil {
+					return nil, 400, errMsg("bad JSON body")
+				}
+			}
+			return s.acceptNotion(r, actor, r.PathValue("name"), body.Token)
 		})
 	}))
 	mux.HandleFunc("POST /sources/{name}/notion-verification", s.portalAs(roleOperator, func(w http.ResponseWriter, r *http.Request, _ string) {
-		_, code, err := s.acceptNotion(r, s.actor(r), r.PathValue("name"))
+		_, code, err := s.acceptNotion(r, s.actor(r), r.PathValue("name"), r.FormValue("token"))
 		if err != nil {
 			http.Error(w, err.Error(), code)
 			return
