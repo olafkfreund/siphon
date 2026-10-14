@@ -52,6 +52,7 @@ sources:
   alerts: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
   deploys: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
   matrix-hooks: { type: webhook, signature: token, token_header: Authorization, format: matrix, secret: env:AGW_HOOK }
+  teams-hooks: { type: webhook, signature: teams-hmac, secret: env:AGW_TEAMS_KEY }
   discord-hooks: { type: webhook, signature: ed25519, format: discord, secret: env:AGW_DISCORD_KEY }
   mattermost-hooks: { type: webhook, signature: body-token, secret: env:AGW_HOOK }
   servicenow-hooks: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }

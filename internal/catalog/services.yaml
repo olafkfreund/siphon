@@ -966,8 +966,38 @@ services:
       token that was not accepted yet: use "Resend token" too.
       Later deliveries are checked with that token as the signing secret.
 
+  - id: teams
+    name: Microsoft Teams
+    mark: MT
+    category: chat
+    summary: "Messages that @mention an outgoing webhook in a Teams channel, verified by its security token. Replies go through a Workflows webhook in your routine."
+    capabilities: [webhooks]
+    status: available
+    templates: [teams-ask-agent]
+    fields:
+      - {<<: *f_name, default: teams}
+      - {key: token, label: Security token, type: secret, required: true, help: 'The base64 security token Teams shows once when you create the outgoing webhook.'}
+      - {key: reply, label: Immediate reply, type: text, help: 'Optional, for example "Working on it…". Teams must get an answer within 5 seconds, so an agent cannot be the reply: post it later from the routine.'}
+    creates:
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: teams-hmac
+          secret: {{secret "token" "secret"}}
+          {{- if .reply}}
+          reply_text: {{.reply | printf "%q"}}
+          {{- end}}
+    setup: |
+      In Teams: the team → Manage team → Apps → Create an outgoing webhook.
+      Callback URL: <your Siphon public URL>/hook/<name>-hooks (needs server.public_url).
+      Copy the security token Teams shows, then connect with it.
+      To answer in the channel, create a Workflows flow "Post to a channel when a webhook
+      request is received" and use its URL in the routine (see the teams-ask-agent template).
+
   # ---- not yet: listed so people know, with the reason
-  - {id: teams, name: Microsoft Teams, mark: MT, category: chat, summary: Microsoft Teams outgoing webhooks., status: not-yet, reason: 'needs a teams-hmac signature mode with a synchronous reply within 5 seconds'}
   - id: google-pubsub
     name: Google Pub/Sub
     mark: GP
