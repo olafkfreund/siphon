@@ -21,6 +21,7 @@ import (
 
 // cfgView is the config list and editor page.
 type cfgView struct {
+	ServiceNow                 bool // the item has a servicenow action: YAML only, no field form
 	Kinds                      []string
 	Kind, Name, Prov           string
 	New, Exists, HasForm, Done bool // Done: the change was reviewed and is valid
@@ -159,7 +160,8 @@ func (s *server) editView(kind, name string, isNew bool, y string) (*cfgView, er
 	p, exists := prov[itemKey{Kind: kind, Name: name}]
 	v := &cfgView{Kinds: sortedKinds(), Kind: kind, Name: name, New: isNew, Exists: exists, Prov: string(p), YAML: y,
 		Rev: rev, Fields: formFields(kind, y)}
-	v.HasForm = len(v.Fields) > 0
+	v.ServiceNow = hasServiceNow(kind, y)
+	v.HasForm = len(v.Fields) > 0 && !v.ServiceNow
 	if isNew {
 		v.Prov = "new"
 	}
@@ -204,8 +206,13 @@ func (s *server) itemYAMLFromRequest(r *http.Request, kind, name string) (string
 		return "", nil, err
 	}
 	existing, _ := itemYAML(eff, kind, name)
+	if hasServiceNow(kind, existing) {
+		return existing, nil, errServiceNowForm
+	}
 	return applyForm(kind, name, existing, r.PostForm, s.Config().Server.DB)
 }
+
+var errServiceNowForm = errors.New("This item has a servicenow action: edit it as YAML. The form cannot show it and would drop it.")
 
 func (s *server) cfgPost(w http.ResponseWriter, r *http.Request, csrf, verb string) {
 	kind, name := r.PathValue("kind"), r.PathValue("name")
@@ -246,7 +253,11 @@ func (s *server) cfgPost(w http.ResponseWriter, r *http.Request, csrf, verb stri
 	switch verb {
 	case "check", "save":
 		if y, pending, err = s.itemYAMLFromRequest(r, kind, name); err != nil {
-			bad(r.PostFormValue("yaml"), err.Error(), http.StatusUnprocessableEntity)
+			shown := r.PostFormValue("yaml")
+			if errors.Is(err, errServiceNowForm) {
+				shown = y // keep the stored YAML on screen
+			}
+			bad(shown, err.Error(), http.StatusUnprocessableEntity)
 			return
 		}
 		mutate = putItem(kind, name, y)

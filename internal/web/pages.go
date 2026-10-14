@@ -84,6 +84,9 @@ func (s *server) jobDetail(id int64) (*jobView, bool, error) {
 		}
 	case a.Routine != "":
 		v.Kind, v.Target = "routine", a.Routine
+	case a.ServiceNow != nil:
+		v.Kind, v.Target = "servicenow", a.ServiceNow.Op+" "+snTable(a.ServiceNow)
+		v.Argv, _ = snArgv(a.ServiceNow, p.Env) // an unrenderable value just shows less
 	case a.Unit != "":
 		v.Kind, v.Target = "unit", a.Unit
 	case len(a.Cmd) > 0:

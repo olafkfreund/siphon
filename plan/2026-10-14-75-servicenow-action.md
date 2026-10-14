@@ -232,3 +232,9 @@ Opus agent reviews them. Step 6 is mine.
     them, so the `explain.go` entries from step 5 came in now.
   - **`get`'s `fields` value** is not checked as a comma list. Only the key
     name is checked, and the client validates each name at run time.
+- **Step 4:**
+  - **Where the summary shows:** the rule summary appears on `/rules`.
+    `/config/rules` lists names only.
+  - **Routines have no field form,** so their guard only covers a form-mode
+    post. YAML-mode saves of servicenow items work, and are the intended
+    edit path.

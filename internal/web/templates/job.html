@@ -15,6 +15,7 @@
       </dl>
       <div class="muted small">Prompt</div><pre>{{.Prompt}}</pre>
       {{else if eq .Kind "cmd"}}<dl><dt>Command</dt><dd>sandboxed, argv only</dd></dl><pre>{{range $i, $a := .Argv}}{{if $i}} {{end}}{{$a}}{{end}}</pre>
+      {{else if eq .Kind "servicenow"}}<dl><dt>ServiceNow</dt><dd><code>{{.Target}}</code> (runs in the daemon, no LLM)</dd></dl><pre>{{range $i, $a := .Argv}}{{if $i}} {{end}}{{$a}}{{end}}</pre>
       {{else if eq .Kind "unit"}}<dl><dt>Unit</dt><dd><code>{{.Target}}</code> (allowlisted)</dd></dl>
       {{else if eq .Kind "routine"}}<dl><dt>Routine</dt><dd><b>{{.Target}}</b> · {{len .Steps}} steps</dd></dl>
       {{else}}<p class="muted">No action details stored for this job.</p>{{end}}

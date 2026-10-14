@@ -120,6 +120,8 @@ func actionSummary(a config.Action) string {
 		return "agent: " + a.Agent
 	case a.Routine != "":
 		return "routine: " + a.Routine
+	case a.ServiceNow != nil:
+		return "servicenow: " + a.ServiceNow.Op + " " + a.ServiceNow.Connection
 	}
 	return ""
 }

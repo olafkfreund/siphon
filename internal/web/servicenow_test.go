@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -51,5 +52,49 @@ func TestServiceNowConnectionTest(t *testing.T) {
 		if strings.Contains(body, s) {
 			t.Fatalf("%s in %s", s, body)
 		}
+	}
+}
+
+const snRuleCfg = `server: { sandbox: none, db: DIR/s.db }
+sources:
+  gh: { type: webhook, secret: env:AGW_HOOK, signature: github }
+  sn: { type: mcp, package: servicenow, read: { tool: t }, env: { SERVICENOW_INSTANCE_URL: env:AGW_HOOK, SERVICENOW_API_KEY: env:AGW_HOOK } }
+rules:
+  - name: note
+    source: gh
+    when: "true"
+    cooldown: 1m
+    action: { servicenow: { connection: sn, op: add_work_note, sys_id: "{{.event.id}}", fields: { text: "hi {{.event.n}}" } } }
+`
+
+func TestServiceNowRulePortal(t *testing.T) {
+	ce := newCfgEnvFile(t, snRuleCfg)
+
+	if w := ce.get("/rules"); !strings.Contains(w.Body.String(), "servicenow") || !strings.Contains(w.Body.String(), "add_work_note") {
+		t.Fatalf("list: %d %s", w.Code, w.Body.String())
+	}
+
+	// The form is replaced by a note; the YAML editor stays.
+	w := ce.get("/config/rules/note")
+	body := w.Body.String()
+	if w.Code != 200 || !strings.Contains(body, "edit it as YAML") || strings.Contains(body, `name="mode" value="form"`) {
+		t.Fatalf("edit: %d %s", w.Code, body)
+	}
+
+	// A form save is refused and nothing changes.
+	w = ce.post("/config/rules/note/save", url.Values{"mode": {"form"}, "name": {"note"}, "rev": {"0"},
+		"f.source": {"gh"}, "f.when": {"true"}, "f.action.cmd": {"echo"}})
+	if w.Code != 422 || !strings.Contains(w.Body.String(), "edit it as YAML") {
+		t.Fatalf("form save: %d %s", w.Code, w.Body.String())
+	}
+	if ce.latest() != 0 || ce.cur.Load().Rules[0].Action.ServiceNow == nil {
+		t.Fatal("refused save changed the config")
+	}
+
+	// The test fire shows the rendered call.
+	cfg := ce.cur.Load()
+	tv := ruleTest(context.Background(), cfg, cfg.Rules[0], map[string]any{"id": "abc", "n": 7}, nil)
+	if len(tv.Fires) != 1 || tv.Fires[0].Kind != "servicenow" || strings.Join(tv.Fires[0].Argv, "|") != "abc|text=hi 7" {
+		t.Fatalf("%+v", tv.Fires)
 	}
 }
