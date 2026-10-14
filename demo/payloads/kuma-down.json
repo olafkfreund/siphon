@@ -1,0 +1,17 @@
+{
+  "heartbeat": {
+    "monitorID": 7,
+    "status": 0,
+    "time": "2026-10-13 09:00:00.000",
+    "msg": "Request failed with status code 502",
+    "important": true,
+    "duration": 0
+  },
+  "monitor": {
+    "id": 7,
+    "name": "shop.example.com",
+    "url": "https://shop.example.com/",
+    "type": "http"
+  },
+  "msg": "[shop.example.com] [🔴 Down] Request failed with status code 502"
+}

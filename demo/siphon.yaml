@@ -1,0 +1,42 @@
+# The demo VM's operator config (nix/microvm.nix with demo = true). Only file:
+# refs: the wrapper generates the secret files on first run.
+# The credential url below is filled in at every start (host Ollama, or the stub).
+server:
+  listen: 0.0.0.0:8080
+  db: /var/lib/siphon/state.db
+  actions_dir: /var/lib/siphon-actions
+  token: file:/etc/siphon/token
+  egress:
+    socket: /run/siphon/egress.sock
+  models:
+    private_endpoints: ["127.0.0.1:8000", "10.0.2.2:11434"]
+  services:
+    private_endpoints: ["127.0.0.1:18099"]
+sources:
+  github:
+    type: mcp
+    url: http://127.0.0.1:8000/mcp
+    allow_private: true
+  github-hooks:
+    type: webhook
+    signature: github
+    secret: file:/etc/siphon/hook
+  uptime-kuma:
+    type: webhook
+    signature: token
+    token_header: X-Siphon-Key
+    secret: file:/etc/siphon/kuma
+  morning:
+    type: webhook
+    signature: token
+    token_header: X-Siphon-Key
+    secret: file:/etc/siphon/kuma
+credentials:
+  ollama-local:
+    provider: openai
+    url: "@MODEL_URL@"
+notify:
+  phone:
+    type: webhook
+    url: file:/etc/siphon/notify-url
+    events: [approval, failed]
