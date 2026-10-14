@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 75
 spec: spec/2026-10-14-75-servicenow-action.md
 ---
