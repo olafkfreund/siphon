@@ -30,6 +30,7 @@ type env struct {
 	got    []rec
 	status int
 	srv    *httptest.Server
+	cfg    *config.Config
 }
 
 // newEnv has one channel "hook" (type given) pointing at an httptest server
@@ -58,11 +59,14 @@ func newEnv(t *testing.T, typ, extra string) *env {
 	host := strings.TrimPrefix(e.srv.URL, "http://")
 	t.Setenv("N_URL", e.srv.URL+"/hook-secret-path")
 	t.Setenv("N_TOK", "s3cr3t-token")
-	cfg, err := config.Parse([]byte("server: {services: {private_endpoints: ['" + host + "']}, public_url: 'https://siphon.example'}\nnotify:\n  hook: {type: " + typ + ", url: 'env:N_URL', token: 'env:N_TOK'" + extra + "}\n"))
+	// feed and blip are polled sources: a failing one notifies (#121).
+	cfg, err := config.Parse([]byte("server: {services: {private_endpoints: ['" + host + "']}, public_url: 'https://siphon.example'}\nnotify:\n  hook: {type: " + typ + ", url: 'env:N_URL', token: 'env:N_TOK'" + extra + "}\n" +
+		"sources:\n  feed: {type: http, url: 'https://feed.example/x', poll: 1m}\n  blip: {type: http, url: 'https://blip.example/x', poll: 1m}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.n = New(st, func() *config.Config { return cfg }, func() time.Time { return e.now })
+	e.cfg = cfg
+	e.n = New(st, func() *config.Config { return e.cfg }, func() time.Time { return e.now })
 	return e
 }
 
@@ -482,5 +486,44 @@ func TestSlackEscapesText(t *testing.T) {
 	json.Unmarshal(b, &sl)
 	if strings.Contains(sl["text"], "<!channel>") || !strings.Contains(sl["text"], "&lt;!channel&gt;") || !strings.Contains(sl["text"], "T &amp; ") || !strings.Contains(sl["text"], "<https://s.example/jobs/1|Open in Siphon>") {
 		t.Fatalf("%s", sl["text"])
+	}
+}
+
+// A failing source that stops polling, or is removed, closes its episode with
+// a message that says so; one still polled and failing gets none (#121).
+func TestSourceStopsPollingCloses(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		change     func(*config.Config)
+	}{
+		{"unpolled", "no longer polls", func(c *config.Config) { c.Sources["feed"].Type = "webhook" }}, // a webhook does not poll
+		{"removed", "was removed", func(c *config.Config) { delete(c.Sources, "feed") }},
+		{"still failing", "", func(*config.Config) {}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, "webhook", "")
+			e.run()
+			t0 := e.now
+			store.PutSourceState(e.st.DB, "feed", t0.Add(time.Minute), "boom")
+			e.now = t0.Add(17 * time.Minute)
+			e.run()
+			e.run()
+			if e.count() != 1 || !strings.Contains(e.got[0].body, `"event":"source"`) {
+				t.Fatalf("failing not sent: %+v", e.got)
+			}
+			tc.change(e.cfg)
+			e.now = e.now.Add(time.Minute)
+			e.run()
+			e.run()
+			if tc.want == "" {
+				if e.count() != 1 {
+					t.Fatalf("closed while still failing: %+v", e.got)
+				}
+				return
+			}
+			if e.count() != 2 || !strings.Contains(e.got[1].body, `"event":"source_ok"`) || !strings.Contains(e.got[1].body, tc.want) {
+				t.Fatalf("%+v", e.got)
+			}
+		})
 	}
 }
