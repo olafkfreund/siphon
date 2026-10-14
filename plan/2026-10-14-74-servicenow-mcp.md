@@ -287,3 +287,11 @@ mine.
   - **Token-endpoint errors** report the status only, never the body,
     which may echo credentials.
   - **A missing `Retry-After`** waits 1 s.
+- **Step 2:**
+  - **Number check:** `get_change` checks its number the same way as
+    `get_incident`, and `cmdb_lookup` refuses a name containing `^`.
+  - **Input types and defaults:** `update_incident.fields` is a
+    string-to-string map. `search_records` defaults `limit` to 10.
+  - **`create_change`'s `template_id`** is sent as
+    `standard_change_template_id`.
+  - **Descriptions:** write tools start with "WRITE:".
