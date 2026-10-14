@@ -3111,7 +3111,8 @@ NixOS module and in the OCI image):
 config management (Nix, /etc, your secrets tool). The portal's session key
 (`portal-session.key` in the state directory) is left out too: a restore on
 the same host keeps it, and a restore on a new host signs everyone out of the
-portal once.
+portal once. Restoring after a compromise? Delete `portal-session.key` before
+starting Siphon, so no old portal session survives.
 
 **Treat the archive like the secrets themselves.** It holds every token
 Siphon was given. Siphon creates it readable only by its owner (mode 0600). Keep it that way, or encrypt it.
@@ -3946,8 +3947,9 @@ role are shown next to **Sign out**.
 
 **Sessions:**
 - **Length:** an SSO session lasts 12 hours, and a token login lasts 24.
-- **Restarts:** sessions survive a restart. To sign everyone out, rotate
-  `server.token` and restart. **Sign out** only clears that browser's cookie.
+- **Restarts:** sessions survive a restart. To sign everyone out, stop
+  Siphon, delete `portal-session.key` in its state directory and start it
+  again (see below). **Sign out** only clears that browser's cookie.
 - **What's in it:** nothing secret. The provider's tokens are not kept
   after sign-in.
 - **The audit log** records SSO actions as `oidc:<email>`, or
@@ -4002,11 +4004,22 @@ A session keeps the role it was signed in with until it ends, at most 12
 hours later. That holds after you remove someone from a group at the
 provider, and after you take their group or email out of `roles`.
 
-**To cut access at once,** remove them at the provider, then restart
-Siphon. A restart ends every portal session.
+**To cut access at once,** remove them at the provider, then end every
+portal session:
 
-Changes to `server.oidc` apply when Siphon restarts, and a restart also
-ends every session. Siphon also checks each request against the config it
+1. Stop Siphon.
+2. Delete `portal-session.key` in its state directory, next to `state.db`.
+3. Start Siphon.
+
+Everyone signs in again, and the removed person can't. A plain restart
+doesn't do this: sessions survive restarts.
+
+Rotating `server.token` also ends every session, but it locks out every
+CLI, API and automation client using the old token too. Prefer deleting
+the key file.
+
+Changes to `server.oidc` apply when Siphon restarts. Sessions survive the
+restart. Siphon also checks each request against the config it
 is running with, so an SSO session stops working once `server.oidc` is
 gone, and a token session once `token_login` is `false`.
 

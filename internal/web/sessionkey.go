@@ -20,7 +20,14 @@ func LoadSessionKey(dir string) ([]byte, error) {
 	if _, err := rand.Read(key); err != nil {
 		return nil, err
 	}
+	// One serve per state dir (store.Lock runs first), so the create race below is for safety only.
 	if b, err := os.ReadFile(path); err == nil && len(b) == 32 {
+		if fi, err := os.Stat(path); err == nil && fi.Mode().Perm()&0o077 != 0 {
+			slog.Warn("portal session key was readable by others; restricting it to the owner")
+			if err := os.Chmod(path, 0o600); err != nil {
+				return nil, err
+			}
+		}
 		return b, nil
 	} else if errors.Is(err, fs.ErrNotExist) {
 		f, cerr := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)

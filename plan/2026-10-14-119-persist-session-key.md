@@ -96,6 +96,26 @@ spec: spec/2026-10-14-119-persist-session-key.md
   sessions. `backup-and-monitoring.md` covers the key file only.
 - **Step 2:** the three cookie tests are in `roles_test.go`
   (`TestSessionKeyPersistsAcrossServers`).
+- **The Opus security review:** no HIGH, and one MEDIUM, fixed.
+  - **MEDIUM:** `docs/tasks/sso.md`'s "Taking access away" still said a
+    restart ends every session. Following it would have left a removed SSO
+    user signed in for up to 12 hours.
+    - The docs, and the `portal.go` comment, now say: stop Siphon, delete
+      `portal-session.key`, then start it. Rotating `server.token` also
+      works, but it locks out the CLI and API clients too.
+    - `backup-and-monitoring.md` says to delete the key after restoring
+      because of a compromise.
+  - **LOW, fixed:**
+    - an existing key that others can read is chmod-ed to 0600, with a
+      test;
+    - `server.db: ":memory:"` skips the key file;
+    - a comment explains why the create race can't happen (`store.Lock`
+      runs first);
+    - the backup test checks its write and the tar errors, and that it saw
+      `state.db`.
+  - **LOW, not changed:** no fsync of the key. A power loss leaves an
+    empty file, which is replaced. Everyone signs in once, and it fails
+    safe.
 
 ## Tests
 

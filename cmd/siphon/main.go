@@ -516,10 +516,12 @@ func serve(ctx context.Context, args []string) error {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	skey, err := web.LoadSessionKey(filepath.Dir(cfg.Server.DB))
-	if err != nil {
-		slog.Warn("portal sessions will not survive a restart", "err", err)
-		skey = nil
+	var skey []byte
+	if cfg.Server.DB != ":memory:" { // no state directory to keep it in
+		if skey, err = web.LoadSessionKey(filepath.Dir(cfg.Server.DB)); err != nil {
+			slog.Warn("portal sessions will not survive a restart", "err", err)
+			skey = nil
+		}
 	}
 	srv := &http.Server{
 		ReadHeaderTimeout: 10 * time.Second,

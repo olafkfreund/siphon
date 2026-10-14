@@ -23,7 +23,8 @@ NixOS module and in the OCI image):
 config management (Nix, /etc, your secrets tool). The portal's session key
 (`portal-session.key` in the state directory) is left out too: a restore on
 the same host keeps it, and a restore on a new host signs everyone out of the
-portal once.
+portal once. Restoring after a compromise? Delete `portal-session.key` before
+starting Siphon, so no old portal session survives.
 
 **Treat the archive like the secrets themselves.** It holds every token
 Siphon was given. Siphon creates it readable only by its owner (mode 0600). Keep it that way, or encrypt it.

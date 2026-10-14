@@ -53,3 +53,22 @@ func TestSessionKeyReadOnlyDir(t *testing.T) {
 		t.Fatalf("wrote %v", e)
 	}
 }
+
+func TestSessionKeyLoosePermsTightened(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, sessionKeyFile)
+	want := []byte("0123456789abcdef0123456789abcdef")
+	if err := os.WriteFile(p, want, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(p, 0o644); err != nil { // past the umask
+		t.Fatal(err)
+	}
+	got, err := LoadSessionKey(dir)
+	if err != nil || string(got) != string(want) {
+		t.Fatalf("key changed or error: %v", err)
+	}
+	if fi, err := os.Stat(p); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v %v", fi.Mode().Perm(), err)
+	}
+}
