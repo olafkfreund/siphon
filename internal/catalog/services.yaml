@@ -452,6 +452,35 @@ services:
       Callback URL: <your Siphon public URL>/hook/<name>-hooks (method POST).
       Save, copy the token Mattermost shows, then connect with it.
 
+  - id: discord
+    name: Discord
+    mark: DC
+    category: chat
+    summary: "Slash commands and other interactions from a Discord app, verified by its public key. Channel messages are not covered."
+    capabilities: [webhooks]
+    status: available
+    templates: [discord-ask-agent]
+    fields:
+      - {<<: *f_name, default: discord}
+      - {key: public_key, label: Public key, type: text, required: true, pattern: '[0-9a-f]{64}', pattern_error: 'the public key is 64 lowercase hex characters', help: 'Developer Portal → your app → General Information → Public Key.'}
+      - {key: reply, label: Immediate reply, type: text, help: 'Optional: shown at once as the command response, instead of "thinking…".'}
+    creates:
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: ed25519
+          format: discord
+          secret: {{secret "public_key" "secret"}}
+          {{- if .reply}}
+          reply_text: {{.reply | printf "%q"}}
+          {{- end}}
+    setup: |
+      Developer Portal → General Information → Interactions Endpoint URL = the URL above, then Save.
+      Discord tests the URL, and Siphon answers it. Register your slash commands with Discord as usual.
+
   # ---- monitoring
   - id: sentry
     name: Sentry
@@ -849,7 +878,6 @@ services:
           {{end -}}
 
   # ---- not yet: listed so people know, with the reason
-  - {id: discord, name: Discord, mark: DC, category: chat, summary: Discord interactions and bot events., status: not-yet, reason: 'needs an ed25519 signature mode and the PING handshake, and does not cover channel messages'}
   - {id: teams, name: Microsoft Teams, mark: MT, category: chat, summary: Microsoft Teams outgoing webhooks., status: not-yet, reason: 'needs a teams-hmac signature mode with a synchronous reply within 5 seconds'}
   - {id: matrix, name: Matrix, mark: MX, category: chat, summary: Matrix application-service events., status: not-yet, reason: 'needs PUT requests and a {} reply'}
   - {id: notion, name: Notion, mark: NO, category: issues, summary: Notion page and database events., status: not-yet, reason: 'needs the verification_token handshake; the remote MCP is OAuth only'}

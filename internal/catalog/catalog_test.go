@@ -236,3 +236,25 @@ func TestMattermostEntry(t *testing.T) {
 		t.Fatalf("generic body-token: %v %+v", err, res)
 	}
 }
+
+func TestDiscordEntry(t *testing.T) {
+	e := Get("discord")
+	if e == nil || e.Status == "not-yet" {
+		t.Fatal("discord missing or not available")
+	}
+	key := strings.Repeat("ab", 32)
+	res, err := e.Render(map[string]string{"name": "dc", "public_key": key, "reply": "Working on it"}, Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	y := res.Items[0].YAML
+	if res.Items[0].Name != "dc-hooks" || !strings.Contains(y, "signature: ed25519") || !strings.Contains(y, "format: discord") || !strings.Contains(y, `reply_text: "Working on it"`) {
+		t.Fatalf("%+v", res.Items)
+	}
+	if len(res.Secrets) != 1 || res.Secrets[0].Value != key {
+		t.Fatalf("secrets %+v", res.Secrets)
+	}
+	if _, err := e.Render(map[string]string{"name": "dc", "public_key": "not-a-key"}, Env{}); err == nil {
+		t.Fatal("a bad public key was accepted")
+	}
+}

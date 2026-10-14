@@ -359,7 +359,6 @@ func TestDiscordValidation(t *testing.T) {
 		{"signature: ed25519, format: discord", strings.Repeat("ab", 32), ""},
 		{"signature: ed25519, format: discord, reply_text: hi", strings.Repeat("ab", 32), ""},
 		{"signature: token, token_header: X-K, format: discord", "x", "format discord needs signature ed25519"},
-		{"signature: ed25519", "not-hex", "64 lowercase hex"},
 		{"signature: ed25519, token_header: X-T", strings.Repeat("ab", 32), "not allowed with signature ed25519"},
 		{"signature: sha256, signature_header: X-S, reply_text: hi", "x", "reply_text is only for"},
 	} {

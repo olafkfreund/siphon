@@ -63,7 +63,7 @@ var explainKinds = map[string]struct {
 		"method":                   {false, "GET", "http: the request method", e("GET", "POST")},
 		"headers":                  {false, "", "http: extra request headers; values are env:/file: refs or literals", nil},
 		"body":                     {false, "", "http POST: the request body", nil},
-		"secret":                   {false, "", "webhook: the HMAC key or token (env:NAME or file:/path)", nil},
+		"secret":                   {false, "", "webhook: the HMAC key or token, or for ed25519 the hex public key (env:NAME or file:/path)", nil},
 		"signature":                {false, "", "webhook: how deliveries are verified", e("github", "sha256", "token", "body-token", "standard-webhooks", "slack", "stripe", "ed25519")},
 		"signature_header":         {false, "", "webhook, signature sha256: the header carrying the signature", nil},
 		"token_header":             {false, "", "webhook, signature token: the header carrying the token", nil},

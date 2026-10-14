@@ -1049,9 +1049,6 @@ var unitName = regexp.MustCompile(`^[A-Za-z0-9@._:-]+\.(service|target|timer)$`)
 
 var bodyTokenField = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// ed25519Key is a hex ed25519 public key (Discord shows it that way).
-var ed25519Key = regexp.MustCompile(`^[0-9a-f]{64}$`)
-
 var webhookID = regexp.MustCompile(`^header\.[A-Za-z0-9-]+$`)
 
 func cleartextRemote(raw string) bool {
@@ -1540,9 +1537,6 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 		case "ed25519":
 			if s.SigHeader != "" || s.TimestampHdr != "" || s.TokenHeader != "" || s.TokenField != "" || s.ID != "" {
 				add("%s: signature_header, timestamp_header, token_header, token_field and id are not allowed with signature ed25519", p)
-			}
-			if s.Secret.Value != "" && !ed25519Key.MatchString(s.Secret.Value) {
-				add("%s: secret must be a public key of 64 lowercase hex characters", p)
 			}
 		default:
 			add("%s: signature must be github, sha256, token, body-token, standard-webhooks, slack, stripe or ed25519, got %q", p, s.Signature)
