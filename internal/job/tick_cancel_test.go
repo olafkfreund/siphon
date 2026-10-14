@@ -37,7 +37,8 @@ func TestTickCancelledPollKeepsStatus(t *testing.T) {
 		close(started)
 		<-r.Context().Done()
 	})
-	if err := store.PutSourceState(p.Store.DB, "s", p.Now(), ""); err != nil {
+	before := time.UnixMilli(1_700_000_000_000)
+	if err := store.PutSourceState(p.Store.DB, "s", before, ""); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -50,6 +51,13 @@ func TestTickCancelledPollKeepsStatus(t *testing.T) {
 	}
 	if e, ok := sourceErr(t, p); !ok || e != "" {
 		t.Fatalf("state changed: %q ok=%v", e, ok)
+	}
+	st, err := store.SourceStates(p.Store.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lp := st["s"].LastPollAt; lp == nil || !lp.Equal(before) {
+		t.Fatalf("last poll moved: %v", lp)
 	}
 }
 

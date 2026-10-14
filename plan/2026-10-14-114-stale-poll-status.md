@@ -54,6 +54,14 @@ spec: spec/2026-10-14-114-stale-poll-status.md
   `Polled()` is false for schedules. `TestScheduleSourceView` caught it.
 - **The diag check** uses `/api/rules/<r>/explain`, the path
   `diagapi_test.go` already uses.
+- **The Opus review:** no HIGH and no MEDIUM.
+  - **Fixed:** the cancelled-poll test also checks that `last_poll_at` is
+    unchanged.
+  - **Filed as #121:** notifications still read a stale
+    `failing_since` for a source that stopped polling, which was already
+    true before this change.
+  - **Accepted, per the plan:** a failing poll slower than the reload
+    rate is never recorded.
 
 ## Tests
 
