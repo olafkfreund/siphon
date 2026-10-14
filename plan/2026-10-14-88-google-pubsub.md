@@ -138,3 +138,10 @@ Opus agent reviews them. Step 4 is mine.
     because go-oidc keeps that context for later key fetches.
 - **Step 3:** `services_catalog_test.go`'s `dummyValues` supplies a valid
   `service_account`, because the email pattern refuses "dummy".
+- **Rebased onto main after #99 (Matrix):**
+  - **Merged side by side:** the `Source` fields, the format switch, the
+    explain entries, the hook options and the format dispatch.
+  - **The catalog entry gains `hook: true`,** so connect shows the hook
+    URL.
+  - **Pub/Sub is charged by the shared once-per-request limiter check**
+    (#99's batch fix), with no extra charge in `servePubSub`.
