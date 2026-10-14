@@ -42,6 +42,10 @@ type cfgView struct {
 	Health     *sourceView
 	LastEvent  string
 	Steps      []stepRow
+	Recipes    []recipe
+	Recipe     *recipeView
+	RefFields  []config.ExplainField
+	Tokens     []string
 }
 
 type cfgRow struct{ Name, Prov string }
@@ -176,6 +180,12 @@ func (s *server) cfgEdit(w http.ResponseWriter, r *http.Request, csrf string) {
 	kind, name := r.PathValue("kind"), r.PathValue("name")
 	isNew := name == ""
 	y := ""
+	var rv *recipeView
+	if isNew && kind == "routines" {
+		if rv, name, y, _ = recipeFor(r.URL.Query().Get("recipe")); rv == nil {
+			name, y = "", ""
+		}
+	}
 	if !isNew {
 		eff, _, _, _, err := s.state()
 		if err != nil {
@@ -193,6 +203,7 @@ func (s *server) cfgEdit(w http.ResponseWriter, r *http.Request, csrf string) {
 		s.fail(w, err)
 		return
 	}
+	v.Recipe = rv
 	s.page(w, r, "cfgedit", view{CSRF: csrf, Cfg: v})
 }
 

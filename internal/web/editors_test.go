@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/store"
 )
@@ -181,4 +183,48 @@ func TestEditorsRoundTrip(t *testing.T) {
 			t.Errorf("%s round trip changed the item:\n--- before\n%s--- after\n%s", it.kind, it.y, got)
 		}
 	}
+}
+
+func TestRoutineStarterParses(t *testing.T) {
+	var rt config.Routine
+	if err := yaml.Unmarshal([]byte(routineStarter), &rt); err != nil || len(rt.Steps) != 2 || rt.Steps[0].ID != "fetch" || rt.Steps[1].Agent == "" {
+		t.Fatalf("starter: %v %+v", err, rt)
+	}
+}
+
+func TestRoutineEditorRecipesAndTokens(t *testing.T) {
+	ce := newCfgEnv(t)
+	body := func(path string) string { return html.UnescapeString(ce.get(path).Body.String()) }
+
+	b := body("/config/routines/new")
+	for _, want := range []string{"Start from a recipe", "/config/routines/new?recipe=", "{{.steps.fetch.output}}", "{{.steps.summarise.output}}", "{{.event.FIELD}}", `data-insert=`, "<h2>Routine YAML</h2>", "steps:"} {
+		if !strings.Contains(b, want) {
+			t.Errorf("new routine: missing %q", want)
+		}
+	}
+	if strings.Contains(b, "<details") {
+		t.Error("routine form is collapsed")
+	}
+
+	r := recipeNameForTest(t)
+	b = body("/config/routines/new?recipe=" + r.Name)
+	if !strings.Contains(b, "/help/templates#"+r.Name) || !strings.Contains(b, `value="`+r.routine+`"`) {
+		t.Errorf("recipe %s not prefilled:\n%s", r.Name, b)
+	}
+	if b = body("/config/routines/new?recipe=nope"); strings.Contains(b, "/help/templates#") || !strings.Contains(b, "CHANGE-ME") {
+		t.Error("unknown recipe prefilled")
+	}
+}
+
+type testRecipe struct{ Name, routine string }
+
+func recipeNameForTest(t *testing.T) testRecipe {
+	t.Helper()
+	for _, r := range routineRecipes() {
+		if rv, name, _, ok := recipeFor(r.Name); ok && rv != nil {
+			return testRecipe{r.Name, name}
+		}
+	}
+	t.Fatal("no template with a routine")
+	return testRecipe{}
 }

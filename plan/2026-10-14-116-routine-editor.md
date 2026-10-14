@@ -69,6 +69,20 @@ spec: spec/2026-10-14-116-routine-editor.md
 
 5. **The visual check (mine), on siphon-dev.**
 
+## Deviations
+
+- **Steps 1–4:**
+  - **The YAML form** is a `yamlform` sub-template, because it's needed in
+    the collapsible, non-collapsible and routine layouts.
+  - **The recipe test** uses the first template with a routine, not
+    `weekly-digest` by name.
+  - **An unknown recipe** falls back to the starter.
+  - **"Other items"** are listed as `kind/name`.
+  - **`[data-insert]`** targets the page's `textarea.code-input`. The
+    routine page has exactly one.
+  - **The session added** the `.json.KEY` and `steps.ID.exit == 0` tokens
+    per step, which the spec asks for and the coder had left out.
+
 ## Tests
 
 ```sh

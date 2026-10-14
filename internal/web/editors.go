@@ -12,6 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/olafkfreund/siphon/docs"
 	"github.com/olafkfreund/siphon/internal/action"
 	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/rule"
@@ -22,6 +23,85 @@ import (
 type optPair struct{ Name, Type string }
 
 type stepRow struct{ ID, Kind, Target, Flags string }
+
+// routineStarter is what a new, empty routine begins with.
+const routineStarter = `# A routine runs its steps in order. A later step, or an agent's prompt,
+# reads an earlier one as {{.steps.<id>.output}}.
+steps:
+  - id: fetch
+    cmd: [curl, -fsS, https://example.com/status.json]
+  - id: summarise
+    agent: CHANGE-ME   # an agent whose prompt uses {{.steps.fetch.output}}
+`
+
+// recipe is a template that has a routine, offered as a starting point.
+type recipe struct{ Name, Title string }
+
+// recipeView is the chosen recipe: what was prefilled and what else it brings.
+type recipeView struct {
+	Name, Title string
+	Others      []string // the template's other items, as kind/name
+}
+
+// routineRecipes are the templates with a routines: section.
+func routineRecipes() (out []recipe) {
+	for _, t := range docs.Templates() {
+		if _, _, ok := templateRoutine(t.YAML); ok {
+			out = append(out, recipe{t.Name, t.Title})
+		}
+	}
+	return out
+}
+
+// templateRoutine is routines[0] of an apply file: its name and body as YAML.
+func templateRoutine(src string) (name, body string, ok bool) {
+	var doc struct {
+		Routines yaml.Node `yaml:"routines"`
+	}
+	n := &doc.Routines
+	if yaml.Unmarshal([]byte(src), &doc) != nil || n.Kind != yaml.MappingNode || len(n.Content) < 2 {
+		return "", "", false
+	}
+	b, err := yaml.Marshal(n.Content[1])
+	return n.Content[0].Value, string(b), err == nil
+}
+
+// recipeFor prefills a new routine from the named template; unknown gives ok=false.
+func recipeFor(name string) (rv *recipeView, routine, body string, ok bool) {
+	for _, t := range docs.Templates() {
+		if t.Name != name {
+			continue
+		}
+		if routine, body, ok = templateRoutine(t.YAML); !ok {
+			return nil, "", "", false
+		}
+		rv = &recipeView{Name: t.Name, Title: t.Title}
+		var all map[string]yaml.Node
+		if yaml.Unmarshal([]byte(t.YAML), &all) != nil {
+			return rv, routine, body, true
+		}
+		for _, kind := range sortedKeys(all) {
+			n := all[kind]
+			switch n.Kind {
+			case yaml.MappingNode:
+				for i := 0; i+1 < len(n.Content); i += 2 {
+					if kind != "routines" || n.Content[i].Value != routine {
+						rv.Others = append(rv.Others, kind+"/"+n.Content[i].Value)
+					}
+				}
+			case yaml.SequenceNode:
+				for _, it := range n.Content {
+					var r struct{ Name string }
+					if it.Decode(&r) == nil && r.Name != "" {
+						rv.Others = append(rv.Others, kind+"/"+r.Name)
+					}
+				}
+			}
+		}
+		return rv, routine, body, true
+	}
+	return nil, "", "", false
+}
 
 // editExtras fills what the per-kind editors show next to the form: pickers,
 // the source's health and last event, a routine's step list.
@@ -70,6 +150,11 @@ func (s *server) editExtras(v *cfgView) error {
 		v.Side = "agents"
 	case "routines":
 		v.Side = "routines"
+		if v.New && strings.TrimSpace(v.YAML) == "" {
+			v.YAML = routineStarter
+		}
+		v.Recipes = routineRecipes()
+		_, v.RefFields, _ = config.Explain("routine")
 		var rt config.Routine
 		if yaml.Unmarshal([]byte(v.YAML), &rt) == nil {
 			for _, st := range rt.Steps {
@@ -94,8 +179,12 @@ func (s *server) editExtras(v *cfgView) error {
 				}
 				r.Flags = strings.Join(fl, " · ")
 				v.Steps = append(v.Steps, r)
+				if st.ID != "" {
+					v.Tokens = append(v.Tokens, "{{.steps."+st.ID+".output}}", "{{.steps."+st.ID+".json.KEY}}", "steps."+st.ID+".exit == 0")
+				}
 			}
 		}
+		v.Tokens = append(v.Tokens, "{{.event.FIELD}}")
 	}
 	return nil
 }
