@@ -1512,7 +1512,7 @@ Ready-made: `siphon template alert-to-servicenow-incident` and
 | ServiceNow to trigger rules | webhooks: the Business Rule ([section 4](#4-the-business-rule)) |
 | A deterministic write, with no LLM | the `servicenow:` action ([Writes without an agent](#writes-without-an-agent)) |
 | An agent to read or update records | the built-in tools (`package: servicenow`), with no Now Assist licence |
-| ServiceNow's own maintained tools | the official MCP server: not usable from Siphon yet, see [#104](https://github.com/olafkfreund/siphon/issues/104) |
+| ServiceNow's own maintained tools | the official MCP server: Siphon logs in to it, but on our demo instance the server itself didn't answer MCP ([below](#the-official-mcp-server)) |
 
 The built-in tools are the supported path for agents.
 
@@ -1530,15 +1530,65 @@ probed it on a demo instance on 2026-10-14:
 | Dynamic client registration | None (`registration_endpoint: null`): a pre-registered OAuth app is required |
 | An unauthenticated MCP request | `302` to `/auth_redirect.do`, not `401` with `WWW-Authenticate` |
 
-**The spike's outcome: it does not work from Siphon yet.** With a
-pre-registered authorization-code OAuth app, `siphon connect oauth` failed
-at once with `calling initialize: sending initialize: Found`. Because the
-server answers with a `302` instead of a `401`, the MCP client never starts
-the OAuth login. A valid client-credentials bearer token and HTTP Basic with
-an admin account also got `302`, so the endpoint seems to accept only tokens
-from its own authorization-code flow. The compatibility fix is tracked in
-[#104](https://github.com/olafkfreund/siphon/issues/104). Until
-then, use the built-in tools.
+### Connecting Siphon
+
+Siphon handles both quirks:
+- **The redirect counts as a login challenge.** For a source with
+  `auth.oauth`, a 3xx from the MCP URL starts the OAuth login. Later, it
+  shows as *login required (the server redirected)*.
+- **The issuer shape is accepted** when you pin `issuer` to the bare
+  instance URL. Siphon then reads the metadata from the MCP path, and only
+  if its issuer equals your pin. Without the pin, the login is refused.
+
+1. **In ServiceNow, create an OAuth app:**
+   - *System OAuth → Application Registry → New → Create an OAuth API
+     endpoint for external clients*;
+   - grant type *Authorization Code*;
+   - redirect URL `<server.public_url>/oauth/callback`.
+2. **Add the source**, with the client secret on stdin:
+
+   ```yaml
+   sources:
+     servicenow-official:
+       type: mcp
+       url: https://<instance>.service-now.com/sncapps/mcp-server/mcp/sn_mcp_server_default
+       auth:
+         oauth:
+           client_id: <the app's client ID>
+           issuer: https://<instance>.service-now.com   # required: see above
+   ```
+
+   ```sh
+   siphon apply -f official.yaml --secret sources/servicenow-official.auth.oauth.client_secret=- --dry-run
+   siphon apply -f official.yaml --secret sources/servicenow-official.auth.oauth.client_secret=- --yes
+   ```
+
+3. **Log in** on the Sources page, or with `siphon connect oauth
+   servicenow-official`. Approve the app's consent page as an interactive
+   ServiceNow user. A *web service access only* user can't log in to the
+   UI, so it can't consent.
+
+### What we found on the demo instance (2026-10-14)
+
+**What worked:**
+- **The login completed** through discovery, the consent page and the
+  token exchange.
+- **The token is valid.** It reads `/api/now/table/...`.
+
+**What didn't:** the MCP server itself.
+- **The MCP URL:** `/sncapps/mcp-server/mcp/<server>` answered an
+  authenticated MCP `initialize` with an HTML *Page not found* page, for
+  every server in `sn_mcp_server_registry`, including the active
+  *Quickstart Server*.
+- **ServiceNow's own REST tools API:** `/api/sn_mcp_server/mcp_tools_api/tools/server/<name>`
+  answered `500 Cannot read property "scope" from undefined`, or *Server
+  not found or inactive*.
+- **The likely cause:** the instance doesn't have the MCP Server Console
+  fully provisioned or licensed (it needs Now Assist).
+
+**Before relying on it,** check that your instance's server answers
+`initialize` with JSON. Until then, use the
+[built-in tools](#agent-tools).
 
 ## Caveats
 

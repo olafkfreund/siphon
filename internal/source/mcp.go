@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"slices"
@@ -197,6 +199,9 @@ func (s MCP) transport(ctx context.Context, stream bool) mcp.Transport {
 		if o.Bearer != "" && o.OAuth == nil {
 			client.Transport = bearerTransport{base: client.Transport, token: o.Bearer}
 		}
+		if o.OAuth != nil {
+			client.Transport = RedirectChallenge(client.Transport, o.URL)
+		}
 		transport = &mcp.StreamableClientTransport{Endpoint: o.URL, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: !stream, OAuthHandler: o.OAuth}
 	}
 	return transport
@@ -229,6 +234,51 @@ func (t bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	copy := req.Clone(req.Context())
 	copy.Header.Set("Authorization", "Bearer "+t.token)
 	return t.base.RoundTrip(copy)
+}
+
+type redirectChallenge struct {
+	base     http.RoundTripper
+	endpoint *url.URL
+}
+
+// RedirectChallenge turns a 3xx from the endpoint itself (a browser login
+// page, as ServiceNow's MCP server sends) into a 401 challenge, so the SDK's
+// OAuth handler runs. Other requests and responses pass through.
+func RedirectChallenge(base http.RoundTripper, endpoint string) http.RoundTripper {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return base
+	}
+	u.RawQuery, u.Fragment = "", ""
+	return redirectChallenge{base: base, endpoint: u}
+}
+
+func (t redirectChallenge) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err != nil || resp.StatusCode < 300 || resp.StatusCode > 399 {
+		return resp, err
+	}
+	u := *req.URL
+	u.RawQuery, u.Fragment = "", ""
+	if u != *t.endpoint {
+		return resp, nil
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	prm := *t.endpoint
+	prm.Path = "/.well-known/oauth-protected-resource" + prm.Path
+	prm.RawPath = ""
+	return &http.Response{
+		Status:     "401 Unauthorized",
+		StatusCode: http.StatusUnauthorized,
+		Proto:      resp.Proto, ProtoMajor: resp.ProtoMajor, ProtoMinor: resp.ProtoMinor,
+		Header: http.Header{
+			"Www-Authenticate":  {`Bearer resource_metadata="` + prm.String() + `"`},
+			"Siphon-Redirected": {"1"},
+		},
+		Body:    http.NoBody,
+		Request: req,
+	}, nil
 }
 
 // jsonText returns the single TextContent of a tool result decoded as JSON

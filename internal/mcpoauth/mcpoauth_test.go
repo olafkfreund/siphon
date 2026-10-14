@@ -23,6 +23,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/source"
 )
 
 // clock is an injectable clock.
@@ -79,58 +80,8 @@ func newAS(t *testing.T) *fakeAS {
 		w.WriteHeader(201)
 		j(w, map[string]any{"client_id": id, "client_secret": "dcr-secret", "token_endpoint_auth_method": "client_secret_post"})
 	})
-	mux.HandleFunc("/authorize", func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		if q.Get("code_challenge_method") != "S256" || q.Get("resource") != a.URL+"/mcp" || q.Get("response_type") != "code" {
-			http.Error(w, "bad request", 400)
-			return
-		}
-		a.mu.Lock()
-		a.n++
-		code := fmt.Sprintf("code-%d", a.n)
-		a.challenge[code] = q.Get("code_challenge")
-		iss := a.issuerSent
-		a.mu.Unlock()
-		if iss == "" {
-			iss = a.URL
-		}
-		j(w, map[string]string{"code": code, "state": q.Get("state"), "iss": iss, "scope": q.Get("scope"), "client_id": q.Get("client_id")})
-	})
-	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
-		r.ParseForm()
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		a.tokens++
-		bad := func() {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(400)
-			json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant", "error_description": "nope"})
-		}
-		switch r.PostForm.Get("grant_type") {
-		case "authorization_code":
-			ch, ok := a.challenge[r.PostForm.Get("code")]
-			sum := sha256.Sum256([]byte(r.PostForm.Get("code_verifier")))
-			if !ok || ch != base64.RawURLEncoding.EncodeToString(sum[:]) {
-				bad()
-				return
-			}
-			delete(a.challenge, r.PostForm.Get("code"))
-		case "refresh_token":
-			if r.PostForm.Get("refresh_token") != a.refresh {
-				bad()
-				return
-			}
-		}
-		a.n++
-		at := fmt.Sprintf("at-%d", a.n)
-		a.access[at] = true
-		out := map[string]any{"access_token": at, "token_type": "Bearer", "expires_in": a.expiresIn}
-		if !a.noRefresh {
-			a.refresh = fmt.Sprintf("rt-%d", a.n)
-			out["refresh_token"] = a.refresh
-		}
-		j(w, out)
-	})
+	mux.HandleFunc("/authorize", a.authorize(a.URL+"/mcp"))
+	mux.HandleFunc("/token", a.token)
 	srv := mcp.NewServer(&mcp.Implementation{Name: "t", Version: "1"}, nil)
 	h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
 	verify := func(_ context.Context, tok string, _ *http.Request) (*auth.TokenInfo, error) {
@@ -143,6 +94,68 @@ func newAS(t *testing.T) *fakeAS {
 	}
 	mux.Handle("/mcp", auth.RequireBearerToken(verify, &auth.RequireBearerTokenOptions{ResourceMetadataURL: a.URL + "/.well-known/oauth-protected-resource"})(h))
 	return a
+}
+
+func (a *fakeAS) j(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
+}
+
+// authorize is the fake's authorization endpoint: it "is" the browser and answers with the code.
+func (a *fakeAS) authorize(resource string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("code_challenge_method") != "S256" || q.Get("resource") != resource || q.Get("response_type") != "code" {
+			http.Error(w, "bad request", 400)
+			return
+		}
+		a.mu.Lock()
+		a.n++
+		code := fmt.Sprintf("code-%d", a.n)
+		a.challenge[code] = q.Get("code_challenge")
+		iss := a.issuerSent
+		a.mu.Unlock()
+		if iss == "" {
+			iss = a.URL
+		}
+		a.j(w, map[string]string{"code": code, "state": q.Get("state"), "iss": iss, "scope": q.Get("scope"), "client_id": q.Get("client_id")})
+	}
+}
+
+func (a *fakeAS) token(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.tokens++
+	bad := func() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant", "error_description": "nope"})
+	}
+	switch r.PostForm.Get("grant_type") {
+	case "authorization_code":
+		ch, ok := a.challenge[r.PostForm.Get("code")]
+		sum := sha256.Sum256([]byte(r.PostForm.Get("code_verifier")))
+		if !ok || ch != base64.RawURLEncoding.EncodeToString(sum[:]) {
+			bad()
+			return
+		}
+		delete(a.challenge, r.PostForm.Get("code"))
+	case "refresh_token":
+		if r.PostForm.Get("refresh_token") != a.refresh {
+			bad()
+			return
+		}
+	}
+	a.n++
+	at := fmt.Sprintf("at-%d", a.n)
+	a.access[at] = true
+	out := map[string]any{"access_token": at, "token_type": "Bearer", "expires_in": a.expiresIn}
+	if !a.noRefresh {
+		a.refresh = fmt.Sprintf("rt-%d", a.n)
+		out["refresh_token"] = a.refresh
+	}
+	a.j(w, out)
 }
 
 type env struct {
@@ -568,5 +581,148 @@ func TestIssuerPinRefusesOldLogin(t *testing.T) {
 	e.pin(e.as.URL)
 	if s, _ := e.m.Status("s"); s != "none" {
 		t.Fatalf("empty stored issuer accepted: %s", s)
+	}
+}
+
+func TestRedirectMeansLoginRequired(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/auth_redirect.do", http.StatusFound)
+	}))
+	defer srv.Close()
+	e := newEnv(t, config.OAuth{})
+	e.cfg.Sources["s"].URL = srv.URL + "/mcp"
+	_, err := (source.MCP{Options: source.MCPOptions{Name: "s", URL: srv.URL + "/mcp", Tool: "t", AllowPrivate: true, OAuth: e.m.Handler("s")}}).Poll(context.Background())
+	if !errors.Is(err, ErrLoginRequired) || !strings.Contains(err.Error(), "redirected") || strings.Contains(err.Error(), "Found") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+const snPath = "/sncapps/mcp/x"
+
+// newSNAS is shaped like ServiceNow's official MCP server: no 401 challenge
+// (a 302 to a login page), a protected resource whose authorization server is
+// the endpoint URL, and that server's RFC 8414 document naming the bare
+// instance as issuer. The bare instance's own metadata URLs do not work.
+func newSNAS(t *testing.T) *fakeAS {
+	a := &fakeAS{challenge: map[string]string{}, access: map[string]bool{}, expiresIn: 3600}
+	mux := http.NewServeMux()
+	a.Server = httptest.NewServer(mux)
+	t.Cleanup(a.Close)
+	mux.HandleFunc("/.well-known/oauth-protected-resource"+snPath, func(w http.ResponseWriter, r *http.Request) {
+		a.j(w, map[string]any{"resource": a.URL + snPath, "authorization_servers": []string{a.URL + snPath}})
+	})
+	mux.HandleFunc("/.well-known/oauth-authorization-server"+snPath, func(w http.ResponseWriter, r *http.Request) {
+		a.j(w, map[string]any{"issuer": a.URL, "authorization_endpoint": a.URL + "/oauth_auth.do", "token_endpoint": a.URL + "/oauth_token.do",
+			"authorization_response_iss_parameter_supported": true, "code_challenge_methods_supported": []string{"S256"},
+			"token_endpoint_auth_methods_supported": []string{"client_secret_post"}})
+	})
+	mux.HandleFunc("/.well-known/oauth-authorization-server", http.NotFound)
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/login.do", http.StatusFound)
+	})
+	mux.HandleFunc("/oauth_auth.do", a.authorize(a.URL+snPath))
+	mux.HandleFunc("/oauth_token.do", a.token)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "t", Version: "1"}, nil)
+	h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
+	mux.HandleFunc(snPath, func(w http.ResponseWriter, r *http.Request) {
+		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		a.mu.Lock()
+		ok := a.access[tok]
+		a.mu.Unlock()
+		if !ok {
+			http.Redirect(w, r, "/auth_redirect.do", http.StatusFound)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+	return a
+}
+
+func newSNEnv(t *testing.T) (*env, *fakeAS) {
+	oc := config.OAuth{ClientID: "pre"}
+	oc.ClientSecret.Value = "pre-secret"
+	e := newEnv(t, oc)
+	sn := newSNAS(t)
+	e.as = sn
+	e.cfg.Sources["s"].URL = sn.URL + snPath
+	return e, sn
+}
+
+func TestServiceNowShapeLogin(t *testing.T) {
+	for _, slash := range []string{"", "/"} { // a pin's trailing / is ignored
+		e, sn := newSNEnv(t)
+		e.pin(sn.URL + slash)
+		e.login1(e.m)
+		raw, _ := os.ReadFile(e.file())
+		var st stored
+		json.Unmarshal(raw, &st)
+		if strings.TrimSuffix(st.Issuer, "/") != sn.URL || st.Resource != sn.URL+snPath {
+			t.Fatalf("stored: %s", raw)
+		}
+		listTools(t, e, sn)
+	}
+}
+
+func listTools(t *testing.T, e *env, sn *fakeAS) {
+	tr := &mcp.StreamableClientTransport{Endpoint: sn.URL + snPath, HTTPClient: http.DefaultClient, MaxRetries: -1, DisableStandaloneSSE: true, OAuthHandler: e.m.Handler("s")}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "c", Version: "1"}, nil).Connect(context.Background(), tr, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	if _, err := cs.ListTools(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestServiceNowShapeNeedsPin(t *testing.T) {
+	e, sn := newSNEnv(t)
+	u, err := e.m.Start(context.Background(), "s")
+	if u != "" || err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("want an issuer mismatch error: %q %v", u, err)
+	}
+	noSecrets(t, err, "pre-secret")
+	if sn.tokens != 0 {
+		t.Fatalf("token endpoint hit %d times", sn.tokens)
+	}
+}
+
+func TestServiceNowShapeWrongPin(t *testing.T) {
+	e, sn := newSNEnv(t)
+	// the last is a real prefix of X, but X's metadata issuer is not that pin
+	for _, pin := range []string{newAS(t).URL, sn.URL + "/other", sn.URL + "/sncapps/mc", sn.URL + "/sncapps"} {
+		e.pin(pin)
+		u, err := e.m.Start(context.Background(), "s")
+		if u != "" || err == nil {
+			t.Fatalf("pin %s: want an error: %q %v", pin, u, err)
+		}
+		noSecrets(t, err, "pre-secret")
+	}
+	if sn.tokens != 0 {
+		t.Fatalf("token endpoint hit %d times", sn.tokens)
+	}
+}
+
+func TestIssuerAliasRefusesDotSegments(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, asmPath) { // any metadata names the pin, so only the path check can refuse
+			fmt.Fprintf(w, `{"issuer":%q}`, srv.URL+"/pin")
+			return
+		}
+		fmt.Fprintf(w, `{"resource":"r","authorization_servers":[%q]}`, srv.URL+"/pin/"+r.URL.Query().Get("x"))
+	}))
+	defer srv.Close()
+	a := &issuerAlias{base: http.DefaultTransport, pin: srv.URL + "/pin"}
+	for x, want := range map[string]bool{"%2e%2e/%2e%2e/u/evil": false, "a/../../u": false, "a/./b": false, "a%2Fb": false, "mcp/x": true} {
+		req, _ := http.NewRequest("GET", srv.URL+prmPath+"?x="+url.QueryEscape(x), nil)
+		resp, err := a.RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		if got := strings.Contains(string(b), `["`+srv.URL+`/pin"]`); got != want {
+			t.Errorf("x=%s: rewritten=%v want %v (%s)", x, got, want, b)
+		}
 	}
 }
