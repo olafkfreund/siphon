@@ -86,7 +86,15 @@ type ruleView struct {
 	Enabled    bool       `json:"enabled"`
 	Overridden bool       `json:"overridden"`
 	LastFired  *time.Time `json:"last_fired"`
+	Approval   bool       `json:"approval"`
+	Provider   string     `json:"provider"`
+	ForEach    bool       `json:"for_each"`
+	Repeat     string     `json:"repeat,omitempty"`
+	Egress     bool       `json:"egress"`
+	Hot        bool       `json:"hot"` // enabled and fired within hotWindow
 }
+
+const hotWindow = 15 * time.Minute
 
 func (s *server) sources() ([]sourceView, error) {
 	states, err := store.SourceStates(s.Store.DB)
@@ -181,7 +189,20 @@ func (s *server) rules() ([]ruleView, error) {
 		if on == "" {
 			on = "edge"
 		}
-		v := ruleView{Name: r.Name, Source: r.Source, When: r.When, On: on, Action: actionSummary(r.Action), Enabled: !off[r.Name], Overridden: off[r.Name]}
+		v := ruleView{Name: r.Name, Source: r.Source, When: r.When, On: on, Action: actionSummary(r.Action), Enabled: !off[r.Name], Overridden: off[r.Name],
+			Approval: s.Config().NeedsApproval(r), ForEach: r.ForEach != "", Egress: r.Egress.Enabled}
+		if a := s.Config().Agents[r.Action.Agent]; r.Action.Agent != "" && a != nil {
+			v.Provider = a.Kind
+			if cr := s.Config().Credentials[a.Credential]; a.Kind == "model" && cr != nil {
+				v.Provider = cr.Provider // a model agent runs on its credential's provider (ollama, openai, …)
+				if cr.Preset != "" {
+					v.Provider = cr.Preset // the openai-compatible tile it was set up from (groq, openrouter, …)
+				}
+			}
+		}
+		if r.Repeat > 0 {
+			v.Repeat = time.Duration(r.Repeat).String()
+		}
 		if src := s.Config().Sources[r.Source]; src != nil {
 			v.SourceType = src.Type
 		} else if r.Source == "agent-result" {
@@ -193,6 +214,7 @@ func (s *server) rules() ([]ruleView, error) {
 		v.Kind, v.Target, _ = strings.Cut(v.Action, ": ")
 		if t, ok := fired[r.Name]; ok {
 			v.LastFired = &t
+			v.Hot = v.Enabled && s.Now().Sub(t) < hotWindow
 		}
 		out = append(out, v)
 	}
