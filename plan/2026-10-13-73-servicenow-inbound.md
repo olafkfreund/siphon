@@ -190,3 +190,11 @@ Opus agent reviews them. Step 7 and the instance check are mine.
   `docs/README.md` sits next to AWS, on the line that already holds the
   page links, not next to GitHub/GitLab. The guide's rule example uses
   `cmd: [echo, "new incident"]` as a placeholder action.
+- **Review of steps 1-6:** the guide's script sends
+  `Content-Type: application/json; charset=utf-8` (the spec has no
+  charset), so a non-ASCII body arrives in the bytes it was signed in. The
+  guide also says to use the Global scope (`getElements()` differs in scoped
+  apps) and adds a non-ASCII title to the checks to confirm on the release.
+  The summary template comments that its `cooldown` applies per rule. No
+  Go test was added for non-ASCII: Go signs and verifies the same bytes, so
+  only a real instance can show the encoding risk.

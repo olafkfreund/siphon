@@ -32,8 +32,8 @@ and `itil`. Put its user name in a third property, `siphon.integration_user`
 
 ## 4. The Business Rule
 
-On each table to send (for example `incident`), add a Business Rule: **After**,
-on **Insert** and **Update**, with this advanced script:
+On each table to send (for example `incident`), add a Business Rule in the **Global** application scope: **After**, on
+**Insert** and **Update**, with this advanced script:
 
 ```javascript
 (function executeRule(current, previous) {
@@ -60,7 +60,7 @@ on **Insert** and **Update**, with this advanced script:
   var r = new sn_ws.RESTMessageV2();
   r.setEndpoint(gs.getProperty('siphon.webhook.url'));
   r.setHttpMethod('post');
-  r.setRequestHeader('Content-Type', 'application/json');
+  r.setRequestHeader('Content-Type', 'application/json; charset=utf-8');
   r.setRequestHeader('webhook-id', id);
   r.setRequestHeader('webhook-timestamp', ts);
   r.setRequestHeader('webhook-signature', 'v1,' + sig);
@@ -87,8 +87,9 @@ The rule sees these fields as `event.<name>`:
 | `priority` | `1` to `5`, as a string |
 | `state` | the state value, as a string |
 
-The delivery id is `sys_id:sys_mod_count`. A retry of one change carries the
-same id, so it collapses onto one replay key; every real update gets a new one.
+The delivery id is `sys_id:sys_mod_count`. A repeated delivery of one change
+carries the same id, so it collapses onto one replay key; every real update
+gets a new one.
 
 ## 6. Rules
 
@@ -114,4 +115,6 @@ Ready-made: `siphon template servicenow-incident-notify` and
   filed it. Use only envelope fields in command arguments, and give agents
   that read it no tools.
 - **To confirm on your release:** `password2` handling in
-  `gs.getProperty`, and `changes()` on every element.
+  `gs.getProperty`, `changes()` on every element, and that a title with
+  non-ASCII text (for example `Café`) is accepted: the body must be sent as
+  UTF-8, the encoding it was signed in.

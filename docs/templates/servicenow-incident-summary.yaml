@@ -23,5 +23,5 @@ rules:
     when: 'event.table == "incident" && event.event == "insert"'
     on: each
     id: event.sys_id
-    cooldown: 1m
+    cooldown: 1m                    # per rule: a second incident within a minute gets no summary
     action: { routine: servicenow-incident-to-phone }
