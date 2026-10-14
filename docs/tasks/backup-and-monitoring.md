@@ -215,9 +215,13 @@ server:
     seen_events: 168h   # ids used to drop duplicate webhook deliveries, and the ids an on: each rule has fired (default 168h = 7 days)
 ```
 
-`seen_events` also covers the ids of `on: each` rules: an `on: each` id that
-has not been seen (fired, or returned again by a polled source) for longer
-than this can fire again if it comes back.
+`seen_events` also covers the ids of `on: each` rules. An `on: each` id is
+dropped once it hasn't been seen, either fired or returned again by a polled
+source, for longer than `seen_events`. That time is counted against the rule's
+own latest activity, not the clock. So while a rule is disabled, its source is
+failing, the host is down or a backup has just been restored, nothing is
+dropped, and ids the source still returns never fire again. An id that is
+dropped can fire again if it ever comes back.
 
 - **Units:** values are durations in hours (`h`). Unset or `0` keeps the
   default.

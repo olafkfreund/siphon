@@ -209,3 +209,19 @@ func TestEachTouchesSeen(t *testing.T) {
 		t.Fatal("touch after the hour")
 	}
 }
+
+// An already-fired each id is noted as seen even while its when errors, so
+// retention keeps it and it does not refire once the error clears.
+func TestEachTouchesSeenWhenErrors(t *testing.T) {
+	h := newH(t)
+	r := config.Rule{Name: "r", Source: "s", When: "event.missing.field > 1", On: "each", ID: `"x"`}
+	if _, err := h.s.DB.Exec(`INSERT INTO rule_state(rule,key,last_value,last_fired_at) VALUES ('r','x',1,?)`, t0.UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	h.eval(r, val(1), time.Hour, false)
+	var n int64
+	h.s.DB.QueryRow(`SELECT COALESCE(last_seen_at,0) FROM rule_state WHERE rule='r' AND key='x'`).Scan(&n)
+	if n != t0.Add(time.Hour).UnixMilli() {
+		t.Fatalf("not touched: %d", n)
+	}
+}

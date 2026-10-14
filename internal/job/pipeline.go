@@ -654,7 +654,7 @@ func (p *Pipeline) RunOnce(ctx context.Context) error {
 			continue
 		}
 		if _, err := p.tick(ctx, cfg, name); err != nil {
-			errs = append(errs, fmt.Errorf("source %s: %w", name, err))
+			errs = append(errs, fmt.Errorf("source %s: %s", name, pollErrText(cfg, err)))
 		}
 	}
 	if _, err := p.RunQueued(ctx); err != nil {
@@ -851,8 +851,9 @@ var quoted = regexp.MustCompile(`"[^"]*"|'[^']*'`)
 // the expression engine quotes ("cannot use "abc" as int") are not kept.
 func stripQuoted(s string) string { return quoted.ReplaceAllString(s, `"…"`) }
 
-// pollErrText is a poll error as stored and logged: quoted values blanked and
-// secrets masked first, then one line of at most 300 bytes.
+// pollErrText is a poll error as stored and logged: secrets masked, then quoted
+// values blanked (masking first, so a quote inside a secret can't split it), then
+// one line of at most 300 bytes.
 func pollErrText(cfg *config.Config, err error) string {
-	return source.OneLine(string(action.Mask([]byte(stripQuoted(err.Error())), cfg.Secrets())), 300)
+	return source.OneLine(stripQuoted(string(action.Mask([]byte(err.Error()), cfg.Secrets()))), 300)
 }

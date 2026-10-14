@@ -158,6 +158,31 @@ spec: spec/2026-10-14-111-poll-error-and-each-prune.md
 
    → verify: `go test -race ./docs/...`.
 
+- **The second Opus review, of the amendment:** no HIGH, and two MEDIUM
+  with one cause. The prune was measured against the clock, so ids the
+  source still returns lost their rows and refired when:
+  - a rule was disabled for longer than `seen_events` (M1);
+  - a source was failing, the host was down, or an old backup was restored
+    (M2). Retention runs at startup, before the first poll.
+
+  **Fixed:** the prune also requires
+  `COALESCE(last_seen_at, last_fired_at) < MAX(COALESCE(last_seen_at, last_fired_at)) over the rule - seen`.
+  That maximum only advances while the rule evaluates, so all four cases
+  freeze it. Test: `TestCleanupEachFrozenRule`. It fails with the
+  clock-only prune.
+- **LOW, fixed:**
+  - **L1:** an already-fired each id is touched before `when` runs, so a
+    `when` error doesn't stop the touch (`TestEachTouchesSeenWhenErrors`);
+  - **L2:** `pollErrText` masks before `stripQuoted`;
+  - **L4:** `RunOnce` wraps `pollErrText`, so `siphon run-once` prints the
+    same filtered text.
+- **LOW, not fixed:**
+  - **L3:** a secret straddling the 4 KiB cap. It's contrived, so it's
+    noted only.
+  - **L5:** a test migrating a populated `0006` database. The store has no
+    partial-migration hook; `0007` is one nullable `ADD COLUMN`. Rollback
+    is corrected below.
+
 ## Tests
 
 ```sh
@@ -171,4 +196,9 @@ at a time. A fresh Opus agent reviews `git diff` against this plan.
 
 Revert the PR. The pruning only deletes rows that today are never read
 again, except by `siphon why`'s per-rule key list, which then shows fewer
-old keys. No schema change.
+old keys.
+
+**Schema:** migration `0007` adds a nullable column. An older binary still
+runs on the migrated database, because every query names its columns. But
+an older binary refuses to restore a backup taken after the upgrade
+(`snapshot.go:74`).

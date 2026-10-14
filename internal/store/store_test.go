@@ -892,3 +892,43 @@ func TestSourceStatesEventAndReject(t *testing.T) {
 		}
 	}
 }
+
+// A rule whose activity froze (disabled, its source failing, the host down, or a
+// restored backup) keeps the ids it last saw: the prune is measured against the
+// rule's own latest activity, not the clock.
+func TestCleanupEachFrozenRule(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.UnixMilli(1_800_000_000_000)
+	day := 24 * time.Hour
+	for _, row := range []struct {
+		key  string
+		seen time.Duration // days ago
+	}{{"newest", 20}, {"near", 25}, {"far", 30}} {
+		at := now.Add(-row.seen * day).UnixMilli()
+		if _, err := s.DB.Exec(`INSERT INTO rule_state(rule,key,last_value,last_fired_at,last_seen_at) VALUES ('f',?,1,?,?)`, row.key, at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := Cleanup(s.DB, now, Retention{EachRules: []string{"f"}}); err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	rows, err := s.DB.Query(`SELECT key FROM rule_state WHERE rule='f' ORDER BY key`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k string
+		rows.Scan(&k)
+		keys = append(keys, k)
+	}
+	// 7 days before its last activity (20 days ago) is 27 days ago: far goes, near stays.
+	if strings.Join(keys, ",") != "near,newest" {
+		t.Fatalf("kept %v", keys)
+	}
+}

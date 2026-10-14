@@ -341,7 +341,7 @@ func Cleanup(db *sql.DB, now time.Time, r Retention) error {
 		{`DELETE FROM jobs WHERE id IN (` + old + `)`, []any{cut}},
 		{`DELETE FROM audit WHERE at < ?`, []any{ms(now.Add(-r.Audit))}},
 		{`DELETE FROM seen_event WHERE seen_at < ?`, []any{ms(now.Add(-r.Seen))}},
-	}, eachPrune(r.EachRules, ms(now.Add(-r.Seen)))...) {
+	}, eachPrune(r.EachRules, ms(now.Add(-r.Seen)), r.Seen)...) {
 		if _, err := tx.Exec(q.sql, q.args...); err != nil {
 			return err
 		}
@@ -355,18 +355,23 @@ type stmt struct {
 }
 
 // eachPrune deletes rule_state rows of the named rules not seen (last_seen_at, else
-// last_fired_at) since cut, keeping each rule's newest-fired row. NULL last_fired_at
+// last_fired_at) for seen before the rule's own latest activity, and before cut,
+// keeping each rule's newest-fired row. Measured against the rule's activity, not the
+// clock: a disabled rule, a failing source, a stopped host or a restored backup
+// freezes it, so ids the source still returns are never pruned. NULL last_fired_at
 // never compares true, so those stay.
-func eachPrune(rules []string, cut int64) []stmt {
+func eachPrune(rules []string, cut int64, seen time.Duration) []stmt {
 	if len(rules) == 0 {
 		return nil
 	}
-	args := make([]any, 0, len(rules)+1)
+	args := make([]any, 0, len(rules)+2)
 	for _, n := range rules {
 		args = append(args, n)
 	}
-	args = append(args, cut)
-	return []stmt{{`DELETE FROM rule_state WHERE rule IN (` + strings.TrimSuffix(strings.Repeat("?,", len(rules)), ",") + `) AND COALESCE(last_seen_at, last_fired_at) < ?
+	args = append(args, cut, seen.Milliseconds())
+	return []stmt{{`DELETE FROM rule_state WHERE rule IN (` + strings.TrimSuffix(strings.Repeat("?,", len(rules)), ",") + `)
+		AND COALESCE(last_seen_at, last_fired_at) < ?
+		AND COALESCE(last_seen_at, last_fired_at) < (SELECT MAX(COALESCE(r2.last_seen_at, r2.last_fired_at)) FROM rule_state r2 WHERE r2.rule = rule_state.rule) - ?
 		AND last_fired_at < (SELECT MAX(r2.last_fired_at) FROM rule_state r2 WHERE r2.rule = rule_state.rule)`, args}}
 }
 
