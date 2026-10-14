@@ -1446,6 +1446,14 @@ rules:
   one. `get` does not.
 - **No retry** on a `create` or `create_change` step: a retry could file a
   duplicate.
+- **`get` is for routines.** A rule-level `get` only records
+  `servicenow get … <number>` in the job output; use it as a step and read
+  `{{.steps.<id>.json.<field>}}` in a later one.
+- **Routines are at-least-once.** A daemon restart during a `create` or
+  `create_change` step can file a duplicate.
+- **`standard` changes** need the field `standard_change_template_id`.
+- **`resolve` is for incidents only** (`table: incident` or none): state 6
+  means something else on other tables.
 - **No approval by default.** Set `approve: true` on the rule or step to wait
   for a person. The job output is `servicenow <op> <table> <number>`, and
   a later step reads `{{.steps.<id>.json.number}}`.

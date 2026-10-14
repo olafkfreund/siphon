@@ -244,3 +244,14 @@ Opus agent reviews them. Step 6 is mine.
     added to `baseConfig`.
   - **`docs/llm.md`:** its `cooldown:` rule now also names servicenow
     writes.
+- **Review of steps 1–5 (fresh Opus):**
+  - **Output is masked** with the connection source's env values only. All
+    of `cfg.Secrets()` could mangle a `get` record.
+  - **The dashboard's `jobActions`** shows servicenow jobs.
+  - **Validation:** a `standard` `create_change` needs
+    `standard_change_template_id`, and `resolve` is incident-only.
+  - **Docs:** `get` belongs in routines, routines are at-least-once (a
+    restart can duplicate a `create`), plus the new limits above.
+  - **A `javascript:` probe on the demo instance:** values written through
+    the Table API are stored literally (INC0010263), not evaluated.
+    Reference fields were not tested.

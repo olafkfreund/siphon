@@ -1737,9 +1737,14 @@ func (c *Config) validateServiceNow(p string, a *ServiceNowAction, add func(stri
 		}
 	case "resolve":
 		need("close_code", "close_notes")
+		if a.Table != "" && a.Table != "incident" {
+			add("%s: resolve is for incidents only (state 6 means something else on other tables)", p)
+		}
 	case "create_change":
 		if t := a.Fields["type"]; t != "normal" && t != "emergency" && t != "standard" {
 			add("%s: create_change type must be normal, emergency or standard", p)
+		} else if t == "standard" {
+			need("standard_change_template_id")
 		}
 	}
 }

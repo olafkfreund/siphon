@@ -170,6 +170,20 @@ func TestRunServiceNowRefusals(t *testing.T) {
 	}
 }
 
+// A short secret on another source must not mangle the record that get returns.
+func TestRunServiceNowMaskScope(t *testing.T) {
+	old := serviceNowHTTP
+	t.Cleanup(func() { serviceNowHTTP = old })
+	f := newSNFake(t, `{"result":{"sys_id":"`+snID+`","number":"INC0010001"}}`)
+	cfg := snConfig(t, f.URL, true, snKeyAuth)
+	cfg.Sources["other"] = &config.Source{Type: "mcp", Env: map[string]config.Secret{"K": {Value: "1"}}}
+	a := &config.ServiceNowAction{Connection: "sn", Op: "get", SysID: snID}
+	exit, out, stdout := snRun(cfg, a, nil)
+	if exit != 0 || !strings.Contains(string(stdout), "INC0010001") || !strings.Contains(out, "INC0010001") {
+		t.Fatalf("%d %q %s", exit, out, stdout)
+	}
+}
+
 func TestRunServiceNowOAuth(t *testing.T) {
 	old := serviceNowHTTP
 	t.Cleanup(func() { serviceNowHTTP = old })

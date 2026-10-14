@@ -103,6 +103,27 @@ func TestFinishJobOnlyRunning(t *testing.T) {
 	}
 }
 
+func TestJobActionsServiceNow(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	now := time.UnixMilli(1_700_000_000_000)
+	tx, _ := s.DB.Begin()
+	InsertJob(tx, Job{Rule: "a", ActionJSON: `{"action":{"ServiceNow":{"Op":"create_change","Fields":{"type":"normal"}}}}`}, now)
+	InsertJob(tx, Job{Rule: "b", ActionJSON: `{"action":{"ServiceNow":{"Op":"get","Table":"problem"}}}`}, now)
+	InsertJob(tx, Job{Rule: "c", ActionJSON: `{"action":{"ServiceNow":{"Op":"add_work_note"}}}`}, now)
+	tx.Commit()
+	js, err := ListJobActions(s.DB, "", 10)
+	if err != nil || len(js) != 3 {
+		t.Fatal(js, err)
+	}
+	// newest first
+	for i, want := range []string{"add_work_note incident", "get problem", "create_change change_request"} {
+		if js[i].Kind != "servicenow" || js[i].Target != want {
+			t.Errorf("%d: %q %q, want servicenow %q", i, js[i].Kind, js[i].Target, want)
+		}
+	}
+}
+
 func TestRequeueRunning(t *testing.T) {
 	s, _ := Open(":memory:")
 	defer s.Close()

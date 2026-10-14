@@ -26,8 +26,18 @@ var serviceNowHTTP = func(allowPrivate bool) *http.Client {
 // and -1 on failure; out is the text for the job, stdout the JSON for later steps.
 func runServiceNow(ctx context.Context, cfg *config.Config, a *config.ServiceNowAction, env map[string]any) (exit int, out string, stdout []byte) {
 	res, table, err := doServiceNow(ctx, cfg, a, env)
+	// Mask only this connection's credentials: a short secret elsewhere (say "1")
+	// would otherwise mangle the record's number.
+	var secrets []string
+	if src := cfg.Sources[a.Connection]; src != nil {
+		for _, v := range src.Env {
+			if v.Value != "" {
+				secrets = append(secrets, v.Value)
+			}
+		}
+	}
 	if err != nil {
-		return -1, string(action.Mask([]byte(err.Error()), cfg.Secrets())), nil
+		return -1, string(action.Mask([]byte(err.Error()), secrets)), nil
 	}
 	ref := str(res["number"])
 	if ref == "" {
@@ -38,7 +48,7 @@ func runServiceNow(ctx context.Context, cfg *config.Config, a *config.ServiceNow
 	} else {
 		stdout, _ = json.Marshal(map[string]string{"op": a.Op, "table": table, "sys_id": str(res["sys_id"]), "number": str(res["number"])})
 	}
-	return 0, fmt.Sprintf("servicenow %s %s %s", a.Op, table, ref), action.Mask(stdout, cfg.Secrets())
+	return 0, fmt.Sprintf("servicenow %s %s %s", a.Op, table, ref), action.Mask(stdout, secrets)
 }
 
 func doServiceNow(ctx context.Context, cfg *config.Config, a *config.ServiceNowAction, env map[string]any) (map[string]any, string, error) {
