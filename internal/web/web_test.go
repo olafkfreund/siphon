@@ -526,3 +526,26 @@ func TestUnsandboxedBanner(t *testing.T) {
 		}
 	}
 }
+
+func TestHooksMatrixRoutes(t *testing.T) {
+	var got []string
+	e := newEnv(t, func(o *Options) {
+		o.Hooks = func(n string) http.Handler {
+			if n != "mx" {
+				return nil
+			}
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got = append(got, r.Method); w.WriteHeader(200) })
+		}
+	})
+	for _, m := range []string{"PUT", "POST", "GET"} {
+		if w := e.do(m, "/hook/mx/_matrix/app/v1/transactions/1", nil, nil); w.Code != 200 {
+			t.Fatal(m, w.Code)
+		}
+	}
+	if len(got) != 3 {
+		t.Fatal(got)
+	}
+	if w := e.do("PUT", "/hook/zz/_matrix/app/v1/transactions/1", nil, nil); w.Code != 404 {
+		t.Fatal(w.Code)
+	}
+}

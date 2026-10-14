@@ -181,7 +181,10 @@ func New(o Options) http.Handler {
 		http.NotFound(w, r)
 	}
 	mux.HandleFunc("POST /hook/{source}", hook)
-	mux.HandleFunc("OPTIONS /hook/{source}", hook) // Azure Event Grid's handshake; the handler refuses it elsewhere
+	mux.HandleFunc("OPTIONS /hook/{source}", hook)     // Azure Event Grid's handshake; the handler refuses it elsewhere
+	for _, m := range []string{"PUT", "POST", "GET"} { // Matrix application-service paths; the handler answers only a matrix source
+		mux.HandleFunc(m+" /hook/{source}/_matrix/app/v1/{rest...}", hook)
+	}
 	s.oauthRoutes(mux)
 	s.notionRoutes(mux)
 	s.apiRoutes(mux)

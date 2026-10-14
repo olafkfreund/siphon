@@ -32,6 +32,7 @@ type WebhookOptions struct {
 	SigPrefix       string // sha256: the header may hold a comma-separated list of PREFIX+hex; any match counts
 	TimestampSep    string // sha256 with a timestamp: what joins timestamp and body (default ".")
 	IDHeader        string
+	AllowQueryToken bool   // matrix: also accept ?access_token= as the token
 	Format          string // "eventgrid": answer Azure Event Grid's handshakes and deliver each event of a batch; "discord" (signature ed25519): answer Discord's PING and interactions; "notion": capture Notion's verification token until a secret is set
 	// OnVerificationToken receives Notion's verification token (format notion, no secret).
 	OnVerificationToken func(string)
@@ -99,19 +100,31 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 		o.Limit = NewLimiter(20, 10)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost && !(r.Method == http.MethodOptions && o.Format == "eventgrid") {
+		matrix := o.Format == "matrix"
+		if strings.Contains(r.URL.Path, matrixPrefix) != matrix {
+			http.NotFound(w, r) // the application-service paths answer only on a matrix source, and a matrix source answers only them
+			return
+		}
+		if r.Method != http.MethodPost && !(r.Method == http.MethodOptions && o.Format == "eventgrid") && !(matrix && (r.Method == http.MethodPut || r.Method == http.MethodGet)) {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
+		}
+		status := func(code int) {
+			if matrix {
+				matrixError(w, code, "")
+				return
+			}
+			w.WriteHeader(code)
 		}
 		reject := func(code int, reason string) {
 			if o.OnReject != nil {
 				o.OnReject(code, reason)
 			}
-			w.WriteHeader(code)
+			status(code)
 		}
 		now := o.Now()
 		if !o.PreLimit.Allow(now) {
-			w.WriteHeader(http.StatusTooManyRequests)
+			status(http.StatusTooManyRequests)
 			return
 		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, o.MaxBody+1))
@@ -163,8 +176,16 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 			key = hex.EncodeToString(sum[:])
 		case "token":
 			header = o.TokenHeader
-			a, b := sha256.Sum256([]byte(r.Header.Get(header))), sha256.Sum256([]byte(o.Secret))
-			if o.Secret == "" || subtle.ConstantTimeCompare(a[:], b[:]) != 1 {
+			got, want := r.Header.Get(header), o.Secret
+			if matrix {
+				want = "Bearer " + o.Secret
+				if q := r.URL.Query().Get("access_token"); o.AllowQueryToken && q != "" && got == "" {
+					got, want = q, o.Secret
+				}
+			}
+			a, b := sha256.Sum256([]byte(got)), sha256.Sum256([]byte(want))
+			ok := o.Secret != "" && subtle.ConstantTimeCompare(a[:], b[:]) == 1
+			if !ok {
 				reject(http.StatusUnauthorized, "token missing or wrong")
 				return
 			}
@@ -269,7 +290,7 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 			reject(http.StatusBadRequest, "delivery id header missing")
 			return
 		}
-		if o.Format != "eventgrid" && o.Format != "discord" && !o.Limit.Allow(now) { // those count per event
+		if o.Format != "eventgrid" && o.Format != "discord" && !matrix && !o.Limit.Allow(now) { // those count per event
 			reject(http.StatusTooManyRequests, "rate limited")
 			return
 		}
@@ -301,6 +322,10 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 		}
 		if o.Format == "eventgrid" {
 			serveEventGrid(w, r, o, now, body, headers, deliver, reject)
+			return
+		}
+		if matrix {
+			serveMatrix(w, r, o, now, body, headers, deliver)
 			return
 		}
 		if o.Format == "discord" {
@@ -439,6 +464,72 @@ func serveDiscord(w http.ResponseWriter, r *http.Request, o WebhookOptions, now 
 	out, _ := json.Marshal(resp) // fixed shapes always encode
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(out)
+}
+
+const matrixPrefix = "/_matrix/app/v1/"
+
+// matrixError answers with a fixed Matrix error body; nothing from the request
+// (least of all the token) is echoed.
+func matrixError(w http.ResponseWriter, code int, errcode string) {
+	if errcode == "" {
+		errcode = map[int]string{400: "M_BAD_JSON", 401: "M_FORBIDDEN", 403: "M_FORBIDDEN", 404: "M_NOT_FOUND", 413: "M_TOO_LARGE", 429: "M_LIMIT_EXCEEDED"}[code]
+	}
+	if errcode == "" {
+		errcode = "M_UNKNOWN"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	io.WriteString(w, `{"errcode":"`+errcode+`"}`)
+}
+
+// serveMatrix handles an authenticated Matrix application-service request:
+// transactions are delivered per event keyed by event_id (a re-sent
+// transaction is acknowledged, its events not delivered twice), ping is
+// answered, and user and room queries are declined.
+func serveMatrix(w http.ResponseWriter, r *http.Request, o WebhookOptions, now time.Time, body []byte, headers map[string]string, deliver Deliver) {
+	_, rest, _ := strings.Cut(r.URL.Path, matrixPrefix)
+	ok := func() {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, "{}")
+	}
+	switch {
+	case r.Method == http.MethodPost && rest == "ping":
+		ok()
+	case r.Method == http.MethodGet && (strings.HasPrefix(rest, "users/") || strings.HasPrefix(rest, "rooms/")):
+		matrixError(w, http.StatusNotFound, "M_NOT_FOUND")
+	case r.Method == http.MethodPut && strings.HasPrefix(rest, "transactions/") && len(rest) > len("transactions/") && !strings.Contains(rest[len("transactions/"):], "/"):
+		var txn struct {
+			Events []map[string]any `json:"events"`
+		}
+		if json.Unmarshal(body, &txn) != nil || txn.Events == nil {
+			matrixError(w, http.StatusBadRequest, "M_BAD_JSON")
+			return
+		}
+		for _, m := range txn.Events {
+			if id, _ := m["event_id"].(string); id == "" {
+				matrixError(w, http.StatusBadRequest, "M_BAD_JSON")
+				return
+			}
+		}
+		for _, m := range txn.Events {
+			// A 429 leaves earlier events delivered; the homeserver retries the
+			// transaction and their event_ids come back as duplicates.
+			if !o.Limit.Allow(now) {
+				if o.OnReject != nil {
+					o.OnReject(http.StatusTooManyRequests, "rate limited")
+				}
+				matrixError(w, http.StatusTooManyRequests, "M_LIMIT_EXCEEDED")
+				return
+			}
+			if _, err := deliver(r.Context(), Event{Source: o.Name, ReceivedAt: now, Headers: headers, Data: m}, m["event_id"].(string)); err != nil {
+				matrixError(w, http.StatusInternalServerError, "M_UNKNOWN")
+				return
+			}
+		}
+		ok()
+	default:
+		matrixError(w, http.StatusNotFound, "M_UNRECOGNIZED")
+	}
 }
 
 // decodeBody reads JSON first, so a JSON body sent with a form Content-Type
