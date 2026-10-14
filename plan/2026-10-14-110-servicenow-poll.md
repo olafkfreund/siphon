@@ -140,6 +140,12 @@ spec: spec/2026-10-14-110-servicenow-poll.md
    siphon-dev. Take the `servicenow` source's `read`/`poll` off too, unless
    the owner wants polling there.
 
+## Deviations
+
+- **Step 2: the action text** starts with a literal, `"Incident {{.item.number}}: …"`.
+  `TestTemplateArgsStartLiteral` refuses a command argument that starts
+  with a template action, because it could render to a leading dash.
+
 ## Tests
 
 ```sh

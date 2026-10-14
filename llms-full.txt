@@ -2895,7 +2895,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 |---|---|---|---|---|
 | Linear | tools, webhooks | available | `siphon connect linear` | [`linear-issue-from-alert`](../templates/linear-issue-from-alert.yaml) |
 | Jira | tools, webhooks | available | `siphon connect jira` | [`jira-new-issue-summary`](../templates/jira-new-issue-summary.yaml) |
-| [ServiceNow](servicenow.md) | tools, webhooks | available | `siphon connect servicenow` | [`alert-to-servicenow-incident`](../templates/alert-to-servicenow-incident.yaml) [`servicenow-incident-summary`](../templates/servicenow-incident-summary.yaml) [`servicenow-incident-triage`](../templates/servicenow-incident-triage.yaml) [`servicenow-change-on-deploy`](../templates/servicenow-change-on-deploy.yaml) [`servicenow-incident-notify`](../templates/servicenow-incident-notify.yaml) |
+| [ServiceNow](servicenow.md) | tools, webhooks | available | `siphon connect servicenow` | [`alert-to-servicenow-incident`](../templates/alert-to-servicenow-incident.yaml) [`servicenow-incident-summary`](../templates/servicenow-incident-summary.yaml) [`servicenow-incident-triage`](../templates/servicenow-incident-triage.yaml) [`servicenow-change-on-deploy`](../templates/servicenow-change-on-deploy.yaml) [`servicenow-incident-notify`](../templates/servicenow-incident-notify.yaml) [`servicenow-incident-poll`](../templates/servicenow-incident-poll.yaml) |
 | Notion | tools, webhooks | available | `siphon connect notion` | [`notion-page-summary`](../templates/notion-page-summary.yaml) |
 
 ## Chat
@@ -5222,6 +5222,28 @@ rules:
     id: event.sys_id
     action:
       cmd: [curl, -fsS, -H, "Title: ServiceNow {{.event.number}}", --data-raw, "New P{{.event.priority}} incident: {{.event.short_description}}", https://ntfy.sh/siphon-CHANGE-ME]
+```
+
+
+---
+
+<!-- file: docs/templates/servicenow-incident-poll.yaml -->
+
+```yaml
+# title:    Get notified of ServiceNow incident changes by polling, without a webhook
+# category: Notifications & glue
+# needs:    sources/servicenow                     (siphon connect servicenow ... --poll-incidents, or add the read block with siphon edit sources servicenow)
+# apply:    siphon apply -f servicenow-incident-poll.yaml
+rules:
+  - name: servicenow-incident-poll
+    source: servicenow
+    for_each: event
+    # "true" fires on every change. For new incidents only: item.sys_mod_count == "0"
+    when: 'true'
+    on: each
+    id: 'item.sys_id + ":" + item.sys_mod_count'
+    action:
+      cmd: [curl, -fsS, -H, "Title: ServiceNow {{.item.number}}", --data-raw, "Incident {{.item.number}}: {{.item.short_description}}", https://ntfy.sh/siphon-CHANGE-ME]
 ```
 
 
