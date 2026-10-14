@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 89
 author: olafkfreund
 ---
@@ -90,3 +90,12 @@ half is out of date.
   option to `id`,** because it's useful for other services too.
   Otherwise the body hash dedupes byte-identical retries, which Azure
   DevOps sends, so it also works. Which do you prefer?
+
+## Decisions (owner, at approval)
+
+- **Ship webhooks now.** Agent tools (remote MCP with Entra, or the local
+  PAT server) are a follow-up issue.
+- **The replay key:** the owner approved adding `id: body.<path>`. The spec
+  revisits it: it found header ids are deliberately not used as replay keys
+  (they're unsigned), and Azure DevOps retries are byte-identical, so the
+  body hash already dedupes them.
