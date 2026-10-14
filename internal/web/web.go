@@ -60,6 +60,10 @@ type Options struct {
 	Now   func() time.Time
 	// OAuth holds the logins of auth.oauth sources (Pipeline.OAuth); nil disables the login routes.
 	OAuth *mcpoauth.Manager
+	// NotionPending and TakeNotionPending read and clear the captured Notion
+	// verification token of a source (Pipeline); nil disables the accept routes.
+	NotionPending     func(source string) (string, time.Time, bool)
+	TakeNotionPending func(source string) (string, bool)
 	// Version is the build version shown by /metrics.
 	Version string
 	// TrustedProxies are the peers whose X-Forwarded-For the failed-login limiter believes.
@@ -179,6 +183,7 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("POST /hook/{source}", hook)
 	mux.HandleFunc("OPTIONS /hook/{source}", hook) // Azure Event Grid's handshake; the handler refuses it elsewhere
 	s.oauthRoutes(mux)
+	s.notionRoutes(mux)
 	s.apiRoutes(mux)
 	s.portalRoutes(mux)
 	s.oidcRoutes(mux)

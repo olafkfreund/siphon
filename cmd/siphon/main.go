@@ -523,7 +523,7 @@ func serve(ctx context.Context, args []string) error {
 		IdleTimeout:       120 * time.Second,
 		Handler: web.New(web.Options{
 			Token: cfg.Server.Token.Value, MetricsToken: cfg.Server.Metrics.Token.Value, Store: st, Config: p.Config, Apply: p.Apply, Banner: banner, Unsandboxed: cfg.Server.Sandbox == "none", ConfigPath: cfgPath, Decide: p.Decide, TestAWS: p.TestAWS,
-			Hooks: p.Webhooks(), OAuth: p.OAuth, Now: time.Now, Version: version, TrustedProxies: cfg.Server.Proxies(),
+			Hooks: p.Webhooks(), OAuth: p.OAuth, NotionPending: p.NotionPending, TakeNotionPending: p.TakeNotionPending, Now: time.Now, Version: version, TrustedProxies: cfg.Server.Proxies(),
 		}),
 	}
 	httpErr := make(chan error, 1)

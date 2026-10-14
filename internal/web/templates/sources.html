@@ -7,6 +7,8 @@
   {{if .LastReject}}<p class="small muted">Refused {{agop .LastRejectAt}}: {{.LastReject}}</p>{{end}}
   {{if .OAuth}}<div class="rule-head mt"><span class="small muted">OAuth: {{.OAuth}}</span><span class="sp"></span>
     {{if can $.Role "operator"}}<form method="post" action="/sources/{{pe .Name}}/oauth"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{if or (eq .OAuth "ok") (eq .OAuth "expired")}}Log in again{{else}}Log in{{end}}</button></form>{{end}}</div>{{end}}
+  {{if and .NotionAwait (can $.Role "operator")}}<div class="rule-head mt">{{if .NotionToken}}<span class="small muted">Verification token <code>{{.NotionToken}}</code> received {{agop .NotionAt}}</span><span class="sp"></span>
+    <form method="post" action="/sources/{{pe .Name}}/notion-verification"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">Use this token</button></form>{{else}}<span class="small muted">Awaiting Notion's verification token</span>{{end}}</div>{{end}}
 </section>
 {{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>Nothing in the current yet. Add a source to <code>siphon.yaml</code>.</section>{{end}}
 </div>{{end}}
