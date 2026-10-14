@@ -275,3 +275,15 @@ Revert the PR.
 This is 8 steps over about 14 files, so a `coder` agent writes steps 1–7
 and a fresh Opus agent reviews them. Step 8 and the instance check are
 mine.
+
+## Deviations
+
+- **Step 1:**
+  - **Redirects:** `New` refuses redirects on a shallow copy of the caller's
+    `http.Client`, rather than trusting the caller. Go forwards custom
+    headers such as `x-sn-apikey` on a redirect.
+  - **`sys_*` names** are banned in write bodies only. Read field lists may
+    name `sys_id`, `sys_updated_on` and so on.
+  - **Token-endpoint errors** report the status only, never the body,
+    which may echo credentials.
+  - **A missing `Retry-After`** waits 1 s.
