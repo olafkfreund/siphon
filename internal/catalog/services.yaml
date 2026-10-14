@@ -358,7 +358,7 @@ services:
     summary: "Agent tools to read and update incidents and changes through a built-in MCP server, and record events by signed webhook from a Business Rule."
     capabilities: [tools, webhooks]
     status: available
-    templates: [alert-to-servicenow-incident, servicenow-change-on-deploy, servicenow-incident-notify, servicenow-incident-summary, servicenow-incident-triage]
+    templates: [alert-to-servicenow-incident, servicenow-change-on-deploy, servicenow-incident-notify, servicenow-incident-poll, servicenow-incident-summary, servicenow-incident-triage]
     fields:
       - {<<: *f_name, default: servicenow}
       - {key: instance, label: Instance URL, type: url, secure: true, private_listed: true, help: 'For agent tools; leave empty for webhooks only. For example https://dev12345.service-now.com. A LAN host must be listed in server.services.private_endpoints.'}
@@ -366,6 +366,7 @@ services:
       - {key: client_id, label: OAuth client ID, type: text, help: 'System OAuth → Application Registry → the OAuth API endpoint for external clients.'}
       - {key: client_secret, label: OAuth client secret, type: secret}
       - {key: api_key, label: API key, type: secret, help: 'For authentication apikey: System Web Services → API Access Policies.'}
+      - {key: poll_incidents, label: Poll incidents, type: bool, help: 'For instances that cannot reach Siphon: check incidents every 2 minutes, instead of or as well as the Business Rule webhook.'}
     creates:
       - kind: sources
         name: '{{.name}}'
@@ -383,6 +384,16 @@ services:
             SERVICENOW_CLIENT_ID: {{secret "client_id" "env.SERVICENOW_CLIENT_ID"}}
             SERVICENOW_CLIENT_SECRET: {{secret "client_secret" "env.SERVICENOW_CLIENT_SECRET"}}
             {{- end}}
+          {{- if .poll_incidents}}
+          poll: 2m
+          read:
+            tool: search_records
+            args:
+              table: incident
+              query: "sys_updated_on>=javascript:gs.minutesAgoStart(10)^ORDERBYDESCsys_updated_on"
+              fields: [number, sys_id, sys_mod_count, short_description, state, priority, urgency, assigned_to, sys_updated_on]
+              limit: 50
+          {{- end}}
       - kind: sources
         name: '{{.name}}-hooks'
         when: 'true'

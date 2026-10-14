@@ -191,6 +191,38 @@ func TestServiceNowEntry(t *testing.T) {
 	}
 }
 
+func TestServiceNowPollIncidents(t *testing.T) {
+	e := Get("servicenow")
+	base := map[string]string{"name": "snow", "instance": "https://dev1.service-now.com", "client_id": "cid", "client_secret": "csec"}
+	src := func(poll string) map[string]any {
+		in := map[string]string{"poll_incidents": poll}
+		for k, v := range base {
+			in[k] = v
+		}
+		res, err := e.Render(in, Env{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var v map[string]any
+		if err := yaml.Unmarshal([]byte(res.Items[0].YAML), &v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	on := src("on")
+	read, _ := on["read"].(map[string]any)
+	if on["poll"] != "2m" || read["tool"] != "search_records" {
+		t.Fatalf("on: %v", on)
+	}
+	if off := src(""); off["poll"] != nil || off["read"] != nil {
+		t.Fatalf("off: %v", off)
+	}
+	res, err := e.Render(map[string]string{"name": "snow", "poll_incidents": "on"}, Env{})
+	if err != nil || len(res.Items) != 1 || res.Items[0].Name != "snow-hooks" {
+		t.Fatalf("no instance: %v %+v", err, res.Items)
+	}
+}
+
 func TestAzureDevOpsTools(t *testing.T) {
 	e := Get("azure-devops")
 	if e == nil {
