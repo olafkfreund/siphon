@@ -186,3 +186,7 @@ Opus agent reviews them. Step 7 and the instance check are mine.
   the secret. The `whsec_` prefix is therefore asserted on
   `res.Secrets[0].Value` (as in `TestSecretAndGeneratedPrefix`), along with
   `Value == "whsec_" + Done.HookSecret`.
+- **Step 6:** the `[ServiceNow](connections/servicenow.md)` link in
+  `docs/README.md` sits next to AWS, on the line that already holds the
+  page links, not next to GitHub/GitLab. The guide's rule example uses
+  `cmd: [echo, "new incident"]` as a placeholder action.

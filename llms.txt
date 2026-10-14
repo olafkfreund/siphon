@@ -42,6 +42,7 @@ Key facts for an assistant:
 - [GitHub](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/connections/github.md): MCP tools and webhooks.
 - [GitLab](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/connections/gitlab.md): merge request and pipeline webhooks.
 - [AWS](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/connections/aws.md): CloudWatch tools with per-run short-lived credentials, EventBridge.
+- [ServiceNow](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/connections/servicenow.md): signed Business Rule webhooks for incidents, changes and requests.
 
 ## Optional
 

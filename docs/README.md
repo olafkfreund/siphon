@@ -36,11 +36,11 @@ baseline in **`siphon.yaml`**.
 
 **[All services you can connect](connections/README.md)** (GitHub, GitLab,
 Bitbucket, Gitea, Linear, Jira, Slack, Sentry, PagerDuty, Grafana, Stripe,
-Home Assistant, Cloudflare, AWS, …) ·
+Home Assistant, Cloudflare, AWS, ServiceNow, …) ·
 [Models (Ollama and OpenAI-compatible)](connections/models.md) ·
 [Logins (Claude, Codex, agy)](connections/logins.md) ·
 [GitHub](connections/github.md) · [GitLab](connections/gitlab.md) ·
-[AWS](connections/aws.md)
+[AWS](connections/aws.md) · [ServiceNow](connections/servicenow.md)
 
 ## When things go wrong
 
