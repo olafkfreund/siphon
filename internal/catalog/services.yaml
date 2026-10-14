@@ -1039,4 +1039,30 @@ services:
       For Cloud Build failures, subscribe to the topic cloud-builds.
       A message larger than limits.http_max_body (1 MiB by default) is refused
       with 413; raise it if your messages are large.
-  - {id: azure-devops, name: Azure DevOps, mark: AD, category: code, summary: Azure DevOps service hooks and work items., status: not-yet, reason: 'service hooks use basic auth only, and the remote MCP is Entra OAuth only'}
+  - id: azure-devops
+    name: Azure DevOps
+    mark: AD
+    category: code
+    summary: "Azure DevOps service hooks (builds, releases, work items, pull requests) by webhook with a shared header token. Agent tools come later."
+    capabilities: [webhooks]
+    status: available
+    templates: [azure-devops-build-failed, azure-devops-new-bug]
+    fields:
+      - {<<: *f_name, default: azure-devops}
+    creates:
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: token
+          token_header: X-Siphon-Key
+          secret: {{generated "secret"}}
+    setup: |
+      Project settings → Service hooks → + → Web Hooks → choose the event
+      (Build completed, Work item created, Pull request created, …) → Next.
+      URL: the URL above. HTTP headers: X-Siphon-Key:<the secret above>.
+      Leave Basic authentication empty. Resource details to send: All (the
+      templates read resource fields). Test, then Finish.
+      server.public_url must be set for the URL to be reachable.
