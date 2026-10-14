@@ -42,7 +42,7 @@ func TestCatalogEntriesRenderAndCommit(t *testing.T) {
 		if w := ce.post("/services/"+e.ID, form); w.Code != 200 {
 			t.Errorf("%s: commit: %d %s", e.ID, w.Code, alertText(w.Body.String()))
 		}
-		if ce.cur.Load().Sources["t-"+e.ID] == nil && ce.cur.Load().Credentials["t-"+e.ID] == nil {
+		if ce.cur.Load().Sources["t-"+e.ID] == nil && ce.cur.Load().Sources["t-"+e.ID+"-hooks"] == nil && ce.cur.Load().Credentials["t-"+e.ID] == nil {
 			t.Errorf("%s: nothing created", e.ID)
 		}
 	}
