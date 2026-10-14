@@ -127,3 +127,13 @@ Nothing else changes.
 
 Steps 1–3 edit about 12 files, so a `coder` agent does them and a fresh
 Opus agent reviews them. Steps 0 and 4 are mine.
+
+## Deviations
+
+- **Step 2:**
+  - **Decoding:** `serveEventGrid` decodes with `DecodeJSON`, not
+    `decodeBody`. A form or raw body must get 400, not become an event.
+  - **The fixtures** come from Microsoft's documented examples, not checked
+    against the live docs here. `noid.json` was made up for the
+    missing-id case.
+  - **An empty batch** gets 400 as well.
