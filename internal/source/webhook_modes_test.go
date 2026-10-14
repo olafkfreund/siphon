@@ -311,6 +311,10 @@ func TestWebhookBodyToken(t *testing.T) {
 
 // Form bodies now decode for every mode; JSON deliveries are unchanged.
 func TestWebhookFormAndJSONOtherModes(t *testing.T) {
+	// curl -d labels a JSON body as a form: it must still decode as JSON.
+	if code, _, ev, _ := bodyTokenPost(t, WebhookOptions{}, "application/x-www-form-urlencoded", `{"token":"s3cret","ref":"main"}`, nil); code != 202 || ev.Data.(map[string]any)["ref"] != "main" {
+		t.Fatalf("JSON under a form Content-Type: %d %v", code, ev)
+	}
 	var got Event
 	h := NewWebhook(WebhookOptions{Name: "w", Secret: "k", Signature: "token", TokenHeader: "X-T"}, func(_ context.Context, e Event, _ string) (bool, error) { got = e; return false, nil })
 	r := httptest.NewRequest(http.MethodPost, "/hook/w", strings.NewReader("a=1&b=2"))

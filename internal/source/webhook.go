@@ -281,9 +281,13 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 	})
 }
 
-// decodeBody reads a form body (a string per single value, a []any per
-// repeated key) or JSON; anything else becomes {"raw": body}.
+// decodeBody reads JSON first, so a JSON body sent with a form Content-Type
+// (curl -d does that) stays JSON; otherwise a form body becomes fields (a
+// string per single value, a []any per repeated key); anything else is raw.
 func decodeBody(r *http.Request, body []byte) any {
+	if data, err := DecodeJSON(body); err == nil {
+		return data
+	}
 	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err == nil && mt == "application/x-www-form-urlencoded" {
 		if q, err := url.ParseQuery(string(body)); err == nil {
 			data := make(map[string]any, len(q))
@@ -301,11 +305,7 @@ func decodeBody(r *http.Request, body []byte) any {
 			return data
 		}
 	}
-	data, err := DecodeJSON(body)
-	if err != nil {
-		return map[string]any{"raw": string(body)}
-	}
-	return data
+	return map[string]any{"raw": string(body)}
 }
 
 // verifyStandard checks a Standard Webhooks delivery and returns its signed
