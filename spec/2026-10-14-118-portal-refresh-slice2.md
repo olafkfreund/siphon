@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 118
 intent: intent/2026-10-14-118-portal-refresh.md
 ---
