@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 111
 author: olafkfreund
 ---
@@ -78,3 +78,9 @@ Two gaps in existing code. Both matter more now that ServiceNow polling
    Prune them too, or leave them? **I'd leave them for now.** A rule removed
    and re-added would lose its edge state and could refire, and that's a
    separate decision.
+
+## Decisions (at approval)
+
+1. **The retention:** reuse `server.retention.seen_events` (default 7
+   days), and document that it now also covers `on: each` ids.
+2. **State left by deleted or renamed rules:** leave it, out of scope.
