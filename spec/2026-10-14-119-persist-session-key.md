@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 119
 intent: intent/2026-10-14-119-persist-session-key.md
 ---
