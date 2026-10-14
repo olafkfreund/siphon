@@ -1,0 +1,25 @@
+2026-10-13T08:57:01Z ##[group]Run actions/checkout@v4
+2026-10-13T08:57:02Z Syncing repository: acme/shop
+2026-10-13T08:57:03Z ##[endgroup]
+2026-10-13T08:57:04Z ##[group]Run actions/setup-go@v5
+2026-10-13T08:57:05Z Setup go version spec 1.26
+2026-10-13T08:57:07Z go version go1.26.0 linux/amd64
+2026-10-13T08:57:07Z ##[endgroup]
+2026-10-13T08:57:08Z ##[group]Run go build ./...
+2026-10-13T08:57:19Z ##[endgroup]
+2026-10-13T08:57:19Z ##[group]Run go test ./...
+2026-10-13T08:57:31Z ok  	acme/shop/auth	0.412s
+2026-10-13T08:57:33Z ok  	acme/shop/catalog	0.538s
+2026-10-13T08:57:36Z --- FAIL: TestTotalRounding (0.00s)
+2026-10-13T08:57:36Z     total_test.go:42: Total(1999.4) = 2000, want 1999
+2026-10-13T08:57:36Z     total_test.go:43: rounding change in cart/total.go: 1999.4 now rounds up, not to nearest
+2026-10-13T08:57:36Z FAIL
+2026-10-13T08:57:36Z FAIL	acme/shop/cart	0.007s
+2026-10-13T08:57:38Z ok  	acme/shop/checkout	0.921s
+2026-10-13T08:57:39Z FAIL
+2026-10-13T08:57:39Z ##[error]Process completed with exit code 1.
+2026-10-13T08:57:39Z ##[endgroup]
+2026-10-13T08:57:39Z Failed step: go test ./...
+2026-10-13T08:57:39Z Failing package: ./cart
+2026-10-13T08:57:39Z Failing test: TestTotalRounding
+2026-10-13T08:57:39Z Job failed: test

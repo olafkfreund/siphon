@@ -1,0 +1,17 @@
+{
+  "action": "completed",
+  "workflow_run": {
+    "id": 1000001,
+    "name": "CI",
+    "head_branch": "main",
+    "head_sha": "3f2a9c1d7e5b4a6c8d0e1f2a3b4c5d6e7f8a9b0c",
+    "event": "push",
+    "status": "completed",
+    "conclusion": "failure",
+    "html_url": "https://github.com/acme/shop/actions/runs/1000001"
+  },
+  "repository": {
+    "full_name": "acme/shop",
+    "name": "shop"
+  }
+}

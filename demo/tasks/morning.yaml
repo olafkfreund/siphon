@@ -1,0 +1,9 @@
+# Act 3 of the demo: the morning webhook runs the weekly-digest routine.
+rules:
+  - name: morning-digest
+    source: morning
+    when: 'true'
+    on: each
+    id: event.day
+    cooldown: 1m
+    action: { routine: weekly-digest }

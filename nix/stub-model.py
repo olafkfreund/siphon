@@ -3,16 +3,36 @@
 #   POST /v1/chat/completions  -> asks for the echo tool once, then answers
 #                                 with the tool's result
 #   POST /mcp                  -> minimal streamable-HTTP MCP: initialize,
-#                                 tools/list (echo), tools/call
+#                                 tools/list (echo + 3 GitHub tools), tools/call
 # Every MCP tools/call is appended to /tmp/mcp-calls so the test can see it,
 # with a hash of the Authorization header it came with (never the header).
 import hashlib
 import json
 import socket
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TOOL = {"name": "echo", "description": "Echo the text back",
         "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}}
+# The demo's GitHub tools: get_job_logs returns the file named in argv[1].
+GH = [{"name": n, "description": d, "inputSchema": {"type": "object", "properties": {}}} for n, d in (
+    ("get_workflow_run", "Get a workflow run"), ("list_workflow_jobs", "List a run's jobs"),
+    ("get_job_logs", "Get a job's logs"))]
+DIAGNOSIS = ("1. The go test job failed in package ./cart.\n2. TestTotalRounding expects 1999 but got 2000.\n"
+             "3. The cause: the new rounding in cart/total.go rounds up instead of to nearest.\n"
+             "4. The failing step is: go test ./...\n5. Fix: revert the rounding change or use math.Round.")
+DIGEST = ("- CI broke on main: TestTotalRounding fails after the cart rounding change; a fix is pending review.\n"
+          "- The agent's diagnosis was approved and ran once; no other agent runs.\n"
+          "- The shop site was down once overnight (Uptime Kuma); one notification went out.\n"
+          "- No approvals are waiting.\n"
+          "- Next: merge the rounding fix, then watch the next CI run.")
+
+
+def job_logs():
+    try:
+        return open(sys.argv[1]).read()
+    except (IndexError, OSError):
+        return "go test ./... FAIL: TestTotalRounding"
 
 
 class H(BaseHTTPRequestHandler):
@@ -28,7 +48,7 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/v1/models":
-            return self.reply(200, {"data": [{"id": "stub-model"}]})
+            return self.reply(200, {"data": [{"id": "stub-model"}, {"id": "llama3.2"}]})
         self.send_response(405)  # no SSE stream on GET /mcp
         self.send_header("Content-Length", "0")
         self.end_headers()
@@ -43,14 +63,17 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/v1/chat/completions":
             msgs = req.get("messages", [])
             tool_msgs = [m for m in msgs if m.get("role") == "tool"]
+            text = " ".join(str(m.get("content")) for m in msgs)
+            names = [t["function"]["name"] for t in req.get("tools") or []]
             if tool_msgs:
-                msg = {"role": "assistant", "content": "final: " + str(tool_msgs[-1].get("content"))}
-            elif req.get("tools"):
+                out = DIAGNOSIS if "Workflow run" in text else "final: " + str(tool_msgs[-1].get("content"))
+                msg = {"role": "assistant", "content": out}
+            elif names:
                 msg = {"role": "assistant", "content": None, "tool_calls": [{
                     "id": "call1", "type": "function",
-                    "function": {"name": req["tools"][0]["function"]["name"], "arguments": json.dumps({"text": "hi from the model"})}}]}
+                    "function": {"name": "get_job_logs" if "get_job_logs" in names else names[0], "arguments": json.dumps({"text": "hi from the model"})}}]}
             else:
-                msg = {"role": "assistant", "content": "plain answer"}
+                msg = {"role": "assistant", "content": DIGEST if "digest" in text else "plain answer"}
             return self.reply(200, {"id": "x", "object": "chat.completion", "model": req.get("model"),
                                     "choices": [{"index": 0, "message": msg, "finish_reason": "stop"}],
                                     "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}})
@@ -66,14 +89,16 @@ class H(BaseHTTPRequestHandler):
                     "protocolVersion": ver, "capabilities": {"tools": {}},
                     "serverInfo": {"name": "stub", "version": "1"}}}, {"Mcp-Session-Id": "s1"})
             if method == "tools/list":
-                return self.reply(200, {"jsonrpc": "2.0", "id": rid, "result": {"tools": [TOOL]}})
+                return self.reply(200, {"jsonrpc": "2.0", "id": rid, "result": {"tools": [TOOL] + GH}})
             if method == "tools/call":
                 args = req.get("params", {}).get("arguments", {})
+                name = req.get("params", {}).get("name")
                 with open("/tmp/mcp-calls", "a") as f:
                     auth = self.headers.get("Authorization", "")
-                    f.write(json.dumps(args) + " auth-sha=" + (hashlib.sha256(auth.encode()).hexdigest()[:16] if auth else "none") + "\n")
+                    f.write(json.dumps(args) + " tool=" + str(name) + " auth-sha=" + (hashlib.sha256(auth.encode()).hexdigest()[:16] if auth else "none") + "\n")
+                text = job_logs() if name == "get_job_logs" else "echo: " + str(args.get("text"))
                 return self.reply(200, {"jsonrpc": "2.0", "id": rid, "result": {
-                    "content": [{"type": "text", "text": "echo: " + str(args.get("text"))}]}})
+                    "content": [{"type": "text", "text": text}]}})
             if method == "ping":
                 return self.reply(200, {"jsonrpc": "2.0", "id": rid, "result": {}})
             return self.reply(200, {"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": "no " + str(method)}})
