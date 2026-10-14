@@ -65,6 +65,21 @@ spec: spec/2026-10-14-118-portal-refresh-slice4.md
 
 5. **The visual check (mine).**
 
+## Deviations
+
+- **Steps 1–4:**
+  - **The Notifications admin gate** covers the add button, the `#add`
+    form and the "Add one below" hint. The submit button's own admin check
+    is dropped, because the whole form is now admin-only.
+  - **The Notifications Test** uses a relative `div.conn-test` target, not
+    `#ntest-<name>`. That's the same dotted-name bug that slice 3 fixed on
+    Connections. There's a test with a channel named `a.b`.
+  - **The Audit filter bar** has search only: rows have no kind or state
+    to filter on.
+  - **The gallery filter** chips filter by category. The category headings
+    stay visible.
+  - **The session deleted** the now-dead `.eg-refused` CSS.
+
 ## Tests
 
 ```sh

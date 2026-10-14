@@ -118,7 +118,7 @@ func TestNotifyPortal(t *testing.T) {
 		t.Fatalf("token file %q", b)
 	}
 	page := ce.get("/notifications?added=hook").Body.String()
-	if !strings.Contains(page, "Channel hook") || !strings.Contains(page, "failed · approval") || strings.Contains(page, "tok-xyz") || strings.Contains(page, hook.URL) {
+	if !strings.Contains(page, "Channel hook") || !strings.Contains(page, `<span class="mode">failed</span> <span class="mode">approval</span>`) || strings.Contains(page, "tok-xyz") || strings.Contains(page, hook.URL) {
 		t.Fatalf("page: %s", page)
 	}
 

@@ -1,21 +1,15 @@
 {{define "egress"}}{{with .Egress}}<div class="top"><div><h1>Egress</h1><div class="muted">Allowlisted hosts for restricted runs. Unrestricted agents (egress off in <code>siphon.yaml</code>) can reach any host.</div></div></div>
 <div class="grid g2e">
   <section class="card" aria-labelledby="lists"><h2 id="lists">Allowlists</h2>
-    {{range .Lists}}<div class="eg-row">
-      <div class="eg-head"><span class="pill tag">{{.Owner}}</span><b>{{.Name}}</b><span class="sp"></span><span class="muted small">{{if .On}}{{len .Hosts}} host{{if ne (len .Hosts) 1}}s{{end}}{{else}}egress off{{end}}</span></div>
-      <div class="eg-hosts">{{if .On}}{{range .Hosts}}<code class="eg-host">{{.Host}}{{if ne .Port 443}}:{{.Port}}{{end}}</code>{{else}}<span class="muted small">no hosts: no network</span>{{end}}{{else}}<span class="muted small">any host (unrestricted)</span>{{end}}</div>
-    </div>{{else}}<div class="empty">No agents or egress-enabled rules.</div>{{end}}
+    {{range .Lists}}<article class="card item-card" aria-label="{{.Owner}} {{.Name}}">
+      <div class="eg-head"><span class="pill tag">{{.Owner}}</span><a href="/config/{{.Owner}}s/{{pe .Name}}"><b>{{.Name}}</b></a><span class="sp"></span>{{if not .On}}<span class="stamp wait">{{template "icon" "shield"}} Unrestricted</span>{{else if .Hosts}}<span class="stamp">{{len .Hosts}} host{{if ne (len .Hosts) 1}}s{{end}}</span>{{else}}<span class="stamp">No network</span>{{end}}</div>
+      <div class="eg-hosts">{{if .On}}{{range .Hosts}}<code class="eg-host">{{.Host}}{{if ne .Port 443}}:{{.Port}}{{end}}</code>{{else}}<span class="muted small">No hosts allowed: the run has no network. Add some under <code>egress.allow</code>.</span>{{end}}{{else}}<span class="muted small">Any host (egress is off for this {{.Owner}}). Turn it on in <code>egress</code> to restrict it.</span>{{end}}</div>
+    </article>{{else}}<div class="empty">No agents or egress-enabled rules. Add an agent to see its allowlist.</div>{{end}}
   </section>
   <section class="card" aria-labelledby="blk"><h2 id="blk">Recently refused</h2>
-    {{if .Blocked}}<table class="eg-refused">
-      <thead><tr><th scope="col">Host</th><th scope="col" class="num">Hits</th><th scope="col">Last</th><th scope="col"><span class="sr-only">Job</span></th></tr></thead>
-      <tbody>{{range .Blocked}}<tr>
-        <td><code class="eg-host">{{.Host}}</code></td>
-        <td class="num">{{.Count}}</td>
-        <td class="muted">{{ago .Last}}</td>
-        <td class="act">{{if .JobID}}<a class="btn sm" href="/jobs/{{.JobID}}">Job {{.JobID}}</a>{{end}}</td>
-      </tr>{{end}}</tbody>
-    </table>{{else}}<div class="empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>Nothing refused recently.</div>{{end}}
+    {{if .Blocked}}{{range .Blocked}}<div class="card item-card row is-err">
+      <code class="eg-host">{{.Host}}</code><span class="sp"></span><span class="mode">{{.Count}} hit{{if ne .Count 1}}s{{end}}</span><span class="muted small" title="{{tm .Last}}">{{ago .Last}}</span>{{if .JobID}}<a class="btn sm" href="/jobs/{{.JobID}}">Job #{{.JobID}}</a>{{end}}
+    </div>{{end}}{{else}}<div class="empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>Nothing refused recently. A run that reaches a host not on its list appears here.</div>{{end}}
     <p class="muted small mt">To allow a host, add it to the agent's <code>egress.allow</code>.</p>
   </section>
 </div>{{end}}{{end}}
