@@ -13,7 +13,7 @@ import (
 
 // baseConfig provides what the templates need: the connections and sources
 // their `needs` headers name, and the aws allowlists.
-const baseConfig = `server: { sandbox: none, public_url: "https://siphon.example.com", db: DIR/s.db, aws: { profiles: [p1] }, models: { private_endpoints: ["127.0.0.1:11434"] }, mcp_packages: { aws-cloudwatch: { command: [cw], hosts: ['logs.{region}.amazonaws.com'], env: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, AWS_REGION, AWS_DEFAULT_REGION, AWS_EC2_METADATA_DISABLED, AWS_CONFIG_FILE, AWS_SHARED_CREDENTIALS_FILE] } } }
+const baseConfig = `server: { sandbox: none, public_url: "https://siphon.example.com", db: DIR/s.db, aws: { profiles: [p1] }, models: { private_endpoints: ["127.0.0.1:11434"] }, mcp_packages: { azure-devops: { command: [ado], hosts: [dev.azure.com], env: [AZURE_DEVOPS_ORG, AZURE_DEVOPS_PAT] }, aws-cloudwatch: { command: [cw], hosts: ['logs.{region}.amazonaws.com'], env: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, AWS_REGION, AWS_DEFAULT_REGION, AWS_EC2_METADATA_DISABLED, AWS_CONFIG_FILE, AWS_SHARED_CREDENTIALS_FILE] } } }
 credentials:
   claude-max: { provider: claude }
   ollama-local: { provider: ollama, url: "http://127.0.0.1:11434" }
@@ -49,6 +49,7 @@ sources:
   datadog: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK }
   cloudflare: { type: mcp, url: "https://mcp.cloudflare.com/mcp", auth: { bearer: env:AGW_HOOK } }
   cloudflare-hooks: { type: webhook, signature: token, token_header: cf-webhook-auth, secret: env:AGW_HOOK }
+  azure-devops: { type: mcp, package: azure-devops, env: { AZURE_DEVOPS_ORG: env:AGW_HOOK, AZURE_DEVOPS_PAT: env:AGW_HOOK } }
   servicenow: { type: mcp, package: servicenow, env: { SERVICENOW_INSTANCE_URL: env:AGW_HOOK, SERVICENOW_API_KEY: env:AGW_HOOK } }
   alerts: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
   deploys: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }

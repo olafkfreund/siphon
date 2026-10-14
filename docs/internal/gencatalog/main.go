@@ -20,7 +20,7 @@ var categories = []struct{ id, title string }{
 }
 
 // pages are the hand-written connection pages with more to say.
-var pages = map[string]string{"github": "github.md", "gitlab": "gitlab.md", "aws": "aws.md", "servicenow": "servicenow.md"}
+var pages = map[string]string{"github": "github.md", "gitlab": "gitlab.md", "aws": "aws.md", "servicenow": "servicenow.md", "azure-devops": "azure-devops.md"}
 
 func main() {
 	var b strings.Builder

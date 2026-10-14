@@ -201,6 +201,18 @@ spec: spec/2026-10-14-102-azure-devops-agent-tools.md
     ignores them. That's harmless, because only the tenant lookup uses it.
   - Step 5's docs say this.
 
+- **Step 5: the plan named the write tool `wit_work_item_attachment_upload`,
+  which doesn't exist in v2.10.0.**
+  - The only attachment tool is `wit_work_item_attachment`. It downloads,
+    and with `savePath` it writes a file under a relative path (upstream
+    refuses `..` and absolute paths). The docs list it as a read tool, with
+    that note, and it isn't in the template.
+  - `pipelines_run` is checked as read-only: its actions are only `get` and
+    `list`.
+- **Step 5: generator maps.** `docs/internal/gencatalog` and `genllms`
+  needed the new page added to their maps, so it's linked and included in
+  `llms-full.txt`.
+
 ## Tests
 
 ```sh
