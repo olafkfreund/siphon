@@ -344,13 +344,15 @@ func changeCount(d string) (n int) {
 	return
 }
 
-var errLine = regexp.MustCompile(`line (\d+)`)
+// errLine is a YAML syntax error in the item itself. Other errors come from
+// re-parsing the whole merged config, whose line numbers are not the textarea's.
+var errLine = regexp.MustCompile(`\byaml: line (\d+)`)
 
 // validView is the data of the cfgvalid fragment: msg is the error, if any,
 // and Line the first line number it names.
 func validView(msg string, changes int) map[string]any {
 	line := 0
-	if m := errLine.FindStringSubmatch(msg); m != nil {
+	if m := errLine.FindStringSubmatch(msg); m != nil && !strings.Contains(msg, "parse config") {
 		line, _ = strconv.Atoi(m[1])
 	}
 	return map[string]any{"Err": msg, "Line": line, "Changes": changes}

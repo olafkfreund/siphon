@@ -140,30 +140,35 @@
         while (gutter.children.length < n) gutter.appendChild(document.createElement("div")).textContent = gutter.children.length + 1;
         while (gutter.children.length > n) gutter.removeChild(gutter.lastChild);
       }
+      // execCommand keeps the edit on the native undo stack; setRangeText is the fallback.
       function edit(from, to, text, selStart, selEnd) {
-        ta.setRangeText(text, from, to, "preserve");
+        ta.setSelectionRange(from, to);
+        if (!document.execCommand || !document.execCommand("insertText", false, text)) {
+          ta.setRangeText(text, from, to, "end");
+          ta.dispatchEvent(new Event("input", { bubbles: true }));
+        }
         ta.setSelectionRange(selStart, selEnd);
-        ta.dispatchEvent(new Event("input", { bubbles: true }));
       }
       ta.addEventListener("input", function () { number(); gutter.scrollTop = ta.scrollTop; });
       ta.addEventListener("scroll", function () { gutter.scrollTop = ta.scrollTop; });
       ta.addEventListener("keydown", function (e) {
-        if (e.ctrlKey || e.altKey || e.metaKey) return;
+        if (e.ctrlKey || e.altKey || e.metaKey || e.isComposing || e.key === "Shift") return;
         var v = ta.value, a = ta.selectionStart, b = ta.selectionEnd;
         if (e.key === "Escape") { leave = true; return; }
-        var skip = leave; leave = false;
+        var skip = leave; leave = false; // Esc, then Tab or Shift+Tab, leaves the box
         if (e.key === "Tab" && !skip) {
           e.preventDefault();
-          var ls = v.lastIndexOf("\n", a - 1) + 1;
+          var ls = a > 0 ? v.lastIndexOf("\n", a - 1) + 1 : 0;
           if (a === b && !e.shiftKey) { edit(a, b, "  ", a + 2, a + 2); return; }
           var end = b > a && v[b - 1] === "\n" ? b - 1 : b, first = 0, total = 0;
+          var nl = v.indexOf("\n", end); end = nl < 0 ? v.length : nl; // whole lines, caret anywhere in them
           var out = v.slice(ls, end).split("\n").map(function (l, i) {
             var r = e.shiftKey ? l.replace(/^ {1,2}/, "") : "  " + l;
             if (i === 0) first = r.length - l.length;
             total += r.length - l.length;
             return r;
           }).join("\n");
-          edit(ls, end, out, Math.max(ls, a + first), b + total);
+          edit(ls, end, out, Math.max(ls, a + first), Math.max(ls, b + total));
         } else if (e.key === "Enter" && a === b && !e.shiftKey) {
           e.preventDefault();
           var cur = v.slice(v.lastIndexOf("\n", a - 1) + 1, a), ind = cur.match(/^ */)[0];
@@ -183,10 +188,16 @@
   }
   document.addEventListener("DOMContentLoaded", initCodeEditors);
   document.addEventListener("htmx:afterSwap", initCodeEditors); // also re-marks the error line after a status swap
+  // A failed validate (expired session, server error) must not leave an old "Valid" on screen.
+  document.addEventListener("htmx:responseError", function (e) {
+    var st = document.getElementById("yaml-status");
+    if (st && e.detail && e.detail.target === st) { st.className = "yaml-status"; st.textContent = "Could not check: reload the page"; delete st.dataset.line; markErrorLine(); }
+  });
 
   // Announce htmx swaps for screen readers.
   document.addEventListener("htmx:afterSwap", function (e) {
     var live = document.getElementById("live");
-    if (live && e.detail && e.detail.target && e.detail.target.id !== "main") live.textContent = "Updated";
+    var t = e.detail && e.detail.target;
+    if (live && t && t.id !== "main" && t.id !== "yaml-status") live.textContent = "Updated"; // the status line speaks for itself
   });
 })();

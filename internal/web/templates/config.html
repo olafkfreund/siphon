@@ -39,7 +39,8 @@
 <form method="post" action="{{.Base}}/save">
 <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><input type="hidden" name="mode" value="yaml">
 {{if .New}}<label class="f">Name<input name="name" value="{{.Name}}" required></label>{{else}}<input type="hidden" name="name" value="{{.Name}}">{{end}}
-<textarea name="yaml" rows="14" class="mono code-input" aria-label="YAML" spellcheck="false"{{if can $.Role "admin"}} hx-post="{{.Base}}/validate" hx-trigger="input changed delay:600ms" hx-target="#yaml-status" hx-swap="outerHTML" hx-include="closest form"{{end}}>{{.YAML}}</textarea>
+<textarea name="yaml" rows="14" class="mono code-input" aria-label="YAML" aria-describedby="yaml-keys" spellcheck="false"{{if can $.Role "admin"}} hx-post="{{.Base}}/validate" hx-trigger="input changed delay:600ms" hx-target="#yaml-status" hx-swap="outerHTML" hx-sync="this:replace" hx-include="closest form"{{end}}>{{.YAML}}</textarea>
+<p id="yaml-keys" class="hint">Tab indents by two spaces; press Esc then Tab to leave the editor.</p>
 {{if can $.Role "admin"}}<div id="yaml-status" class="yaml-status" role="status" aria-live="polite"></div>{{end}}
 {{if can $.Role "admin"}}<div class="row-actions"><button class="btn" formaction="{{.Base}}/check">Review changes</button><button class="btn primary">Save &amp; apply</button></div>{{end}}
 </form></details>
