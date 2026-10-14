@@ -72,6 +72,43 @@
     if (e.key === "g") { g = true; setTimeout(function () { g = false; }, 800); }
   });
 
+  // Rules page: search box + chips narrow the cards; state lives for the session.
+  function rulesFilter() {
+    var bar = document.querySelector(".rules-bar");
+    if (!bar || bar.dataset.bound) return; // bound once per rendered bar
+    bar.dataset.bound = "1";
+    var q = bar.querySelector(".rules-search"), chips = bar.querySelectorAll(".chip"), cards = document.querySelectorAll(".rule-card");
+    var none = document.querySelector(".rules-none"), chip = "all";
+    try { var st = JSON.parse(sessionStorage.getItem("siphon-rules") || "{}"); q.value = st.q || ""; chip = st.chip || "all"; } catch (e) {}
+    bar.hidden = false;
+    chips.forEach(function (c) {
+      var f = c.dataset.filter;
+      if (f !== "all" && f !== "on" && f !== "off" && f !== "hot" && !document.querySelector('.rule-card[data-kind="' + f + '"]')) c.hidden = true;
+    });
+    var saved = bar.querySelector('.chip[data-filter="' + chip + '"]');
+    if (!saved || saved.hidden) chip = "all"; // the saved kind may have no rules any more
+    function apply() {
+      var words = q.value.toLowerCase().split(/\s+/).filter(Boolean), shown = 0;
+      cards.forEach(function (c) {
+        var ok = chip === "all" || c.dataset.kind === chip || c.dataset.status === chip || (chip === "hot" && c.dataset.hot === "true");
+        var text = (c.dataset.text || "").toLowerCase();
+        c.hidden = !(ok && words.every(function (w) { return text.indexOf(w) >= 0; }));
+        if (!c.hidden) shown++;
+      });
+      chips.forEach(function (c) { c.setAttribute("aria-pressed", c.dataset.filter === chip ? "true" : "false"); });
+      if (none) none.hidden = shown > 0;
+      try { sessionStorage.setItem("siphon-rules", JSON.stringify({ q: q.value, chip: chip })); } catch (e) {}
+    }
+    q.addEventListener("input", apply);
+    bar.addEventListener("click", function (e) { var c = e.target.closest(".chip"); if (c) { chip = c.dataset.filter; apply(); } });
+    if (none) none.addEventListener("click", function (e) {
+      if (e.target.closest("[data-action=clear-filter]")) { q.value = ""; chip = "all"; apply(); q.focus(); }
+    });
+    apply();
+  }
+  document.addEventListener("DOMContentLoaded", rulesFilter);
+  document.addEventListener("htmx:afterSwap", rulesFilter);
+
   // Announce htmx swaps for screen readers.
   document.addEventListener("htmx:afterSwap", function (e) {
     var live = document.getElementById("live");
