@@ -43,18 +43,31 @@
 {{else}}<div class="card"><p class="muted">Edit the fields on the left, or open “Edit as YAML” below for everything else.</p></div>{{end}}
 </div></form>{{end}}
 {{if .Steps}}<section class="card mb"><h2>Steps</h2><ol class="small">{{range .Steps}}<li><b>{{.ID}}</b> · {{.Kind}} <code>{{.Target}}</code>{{if .Flags}} <span class="muted">· {{.Flags}}</span>{{end}}</li>{{end}}</ol></section>{{end}}
-<details class="card mb yaml-edit"{{if not .HasForm}} open{{end}}><summary>Edit as YAML</summary>
-<form method="post" action="{{.Base}}/save">
+{{if .Recipe}}<p class="banner" role="status">Started from the <b>{{.Recipe.Title}}</b> recipe. {{if .Recipe.Others}}It also needs {{range $i, $o := .Recipe.Others}}{{if $i}}, {{end}}<code>{{$o}}</code>{{end}}: add those separately. {{end}}<a href="/help/templates#{{.Recipe.Name}}">See the whole template</a>.</p>{{end}}
+{{if .NoRecipe}}<p class="muted small" role="status">Unknown recipe "{{.NoRecipe}}": starting from the starter instead.</p>{{end}}
+{{if and .New .Recipes}}<section class="card mb recipes"><h2>Start from a recipe</h2><ul class="small">{{range .Recipes}}<li><a href="/config/routines/new?recipe={{pe .Name}}">{{.Title}}</a></li>{{end}}</ul></section>{{end}}
+{{if .HasForm}}<details class="card mb yaml-edit"><summary>Edit as YAML</summary>
+{{template "yamlform" $}}</details>
+{{else if eq .Side "routines"}}<div class="grid g2 mb"><section class="card yaml-edit"><h2>Routine YAML</h2>
+{{template "yamlform" $}}</section>
+<aside class="card ref"><h2>Reference</h2>
+{{if .Tokens}}<p class="small muted">Click to insert at the cursor:</p><p class="tokens">{{range .Tokens}}<button type="button" class="token mono" data-insert="{{.}}">{{.}}</button> {{end}}</p>{{end}}
+<dl class="small">{{range .RefFields}}<dt><code>{{.Path}}</code>{{if .Required}} <span class="badge">required</span>{{end}}</dt><dd>{{.Description}}</dd>{{end}}</dl></aside></div>
+{{else}}<section class="card mb yaml-edit"><h2>Edit as YAML</h2>
+{{template "yamlform" $}}</section>
+{{end}}
+{{if and .Exists (ne .Prov "file")}}{{if can $.Role "admin"}}<form method="post" action="{{.Base}}/reset" class="sm"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><button>Reset to file</button></form>{{end}}{{end}}
+{{if .Exists}}{{if can $.Role "admin"}}<form method="post" action="{{.Base}}/delete" class="sm"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><button class="btn no">Delete</button></form>{{end}}{{end}}
+{{end}}{{end}}
+
+{{define "yamlform"}}{{with .Cfg}}<form method="post" action="{{.Base}}/save">
 <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><input type="hidden" name="mode" value="yaml">
 {{if .New}}<label class="f">Name<input name="name" value="{{.Name}}" required></label>{{else}}<input type="hidden" name="name" value="{{.Name}}">{{end}}
 <textarea name="yaml" rows="14" class="mono code-input" aria-label="YAML" aria-describedby="yaml-keys" spellcheck="false"{{if can $.Role "admin"}} hx-post="{{.Base}}/validate" hx-trigger="input changed delay:600ms" hx-target="#yaml-status" hx-swap="outerHTML" hx-sync="this:replace" hx-include="closest form"{{end}}>{{.YAML}}</textarea>
 <p id="yaml-keys" class="hint">Tab indents by two spaces; press Esc then Tab to leave the editor.</p>
 {{if can $.Role "admin"}}<div id="yaml-status" class="yaml-status" role="status" aria-live="polite"></div>{{end}}
 {{if can $.Role "admin"}}<div class="row-actions"><button class="btn" formaction="{{.Base}}/check">Review changes</button><button class="btn primary">Save &amp; apply</button></div>{{end}}
-</form></details>
-{{if and .Exists (ne .Prov "file")}}{{if can $.Role "admin"}}<form method="post" action="{{.Base}}/reset" class="sm"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><button>Reset to file</button></form>{{end}}{{end}}
-{{if .Exists}}{{if can $.Role "admin"}}<form method="post" action="{{.Base}}/delete" class="sm"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><button class="btn no">Delete</button></form>{{end}}{{end}}
-{{end}}{{end}}
+</form>{{end}}{{end}}
 
 {{define "cfgvalid"}}<div id="yaml-status" class="yaml-status {{if .Err}}err{{else}}ok{{end}}" role="status" aria-live="polite"{{if .Line}} data-line="{{.Line}}"{{end}}>{{if .Err}}{{template "icon" "x"}} {{.Err}}{{else}}{{template "icon" "check"}} {{if .Changes}}Valid · {{.Changes}} changes{{else}}Valid · no change{{end}}{{end}}</div>{{end}}
 

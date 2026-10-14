@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/store"
 )
@@ -181,4 +183,75 @@ func TestEditorsRoundTrip(t *testing.T) {
 			t.Errorf("%s round trip changed the item:\n--- before\n%s--- after\n%s", it.kind, it.y, got)
 		}
 	}
+}
+
+func TestRoutineStarterParses(t *testing.T) {
+	var rt config.Routine
+	if err := yaml.Unmarshal([]byte(routineStarter), &rt); err != nil || len(rt.Steps) != 2 || rt.Steps[0].ID != "fetch" || rt.Steps[1].Agent == "" {
+		t.Fatalf("starter: %v %+v", err, rt)
+	}
+}
+
+func TestRoutineEditorRecipesAndTokens(t *testing.T) {
+	ce := newCfgEnv(t)
+	body := func(path string) string { return html.UnescapeString(ce.get(path).Body.String()) }
+
+	b := body("/config/routines/new")
+	for _, want := range []string{"Start from a recipe", "/config/routines/new?recipe=", "{{.steps.fetch.output}}", "{{.steps.summarise.output}}", "{{.event.FIELD}}", `data-insert=`, "<h2>Routine YAML</h2>", "steps:"} {
+		if !strings.Contains(b, want) {
+			t.Errorf("new routine: missing %q", want)
+		}
+	}
+	if strings.Contains(b, "<details") {
+		t.Error("routine form is collapsed")
+	}
+
+	r := recipeNameForTest(t)
+	b = body("/config/routines/new?recipe=" + r.Name)
+	if !strings.Contains(b, "/help/templates#"+r.Name) || !strings.Contains(b, `value="`+r.routine+`"`) {
+		t.Errorf("recipe %s not prefilled:\n%s", r.Name, b)
+	}
+	if b = body("/config/routines/new?recipe=nope"); strings.Contains(b, "/help/templates#") || !strings.Contains(b, "CHANGE-ME") || !strings.Contains(b, "Unknown recipe") {
+		t.Error("unknown recipe prefilled, or not said")
+	}
+
+	// the "new" page never replaces an existing routine (a recipe prefills a name that may be taken)
+	form := url.Values{"mode": {"yaml"}, "name": {"dup"}, "rev": {"0"}, "yaml": {"steps:\n  - id: a\n    cmd: [echo, one]\n"}}
+	if w := ce.post("/config/routines/new/save", form); w.Code != 303 {
+		t.Fatalf("first save: %d %s", w.Code, w.Body.String())
+	}
+	form.Set("rev", strconv.FormatInt(ce.latest(), 10))
+	form.Set("yaml", "steps:\n  - id: b\n    cmd: [echo, two]\n")
+	if w := ce.post("/config/routines/new/save", form); w.Code != 409 || !strings.Contains(w.Body.String(), "already exists") {
+		t.Fatalf("overwrite from new: %d", w.Code)
+	}
+	if rt := ce.cur.Load().Routines["dup"]; rt == nil || len(rt.Steps) != 1 || rt.Steps[0].ID != "a" {
+		t.Fatalf("routine was replaced: %+v", rt)
+	}
+	// a page with a form keeps the collapsible YAML editor and its live validation
+	if b = body("/config/rules/r1"); !strings.Contains(b, "<details") || !strings.Contains(b, `/validate"`) {
+		t.Error("rule editor lost its YAML form")
+	}
+}
+
+func TestStepTokensQuoteNonIdentifiers(t *testing.T) {
+	if got := stepTokens("fetch-data"); got[0] != `{{index .steps "fetch-data" "output"}}` {
+		t.Fatalf("%q", got)
+	}
+	if got := stepTokens("fetch"); got[0] != "{{.steps.fetch.output}}" {
+		t.Fatalf("%q", got)
+	}
+}
+
+type testRecipe struct{ Name, routine string }
+
+func recipeNameForTest(t *testing.T) testRecipe {
+	t.Helper()
+	for _, r := range routineRecipes() {
+		if rv, name, _, ok := recipeFor(r.Name); ok && rv != nil {
+			return testRecipe{r.Name, name}
+		}
+	}
+	t.Fatal("no template with a routine")
+	return testRecipe{}
 }

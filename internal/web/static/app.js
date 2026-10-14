@@ -207,6 +207,15 @@
     if (st && e.detail && e.detail.target === st) { st.className = "yaml-status"; st.textContent = "Could not check: reload the page"; delete st.dataset.line; markErrorLine(); }
   });
 
+  // Reference chips: insert their text at the caret of the YAML box.
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-insert]"), ta = document.querySelector("textarea.code-input");
+    if (!b || !ta) return;
+    ta.focus();
+    ta.setRangeText(b.dataset.insert, ta.selectionStart, ta.selectionEnd, "end");
+    ta.dispatchEvent(new Event("input", { bubbles: true })); // numbers lines, runs validation
+  });
+
   // Announce htmx swaps for screen readers.
   document.addEventListener("htmx:afterSwap", function (e) {
     var live = document.getElementById("live");
