@@ -33,6 +33,8 @@ source  ──event──▶  rule (when: …)  ──fires──▶  action
   - `servicenow: {connection, op, …}`: one ServiceNow call made by the daemon, no LLM (`siphon explain rule`; writes need a `cooldown`);
   - `unit: <name>.service`: an allowlisted systemd unit.
 
+For agents on ServiceNow, use the built-in tools (`package: servicenow`): ServiceNow's official MCP server does not work from Siphon yet (#104; see `docs/connections/servicenow.md`).
+
 **Agents** run on a **connection**:
 - a subscription login (`kind: claude|codex|agy`);
 - a model endpoint (`kind: model`, with an `ollama`/`openai` credential and

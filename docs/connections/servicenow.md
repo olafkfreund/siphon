@@ -251,6 +251,41 @@ Ready-made: `siphon template alert-to-servicenow-incident` and
   with a login page or a redirect; Siphon reports it as unavailable and
   never follows it.
 
+## Which path when
+
+| You want | Use |
+|---|---|
+| ServiceNow to trigger rules | webhooks: the Business Rule ([section 4](#4-the-business-rule)) |
+| A deterministic write, with no LLM | the `servicenow:` action ([Writes without an agent](#writes-without-an-agent)) |
+| An agent to read or update records | the built-in tools (`package: servicenow`), with no Now Assist licence |
+| ServiceNow's own maintained tools | the official MCP server: not usable from Siphon yet, see [#104](https://github.com/olafkfreund/siphon/issues/104) |
+
+The built-in tools are the supported path for agents.
+
+## The official MCP server
+
+ServiceNow ships its own MCP server (it needs a Now Assist licence). We
+probed it on a demo instance on 2026-10-14:
+
+| Check | Result |
+|---|---|
+| The MCP endpoint | `https://<instance>/sncapps/mcp-server/mcp/<server>` (for example `sn_mcp_server_default`), listed in `sn_mcp_server_registry` |
+| RFC 9728 protected-resource metadata | Present at `/.well-known/oauth-protected-resource/<mcp path>`; `authorization_servers` is the MCP URL |
+| RFC 8414 authorization-server metadata | Present at `/.well-known/oauth-authorization-server/<mcp path>`: `/oauth_auth.do`, `/oauth_token.do`, PKCE `S256`, authorization code and refresh |
+| Issuer | The metadata's `issuer` is the bare instance URL, not the MCP URL the resource metadata names |
+| Dynamic client registration | None (`registration_endpoint: null`): a pre-registered OAuth app is required |
+| An unauthenticated MCP request | `302` to `/auth_redirect.do`, not `401` with `WWW-Authenticate` |
+
+**The spike's outcome: it does not work from Siphon yet.** With a
+pre-registered authorization-code OAuth app, `siphon connect oauth` failed
+at once with `calling initialize: sending initialize: Found`. Because the
+server answers with a `302` instead of a `401`, the MCP client never starts
+the OAuth login. A valid client-credentials bearer token and HTTP Basic with
+an admin account also got `302`, so the endpoint seems to accept only tokens
+from its own authorization-code flow. The compatibility fix is tracked in
+[#104](https://github.com/olafkfreund/siphon/issues/104). Until
+then, use the built-in tools.
+
 ## Caveats
 
 - **The instance must reach the URL:** a public endpoint, or a MID server.
