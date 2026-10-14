@@ -529,6 +529,14 @@ pre .add { color: #5ef0b4 } pre .del { color: #ff8fa0 }
 .eg-refused .act { text-align: right }
 .eg-refused .eg-host { background: color-mix(in srgb, var(--coral) 10%, transparent); border-color: color-mix(in srgb, var(--coral) 25%, transparent) }
 
+/* slice 2: approvals and sources */
+.flow.flow-2 { grid-template-columns: minmax(8rem,1fr) 44px minmax(10rem,1.4fr) }
+.item-card[data-kind=webhook]::before { background: var(--ink) }
+.item-card[data-kind=mcp]::before { background: var(--biolume) }
+.item-card[data-kind=schedule]::before { background: var(--amber) }
+.item-card[data-kind=http]::before { background: var(--current) }
+.blocked.is-wait { background: color-mix(in srgb, var(--amber) 14%, transparent) }
+.mode .ico { width: 14px; height: 14px; vertical-align: -2px }
 /* YAML editor (app.js initCodeEditors): the gutter mirrors the textarea's lines. */
 .code-editor { display: grid; grid-template-columns: auto 1fr; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden }
 .code-gutter, .code-input { font-family: var(--mono); font-size: .85rem; line-height: 1.5; padding-block: .55rem }
