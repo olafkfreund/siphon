@@ -295,3 +295,10 @@ mine.
   - **`create_change`'s `template_id`** is sent as
     `standard_change_template_id`.
   - **Descriptions:** write tools start with "WRITE:".
+- **Step 4:**
+  - **The inventory test changed.** `TestInventoryHasNoSecrets`
+    (`cmd/siphon/describe_test.go`) asserted exactly one package. It now
+    expects `github` and the built-in `servicenow`. That's the inventory
+    change the step's trap anticipated, in a test rather than a golden file.
+  - **The injected package isn't saved anywhere.** Export and the overlay
+    work on YAML text (`config.Effective`), never on the parsed `Config`.

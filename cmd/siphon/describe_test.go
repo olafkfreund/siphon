@@ -190,7 +190,8 @@ rules:
 		inv.Agents[0]["kind"] != "model" || inv.Agents[0]["credential"] != "ollama-local" || inv.Rules[0]["enabled"] != false || len(inv.Routines) != 1 {
 		t.Fatalf("%s", out)
 	}
-	if len(inv.Packages) != 1 || inv.Packages[0].Name != "github" || inv.Packages[0].Env[0] != "GITHUB_PERSONAL_ACCESS_TOKEN" {
+	// servicenow is built in, so it is always listed after the operator's packages.
+	if len(inv.Packages) != 2 || inv.Packages[1].Name != "servicenow" || inv.Packages[0].Name != "github" || inv.Packages[0].Env[0] != "GITHUB_PERSONAL_ACCESS_TOKEN" {
 		t.Fatalf("packages: %+v", inv.Packages)
 	}
 	if inv.Server.AWS.Profiles[0] != "p1" || inv.Server.Models.PrivateEndpoints[0] != "127.0.0.1:11434" || inv.Server.Services.PrivateEndpoints[0] != "gitlab.lan:443" {

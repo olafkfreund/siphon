@@ -646,6 +646,19 @@ func parse(b []byte, stub map[string]string) (*Config, error) {
 	if err := dec.Decode(new(yaml.Node)); !errors.Is(err, io.EOF) {
 		return nil, errors.New("parse config: multiple YAML documents are not supported")
 	}
+	// Built in, so a source can name package: servicenow without operator setup.
+	// It lives only in the parsed Config; export and the overlay work on YAML.
+	if _, ok := c.Server.MCPPackages["servicenow"]; !ok {
+		if c.Server.MCPPackages == nil {
+			c.Server.MCPPackages = map[string]MCPPackage{}
+		}
+		exe, _ := os.Executable()
+		c.Server.MCPPackages["servicenow"] = MCPPackage{
+			Command: []string{exe, "mcp-servicenow"},
+			Env:     []string{"SERVICENOW_INSTANCE_URL", "SERVICENOW_CLIENT_ID", "SERVICENOW_CLIENT_SECRET", "SERVICENOW_API_KEY"},
+			URLEnv:  []string{"SERVICENOW_INSTANCE_URL"},
+		}
+	}
 	for _, s := range c.Sources {
 		if s != nil && s.Poll == 0 && s.Polled() {
 			s.Poll = Duration(time.Minute)

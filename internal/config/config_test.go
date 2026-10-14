@@ -1178,3 +1178,40 @@ func TestTrustedProxiesInvalid(t *testing.T) {
 		t.Fatalf("mapped: %v", got)
 	}
 }
+
+// The built-in servicenow package needs no mcp_packages entry; the instance
+// URL is the only host its bridge may reach.
+func TestBuiltinServiceNowPackage(t *testing.T) {
+	t.Setenv("T_URL", "https://dev1.service-now.com")
+	t.Setenv("T_KEY", "k")
+	build := func(url, server string) (*Config, error) {
+		t.Setenv("T_URL", url)
+		return Parse([]byte(server + "sources: {sn: {type: mcp, package: servicenow, env: {SERVICENOW_INSTANCE_URL: 'env:T_URL', SERVICENOW_API_KEY: 'env:T_KEY'}, read: {tool: t}}}\n"))
+	}
+	c, err := build("https://dev1.service-now.com", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd := c.Sources["sn"].Command; len(cmd) != 2 || cmd[1] != "mcp-servicenow" {
+		t.Errorf("command: %v", cmd)
+	}
+	if got := c.BridgeEgress(c.Sources["sn"]); len(got) != 1 || got[0].Host != "dev1.service-now.com" || got[0].Port != 443 {
+		t.Errorf("egress: %v", got)
+	}
+	c, _ = build("http://10.0.0.5:8080", "")
+	if err := c.BridgeCheck(c.Sources["sn"]); err == nil || !strings.Contains(err.Error(), "private_endpoints") {
+		t.Errorf("private unlisted: %v", err)
+	}
+	c, err = build("http://10.0.0.5:8080", "server: {services: {private_endpoints: ['10.0.0.5:8080']}}\n")
+	if err != nil || c.BridgeCheck(c.Sources["sn"]) != nil {
+		t.Errorf("private listed: %v", err)
+	}
+	// an operator-defined package wins
+	c, err = build("https://dev1.service-now.com", "server: {mcp_packages: {servicenow: {command: [/opt/sn], env: [SERVICENOW_INSTANCE_URL, SERVICENOW_API_KEY]}}}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd := c.Sources["sn"].Command; len(cmd) != 1 || cmd[0] != "/opt/sn" {
+		t.Errorf("operator package: %v", cmd)
+	}
+}
