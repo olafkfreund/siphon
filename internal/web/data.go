@@ -99,7 +99,7 @@ func (s *server) sources() ([]sourceView, error) {
 		if src.Polled() {
 			v.Poll = time.Duration(src.Poll).String()
 		}
-		if st, ok := states[name]; ok {
+		if st, ok := states[name]; ok && (src.Polled() || src.Type == "schedule") { // the scheduler stores its last run in LastPollAt
 			v.LastPollAt, v.LastError = st.LastPollAt, st.LastError
 		}
 		if st, ok := states[name]; ok && src.Type == "webhook" {

@@ -47,6 +47,14 @@ spec: spec/2026-10-14-114-stale-poll-status.md
 
    → verify: `go test -race ./internal/web`.
 
+## Deviations
+
+- **Step 2: the guard is `src.Polled() || src.Type == "schedule"`.** The
+  scheduler records a schedule source's last run in `LastPollAt`, and
+  `Polled()` is false for schedules. `TestScheduleSourceView` caught it.
+- **The diag check** uses `/api/rules/<r>/explain`, the path
+  `diagapi_test.go` already uses.
+
 ## Tests
 
 ```sh
