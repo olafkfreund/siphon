@@ -22,6 +22,7 @@ import (
 	"time"
 	_ "time/tzdata" // zone names work without host zoneinfo
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/term"
 
 	"github.com/olafkfreund/siphon/internal/action"
@@ -31,6 +32,7 @@ import (
 	"github.com/olafkfreund/siphon/internal/job"
 	"github.com/olafkfreund/siphon/internal/mcpbridge"
 	"github.com/olafkfreund/siphon/internal/rule"
+	"github.com/olafkfreund/siphon/internal/servicenow"
 	"github.com/olafkfreund/siphon/internal/source"
 	"github.com/olafkfreund/siphon/internal/store"
 	"github.com/olafkfreund/siphon/internal/web"
@@ -91,6 +93,22 @@ func main() {
 		}
 		if rerr != nil && ctx.Err() == nil {
 			fmt.Fprintln(os.Stderr, "mcp-bridge:", rerr)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	case "mcp-servicenow":
+		// Internal: the built-in `servicenow` MCP package runs this over stdio.
+		hc := &http.Client{
+			Transport:     &http.Transport{Proxy: http.ProxyFromEnvironment},
+			Timeout:       60 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		}
+		sc, rerr := servicenow.ClientFromEnv(os.Getenv, hc)
+		if rerr == nil {
+			rerr = servicenow.ServeMCP(ctx, sc, &mcp.StdioTransport{})
+		}
+		if rerr != nil && ctx.Err() == nil {
+			fmt.Fprintln(os.Stderr, "mcp-servicenow:", rerr)
 			os.Exit(1)
 		}
 		os.Exit(0)

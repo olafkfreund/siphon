@@ -20,7 +20,7 @@ import (
 // given -config). Client mode talks to a running siphon over its API.
 
 // localOnly never goes through the API.
-var localOnly = []string{"version", "exec-job", "agent-run", "mcp-bridge", "schema", "validate", "config", "rules", "run-once", "serve", "credentials", "backup"}
+var localOnly = []string{"version", "exec-job", "agent-run", "mcp-bridge", "mcp-servicenow", "schema", "validate", "config", "rules", "run-once", "serve", "credentials", "backup"}
 
 // clientMode reports whether cmd runs against a server: not a local-only
 // command, and not one of the old local commands given -config.
