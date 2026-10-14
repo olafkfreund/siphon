@@ -167,6 +167,21 @@ spec: spec/2026-10-14-118-portal-refresh-slice1.md
   - **`.stamp.err` and `.stamp.wait`** follow `.stamp.hot`.
   - **A chip is hidden** when no item has its value in any filter
     attribute. `all`, `hot`, `on` and `off` always show.
+- **Steps 2–5:**
+  1. **The shared `pill` template** (`layout.html`) printed the emoji in
+     every state pill, portal-wide. It now uses sprite icons: `timer`,
+     `hand`, `check` and `x`, none for cancelled, and the running pill
+     keeps its CSS bubbles. The topbar's approvals pill is changed the
+     same way.
+  2. **`.item-card.row`** is a flex row of fixed-basis cells (`.c-id`,
+     `.c-rule`, `.c-run`, `.c-state`, `.c-att`, `.c-time`, `.c-exit`), so
+     the columns line up. It wraps below 820px.
+  3. **No "active" chip** on Jobs: the chips match `data-kind` and
+     `data-state` exactly, and the server-side state chips already cover
+     running.
+  4. **The job page's Details card** is folded into the hero's stamps.
+  5. **A shared `jobrow` template** (in `jobs.html`) is reused by the
+     Dashboard's recent runs.
 
 ## Tests
 
