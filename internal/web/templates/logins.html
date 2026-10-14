@@ -1,9 +1,9 @@
-{{define "logins"}}<div class="top"><div><h1>Connections</h1><div class="muted">The subscriptions and model endpoints your agents run on. Secrets are stored write-only and never shown again.</div></div><span class="sp"></span><a class="btn" href="#add">{{template "icon" "plus"}}Subscription</a><a class="btn primary" href="#add-model">{{template "icon" "plus"}}Model endpoint</a></div>
+{{define "logins"}}<div class="top"><div><h1>Connections</h1><div class="muted">The subscriptions and model endpoints your agents run on. Secrets are stored write-only and never shown again.</div></div><span class="sp"></span>{{if can $.Role "admin"}}<a class="btn" href="#add">{{template "icon" "plus"}}Subscription</a><a class="btn primary" href="#add-model">{{template "icon" "plus"}}Model endpoint</a>{{end}}</div>
 {{with .LoginForm}}{{if .Notice}}<div class="banner ok" role="status">{{template "icon" "check"}} {{.Notice}}</div>{{end}}{{end}}
 
 <h2 class="section-h">{{template "icon" "key"}} Subscriptions <span class="muted small">Claude · Codex · agy</span></h2>
 <div class="grid g3 mb">
-{{range .Logins}}<article class="card acct s-{{.Status}}" aria-label="Login {{.Name}}">
+{{range .Logins}}<article class="card item-card acct s-{{.Status}}{{if eq .Status "expired"}} is-err{{else if eq .Status "expiring"}} is-wait{{else if eq .Status "connected"}} is-ok{{end}}" aria-label="Login {{.Name}}">
   <div class="acct-head">{{template "provider" .Key}}<span class="sp"></span>
     {{if eq .Status "connected"}}<span class="pill done">{{template "icon" "check"}} Connected</span>
     {{else if eq .Status "expiring"}}<span class="pill pending_approval">Expires {{.Expiry}}</span>
@@ -14,14 +14,15 @@
   <h2 class="acct-name">{{.Name}}</h2>
   <p class="muted small">{{.Type}}{{if eq .Status "connected" "expiring"}} · expires {{.Expiry}} · refreshed {{.Written}}{{end}}{{if eq .Status "missing"}} · agents using it can't run yet{{end}}</p>
   <div class="row-actions">
-    {{if eq .Status "missing" "expired"}}<a class="btn sm primary" href="/connections?connect={{pe .Name}}#add">Connect</a>{{else if ne .Status "apikey"}}<a class="btn sm" href="/connections?connect={{pe .Name}}#add">Replace</a>{{end}}
+    {{if can $.Role "admin"}}{{if eq .Status "missing" "expired"}}<a class="btn sm primary" href="/connections?connect={{pe .Name}}#add">Connect</a>{{else if ne .Status "apikey"}}<a class="btn sm" href="/connections?connect={{pe .Name}}#add">Replace</a>{{end}}{{end}}
     {{if can $.Role "admin"}}<form method="post" action="/logins/{{pe .Name}}/delete" data-confirm="Delete the login {{.Name}}? Agents using it will stop until you connect it again."><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm no">Delete</button></form>{{end}}
   </div>
+  <p class="acct-foot small muted">{{template "usedby" .Agents}}</p>
 </article>
 {{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>No logins yet. Add one below so your agents can run.</section>{{end}}
 </div>
 
-{{with .LoginForm}}
+{{if can $.Role "admin"}}{{with .LoginForm}}
 <section class="card login-add-card" id="add" aria-labelledby="add-h">
 <h2 id="add-h">{{if .Name}}Connect <b>{{.Name}}</b>{{else}}Add a login{{end}}</h2>
 {{if .Err}}<div class="banner" role="alert">{{.Err}}</div>{{end}}
@@ -48,24 +49,25 @@
   <label class="f">Paste it here<textarea name="value" rows="4" autocomplete="off" spellcheck="false" required></textarea><span class="hint">Stored in a 0600 file under Siphon's state and never shown again.</span></label>
   {{if can $.Role "admin"}}<div class="row-actions"><button class="btn primary">{{template "icon" "check"}}Connect</button></div>{{end}}
 </form>
-</section>{{end}}
+</section>{{end}}{{end}}
 <h2 class="section-h" id="models">{{template "icon" "agent"}} Models <span class="muted small">Ollama · LM Studio · OpenRouter · Groq · Mistral · any OpenAI-compatible API</span></h2>
 <div class="grid g3 mb">
-{{range .Models}}<article class="card acct" aria-label="Model connection {{.Name}}">
+{{range .Models}}<article class="card item-card acct{{with .Test}}{{if .Err}} is-err{{else}} is-ok{{end}}{{end}}" aria-label="Model connection {{.Name}}">
   <div class="acct-head">{{template "provider" .Preset}}<span class="sp"></span>{{with .Test}}{{if .Err}}<span class="pill failed">{{template "icon" "x"}} Unreachable</span>{{else}}<span class="pill done">{{template "icon" "check"}} {{len .Models}} models</span>{{end}}{{else}}<span class="pill cancelled">Not tested</span>{{end}}</div>
   <h2 class="acct-name">{{.Name}}</h2>
   <p class="muted small mono">{{.Host}}</p>
-  <div id="test-{{.Name}}">{{with .Test}}{{template "conntest" .}}{{end}}</div>
   <div class="row-actions">
-    {{if can $.Role "operator"}}<form method="post" action="/connections/{{pe .Name}}/test" hx-post="/connections/{{pe .Name}}/test" hx-target="#test-{{.Name}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{template "icon" "play"}}Test</button></form>{{end}}
+    {{if can $.Role "operator"}}<form method="post" action="/connections/{{pe .Name}}/test" hx-post="/connections/{{pe .Name}}/test" hx-target="next .conn-test"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{template "icon" "play"}}Test</button></form>{{end}}
     <a class="btn sm" href="/config/credentials/{{pe .Name}}">Edit</a>
     {{if can $.Role "admin"}}<form method="post" action="/logins/{{pe .Name}}/delete" data-confirm="Delete the connection {{.Name}}? Agents using it will stop until you add it again."><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm no">Delete</button></form>{{end}}
   </div>
+  <div class="conn-test" aria-live="polite">{{with .Test}}{{template "conntest" .}}{{end}}</div>
+  <p class="acct-foot small muted">{{template "usedby" .Agents}}</p>
 </article>
 {{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>No model endpoints yet. Add Ollama or any OpenAI-compatible API below.</section>{{end}}
 </div>
 
-{{with .ModelForm}}<section class="card login-add-card" id="add-model" aria-labelledby="addm-h">
+{{if can $.Role "admin"}}{{with .ModelForm}}<section class="card login-add-card" id="add-model" aria-labelledby="addm-h">
 <h2 id="addm-h">Add a model endpoint</h2>
 {{if .Err}}<div class="banner" role="alert">{{.Err}}</div>{{end}}
 <form method="post" action="/connections/models" class="login-add model-add">
@@ -79,7 +81,9 @@
   <label class="f key-field"><span>API key <span class="muted">(optional)</span></span><input type="password" name="api_key" autocomplete="off" spellcheck="false"><span class="hint">Write-only. Not needed for Ollama or LM Studio.</span></label>
   {{if can $.Role "admin"}}<div class="row-actions"><button class="btn primary">{{template "icon" "check"}}Add endpoint</button></div>{{end}}
 </form>
-</section>{{end}}{{end}}
+</section>{{end}}{{end}}{{end}}
+
+{{define "usedby"}}{{if .}}used by {{len .}} agent{{if ne (len .) 1}}s{{end}}: {{range $i, $a := .}}{{if $i}}, {{end}}<a href="/config/agents/{{pe $a}}">{{$a}}</a>{{end}}{{else}}unused{{end}}{{end}}
 
 {{define "conntest"}}{{if .Err}}<p class="err small">{{template "icon" "x"}} {{.Err}}</p>{{else}}<p class="small ok-text">{{template "icon" "check"}} {{len .Models}} models{{if .Latency}} · {{.Latency}}{{end}}</p>
 {{if .Models}}<details class="more"><summary>Models</summary><ul class="small mono model-list">{{range .Models}}<li>{{.}}{{if tools .}} <span class="pill done tiny">tools ✓</span>{{end}}</li>{{end}}</ul></details>{{end}}{{end}}{{end}}
