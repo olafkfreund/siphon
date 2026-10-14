@@ -1,8 +1,17 @@
 {{define "helptemplates"}}{{with .Gallery}}<div class="helplayout">
 {{template "helpnav" .Nav}}
 <div class="gallery"><div class="top"><div><h1>Templates</h1><div class="muted">{{.Total}} ready-made tasks. Copy one, or run <code>siphon template &lt;name&gt;</code>.</div></div></div>
+{{if gt .Total 12}}<div class="filter-bar" data-filter-scope="templates" hidden>
+  <input type="search" class="filter-search" aria-label="Filter templates" placeholder="Filter templates…  /" autocomplete="off">
+  <div class="chips" role="group" aria-label="Filter by category">
+    <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
+    {{range .Groups}}<button type="button" class="chip" data-filter="{{.Category}}" aria-pressed="false">{{.Category}}</button>{{end}}
+  </div>
+</div>
+<p class="filter-none muted" data-filter-scope="templates" hidden>No templates match. <button type="button" class="btn sm" data-action="clear-filter">Clear filter</button></p>
+{{end}}<div data-filter-list="templates">
 {{range .Groups}}<h2 id="cat-{{.Category}}">{{.Category}}</h2>
-<div class="stack">{{range .Items}}<section class="card tpl" id="{{.Name}}" aria-labelledby="h-{{.Name}}">
+<div class="stack">{{range .Items}}<section class="card item-card tpl" id="{{.Name}}" data-filter-item data-kind="{{.Category}}" data-text="{{.Name}} {{.Title}} {{.Category}}" aria-labelledby="h-{{.Name}}">
   <div class="top tight"><h3 id="h-{{.Name}}">{{.Title}}</h3><span class="sp"></span><code class="chip">{{.Name}}</code></div>
   {{if .Needs}}<div class="small"><span class="muted">Connect first:</span> {{range .Needs}}{{if .Href}}<a class="chip" href="{{.Href}}">{{.Ref}}</a>{{else}}<code class="chip">{{.Ref}}</code>{{end}} {{end}}</div>{{end}}
   {{if .Secrets}}<div class="small"><span class="muted">Secrets to pass:</span> {{range .Secrets}}<code class="chip">{{.}}</code> {{end}}</div>{{end}}
@@ -14,4 +23,4 @@
     <div><code id="a-{{.Name}}">{{.Apply}}</code> <button type="button" class="btn sm" data-action="copy" data-target="a-{{.Name}}">{{template "icon" "copy"}}Copy</button></div>
   </div>
 </section>{{end}}</div>{{end}}
-</div></div>{{end}}{{end}}
+</div></div></div>{{end}}{{end}}

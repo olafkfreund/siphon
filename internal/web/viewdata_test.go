@@ -154,3 +154,99 @@ func TestJobPageHero(t *testing.T) {
 		}
 	}
 }
+
+// Slice 4: one regression test per verified bug, plus the new filter bars.
+func (e *env) pageAs(r role, path string) string {
+	c, _ := e.asRole(r, "u")
+	return e.do("GET", path, nil, func(q *http.Request) { q.AddCookie(c) }).Body.String()
+}
+
+// Bugs 1 and the failed-channel flag, the deliveries filter, the chips-check.
+func TestSlice4Notifications(t *testing.T) {
+	e := newEnv(t, func(o *Options) {
+		o.ConfigPath = "x"
+		o.Cfg.Notify = map[string]*config.Notify{"phone": {Type: "ntfy"}, "a.b": {Type: "ntfy"}}
+	})
+	if _, err := e.st.DB.Exec(`INSERT INTO notifications(channel,event,key,source,title,body,created_at,next_at,state,error) VALUES ('phone','failed','k','','t','b',?,?,'failed','boom')`, e.now.UnixMilli(), e.now.UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []role{roleViewer, roleOperator} {
+		if b := e.pageAs(r, "/notifications"); strings.Contains(b, `id="add"`) || strings.Contains(b, `href="#add"`) {
+			t.Errorf("%s sees the add form", r)
+		}
+	}
+	b := e.pageAs(roleAdmin, "/notifications")
+	if strings.Contains(b, "#ntest-") || strings.Count(b, `hx-target="next .conn-test"`) != 2 {
+		t.Error("Test must target a relative .conn-test, not an id built from the name")
+	}
+	for _, want := range []string{`id="add"`, `href="#add"`, "chips-check", "item-card is-err", "stamp err", `data-filter-scope="deliveries" hidden`, `data-state="failed"`} {
+		if !strings.Contains(b, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+}
+
+// Bug 3 and the linked owners.
+func TestSlice4Egress(t *testing.T) {
+	off := false
+	e := newEnv(t, func(o *Options) {
+		o.Cfg.Agents = map[string]*config.Agent{"free": {Kind: "claude", Egress: config.EgressAgent{Enabled: &off}}, "tight": {Kind: "model"}}
+	})
+	b := e.page("/egress")
+	for _, want := range []string{"stamp wait", "#i-shield", "Unrestricted", "No network", `href="/config/agents/free"`, `href="/config/agents/tight"`} {
+		if !strings.Contains(b, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+}
+
+// Bugs 4 and 6.
+func TestSlice4Audit(t *testing.T) {
+	e := newEnv(t, nil)
+	if !strings.Contains(e.page("/audit"), `<div class="empty">No audit entries yet.</div></section>`) || strings.Contains(e.page("/audit"), "<table") {
+		t.Error("empty state is not a full-width card")
+	}
+	tx, _ := e.st.DB.Begin()
+	store.Audit(tx, e.now, "alice", "rule_added", 0, "r9")
+	tx.Commit()
+	b := e.page("/audit")
+	if !strings.Contains(b, `<b class="c-actor">alice</b>`) || strings.Contains(b, "hide-sm") || !strings.Contains(b, `data-filter-scope="audit" hidden`) {
+		t.Error("actor hidden or no filter bar")
+	}
+}
+
+// Bugs 2 and 6 for History.
+func TestSlice4History(t *testing.T) {
+	e := newEnv(t, func(o *Options) { o.ConfigPath = "x" })
+	if b := e.pageAs(roleAdmin, "/history"); !strings.Contains(b, "No portal changes yet.") || strings.Contains(b, "<table") {
+		t.Error("history empty state")
+	}
+	tx, _ := e.st.DB.Begin()
+	id, err := store.AddRevision(tx, e.now, "alice", "edit", "{}", "diff")
+	tx.Commit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := e.pageAs(roleAdmin, "/history/"+itoa(int(id)))
+	if !strings.Contains(b, `data-confirm="Restore revision `+itoa(int(id))+`?`) {
+		t.Error("Restore has no confirm")
+	}
+	if b = e.pageAs(roleAdmin, "/history"); !strings.Contains(b, "item-card row") || strings.Contains(b, "filter-bar") {
+		t.Error("history rows, and no filter bar under 11 revisions")
+	}
+}
+
+// Bug 5 and the template gallery filter.
+func TestSlice4PillAndGallery(t *testing.T) {
+	e := newEnv(t, nil)
+	tx, _ := e.st.DB.Begin()
+	id, _ := store.InsertJob(tx, store.Job{Rule: "r", State: "running", ActionJSON: `{"action":{"Unit":"u"}}`}, e.now)
+	tx.Commit()
+	store.FinishJob(e.st.DB, id, "cancelled", 0, "", e.now)
+	if b := e.page("/jobs"); !strings.Contains(b, `pill cancelled"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg> Cancelled`) {
+		t.Error("cancelled pill has no icon")
+	}
+	if b := e.page("/help/templates"); !strings.Contains(b, `data-filter-scope="templates" hidden`) || !strings.Contains(b, "data-filter-item") {
+		t.Error("no gallery filter bar")
+	}
+}

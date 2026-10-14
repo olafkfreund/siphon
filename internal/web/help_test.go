@@ -170,8 +170,8 @@ func TestHelpGallery(t *testing.T) {
 	w := ce.get("/help/templates")
 	body := w.Body.String()
 	ts := docs.Templates()
-	if w.Code != 200 || strings.Count(body, `class="card tpl"`) != len(ts) {
-		t.Fatalf("%d, %d cards for %d templates", w.Code, strings.Count(body, `class="card tpl"`), len(ts))
+	if w.Code != 200 || strings.Count(body, `class="card item-card tpl"`) != len(ts) {
+		t.Fatalf("%d, %d cards for %d templates", w.Code, strings.Count(body, `class="card item-card tpl"`), len(ts))
 	}
 	cspClean(t, "gallery", body)
 	for _, tpl := range ts {

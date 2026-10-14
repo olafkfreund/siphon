@@ -125,15 +125,19 @@
 
 {{define "egresspreview"}}{{if .Err}}<div class="err">{{.Err}}</div>{{else if .On}}<ul class="small">{{range .Hosts}}<li class="mono">{{.Host}}:{{.Port}}</li>{{else}}<li class="muted">No hosts allowed.</li>{{end}}</ul>{{else}}<p class="muted">Restriction is off for this agent.</p>{{end}}{{end}}
 
-{{define "history"}}{{with .Hist}}<div class="top"><div><h1>History</h1><div class="muted">Every portal change is a revision. Restoring one is a new revision.</div></div>
+{{define "history"}}{{with .Hist}}<div class="top"><div><h1>History</h1><div class="muted">Every portal change is a revision. Restoring one is a new revision.</div></div><span class="sp"></span>
 <a class="btn" href="/history/export">Export YAML</a></div>
-<section class="card"><table class="cards"><thead><tr><th>#</th><th>When</th><th>Who</th><th>What</th><th></th></tr></thead><tbody>
-{{range .Revs}}<tr><td data-label="#"><a href="/history/{{.ID}}">{{.ID}}</a></td><td data-label="When" title="{{tm .At}}">{{ago .At}}</td><td data-label="Who">{{.Actor}}</td><td data-label="What">{{.Summary}}</td>
-<td><a class="btn sm" href="/history/{{.ID}}">Review</a></td></tr>
-{{else}}<tr><td colspan="5"><div class="empty">No portal changes yet.</div></td></tr>{{end}}
-</tbody></table></section>{{end}}{{end}}
+{{if gt (len .Revs) 10}}<div class="filter-bar" data-filter-scope="history" hidden>
+  <input type="search" class="filter-search" aria-label="Filter revisions" placeholder="Filter by who or what…  /" autocomplete="off">
+</div>
+<p class="filter-none muted" data-filter-scope="history" hidden>No revisions match. <button type="button" class="btn sm" data-action="clear-filter">Clear filter</button></p>
+{{end}}<div data-filter-list="history">
+{{range .Revs}}<div class="card item-card row" data-filter-item data-text="{{.ID}} {{.Actor}} {{.Summary}}">
+  <a href="/history/{{.ID}}">#{{.ID}}</a><span class="muted small" title="{{tm .At}}">{{ago .At}}</span><b>{{.Actor}}</b><span class="small wrap">{{.Summary}}</span><span class="sp"></span><a class="btn sm" href="/history/{{.ID}}">Review</a>
+</div>
+{{else}}<section class="card"><div class="empty">No portal changes yet.</div></section>{{end}}
+</div>{{end}}{{end}}
 
-{{define "historyitem"}}{{with .Hist}}{{with .Rev}}<div class="top"><div><h1>Revision {{.ID}}</h1><div class="muted">{{.Summary}} · {{.Actor}} · {{tm .At}}</div></div></div>
-<nav class="small mb"><a href="/history">← History</a></nav>
+{{define "historyitem"}}{{with .Hist}}{{with .Rev}}<div class="top"><div><h1>Revision {{.ID}}</h1><div class="muted">{{.Summary}} · {{.Actor}} · {{tm .At}}</div></div><span class="sp"></span><a class="btn" href="/history">← History</a></div>
 <section class="card"><div class="diff"><pre>{{diffhtml .Diff}}</pre></div>
-{{if can $.Role "admin"}}<form method="post" action="/history/{{.ID}}/restore"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{$.Hist.Latest}}"><button class="btn primary">Restore this revision</button></form>{{end}}</section>{{end}}{{end}}{{end}}
+{{if can $.Role "admin"}}<form method="post" action="/history/{{.ID}}/restore" data-confirm="Restore revision {{.ID}}? It replaces the live config (a new revision you can undo)."><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{$.Hist.Latest}}"><button class="btn primary">Restore this revision</button></form>{{end}}</section>{{end}}{{end}}{{end}}

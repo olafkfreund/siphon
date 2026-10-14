@@ -42,7 +42,7 @@
 
 {{define "icon"}}<svg class="ico" aria-hidden="true"><use href="#i-{{.}}"/></svg>{{end}}
 
-{{define "pill"}}{{if eq . "queued"}}<span class="pill queued">{{template "icon" "timer"}} Queued</span>{{else if eq . "running"}}<span class="pill running"><span class="i" aria-hidden="true"></span> Running</span>{{else if eq . "pending_approval"}}<span class="pill pending_approval">{{template "icon" "hand"}} Waiting for you</span>{{else if eq . "done"}}<span class="pill done">{{template "icon" "check"}} Done</span>{{else if eq . "failed"}}<span class="pill failed">{{template "icon" "x"}} Failed</span>{{else if eq . "cancelled"}}<span class="pill cancelled">Cancelled</span>{{else}}<span class="pill tag">{{.}}</span>{{end}}{{end}}
+{{define "pill"}}{{if eq . "queued"}}<span class="pill queued">{{template "icon" "timer"}} Queued</span>{{else if eq . "running"}}<span class="pill running"><span class="i" aria-hidden="true"></span> Running</span>{{else if eq . "pending_approval"}}<span class="pill pending_approval">{{template "icon" "hand"}} Waiting for you</span>{{else if eq . "done"}}<span class="pill done">{{template "icon" "check"}} Done</span>{{else if eq . "failed"}}<span class="pill failed">{{template "icon" "x"}} Failed</span>{{else if eq . "cancelled"}}<span class="pill cancelled">{{template "icon" "x"}} Cancelled</span>{{else}}<span class="pill tag">{{.}}</span>{{end}}{{end}}
 
 {{define "kindicon"}}{{if eq . "agent"}}{{template "icon" "agent"}}{{else if eq . "cmd"}}{{template "icon" "term"}}{{else if eq . "unit"}}{{template "icon" "unit"}}{{else if eq . "routine"}}{{template "icon" "routine"}}{{else}}{{template "icon" "bolt"}}{{end}}{{end}}
 

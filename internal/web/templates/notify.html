@@ -1,22 +1,22 @@
-{{define "notify"}}{{with .Notify}}<div class="top"><div><h1>Notifications</h1><div class="muted">Get told when an agent needs approval, a job fails or a source breaks. Messages carry names and ids only, never event data or output. The URL and token are stored write-only and never shown again.</div></div><span class="sp"></span>{{if .Editable}}<a class="btn primary" href="#add">{{template "icon" "plus"}}Channel</a>{{end}}</div>
+{{define "notify"}}{{with .Notify}}<div class="top"><div><h1>Notifications</h1><div class="muted">Get told when an agent needs approval, a job fails or a source breaks. Messages carry names and ids only, never event data or output. The URL and token are stored write-only and never shown again.</div></div><span class="sp"></span>{{if and .Editable (can $.Role "admin")}}<a class="btn primary" href="#add">{{template "icon" "plus"}}Channel</a>{{end}}</div>
 {{if .Notice}}<div class="banner ok" role="status">{{template "icon" "check"}} {{.Notice}}</div>{{end}}
 
 <div class="grid g3 mb">
-{{range .Channels}}<article class="card acct" aria-label="Channel {{.Name}}">
-  <div class="acct-head"><span class="pill tag">{{.Type}}</span><span class="sp"></span>{{with .Last}}{{template "pill" .State}}{{else}}<span class="pill cancelled">No messages yet</span>{{end}}</div>
+{{range .Channels}}<article class="card item-card{{with .Last}}{{if eq .State "failed"}} is-err{{end}}{{end}}" aria-label="Channel {{.Name}}">
+  <div class="acct-head"><span class="pill tag">{{.Type}}</span><span class="sp"></span>{{with .Last}}{{template "pill" .State}}{{else}}<span class="stamp">No messages yet</span>{{end}}</div>
   <h2 class="acct-name">{{.Name}}</h2>
-  <p class="muted small">{{range $i, $e := .Events}}{{if $i}} · {{end}}{{$e}}{{end}}</p>
-  {{with .Last}}<p class="muted small">Last: {{.Event}} {{if .SentAt}}{{tp .SentAt}}{{else}}{{ago .CreatedAt}}{{end}}{{if .Error}} · {{.Error}}{{end}}</p>{{end}}
-  <div id="ntest-{{.Name}}"></div>
+  <p class="chips-ev">{{range .Events}}<span class="mode">{{.}}</span> {{end}}</p>
+  {{with .Last}}<p class="muted small">Last: {{.Event}} <span title="{{if .SentAt}}{{tp .SentAt}}{{else}}{{tm .CreatedAt}}{{end}}">{{if .SentAt}}{{tp .SentAt}}{{else}}{{ago .CreatedAt}}{{end}}</span></p>{{if .Error}}<p><span class="stamp err">{{.Error}}</span></p>{{end}}{{end}}
   <div class="row-actions">
-    {{if can $.Role "operator"}}<form method="post" action="/notifications/{{pe .Name}}/test" hx-post="/notifications/{{pe .Name}}/test" hx-target="#ntest-{{.Name}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{template "icon" "play"}}Test</button></form>{{end}}
+    {{if can $.Role "operator"}}<form method="post" action="/notifications/{{pe .Name}}/test" hx-post="/notifications/{{pe .Name}}/test" hx-target="next .conn-test"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{template "icon" "play"}}Test</button></form>{{end}}
     {{if $.Notify.Editable}}{{if can $.Role "admin"}}<form method="post" action="/notifications/{{pe .Name}}/delete" data-confirm="Delete the channel {{.Name}}? It stops receiving messages."><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm no">Delete</button></form>{{end}}{{end}}
   </div>
+  <div class="conn-test" aria-live="polite"></div>
 </article>
-{{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>No channels yet.{{if .Editable}} Add one below.{{end}}</section>{{end}}
+{{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>No channels yet.{{if and .Editable (can $.Role "admin")}} Add one below.{{end}}</section>{{end}}
 </div>
 
-{{if .Editable}}{{with .Form}}<section class="card login-add-card" id="add" aria-labelledby="add-h">
+{{if and .Editable (can $.Role "admin")}}{{with .Form}}<section class="card login-add-card" id="add" aria-labelledby="add-h">
 <h2 id="add-h">Add a channel</h2>
 {{if .Err}}<div class="banner" role="alert">{{.Err}}</div>{{end}}
 <form method="post" action="/notifications" class="login-add">
@@ -29,22 +29,30 @@
   <label class="f">Name<input name="name" value="{{.Name}}" placeholder="e.g. phone" required pattern="[a-z0-9][a-z0-9_\-]{0,63}" autocomplete="off"><span class="hint">Lowercase letters, digits, <code>_</code> and <code>-</code>.</span></label>
   <label class="f">URL<input type="password" name="url" required autocomplete="off" spellcheck="false"><span class="hint">Write-only. https, or http to a host:port listed in <code>server.services.private_endpoints</code>. For ntfy, the topic URL (it is the secret).</span></label>
   <label class="f"><span>Token <span class="muted">(optional)</span></span><input type="password" name="token" autocomplete="off" spellcheck="false"><span class="hint">Write-only. An ntfy access token or a webhook bearer token. Slack needs none.</span></label>
-  {{$ev := .Events}}<fieldset class="f kinds"><legend>Send me</legend><span class="seg">
+  {{$ev := .Events}}<fieldset class="f kinds"><legend>Send me</legend><span class="chips-check">
     {{range $.Notify.AllEvents}}<label><input type="checkbox" name="events" value="{{.}}"{{if has $ev .}} checked{{end}}><span>{{.}}</span></label>{{end}}
   </span></fieldset>
-  {{if can $.Role "admin"}}<div class="row-actions"><button class="btn primary">{{template "icon" "check"}}Add channel</button></div>{{end}}
+  <div class="row-actions"><button class="btn primary">{{template "icon" "check"}}Add channel</button></div>
 </form>
 </section>{{end}}{{end}}
 
-<section class="card mt" aria-labelledby="rec"><h2 id="rec">Recent deliveries</h2>
-{{if .Recent}}<table>
-  <thead><tr><th scope="col">When</th><th scope="col">Channel</th><th scope="col">Event</th><th scope="col">Job</th><th scope="col">State</th><th scope="col">Tries</th><th scope="col">Error</th></tr></thead>
-  <tbody>{{range .Recent}}<tr>
-    <td class="muted">{{ago .CreatedAt}}</td><td>{{.Channel}}</td><td>{{.Event}}</td>
-    <td>{{if .JobID}}<a href="/jobs/{{.JobID}}">{{.JobID}}</a>{{else}}{{.Source}}{{end}}</td>
-    <td>{{template "pill" .State}}</td><td class="num">{{.Attempts}}</td><td class="muted small">{{.Error}}</td>
-  </tr>{{end}}</tbody>
-</table>{{else}}<div class="empty">Nothing sent yet.</div>{{end}}
+<section class="mt" aria-labelledby="rec"><h2 id="rec">Recent deliveries</h2>
+{{if .Recent}}<div class="filter-bar" data-filter-scope="deliveries" hidden>
+  <input type="search" class="filter-search" aria-label="Filter deliveries" placeholder="Filter by channel, event, job…  /" autocomplete="off">
+  <div class="chips" role="group" aria-label="Filter by state">
+    <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
+    <button type="button" class="chip" data-filter="sent" aria-pressed="false">sent</button>
+    <button type="button" class="chip" data-filter="failed" aria-pressed="false">failed</button>
+    <button type="button" class="chip" data-filter="pending" aria-pressed="false">pending</button>
+    <button type="button" class="chip" data-filter="suppressed" aria-pressed="false">suppressed</button>
+  </div>
+</div>
+<p class="filter-none muted" data-filter-scope="deliveries" hidden>No deliveries match. <button type="button" class="btn sm" data-action="clear-filter">Clear filter</button></p>
+<div data-filter-list="deliveries">{{range .Recent}}<div class="card item-card row{{if eq .State "failed"}} is-err{{end}}" data-filter-item data-state="{{.State}}" data-text="{{.Channel}} {{.Event}} {{.JobID}} {{.Source}} {{.Error}}">
+  <span class="muted small" title="{{tm .CreatedAt}}">{{ago .CreatedAt}}</span><b>{{.Channel}}</b><span class="mode">{{.Event}}</span>
+  <span class="small">{{if .JobID}}<a href="/jobs/{{.JobID}}">#{{.JobID}}</a>{{else}}{{.Source}}{{end}}</span>
+  <span>{{template "pill" .State}}</span>{{if gt .Attempts 1}}<span class="mode">{{.Attempts}} tries</span>{{end}}{{if .Error}}<span class="stamp err">{{.Error}}</span>{{end}}
+</div>{{end}}</div>{{else}}<section class="card"><div class="empty">Nothing sent yet.</div></section>{{end}}
 </section>{{end}}{{end}}
 
 {{define "notifytest"}}{{if .OK}}<p class="small ok-text">{{template "icon" "check"}} Sent (HTTP {{.Status}})</p>{{else}}<p class="err small">{{template "icon" "x"}} {{.Err}}</p>{{end}}{{end}}

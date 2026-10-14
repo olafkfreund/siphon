@@ -1,5 +1,11 @@
 {{define "audit"}}<div class="top"><div><h1>Audit</h1><div class="muted">Who did what, newest first.</div></div></div>
-<section class="card"><table class="cards"><thead><tr><th>Time</th><th>Event</th><th class="hide-sm">Actor</th><th>Job</th><th>Detail</th></tr></thead><tbody>
-{{range .Audit}}<tr><td class="muted small" title="{{tm .At}}" data-label="Time">{{ago .At}}</td><td data-label="Event"><span class="pill tag">{{.Event}}</span></td><td class="hide-sm" data-label="Actor">{{.Actor}}</td><td data-label="Job">{{if .JobID}}<a href="/jobs/{{.JobID}}">{{.JobID}}</a>{{end}}</td><td class="small wrap" data-label="Detail">{{.Detail}}</td></tr>
-{{else}}<tr><td colspan="5"><div class="empty">No audit entries yet.</div></td></tr>{{end}}
-</tbody></table></section>{{end}}
+{{if .Audit}}<div class="filter-bar" data-filter-scope="audit" hidden>
+  <input type="search" class="filter-search" aria-label="Filter the audit log" placeholder="Filter by actor, event, job, detail…  /" autocomplete="off">
+</div>
+<p class="filter-none muted" data-filter-scope="audit" hidden>No entries match. <button type="button" class="btn sm" data-action="clear-filter">Clear filter</button></p>
+{{end}}<div data-filter-list="audit">
+{{range .Audit}}<div class="card item-card row" data-filter-item data-text="{{.Actor}} {{.Event}} {{.JobID}} {{.Detail}}">
+  <span class="muted small" title="{{tm .At}}">{{ago .At}}</span><span class="pill tag">{{.Event}}</span><b class="c-actor">{{.Actor}}</b>{{if .JobID}}<a href="/jobs/{{.JobID}}">#{{.JobID}}</a>{{end}}<span class="small wrap">{{.Detail}}</span>
+</div>
+{{else}}<section class="card"><div class="empty">No audit entries yet.</div></section>{{end}}
+</div>{{end}}
