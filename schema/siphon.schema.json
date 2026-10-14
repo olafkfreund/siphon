@@ -682,6 +682,9 @@
             },
             "type": "object"
           },
+          "format": {
+            "type": "string"
+          },
           "headers": {
             "additionalProperties": {
               "description": "env:NAME, file:/path, or (where allowed) a literal",

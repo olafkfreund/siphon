@@ -12,6 +12,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,6 +31,7 @@ type WebhookOptions struct {
 	SigPrefix       string // sha256: the header may hold a comma-separated list of PREFIX+hex; any match counts
 	TimestampSep    string // sha256 with a timestamp: what joins timestamp and body (default ".")
 	IDHeader        string
+	Format          string // "eventgrid": answer Azure Event Grid's handshakes and deliver each event of a batch
 	MaxBody         int64
 	Now             func() time.Time
 	// PreLimit counts every request before it is read or verified (a flood of
@@ -92,7 +94,7 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 		o.Limit = NewLimiter(20, 10)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
+		if r.Method != http.MethodPost && !(r.Method == http.MethodOptions && o.Format == "eventgrid") {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
@@ -232,8 +234,7 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 			reject(http.StatusBadRequest, "delivery id header missing")
 			return
 		}
-		allowed := o.Limit.Allow(now)
-		if !allowed {
+		if o.Format != "eventgrid" && !o.Limit.Allow(now) { // eventgrid counts per event
 			reject(http.StatusTooManyRequests, "rate limited")
 			return
 		}
@@ -263,6 +264,10 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 				headers[name] = r.Header.Get(k)
 			}
 		}
+		if o.Format == "eventgrid" {
+			serveEventGrid(w, r, o, now, body, headers, deliver, reject)
+			return
+		}
 		if data == nil {
 			data = decodeBody(r, body)
 		}
@@ -279,6 +284,71 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 			w.WriteHeader(http.StatusAccepted)
 		}
 	})
+}
+
+var egOrigin = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`)
+
+// serveEventGrid handles an authenticated Azure Event Grid request: the
+// OPTIONS abuse-protection handshake, the validation event, and delivery of
+// each event of a batch (or of a single CloudEvent) keyed by its own id.
+// validationUrl is never fetched.
+func serveEventGrid(w http.ResponseWriter, r *http.Request, o WebhookOptions, now time.Time, body []byte, headers map[string]string, deliver Deliver, reject func(int, string)) {
+	if r.Method == http.MethodOptions {
+		origin := r.Header.Get("WebHook-Request-Origin")
+		if !egOrigin.MatchString(origin) {
+			reject(http.StatusBadRequest, "origin missing or invalid")
+			return
+		}
+		w.Header().Set("WebHook-Allowed-Origin", origin)
+		w.Header().Set("WebHook-Allowed-Rate", "*")
+		return
+	}
+	data, err := DecodeJSON(body)
+	if err != nil {
+		reject(http.StatusBadRequest, "body is not JSON")
+		return
+	}
+	list, ok := data.([]any)
+	if !ok {
+		list = []any{data}
+	}
+	events := make([]map[string]any, len(list))
+	for i, x := range list {
+		m, _ := x.(map[string]any)
+		if id, _ := m["id"].(string); id == "" {
+			reject(http.StatusBadRequest, "event without id")
+			return
+		}
+		events[i] = m
+	}
+	if len(events) == 0 {
+		reject(http.StatusBadRequest, "empty batch")
+		return
+	}
+	if t, _ := events[0]["eventType"].(string); len(events) == 1 && t == "Microsoft.EventGrid.SubscriptionValidationEvent" {
+		d, _ := events[0]["data"].(map[string]any)
+		code, _ := d["validationCode"].(string)
+		if code == "" || len(code) > 128 {
+			reject(http.StatusBadRequest, "validation code missing or too long")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		reply, _ := json.Marshal(map[string]string{"validationResponse": code})
+		w.Write(reply)
+		return
+	}
+	for _, m := range events {
+		// A 429 here leaves earlier events delivered; Event Grid retries the whole
+		// batch and their ids come back as duplicates.
+		if !o.Limit.Allow(now) {
+			reject(http.StatusTooManyRequests, "rate limited")
+			return
+		}
+		if _, err := deliver(r.Context(), Event{Source: o.Name, ReceivedAt: now, Headers: headers, Data: m}, m["id"].(string)); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+	}
 }
 
 // decodeBody reads JSON first, so a JSON body sent with a form Content-Type

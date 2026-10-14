@@ -169,13 +169,15 @@ func New(o Options) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
-	mux.HandleFunc("POST /hook/{source}", func(w http.ResponseWriter, r *http.Request) {
+	hook := func(w http.ResponseWriter, r *http.Request) {
 		if h := s.hook(r.PathValue("source")); h != nil {
 			h.ServeHTTP(w, r)
 			return
 		}
 		http.NotFound(w, r)
-	})
+	}
+	mux.HandleFunc("POST /hook/{source}", hook)
+	mux.HandleFunc("OPTIONS /hook/{source}", hook) // Azure Event Grid's handshake; the handler refuses it elsewhere
 	s.oauthRoutes(mux)
 	s.apiRoutes(mux)
 	s.portalRoutes(mux)
