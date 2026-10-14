@@ -103,6 +103,28 @@ spec: spec/2026-10-14-111-poll-error-and-each-prune.md
 
    → verify: `go test -race ./docs/...`.
 
+## Deviations
+
+- **The Opus review of the whole diff:** no HIGH, and two MEDIUM.
+  - **M2, fixed: the journal got the tool's text unmasked.** `tickAndNudge`
+    logged the raw poll error. It now logs `pollErrText`, the same
+    blanked, masked, one-line text the source status stores.
+  - **L1, fixed: clipping and whitespace-collapse ran before `Mask`,** so a
+    clipped or multi-line secret could slip past it, and a clipped closing
+    quote could slip past `stripQuoted`. Now:
+    - `toolErrText` only joins, capped at 4 KiB;
+    - `pollErrText` blanks, then masks, then collapses and clips to 300
+      bytes.
+
+    This applies to every stored poll error, not only MCP ones, and
+    deviates from step 1's "clip in `toolErrText`".
+  - **L2, L3 and L4, fixed:**
+    - the rune-boundary test now exercises the back-off;
+    - the `seen_events` YAML comment is updated, as spec §3 says;
+    - the store test checks its setup errors.
+  - **M1, open: an owner decision,** because it changes the spec's premise.
+    See the PR or the session.
+
 ## Tests
 
 ```sh

@@ -176,8 +176,13 @@ sources:
 		}
 		return clientSide
 	}
-	if _, err := p.Tick(ctx, "factory"); err == nil {
+	_, tickErr := p.Tick(ctx, "factory")
+	if tickErr == nil {
 		t.Fatal("want an error")
+	}
+	// what tickAndNudge logs: masked and quote-blanked too
+	if logged := pollErrText(cfg, tickErr); strings.Contains(logged, "tok-secret-123") || strings.Contains(logged, "alice") || strings.Contains(logged, "\n") {
+		t.Fatalf("logged %q", logged)
 	}
 	states, err := store.SourceStates(st.DB)
 	if err != nil {

@@ -3300,7 +3300,7 @@ server:
   retention:
     jobs: 2160h         # finished jobs with their approvals and notifications (default 720h = 30 days)
     audit: 8760h        # the audit log (default 720h)
-    seen_events: 168h   # ids used to drop duplicate webhook deliveries (default 168h = 7 days)
+    seen_events: 168h   # ids used to drop duplicate webhook deliveries, and the ids an on: each rule has fired (default 168h = 7 days)
 ```
 
 `seen_events` also covers the ids of `on: each` rules: an `on: each` id that

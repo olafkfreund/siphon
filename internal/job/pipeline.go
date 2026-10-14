@@ -202,7 +202,7 @@ func (p *Pipeline) tick(ctx context.Context, cfg *config.Config, name string) ([
 	ev, err := p.poll(ctx, cfg, name)
 	msg := ""
 	if err != nil {
-		msg = string(action.Mask([]byte(stripQuoted(err.Error())), cfg.Secrets()))
+		msg = pollErrText(cfg, err)
 	}
 	if serr := store.PutSourceState(p.Store.DB, name, p.Now(), msg); serr != nil {
 		return nil, serr
@@ -850,3 +850,9 @@ var quoted = regexp.MustCompile(`"[^"]*"|'[^']*'`)
 // stripQuoted blanks quoted literals in a stored rule error, so event values
 // the expression engine quotes ("cannot use "abc" as int") are not kept.
 func stripQuoted(s string) string { return quoted.ReplaceAllString(s, `"…"`) }
+
+// pollErrText is a poll error as stored and logged: quoted values blanked and
+// secrets masked first, then one line of at most 300 bytes.
+func pollErrText(cfg *config.Config, err error) string {
+	return source.OneLine(string(action.Mask([]byte(stripQuoted(err.Error())), cfg.Secrets())), 300)
+}

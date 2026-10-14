@@ -189,9 +189,10 @@ func TestMCPToolError(t *testing.T) {
 		{"text", []mcp.Content{&mcp.TextContent{Text: "boom: 403 ACL"}}, func(m string) bool {
 			return strings.Contains(m, "MCP tool fail returned an error: boom: 403 ACL")
 		}},
-		{"clipped", []mcp.Content{&mcp.TextContent{Text: strings.Repeat("é", 500)}}, func(m string) bool {
+		{"capped", []mcp.Content{&mcp.TextContent{Text: "x" + strings.Repeat("é", 3000)}}, func(m string) bool {
+			// the odd prefix puts byte 4096 mid-rune, so the cut backs off
 			_, text, _ := strings.Cut(m, "an error: ")
-			return utf8.ValidString(text) && strings.HasSuffix(text, "…") && len(text) <= 300+len("…")
+			return utf8.ValidString(text) && strings.HasSuffix(text, "…") && len(text) <= 4096+len("…")
 		}},
 		{"empty", nil, func(m string) bool { return strings.HasSuffix(m, "an error: (no message)") }},
 	} {
@@ -274,5 +275,14 @@ func TestRedirectChallenge(t *testing.T) {
 	}
 	if r := get("/ok"); r.StatusCode != 200 {
 		t.Fatalf("200: %d", r.StatusCode)
+	}
+}
+
+func TestOneLine(t *testing.T) {
+	if got := OneLine("a\n  b\tc", 300); got != "a b c" {
+		t.Fatalf("%q", got)
+	}
+	if got := OneLine("x"+strings.Repeat("é", 200), 300); !utf8.ValidString(got) || !strings.HasSuffix(got, "…") || len(got) > 300+len("…") {
+		t.Fatalf("%q", got)
 	}
 }

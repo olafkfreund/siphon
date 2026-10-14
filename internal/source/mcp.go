@@ -297,8 +297,9 @@ func jsonText(content []mcp.Content) (any, bool) {
 	return v, err == nil
 }
 
-// toolErrText joins the TextContent of an error result with "; ", collapses
-// whitespace and clips to 300 bytes (on a rune boundary, plus "…").
+// toolErrText joins the TextContent of an error result with "; ", capped at
+// 4 KiB on a rune boundary. The caller masks it before clipping it for display,
+// so a secret is never cut in half before Mask sees it.
 func toolErrText(content []mcp.Content) string {
 	var parts []string
 	for _, c := range content {
@@ -306,16 +307,24 @@ func toolErrText(content []mcp.Content) string {
 			parts = append(parts, t.Text)
 		}
 	}
-	text := strings.Join(strings.Fields(strings.Join(parts, "; ")), " ")
+	text := strings.TrimSpace(strings.Join(parts, "; "))
 	if text == "" {
 		return "(no message)"
 	}
-	if len(text) > 300 {
-		n := 300
-		for n > 0 && !utf8.RuneStart(text[n]) {
-			n--
-		}
-		text = text[:n] + "…"
-	}
-	return text
+	return clipRunes(text, 4096)
 }
+
+// clipRunes cuts s to at most n bytes on a rune boundary, adding "…" if it cut.
+func clipRunes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "…"
+}
+
+// OneLine collapses whitespace and clips to n bytes: for a masked error shown
+// in one line (a source status or a log line).
+func OneLine(s string, n int) string { return clipRunes(strings.Join(strings.Fields(s), " "), n) }

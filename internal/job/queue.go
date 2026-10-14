@@ -129,7 +129,7 @@ func (p *Pipeline) tickAndNudge(ctx context.Context, cfg *config.Config, name st
 	start := p.Now()
 	ids, err := p.tick(ctx, cfg, name)
 	if err != nil && ctx.Err() == nil {
-		slog.Warn("poll failed", "source", name, "err", err)
+		slog.Warn("poll failed", "source", name, "err", pollErrText(cfg, err)) // the tool's text may hold a secret
 	}
 	for range ids {
 		p.nudgeWorkers()

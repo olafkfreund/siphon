@@ -664,20 +664,36 @@ func TestCleanupCustomRetention(t *testing.T) {
 }
 
 func TestCleanupEachRules(t *testing.T) {
-	s, _ := Open(":memory:")
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer s.Close()
 	now := time.UnixMilli(1_800_000_000_000)
 	day := 24 * time.Hour
-	tx, _ := s.DB.Begin()
-	for i, d := range []time.Duration{10, 9, 1} {
-		PutRuleState(tx, "e", fmt.Sprint("k", i), true, now.Add(-d*day))
+	tx, err := s.DB.Begin()
+	if err != nil {
+		t.Fatal(err)
 	}
-	PutRuleState(tx, "e", "unfired", true, time.Time{})
-	PutRuleState(tx, "old", "k", true, now.Add(-30*day))
-	PutRuleState(tx, "g", "a", true, now.Add(-30*day))
-	PutRuleState(tx, "g", "b", true, now.Add(-31*day))
-	before, _ := RuleLastFired(tx, "e")
-	tx.Commit()
+	put := func(rule, key string, fired time.Time) {
+		if err := PutRuleState(tx, rule, key, true, fired); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, d := range []time.Duration{10, 9, 1} {
+		put("e", fmt.Sprint("k", i), now.Add(-d*day))
+	}
+	put("e", "unfired", time.Time{})
+	put("old", "k", now.Add(-30*day))
+	put("g", "a", now.Add(-30*day))
+	put("g", "b", now.Add(-31*day))
+	before, err := RuleLastFired(tx, "e")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 	count := func(rule string) (n int) {
 		s.DB.QueryRow(`SELECT COUNT(*) FROM rule_state WHERE rule=?`, rule).Scan(&n)
 		return
