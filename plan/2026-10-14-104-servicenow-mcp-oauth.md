@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 104
 spec: spec/2026-10-14-104-servicenow-mcp-oauth.md
 ---
