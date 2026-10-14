@@ -2,6 +2,8 @@
 #   POST  /oauth_token.do                -> client-credentials token, if the
 #                                           id/secret match the env
 #   PATCH /api/now/table/incident/<id>   -> records the call, answers an incident
+#   GET   /api/now/table/incident        -> a one-record list (the poll), counted in POLLS, not SEEN
+#   GET   /_polls                        -> how many list calls were answered
 #   GET   /_seen                         -> the recorded PATCH calls
 # Records hold {method, path, body, bearer_ok}, never the token or the secret.
 # Env: STUB_SN_CLIENT_ID, STUB_SN_CLIENT_SECRET, optional STUB_SN_PORT.
@@ -18,6 +20,7 @@ CLIENT_SECRET = os.environ["STUB_SN_CLIENT_SECRET"]
 TOKEN = "stub-tok-0123456789abcdef"
 INCIDENT = re.compile(r"^/api/now/table/incident/([0-9a-f]{32})$")
 SEEN = []
+POLLS = [0]
 
 
 class H(BaseHTTPRequestHandler):
@@ -35,6 +38,13 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/_seen":
             return self.reply(200, SEEN)
+        if self.path == "/_polls":
+            return self.reply(200, POLLS[0])
+        if urllib.parse.urlsplit(self.path).path == "/api/now/table/incident":
+            if self.headers.get("Authorization", "") != "Bearer " + TOKEN:
+                return self.reply(401, {"error": {"message": "User Not Authenticated"}})
+            POLLS[0] += 1
+            return self.reply(200, {"result": [{"number": "INC0000042", "sys_id": "fedcba9876543210fedcba9876543210", "sys_mod_count": "0", "short_description": "polled"}]})
         self.reply(404, {"error": "not found"})
 
     def do_POST(self):

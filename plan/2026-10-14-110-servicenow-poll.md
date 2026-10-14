@@ -146,6 +146,10 @@ spec: spec/2026-10-14-110-servicenow-poll.md
   `TestTemplateArgsStartLiteral` refuses a command argument that starts
   with a template action, because it could render to a leading dash.
 
+- **Step 4: an earlier subtest** ("signed webhooks run a sandboxed cmd…",
+  `vm-test.nix:647`) counted every `done` job and expected 2. The polled job
+  makes a third, so that query now excludes `rule='sn-poll'`.
+
 ## Tests
 
 ```sh

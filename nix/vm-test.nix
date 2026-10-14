@@ -218,6 +218,17 @@ pkgs.testers.runNixOSTest {
             env.SERVICENOW_INSTANCE_URL = "file:/etc/siphon/sn-url";
             env.SERVICENOW_CLIENT_ID = "file:/etc/siphon/sn-client-id";
             env.SERVICENOW_CLIENT_SECRET = "file:/etc/siphon/sn-client-secret";
+            # polling through the connection's own source (#110)
+            poll = "5s";
+            read = {
+              tool = "search_records";
+              args = {
+                table = "incident";
+                query = "sys_updated_on>=javascript:gs.minutesAgoStart(10)^ORDERBYDESCsys_updated_on";
+                fields = [ "number" "sys_id" "sys_mod_count" "short_description" ];
+                limit = 50;
+              };
+            };
           };
           sources.servicenow-hooks = {
             type = "webhook";
@@ -444,6 +455,18 @@ pkgs.testers.runNixOSTest {
               };
             }
             {
+              name = "sn-poll";
+              source = "servicenow";
+              for_each = "event";
+              when = "true";
+              on = "each";
+              id = ''item.sys_id + ":" + item.sys_mod_count'';
+              action.cmd = [
+                "echo"
+                "polled {{.item.number}} mod {{.item.sys_mod_count}}"
+              ];
+            }
+            {
               name = "aws-agent";
               source = "gh";
               when = ''event.kind == "aws"'';
@@ -621,7 +644,7 @@ pkgs.testers.runNixOSTest {
         try:
             machine.wait_until_succeeds("test -e /var/lib/marker/done", timeout=60)
             machine.wait_until_succeeds(
-                "sqlite3 /var/lib/siphon/state.db \"select count(*) from jobs where state='done'\" | grep -qx 2",
+                "sqlite3 /var/lib/siphon/state.db \"select count(*) from jobs where state='done' and rule!='sn-poll'\" | grep -qx 2",
                 timeout=60,
             )
         except Exception:
@@ -844,6 +867,22 @@ pkgs.testers.runNixOSTest {
         time.sleep(5)
         assert machine.succeed(njobs).strip() == "1", "the same change made a second job"
         assert len(json.loads(machine.succeed("curl -s http://127.0.0.1:8081/_seen"))) == 1, "a resend patched twice"
+        # polling: the same record on every poll is one job (the id dedupes it)
+        try:
+            machine.wait_until_succeeds(
+                "sqlite3 /var/lib/siphon/state.db \"select state from jobs where rule='sn-poll'\" | grep -qx done",
+                timeout=120,
+            )
+        except Exception:
+            dump()
+            print(machine.execute("sqlite3 /var/lib/siphon/state.db \"select rule, state, output from jobs\"")[1])
+            print(machine.execute("curl -s http://127.0.0.1:8081/_polls")[1])
+            raise
+        pollout = machine.succeed("sqlite3 /var/lib/siphon/state.db \"select output from jobs where rule='sn-poll'\"")
+        assert "polled INC0000042 mod 0" in pollout, pollout
+        polls0 = int(machine.succeed("curl -s http://127.0.0.1:8081/_polls"))
+        machine.wait_until_succeeds(f"test $(curl -s http://127.0.0.1:8081/_polls) -ge {polls0 + 2}", timeout=60)
+        assert machine.succeed("sqlite3 /var/lib/siphon/state.db \"select count(*) from jobs where rule='sn-poll'\"").strip() == "1", "a repeated poll made a second job"
         # the client secret and the token stay out of the jobs and the journal
         alljobs = machine.succeed("sqlite3 /var/lib/siphon/state.db 'select output from jobs'")
         logs = machine.succeed("journalctl -u siphon --no-pager")
