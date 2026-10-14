@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 110
 intent: intent/2026-10-14-110-servicenow-poll.md
 ---
