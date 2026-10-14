@@ -289,7 +289,8 @@ func (s *server) portalAs(need role, h func(w http.ResponseWriter, r *http.Reque
 
 // sessionAllowed drops sessions the live config no longer allows: SSO ones
 // once server.oidc is gone, token ones once token_login is off.
-// ponytail: a removed role mapping still lasts until expiry or restart; that needs groups in the cookie.
+// ponytail: a removed role mapping still lasts until expiry, or until portal-session.key is deleted
+// and Siphon restarted (docs/tasks/sso.md); revoking one person needs groups in the cookie.
 func (s *server) sessionAllowed(se session) bool {
 	o := s.Config().Server.OIDC
 	if strings.HasPrefix(se.actor, "oidc:") {

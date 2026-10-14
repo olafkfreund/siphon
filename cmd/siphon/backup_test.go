@@ -247,3 +247,38 @@ func snapshot(t *testing.T, dir string) string {
 	})
 	return b.String()
 }
+
+func TestBackupOmitsSessionKey(t *testing.T) {
+	src := mkState(t, 1)
+	if err := os.WriteFile(filepath.Join(src, "portal-session.key"), []byte("0123456789abcdef0123456789abcdef"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "b.tar.gz")
+	if _, err := create(t, src, out); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := os.Open(out)
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := tar.NewReader(gz)
+	sawDB := false
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		sawDB = sawDB || h.Name == "state.db"
+		if strings.Contains(h.Name, "portal-session") {
+			t.Fatalf("archive contains %s", h.Name)
+		}
+	}
+	if !sawDB {
+		t.Fatal("archive has no state.db: the check above saw nothing")
+	}
+}
