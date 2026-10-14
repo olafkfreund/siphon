@@ -233,6 +233,22 @@ The endpoint is X = `https://<inst>/sncapps/mcp-server/mcp/sn_mcp_server_default
   - the alias checks the path prefix on whole segments;
   - it ignores a pin's trailing `/`, as the pin does elsewhere.
 
+- **Step 7's live result** (2026-10-14, calitiiltddemo3):
+  - **What worked:** discovery, the login and the token exchange all
+    completed, and the token reads the Table API (200).
+  - **What didn't:** the MCP server itself. `/sncapps/mcp-server/mcp/<server>`
+    answers an authenticated `initialize` with an HTML "Page not found", for
+    every registered server.
+  - **ServiceNow's REST tools API fails as well:** a 500 script error, or
+    "Server not found or inactive". That's a ServiceNow-side provisioning
+    or licence problem.
+- **So step 6 (the catalog option) is not done,** as the spec says. The
+  findings are in the docs (step 5) and on #104.
+- **The admin is *web service access only*, and can't consent in the UI.**
+  So the consent was scripted as an interactive itil user,
+  `siphon.mcp.tester`, which was created for this. Its credentials are in
+  agenix, on nixos_config PR #2301.
+
 ## Tests
 
 ```sh
