@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 116
 spec: spec/2026-10-14-116-routine-editor.md
 ---
