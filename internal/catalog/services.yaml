@@ -1043,13 +1043,28 @@ services:
     name: Azure DevOps
     mark: AD
     category: code
-    summary: "Azure DevOps service hooks (builds, releases, work items, pull requests) by webhook with a shared header token. Agent tools come later."
-    capabilities: [webhooks]
-    status: available
-    templates: [azure-devops-build-failed, azure-devops-new-bug]
+    summary: "Agent tools for builds, work items, pull requests and code search through Microsoft's local Azure DevOps MCP server (read-only templates, PAT), and service hooks (builds, releases, work items, pull requests) by webhook with a shared header token."
+    capabilities: [tools, webhooks]
+    status: needs-package
+    needs_package: [azure-devops]
+    reason: 'add `azure-devops` to `server.mcp_packages` (`services.siphon.catalogPackages = [ "azure-devops" ]` on NixOS)'
+    nix: {attr: azure-devops-mcp, args: [], env: [AZURE_DEVOPS_ORG, AZURE_DEVOPS_PAT], hosts: [dev.azure.com, vssps.dev.azure.com, almsearch.dev.azure.com]}
+    templates: [azure-devops-build-failed, azure-devops-build-triage, azure-devops-new-bug]
     fields:
       - {<<: *f_name, default: azure-devops}
+      - {key: organization, label: Organization, type: text, help: 'For agent tools; leave empty for webhooks only. The organization name in https://dev.azure.com/<organization>.'}
+      - {key: pat, label: Personal access token, type: secret, help: 'User settings → Personal access tokens. Scopes: Work Items (Read), Build (Read), Code (Read); Read & write only if agents may use write tools. A PAT expires (30 days by default, 1 year at most): renew it before then.'}
     creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: '{{if .organization}}true{{end}}'
+        yaml: |
+          type: mcp
+          package: azure-devops
+          env:
+            AZURE_DEVOPS_ORG: {{secret "organization" "env.AZURE_DEVOPS_ORG"}}
+            {{- if not (has "pat")}}{{fail "a personal access token is required with an organization"}}{{end}}
+            AZURE_DEVOPS_PAT: {{secret "pat" "env.AZURE_DEVOPS_PAT"}}
       - kind: sources
         name: '{{.name}}-hooks'
         when: 'true'
@@ -1066,3 +1081,5 @@ services:
       Leave Basic authentication empty. Resource details to send: All (the
       templates read resource fields). Test, then Finish.
       server.public_url must be set for the URL to be reachable.
+      With an organization and a PAT set, agents get Azure DevOps tools: see the
+      "Agent tools" section of docs/connections/azure-devops.md for the read-only allowed_tools.

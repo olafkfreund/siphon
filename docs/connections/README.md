@@ -25,7 +25,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 | Bitbucket | tools, webhooks | available | `siphon connect bitbucket` | [`bitbucket-pr-review`](../templates/bitbucket-pr-review.yaml) |
 | Gitea | tools, webhooks | needs package for tools (`catalogPackages = [ "gitea" ]`) | `siphon connect gitea` | [`gitea-pr-review`](../templates/gitea-pr-review.yaml) |
 | Forgejo | tools, webhooks | needs package for tools (`catalogPackages = [ "forgejo" ]`) | `siphon connect forgejo` | [`forgejo-pr-review`](../templates/forgejo-pr-review.yaml) |
-| Azure DevOps | webhooks | available | `siphon connect azure-devops` | [`azure-devops-build-failed`](../templates/azure-devops-build-failed.yaml) [`azure-devops-new-bug`](../templates/azure-devops-new-bug.yaml) |
+| Azure DevOps | tools, webhooks | needs package for tools (`catalogPackages = [ "azure-devops" ]`) | `siphon connect azure-devops` | [`azure-devops-build-failed`](../templates/azure-devops-build-failed.yaml) [`azure-devops-new-bug`](../templates/azure-devops-new-bug.yaml) |
 
 ## Issue tracking
 

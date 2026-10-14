@@ -390,7 +390,7 @@ in
           e = catalogPackages.${id};
         in
         {
-          package = pkgs.${e.package};
+          package = pkgs.${e.package} or self.packages.${pkgs.stdenv.hostPlatform.system}.${e.package};
           inherit (e) args env hosts;
           urlEnv = e.url_env or [ ];
         }))))

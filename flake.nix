@@ -115,7 +115,7 @@
                   system.stateVersion = "26.05";
                   services.siphon = {
                     enable = true;
-                    catalogPackages = [ "grafana" ];
+                    catalogPackages = [ "grafana" "azure-devops" ];
                   };
                 }
               ];
@@ -126,6 +126,9 @@
           assert pk.grafana.package == pkgs.mcp-grafana;
           assert builtins.elem "--disable-write" pk.grafana.args;
           assert builtins.elem "GRAFANA_URL" pk.grafana.urlEnv;
+          assert pk ? azure-devops;
+          assert pk.azure-devops.package == self.packages.${pkgs.stdenv.hostPlatform.system}.azure-devops-mcp;
+          assert builtins.elem "dev.azure.com" pk.azure-devops.hosts;
           pkgs.runCommand "catalog-module-ok" { } "touch $out";
         # cli.enable (default) puts siphon on PATH with SIPHON_URL at the daemon's port.
         cli-module =

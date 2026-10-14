@@ -191,6 +191,39 @@ func TestServiceNowEntry(t *testing.T) {
 	}
 }
 
+func TestAzureDevOpsTools(t *testing.T) {
+	e := Get("azure-devops")
+	if e == nil {
+		t.Fatal("azure-devops missing")
+	}
+	res, err := e.Render(map[string]string{"name": "ado"}, Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Items) != 1 || res.Items[0].Name != "ado-hooks" {
+		t.Fatalf("no organization: %+v", res.Items)
+	}
+	res, err = e.Render(map[string]string{"name": "ado", "organization": "contoso", "pat": "pat-value"}, Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Items) != 2 || res.Items[0].Name != "ado" || res.Items[1].Name != "ado-hooks" {
+		t.Fatalf("items %+v", res.Items)
+	}
+	y := res.Items[0].YAML
+	for _, want := range []string{"package: azure-devops", "AZURE_DEVOPS_ORG: ", "AZURE_DEVOPS_PAT: "} {
+		if !strings.Contains(y, want) {
+			t.Errorf("missing %q in %s", want, y)
+		}
+	}
+	if strings.Contains(y, "contoso") || strings.Contains(y, "pat-value") {
+		t.Errorf("value in yaml: %s", y)
+	}
+	if _, err := e.Render(map[string]string{"name": "ado", "organization": "contoso"}, Env{}); err == nil {
+		t.Error("organization without a PAT: no error")
+	}
+}
+
 func TestAzureEventGridEntry(t *testing.T) {
 	e := Get("azure-eventgrid")
 	if e == nil || e.Status != "available" {
