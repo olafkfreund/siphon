@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 75
 author: olafkfreund
 ---
@@ -81,3 +81,10 @@ This is Phase 3 of the ServiceNow integration (#71).
 - **Should the portal's rule editor edit this action,** or only show it?
   **I'd show it read-only now,** and edit it as YAML, as the roadmap planned.
   A form is follow-up work.
+
+## Decisions (owner, at approval)
+
+- **Approval:** none by default. The rule's or step's `approve:` applies.
+- **`get`** is included.
+- **The portal** shows the action read-only; it's edited as YAML. A form is
+  follow-up work.
