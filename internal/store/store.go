@@ -125,6 +125,13 @@ func PutRuleState(tx *sql.Tx, rule, key string, value bool, firedAt time.Time) e
 	return err
 }
 
+// TouchRuleSeen records that an already-fired on: each key was seen again, at most once an hour.
+func TouchRuleSeen(tx *sql.Tx, rule, key string, now time.Time) error {
+	_, err := tx.Exec(`UPDATE rule_state SET last_seen_at=? WHERE rule=? AND key=? AND (last_seen_at IS NULL OR last_seen_at < ?)`,
+		ms(now), rule, key, ms(now.Add(-time.Hour)))
+	return err
+}
+
 // MarkSeen records (scope,id); isNew is false if it was already seen.
 func MarkSeen(tx *sql.Tx, scope, id string, now time.Time) (isNew bool, err error) {
 	r, err := tx.Exec(`INSERT OR IGNORE INTO seen_event(scope,id,seen_at) VALUES (?,?,?)`, scope, id, ms(now))
@@ -347,8 +354,9 @@ type stmt struct {
 	args []any
 }
 
-// eachPrune deletes rule_state rows of the named rules fired before cut, keeping
-// each rule's newest row. NULL last_fired_at never compares true, so those stay.
+// eachPrune deletes rule_state rows of the named rules not seen (last_seen_at, else
+// last_fired_at) since cut, keeping each rule's newest-fired row. NULL last_fired_at
+// never compares true, so those stay.
 func eachPrune(rules []string, cut int64) []stmt {
 	if len(rules) == 0 {
 		return nil
@@ -358,7 +366,7 @@ func eachPrune(rules []string, cut int64) []stmt {
 		args = append(args, n)
 	}
 	args = append(args, cut)
-	return []stmt{{`DELETE FROM rule_state WHERE rule IN (` + strings.TrimSuffix(strings.Repeat("?,", len(rules)), ",") + `) AND last_fired_at < ?
+	return []stmt{{`DELETE FROM rule_state WHERE rule IN (` + strings.TrimSuffix(strings.Repeat("?,", len(rules)), ",") + `) AND COALESCE(last_seen_at, last_fired_at) < ?
 		AND last_fired_at < (SELECT MAX(r2.last_fired_at) FROM rule_state r2 WHERE r2.rule = rule_state.rule)`, args}}
 }
 

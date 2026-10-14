@@ -26,7 +26,7 @@ func TestOpenTwiceIdempotent(t *testing.T) {
 		}
 		var m int
 		s.DB.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&m)
-		if m != 6 {
+		if m != 7 {
 			t.Fatalf("migrations recorded: %d", m)
 		}
 		var fk int
@@ -718,8 +718,60 @@ func TestCleanupEachRules(t *testing.T) {
 	}
 }
 
+func TestCleanupEachSeen(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.UnixMilli(1_800_000_000_000)
+	day := 24 * time.Hour
+	tx, _ := s.DB.Begin()
+	for _, k := range []string{"seen1", "seen10", "never"} {
+		if err := PutRuleState(tx, "e", k, true, now.Add(-30*day)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// newest-fired row, never touched: kept for cooldown.
+	if err := PutRuleState(tx, "e", "newest", true, now.Add(-20*day)); err != nil {
+		t.Fatal(err)
+	}
+	if err := TouchRuleSeen(tx, "e", "seen1", now.Add(-day)); err != nil {
+		t.Fatal(err)
+	}
+	if err := TouchRuleSeen(tx, "e", "seen10", now.Add(-10*day)); err != nil {
+		t.Fatal(err)
+	}
+	// throttled: a touch within the hour keeps the first time.
+	if err := TouchRuleSeen(tx, "e", "seen10", now.Add(-10*day+time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	var seen int64
+	tx.QueryRow(`SELECT last_seen_at FROM rule_state WHERE key='seen10'`).Scan(&seen)
+	if seen != ms(now.Add(-10*day)) {
+		t.Fatalf("throttle: %d", seen)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := Cleanup(s.DB, now, Retention{EachRules: []string{"e"}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := s.DB.Query(`SELECT key FROM rule_state WHERE rule='e' ORDER BY key`)
+	var got []string
+	for rows.Next() {
+		var k string
+		rows.Scan(&k)
+		got = append(got, k)
+	}
+	rows.Close()
+	if fmt.Sprint(got) != "[newest seen1]" {
+		t.Fatalf("kept %v", got)
+	}
+}
+
 func TestNewestMigration(t *testing.T) {
-	if got := NewestMigration(); got != "0006_event_headers.sql" {
+	if got := NewestMigration(); got != "0007_rule_state_seen.sql" {
 		t.Fatal(got)
 	}
 }

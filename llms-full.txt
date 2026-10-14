@@ -3304,7 +3304,8 @@ server:
 ```
 
 `seen_events` also covers the ids of `on: each` rules: an `on: each` id that
-fired longer ago than this can fire again if it comes back.
+has not been seen (fired, or returned again by a polled source) for longer
+than this can fire again if it comes back.
 
 - **Units:** values are durations in hours (`h`). Unset or `0` keeps the
   default.

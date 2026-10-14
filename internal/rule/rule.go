@@ -196,7 +196,11 @@ func evalItem(ctx context.Context, tx *sql.Tx, r config.Rule, env map[string]any
 
 	if r.On == "each" {
 		// Already fired: the row has a fire time. Deferred ids have no row yet.
-		if !cur || !st.LastFired.IsZero() {
+		if !st.LastFired.IsZero() {
+			// Still in the poll result: note it so retention keeps the row.
+			return f, false, store.TouchRuleSeen(tx, r.Name, key, now)
+		}
+		if !cur {
 			return f, false, nil
 		}
 		ok, err := admit(tx, r, key, now)

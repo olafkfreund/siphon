@@ -180,3 +180,32 @@ func TestNonBoolWhen(t *testing.T) {
 		t.Fatal("want error")
 	}
 }
+
+func TestEachTouchesSeen(t *testing.T) {
+	h := newH(t)
+	r := config.Rule{Name: "r", Source: "s", When: "false", On: "each", ID: `"x"`}
+	if _, err := h.s.DB.Exec(`INSERT INTO rule_state(rule,key,last_value,last_fired_at) VALUES ('r','x',1,?)`, t0.UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	seen := func() (n int64) {
+		h.s.DB.QueryRow(`SELECT COALESCE(last_seen_at,0) FROM rule_state WHERE rule='r' AND key='x'`).Scan(&n)
+		return
+	}
+	h.eval(r, val(1), time.Minute, true)
+	if seen() != 0 {
+		t.Fatal("dry run must not touch")
+	}
+	h.eval(r, val(1), time.Hour, false) // when is false now: still touched
+	first := seen()
+	if first != t0.Add(time.Hour).UnixMilli() {
+		t.Fatalf("touch: %d", first)
+	}
+	h.eval(r, val(1), time.Hour+30*time.Minute, false)
+	if seen() != first {
+		t.Fatal("throttled within the hour")
+	}
+	h.eval(r, val(1), 3*time.Hour, false)
+	if seen() != t0.Add(3*time.Hour).UnixMilli() {
+		t.Fatal("touch after the hour")
+	}
+}
