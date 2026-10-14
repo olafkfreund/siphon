@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 74
 spec: spec/2026-10-14-74-servicenow-mcp.md
 ---
