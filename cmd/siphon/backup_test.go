@@ -247,3 +247,28 @@ func snapshot(t *testing.T, dir string) string {
 	})
 	return b.String()
 }
+
+func TestBackupOmitsSessionKey(t *testing.T) {
+	src := mkState(t, 1)
+	os.WriteFile(filepath.Join(src, "portal-session.key"), []byte("0123456789abcdef0123456789abcdef"), 0o600)
+	out := filepath.Join(t.TempDir(), "b.tar.gz")
+	if _, err := create(t, src, out); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := os.Open(out)
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := tar.NewReader(gz)
+	for {
+		h, err := tr.Next()
+		if err != nil {
+			break
+		}
+		if strings.Contains(h.Name, "portal-session") {
+			t.Fatalf("archive contains %s", h.Name)
+		}
+	}
+}

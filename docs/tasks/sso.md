@@ -88,6 +88,8 @@ role are shown next to **Sign out**.
 
 **Sessions:**
 - **Length:** an SSO session lasts 12 hours, and a token login lasts 24.
+- **Restarts:** sessions survive a restart. To sign everyone out, rotate
+  `server.token` and restart. **Sign out** only clears that browser's cookie.
 - **What's in it:** nothing secret. The provider's tokens are not kept
   after sign-in.
 - **The audit log** records SSO actions as `oidc:<email>`, or

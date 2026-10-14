@@ -3108,7 +3108,10 @@ NixOS module and in the OCI image):
 | `credentials/` | subscription logins (`siphon connect login`, `credentials import`) and MCP OAuth logins (`siphon connect oauth`) |
 
 **Not included:** `siphon.yaml` and `server.token`. Keep those with your own
-config management (Nix, /etc, your secrets tool).
+config management (Nix, /etc, your secrets tool). The portal's session key
+(`portal-session.key` in the state directory) is left out too: a restore on
+the same host keeps it, and a restore on a new host signs everyone out of the
+portal once.
 
 **Treat the archive like the secrets themselves.** It holds every token
 Siphon was given. Siphon creates it readable only by its owner (mode 0600). Keep it that way, or encrypt it.
@@ -3943,6 +3946,8 @@ role are shown next to **Sign out**.
 
 **Sessions:**
 - **Length:** an SSO session lasts 12 hours, and a token login lasts 24.
+- **Restarts:** sessions survive a restart. To sign everyone out, rotate
+  `server.token` and restart. **Sign out** only clears that browser's cookie.
 - **What's in it:** nothing secret. The provider's tokens are not kept
   after sign-in.
 - **The audit log** records SSO actions as `oidc:<email>`, or

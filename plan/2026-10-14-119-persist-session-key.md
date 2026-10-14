@@ -89,6 +89,14 @@ spec: spec/2026-10-14-119-persist-session-key.md
 
    → verify: `go test -race ./docs/...`.
 
+## Deviations
+
+- **Step 4:** the sentence about token rotation went into `docs/tasks/sso.md`
+  (its Sessions list). That's the only docs page that describes sign-in and
+  sessions. `backup-and-monitoring.md` covers the key file only.
+- **Step 2:** the three cookie tests are in `roles_test.go`
+  (`TestSessionKeyPersistsAcrossServers`).
+
 ## Tests
 
 ```sh
