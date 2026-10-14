@@ -678,7 +678,7 @@ func listTools(t *testing.T, e *env, sn *fakeAS) {
 func TestServiceNowShapeNeedsPin(t *testing.T) {
 	e, sn := newSNEnv(t)
 	u, err := e.m.Start(context.Background(), "s")
-	if u != "" || err == nil {
+	if u != "" || err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("want an issuer mismatch error: %q %v", u, err)
 	}
 	noSecrets(t, err, "pre-secret")
@@ -689,7 +689,8 @@ func TestServiceNowShapeNeedsPin(t *testing.T) {
 
 func TestServiceNowShapeWrongPin(t *testing.T) {
 	e, sn := newSNEnv(t)
-	for _, pin := range []string{newAS(t).URL, sn.URL + "/other", sn.URL + "/sncapps/mc"} {
+	// the last is a real prefix of X, but X's metadata issuer is not that pin
+	for _, pin := range []string{newAS(t).URL, sn.URL + "/other", sn.URL + "/sncapps/mc", sn.URL + "/sncapps"} {
 		e.pin(pin)
 		u, err := e.m.Start(context.Background(), "s")
 		if u != "" || err == nil {
@@ -699,5 +700,29 @@ func TestServiceNowShapeWrongPin(t *testing.T) {
 	}
 	if sn.tokens != 0 {
 		t.Fatalf("token endpoint hit %d times", sn.tokens)
+	}
+}
+
+func TestIssuerAliasRefusesDotSegments(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, asmPath) { // any metadata names the pin, so only the path check can refuse
+			fmt.Fprintf(w, `{"issuer":%q}`, srv.URL+"/pin")
+			return
+		}
+		fmt.Fprintf(w, `{"resource":"r","authorization_servers":[%q]}`, srv.URL+"/pin/"+r.URL.Query().Get("x"))
+	}))
+	defer srv.Close()
+	a := &issuerAlias{base: http.DefaultTransport, pin: srv.URL + "/pin"}
+	for x, want := range map[string]bool{"%2e%2e/%2e%2e/u/evil": false, "a/../../u": false, "a/./b": false, "a%2Fb": false, "mcp/x": true} {
+		req, _ := http.NewRequest("GET", srv.URL+prmPath+"?x="+url.QueryEscape(x), nil)
+		resp, err := a.RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		if got := strings.Contains(string(b), `["`+srv.URL+`/pin"]`); got != want {
+			t.Errorf("x=%s: rewritten=%v want %v (%s)", x, got, want, b)
+		}
 	}
 }

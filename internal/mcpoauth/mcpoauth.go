@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -416,16 +417,8 @@ func (t *issuerAlias) RoundTrip(req *http.Request) (*http.Response, error) {
 	xp := t.x
 	t.mu.Unlock()
 	if xp != "" && req.Method == http.MethodGet && req.URL.Scheme == p.Scheme && req.URL.Host == p.Host && req.URL.Path == asmPath+pp && req.URL.RawQuery == "" {
-		alt := req.Clone(req.Context())
-		alt.URL.Path, alt.URL.RawPath = asmPath+xp, ""
-		if resp, err := t.base.RoundTrip(alt); err == nil {
-			b, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			var meta struct{ Issuer string }
-			if resp.StatusCode == http.StatusOK && json.Unmarshal(b, &meta) == nil && strings.TrimSuffix(meta.Issuer, "/") == t.pin {
-				resp.Body = io.NopCloser(bytes.NewReader(b))
-				return resp, nil
-			}
+		if resp := t.xMeta(req, xp); resp != nil {
+			return resp, nil
 		}
 		return t.base.RoundTrip(req)
 	}
@@ -453,9 +446,16 @@ func (t *issuerAlias) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, nil
 	}
 	xs := strings.TrimSuffix(x.Path, "/")
-	if servers[0] == t.pin || x.Scheme != p.Scheme || x.Host != p.Host || (xs != pp && !strings.HasPrefix(xs, pp+"/")) {
+	// a dot segment or an escaped byte could climb out of the pin's path on a server that normalises
+	if x.RawPath != "" || xs != "" && path.Clean(xs) != xs || servers[0] == t.pin || x.Scheme != p.Scheme || x.Host != p.Host || (xs != pp && !strings.HasPrefix(xs, pp+"/")) {
 		return resp, nil
 	}
+	// only name P if X's metadata really says issuer P; otherwise go-sdk would fall back to guessed endpoints under P
+	m := t.xMeta(req, xs)
+	if m == nil {
+		return resp, nil
+	}
+	m.Body.Close()
 	doc["authorization_servers"] = []string{t.pin}
 	nb, err := json.Marshal(doc)
 	if err != nil {
@@ -468,6 +468,25 @@ func (t *issuerAlias) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp.ContentLength = int64(len(nb))
 	resp.Header.Set("Content-Length", fmt.Sprint(len(nb)))
 	return resp, nil
+}
+
+// xMeta fetches X's RFC 8414 document on req's origin and returns it only if its issuer is the pin.
+func (t *issuerAlias) xMeta(req *http.Request, xp string) *http.Response {
+	alt := req.Clone(req.Context())
+	alt.Method, alt.Body, alt.ContentLength = http.MethodGet, nil, 0
+	alt.URL.Path, alt.URL.RawPath, alt.URL.RawQuery = asmPath+xp, "", ""
+	resp, err := t.base.RoundTrip(alt)
+	if err != nil {
+		return nil
+	}
+	b, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var meta struct{ Issuer string }
+	if err != nil || resp.StatusCode != http.StatusOK || json.Unmarshal(b, &meta) != nil || strings.TrimSuffix(meta.Issuer, "/") != t.pin {
+		return nil
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(b))
+	return resp
 }
 
 func (m *Manager) run(ctx context.Context, name string, s *config.Source, redirect string, l *login, urlCh chan<- string) error {

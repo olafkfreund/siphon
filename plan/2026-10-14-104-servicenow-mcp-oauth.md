@@ -249,6 +249,18 @@ The endpoint is X = `https://<inst>/sncapps/mcp-server/mcp/sn_mcp_server_default
   `siphon.mcp.tester`, which was created for this. Its credentials are in
   agenix, on nixos_config PR #2301.
 
+- **The Opus review of the whole diff:**
+  - **MEDIUM, fixed:** an X path with dot segments or escaped bytes
+    (`/pin/%2e%2e/...`) passed the prefix check. X is now refused when its
+    path isn't clean or has a `RawPath`.
+  - **Found while testing that:** when X's metadata issuer wasn't the pin,
+    the PRM was still rewritten to P, so go-sdk fell back to guessed
+    endpoints under P. The alias now checks X's issuer before rewriting.
+  - **Tests:** a dot-segment test, a `/sncapps` real-prefix case, and the
+    "does not match" assertion in NeedsPin.
+  - **LOW, kept as approved:** every 3xx, not just 302, counts as the
+    challenge.
+
 ## Tests
 
 ```sh
