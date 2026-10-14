@@ -558,3 +558,35 @@ func TestHooksMatrixRoutes(t *testing.T) {
 		t.Fatal(w.Code)
 	}
 }
+
+func TestRulesViewFields(t *testing.T) {
+	e := newEnv(t, func(o *Options) {
+		o.Cfg.Agents = map[string]*config.Agent{"a": {Kind: "codex"}}
+		o.Cfg.Rules = []config.Rule{
+			{Name: "ag", Source: "disk", When: "true", ForEach: "items", Repeat: config.Duration(time.Hour), Cooldown: config.Duration(time.Minute), Approve: true, Action: config.Action{Agent: "a"}},
+			{Name: "cmd", Source: "disk", When: "true", Egress: config.EgressRule{Enabled: true}, Action: config.Action{Cmd: []string{"true"}}},
+			{Name: "off", Source: "disk", When: "true", Action: config.Action{Cmd: []string{"true"}}},
+		}
+	})
+	for rule, ago := range map[string]time.Duration{"ag": 5 * time.Minute, "cmd": 20 * time.Minute, "off": time.Minute} {
+		at := e.now.Add(-ago).UnixMilli()
+		if _, err := e.st.DB.Exec(`INSERT INTO rule_state(rule,key,last_value,last_fired_at,last_seen_at) VALUES (?,'k',1,?,?)`, rule, at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.do("POST", "/api/rules/off/disable", nil, bearer)
+	rules, err := e.srv.rules()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ag, cmd, off := rules[0], rules[1], rules[2]
+	if !ag.Hot || cmd.Hot || off.Hot {
+		t.Fatalf("hot: %v %v %v", ag.Hot, cmd.Hot, off.Hot)
+	}
+	if !ag.Approval || ag.Provider != "codex" || !ag.ForEach || ag.Repeat != "1h0m0s" || ag.Egress {
+		t.Fatalf("%+v", ag)
+	}
+	if cmd.Approval || cmd.Provider != "" || cmd.ForEach || cmd.Repeat != "" || !cmd.Egress {
+		t.Fatalf("%+v", cmd)
+	}
+}
