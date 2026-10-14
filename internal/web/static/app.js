@@ -123,6 +123,67 @@
   });
   document.addEventListener("htmx:afterSwap", initFilters);
 
+  // YAML editor: line numbers, indent keys, error line. The textarea stays the form field.
+  function initCodeEditors() {
+    document.querySelectorAll("textarea.code-input").forEach(function (ta) {
+      if (ta.dataset.editor) return;
+      ta.dataset.editor = "1";
+      var wrap = document.createElement("div"), gutter = document.createElement("div"), leave = false;
+      wrap.className = "code-editor";
+      gutter.className = "code-gutter";
+      gutter.setAttribute("aria-hidden", "true");
+      ta.parentNode.insertBefore(wrap, ta);
+      wrap.appendChild(gutter);
+      wrap.appendChild(ta);
+      function number() {
+        var n = ta.value.split("\n").length;
+        while (gutter.children.length < n) gutter.appendChild(document.createElement("div")).textContent = gutter.children.length + 1;
+        while (gutter.children.length > n) gutter.removeChild(gutter.lastChild);
+      }
+      function edit(from, to, text, selStart, selEnd) {
+        ta.setRangeText(text, from, to, "preserve");
+        ta.setSelectionRange(selStart, selEnd);
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      ta.addEventListener("input", function () { number(); gutter.scrollTop = ta.scrollTop; });
+      ta.addEventListener("scroll", function () { gutter.scrollTop = ta.scrollTop; });
+      ta.addEventListener("keydown", function (e) {
+        if (e.ctrlKey || e.altKey || e.metaKey) return;
+        var v = ta.value, a = ta.selectionStart, b = ta.selectionEnd;
+        if (e.key === "Escape") { leave = true; return; }
+        var skip = leave; leave = false;
+        if (e.key === "Tab" && !skip) {
+          e.preventDefault();
+          var ls = v.lastIndexOf("\n", a - 1) + 1;
+          if (a === b && !e.shiftKey) { edit(a, b, "  ", a + 2, a + 2); return; }
+          var end = b > a && v[b - 1] === "\n" ? b - 1 : b, first = 0, total = 0;
+          var out = v.slice(ls, end).split("\n").map(function (l, i) {
+            var r = e.shiftKey ? l.replace(/^ {1,2}/, "") : "  " + l;
+            if (i === 0) first = r.length - l.length;
+            total += r.length - l.length;
+            return r;
+          }).join("\n");
+          edit(ls, end, out, Math.max(ls, a + first), b + total);
+        } else if (e.key === "Enter" && a === b && !e.shiftKey) {
+          e.preventDefault();
+          var cur = v.slice(v.lastIndexOf("\n", a - 1) + 1, a), ind = cur.match(/^ */)[0];
+          if (/:\s*$/.test(cur)) ind += "  ";
+          edit(a, b, "\n" + ind, a + 1 + ind.length, a + 1 + ind.length);
+        }
+      });
+      number();
+    });
+    markErrorLine();
+  }
+  function markErrorLine() {
+    var st = document.getElementById("yaml-status"), l = st ? parseInt(st.dataset.line, 10) : 0;
+    document.querySelectorAll(".code-gutter").forEach(function (g) {
+      Array.prototype.forEach.call(g.children, function (d, i) { d.classList.toggle("is-err", i + 1 === l); });
+    });
+  }
+  document.addEventListener("DOMContentLoaded", initCodeEditors);
+  document.addEventListener("htmx:afterSwap", initCodeEditors); // also re-marks the error line after a status swap
+
   // Announce htmx swaps for screen readers.
   document.addEventListener("htmx:afterSwap", function (e) {
     var live = document.getElementById("live");
