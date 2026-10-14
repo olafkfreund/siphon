@@ -62,6 +62,24 @@ spec: spec/2026-10-14-118-portal-refresh-slice2.md
 
 4. **The visual check (mine).**
 
+## Deviations
+
+- **Steps 1–3:**
+  - **Notion:** viewers see the status text. The token value and the "Use
+    this token" form stay operator-only, as `TestNotionVerification`
+    requires.
+  - **A stdio source's `Target`** shows only the package or `argv[0]`,
+    never the arguments, which may carry values.
+  - **The expired-OAuth "stale" case** is implemented but untested: a
+    token store in the web tests is too heavy. The refusing-webhook case
+    is tested.
+  - **The approvals stamp** reads "asked X ago · expires in Y", with a new
+    `left` template func. The session changed "waiting" to "asked".
+  - **`ActionOf`** is `map[int64]approvalAction`, which wraps
+    `store.JobAction` with `Source`, `SourceType` and `Soon`. A pending
+    job outside the dashboard's 24-hour window shows "unknown" as its
+    trigger, with "see details".
+
 ## Tests
 
 ```sh

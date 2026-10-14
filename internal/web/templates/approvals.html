@@ -1,13 +1,30 @@
 {{define "approvals"}}<div class="top"><div><h1>Approvals</h1><div class="muted">Runs that wait for a person before they jet out.</div></div></div>
-<div class="stack">
-{{range $a := .Approvals}}{{$p := index $.ActionOf $a.JobID}}<section class="card need-card">
-  <div class="need">{{template "pill" "pending_approval"}}<div class="what"><a href="/jobs/{{$a.JobID}}"><b>{{$a.Rule}}</b></a>{{if $p.Kind}} <span class="muted">· {{$p.Kind}} <b>{{$p.Target}}</b></span>{{end}}
-    <div class="muted small">created {{ago $a.CreatedAt}} · expires {{tm $a.ExpiresAt}}</div></div><span class="sp"></span>
-    <div class="acts">
-      <a class="btn sm" href="/jobs/{{$a.JobID}}">Details</a>
-      {{if can $.Role "operator"}}<form method="post" action="/approvals/{{$a.JobID}}/deny"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm no">Deny</button></form>{{end}}
-      {{if can $.Role "operator"}}<form method="post" action="/approvals/{{$a.JobID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm ok">Approve</button></form>{{end}}
-    </div></div>
+{{if gt (len .Approvals) 1}}<div class="filter-bar" data-filter-scope="approvals" hidden>
+  <input type="search" class="filter-search" aria-label="Filter approvals" placeholder="Filter by id, rule, target, source…  /" autocomplete="off">
+  <div class="chips" role="group" aria-label="Filter by kind">
+    <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
+    <button type="button" class="chip" data-filter="agent" aria-pressed="false">agent</button>
+    <button type="button" class="chip" data-filter="cmd" aria-pressed="false">cmd</button>
+    <button type="button" class="chip" data-filter="unit" aria-pressed="false">unit</button>
+    <button type="button" class="chip" data-filter="routine" aria-pressed="false">routine</button>
+    <button type="button" class="chip" data-filter="servicenow" aria-pressed="false">servicenow</button>
+  </div>
+</div>
+<p class="filter-none muted" data-filter-scope="approvals" hidden>No approvals match. <button type="button" class="btn sm" data-action="clear-filter">Clear filter</button></p>
+{{end}}<div class="stack" data-filter-list="approvals">
+{{range $a := .Approvals}}{{$p := index $.ActionOf $a.JobID}}<section class="card item-card is-wait" data-filter-item data-kind="{{$p.Kind}}" data-text="{{$a.JobID}} {{$a.Rule}} {{$p.Target}} {{$p.Provider}} {{$p.Source}}" aria-label="Approval for job {{$a.JobID}}, rule {{$a.Rule}}">
+  <div class="item-head"><a class="item-title" href="/jobs/{{$a.JobID}}"><b>{{$a.Rule}}</b></a><span class="muted small">#{{$a.JobID}}</span><span class="sp"></span>
+    <span class="stamp {{if $p.Soon}}err{{else}}wait{{end}}">asked {{ago $a.CreatedAt}} · expires in {{left $a.ExpiresAt}}</span></div>
+  <div class="flow flow-2">
+    <div class="node"><small><span class="sr-only">Trigger: </span>{{template "srcicon" $p.SourceType}}<span>{{if $p.SourceType}}{{$p.SourceType}}{{else}}trigger{{end}}</span></small>{{if $p.Source}}<code class="node-target" title="{{$p.Source}}">{{$p.Source}}</code>{{else}}<span class="muted">unknown</span>{{end}}</div>
+    <span class="pipe" aria-hidden="true"></span>
+    <div class="node"><small>will run</small>{{if $p.Kind}}{{template "run" $p}}{{else}}<span class="muted">see details</span>{{end}}</div>
+  </div>
+  <div class="item-foot"><span class="muted small">expires {{tm $a.ExpiresAt}}</span><span class="sp"></span>
+    <a class="btn sm" href="/jobs/{{$a.JobID}}" aria-label="Details of job {{$a.JobID}} ({{$a.Rule}})">Details</a>
+    {{if can $.Role "operator"}}<form method="post" action="/approvals/{{$a.JobID}}/deny" data-confirm="Deny job {{$a.JobID}}? It will be cancelled."><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm no" aria-label="Deny job {{$a.JobID}} ({{$a.Rule}})">{{template "icon" "x"}}Deny</button></form>
+    <form method="post" action="/approvals/{{$a.JobID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm ok" aria-label="Approve job {{$a.JobID}} ({{$a.Rule}})">{{template "icon" "check"}}Approve</button></form>{{else}}<span class="muted small">An operator decides.</span>{{end}}
+  </div>
 </section>
 {{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>Nothing is waiting for you.</section>{{end}}
 </div>{{end}}

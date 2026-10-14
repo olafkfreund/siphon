@@ -484,6 +484,9 @@ func TestNotionVerification(t *testing.T) {
 	if b := page(vc); strings.Contains(b, tok) || strings.Contains(b, "Use this token") {
 		t.Fatalf("viewer sees the token")
 	}
+	if !strings.Contains(page(vc), "Verification token received") {
+		t.Fatalf("viewer does not see the status text")
+	}
 	if code := ce.do("POST", "/sources/n/notion-verification", url.Values{"csrf": {vcsrf}, "token": {tok}}, func(r *http.Request) { r.AddCookie(vc) }).Code; code != 403 || pending.Load() == nil {
 		t.Fatalf("viewer accept: %d", code)
 	}

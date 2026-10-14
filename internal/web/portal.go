@@ -32,7 +32,7 @@ type view struct {
 	Notify      *notifyView
 	JobNotes    []store.Notification
 	Counts      map[string]int
-	ActionOf    map[int64]store.JobAction
+	ActionOf    map[int64]approvalAction
 	LoginForm   *loginForm
 	Models      []modelConnView
 	Presets     []modelPreset
@@ -45,6 +45,34 @@ type view struct {
 	Help        *helpView
 	HelpPage    *helpPageView
 	Gallery     *galleryView
+}
+
+// approvalAction is what a waiting job will run, plus its trigger and whether it expires soon.
+type approvalAction struct {
+	store.JobAction
+	Source, SourceType string
+	Soon               bool // expires in under 15 minutes
+}
+
+func (s *server) approvalActions(pending []store.JobAction, as []store.PendingApproval) map[int64]approvalAction {
+	acts := map[int64]store.JobAction{}
+	for _, p := range pending {
+		acts[p.ID] = p
+	}
+	out := map[int64]approvalAction{}
+	for _, a := range as {
+		v := approvalAction{JobAction: acts[a.JobID], Soon: a.ExpiresAt.Sub(s.Now()) < hotWindow}
+		for _, r := range s.Config().Rules {
+			if r.Name == a.Rule {
+				v.Source = r.Source
+				if src := s.Config().Sources[r.Source]; src != nil {
+					v.SourceType = src.Type
+				}
+			}
+		}
+		out[a.JobID] = v
+	}
+	return out
 }
 
 type layout struct {
@@ -107,14 +135,14 @@ func (s *server) portalRoutes(mux *http.ServeMux) {
 	})
 	page("/approvals", "approvals", func(_ *http.Request, v *view) (ok bool, err error) {
 		d, err := store.GetDashboard(s.Store.DB, s.Now().Add(-24*time.Hour))
-		v.ActionOf = map[int64]store.JobAction{}
-		for _, p := range d.Pending {
-			v.ActionOf[p.ID] = p
+		if err != nil {
+			return true, err
 		}
-		if err == nil {
-			v.Approvals, err = store.PendingApprovals(s.Store.DB)
+		if v.Approvals, err = store.PendingApprovals(s.Store.DB); err != nil {
+			return true, err
 		}
-		return true, err
+		v.ActionOf = s.approvalActions(d.Pending, v.Approvals)
+		return true, nil
 	})
 	page("/connections", "logins", func(r *http.Request, v *view) (bool, error) {
 		*v = s.connectionsView(r, v.CSRF)

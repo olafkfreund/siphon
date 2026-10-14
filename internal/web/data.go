@@ -20,9 +20,11 @@ type sourceView struct {
 	Poll       string     `json:"poll,omitempty"`
 	LastPollAt *time.Time `json:"last_poll_at"`
 	LastError  string     `json:"last_error"`
-	Health     string     `json:"health"`          // ok | stale | error | idle
-	OAuth      string     `json:"oauth,omitempty"` // auth.oauth sources: none | pending | ok | expired
-	Hot        bool       `json:"hot"`             // health ok and a poll or event within hotWindow
+	Health     string     `json:"health"`           // ok | stale | error | idle
+	OAuth      string     `json:"oauth,omitempty"`  // auth.oauth sources: none | pending | ok | expired
+	Hot        bool       `json:"hot"`              // health ok and a poll, event or run within hotWindow
+	Target     string     `json:"target,omitempty"` // the endpoint: webhook URL, schedule "at", or the URL or stdio summary
+	Rules      int        `json:"rules"`            // rules reading this source
 
 	// webhook sources: the last delivery, and a refusal newer than it
 	LastEventAt  *time.Time `json:"last_event_at,omitempty"`
@@ -133,6 +135,26 @@ func (s *server) sources() ([]sourceView, error) {
 		if v.ToolsOnly && v.Check != nil && !v.Check.OK {
 			v.LastError = "Connection test failed: " + v.Check.Detail
 		}
+		switch src.Type {
+		case "webhook":
+			v.Target = s.hookURL(name)
+		case "schedule":
+			v.Target = src.At
+		default:
+			switch {
+			case src.URL != "":
+				v.Target = src.URL
+			case src.Package != "":
+				v.Target = "stdio: " + src.Package
+			case len(src.Command) > 0:
+				v.Target = "stdio: " + src.Command[0] // argv[0] only: the arguments may carry values
+			}
+		}
+		for _, r := range s.Config().Rules {
+			if r.Source == name {
+				v.Rules++
+			}
+		}
 		switch {
 		case v.LastError != "":
 			v.Health = "error"
@@ -153,8 +175,11 @@ func (s *server) sources() ([]sourceView, error) {
 		default:
 			v.Health = "ok"
 		}
+		if v.Health != "error" && (v.LastReject != "" || v.OAuth == "expired") { // refusing deliveries, or the login lapsed
+			v.Health = "stale"
+		}
 		if v.Health == "ok" {
-			for _, t := range []*time.Time{v.LastPollAt, v.LastEventAt} {
+			for _, t := range []*time.Time{v.LastPollAt, v.LastEventAt, v.LastRunAt} {
 				if t != nil && s.Now().Sub(*t) < hotWindow {
 					v.Hot = true
 				}
@@ -348,4 +373,18 @@ func ago(now, t time.Time) string {
 		return strconv.Itoa(int(d.Hours())) + " h ago"
 	}
 	return t.Local().Format("2 Jan 15:04")
+}
+
+// left is the time until t, rounded for a glance: "12 min", "3 h", or "expired".
+func left(now, t time.Time) string {
+	d := t.Sub(now)
+	switch {
+	case d <= 0:
+		return "expired"
+	case d < time.Minute:
+		return "under 1 min"
+	case d < time.Hour:
+		return strconv.Itoa(int(d.Minutes())) + " min"
+	}
+	return strconv.Itoa(int(d.Hours())) + " h"
 }

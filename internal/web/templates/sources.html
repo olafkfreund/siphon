@@ -1,14 +1,37 @@
-{{define "sources"}}<div class="top"><div><h1>Sources</h1><div class="muted">Where Siphon draws events in from.</div></div></div>
-<div class="grid g2e">
-{{range .Sources}}<section class="card" aria-label="Source {{.Name}}">
-  <div class="item-head"><span class="dot {{.Health}}" title="{{.Health}}"></span><b>{{.Name}}</b><span class="pill tag">{{.Type}}</span><span class="sp"></span>{{if .Poll}}<span class="muted small">every {{.Poll}}</span>{{else if .At}}<span class="muted small"><code>{{.At}}</code></span>{{end}}</div>
-  {{if eq .Type "schedule"}}<p class="small muted mt">Next run {{zoned .NextRunAt .Timezone}} · last run {{if .LastRunAt}}{{zoned .LastRunAt .Timezone}}{{else}}never{{end}}</p>{{end}}
-  <p class="small {{if .LastError}}err{{else}}muted{{end}} mt">{{if .LastError}}{{.LastError}}{{else if eq .Type "schedule"}}{{else if eq .Type "webhook"}}{{if .LastEventAt}}Last delivery {{agop .LastEventAt}}{{else}}Waiting for the first delivery.{{end}}{{else if .ToolsOnly}}Agent tools · {{if .Check}}connection test ok {{agot .Check.At}}{{if .Check.Detail}} · {{.Check.Detail}}{{end}}{{else}}not tested yet{{end}}{{else if .LastPollAt}}Last poll {{agop .LastPollAt}}{{else}}Not polled yet.{{end}}</p>
-  {{if .LastReject}}<p class="small muted">Refused {{agop .LastRejectAt}}: {{.LastReject}}</p>{{end}}
-  {{if .OAuth}}<div class="item-head mt"><span class="small muted">OAuth: {{.OAuth}}</span><span class="sp"></span>
-    {{if can $.Role "operator"}}<form method="post" action="/sources/{{pe .Name}}/oauth"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{if or (eq .OAuth "ok") (eq .OAuth "expired")}}Log in again{{else}}Log in{{end}}</button></form>{{end}}</div>{{end}}
-  {{if and .NotionAwait (can $.Role "operator")}}<div class="item-head mt">{{if .NotionToken}}<span class="small muted">Verification token <code>{{.NotionToken}}</code> received {{agop .NotionAt}}</span><span class="sp"></span>
-    <form method="post" action="/sources/{{pe .Name}}/notion-verification"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="token" value="{{.NotionToken}}"><button class="btn sm primary">Use this token</button></form>{{else}}<span class="small muted">Awaiting Notion's verification token</span>{{end}}</div>{{end}}
+{{define "sources"}}<div class="top"><div><h1>Sources</h1><div class="muted">Where Siphon draws events in from.</div></div><span class="sp"></span>{{if can $.Role "admin"}}<a class="btn primary" href="/config/sources/new">New source</a>{{end}}</div>
+{{if .Sources}}<div class="filter-bar" data-filter-scope="sources" hidden>
+  <input type="search" class="filter-search" aria-label="Filter sources" placeholder="Filter sources…  /" autocomplete="off">
+  <div class="chips" role="group" aria-label="Filter by kind or health">
+    <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
+    <button type="button" class="chip" data-filter="webhook" aria-pressed="false">webhook</button>
+    <button type="button" class="chip" data-filter="http" aria-pressed="false">http</button>
+    <button type="button" class="chip" data-filter="mcp" aria-pressed="false">mcp</button>
+    <button type="button" class="chip" data-filter="schedule" aria-pressed="false">schedule</button>
+    <button type="button" class="chip" data-filter="error" aria-pressed="false">error</button>
+    <button type="button" class="chip" data-filter="stale" aria-pressed="false">stale</button>
+    <button type="button" class="chip" data-filter="hot" aria-pressed="false">hot</button>
+  </div>
+</div>
+<p class="filter-none muted" data-filter-scope="sources" hidden>No sources match. <button type="button" class="btn sm" data-action="clear-filter">Clear filter</button></p>
+{{end}}<div class="grid g2e" data-filter-list="sources">
+{{range .Sources}}{{$wait := or .LastReject (eq .OAuth "expired")}}<section data-filter-item class="card item-card{{if .Hot}} is-hot{{end}}{{if eq .Health "error"}} is-err{{else if $wait}} is-wait{{end}}" aria-label="Source {{.Name}}" data-kind="{{.Type}}" data-health="{{.Health}}" data-hot="{{.Hot}}" data-text="{{.Name}} {{.Type}} {{.Target}}">
+  <div class="item-head"><span class="dot {{.Health}}" aria-hidden="true"></span>{{if can $.Role "admin"}}<a class="item-title" href="/config/sources/{{pe .Name}}">{{.Name}}</a>{{else}}<b class="item-title">{{.Name}}</b>{{end}}<span class="muted small">{{template "srcicon" .Type}} {{.Type}}</span><span class="sp"></span>
+    <span class="stamp{{if eq .Health "error"}} err{{else if $wait}} wait{{else if .Hot}} hot{{end}}">{{if eq .Health "error"}}error{{else if .LastReject}}refusing{{else if eq .OAuth "expired"}}login expired{{else}}{{.Health}}{{end}}</span>
+    {{if can $.Role "admin"}}<a class="btn sm" href="/config/sources/{{pe .Name}}">Edit</a>{{end}}</div>
+  <div class="node"><small><span class="sr-only">Endpoint: </span>{{template "srcicon" .Type}}<span>{{if eq .Type "webhook"}}receives at{{else if eq .Type "schedule"}}runs at{{else}}reads from{{end}}</span></small>
+    {{if eq .Type "webhook"}}<code id="src-{{.Name}}" class="wrap">{{.Target}}</code> <button type="button" class="btn sm" data-action="copy" data-target="src-{{.Name}}">{{template "icon" "copy"}}Copy</button>
+    {{else if eq .Type "schedule"}}<code>{{.At}}</code>{{if .Timezone}} <span class="muted small">{{.Timezone}}</span>{{end}}
+    {{else if .Target}}<code class="wrap">{{.Target}}</code>{{end}}
+    {{if eq .Type "schedule"}}<div class="small muted">Next run {{zoned .NextRunAt .Timezone}} · last run {{if .LastRunAt}}{{zoned .LastRunAt .Timezone}}{{else}}never{{end}}</div>
+    {{else if not .LastError}}<div class="small muted">{{if eq .Type "webhook"}}{{if .LastEventAt}}Last delivery {{agop .LastEventAt}}{{else}}Waiting for the first delivery.{{end}}{{else if .ToolsOnly}}Agent tools · {{if .Check}}connection test ok {{agot .Check.At}}{{if .Check.Detail}} · {{.Check.Detail}}{{end}}{{else}}not tested yet{{end}}{{else if .LastPollAt}}Last poll {{agop .LastPollAt}}{{else}}Not polled yet.{{end}}</div>{{end}}
+  </div>
+  {{if .LastError}}<div class="blocked is-err"><span>{{.LastError}}</span></div>{{end}}
+  {{if .LastReject}}<div class="blocked is-wait"><span>Refused {{agop .LastRejectAt}}: {{.LastReject}}</span></div>{{end}}
+  <div class="item-foot">{{if .Poll}}<span class="mode">{{template "icon" "timer"}} every {{.Poll}}</span>{{end}}{{if .ToolsOnly}}<span class="mode">tools only</span>{{end}}<span class="mode">{{.Rules}} rule{{if ne .Rules 1}}s{{end}}</span>
+    {{if .OAuth}}<span class="sp"></span><span class="small muted">OAuth: {{.OAuth}}</span>
+    {{if can $.Role "operator"}}<form method="post" action="/sources/{{pe .Name}}/oauth"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm{{if or (eq .OAuth "ok") (eq .OAuth "pending")}}{{else}} primary{{end}}">{{if or (eq .OAuth "ok") (eq .OAuth "expired")}}Log in again{{else}}Log in{{end}}</button></form>{{end}}{{end}}
+    {{if .NotionAwait}}<span class="sp"></span>{{if .NotionToken}}<span class="small muted">Verification token received {{agop .NotionAt}}{{if can $.Role "operator"}}: <code>{{.NotionToken}}</code>{{end}}</span>
+    {{if can $.Role "operator"}}<form method="post" action="/sources/{{pe .Name}}/notion-verification"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="token" value="{{.NotionToken}}"><button class="btn sm primary">Use this token</button></form>{{end}}{{else}}<span class="small muted">Awaiting Notion's verification token</span>{{end}}{{end}}</div>
 </section>
-{{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>Nothing in the current yet. Add a source to <code>siphon.yaml</code>.</section>{{end}}
+{{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>Nothing in the current yet. <a href="/help/templates">Start from a template</a>{{if can $.Role "admin"}} or <a href="/config/sources/new">add a source</a>{{end}}.</section>{{end}}
 </div>{{end}}
