@@ -1,5 +1,5 @@
 ---
-status: approved
+status: draft
 issue: 111
 spec: spec/2026-10-14-111-poll-error-and-each-prune.md
 ---
@@ -124,6 +124,39 @@ spec: spec/2026-10-14-111-poll-error-and-each-prune.md
     - the store test checks its setup errors.
   - **M1, open: an owner decision,** because it changes the spec's premise.
     See the PR or the session.
+
+## Amendment: steps 5–6 (prune by last seen), pending approval
+
+5. **The migration and the sighting** (spec amendment).
+   - **The new `internal/store/migrations/0007_rule_state_seen.sql`:**
+     `ALTER TABLE rule_state ADD COLUMN last_seen_at INTEGER;`.
+   - **`internal/store/store.go`:** add `TouchRuleSeen(tx, rule, key, now)`
+     with the throttled UPDATE (`now - 1h`).
+   - **`internal/rule/rule.go` `evalItem`, the each branch:** before
+     `return f, false, nil` for an already-fired key, call `TouchRuleSeen`
+     when `!st.LastFired.IsZero()`, whatever `cur` is.
+   - **`eachPrune`:** use `COALESCE(last_seen_at, last_fired_at) < ?`. The
+     newest-fired-row guard stays.
+   - **The tests:**
+     - **Rule:** a touch on re-evaluation, throttled within an hour.
+     - **Store:** fired 30 days ago but seen 1 day ago survives; seen 10
+       days ago goes; the newest-fired row still stays.
+     - **Migration:** the existing migration tests pick up `0007`, so check
+       `NewestMigration` and any schema snapshot test.
+
+   → verify: `go test -race ./internal/rule ./internal/store ./internal/job`.
+
+   Traps:
+   - **Migrations are append-only:** never edit `0001`–`0006`.
+   - **Dry-run evaluation** runs inside a savepoint that rolls back, so
+     check that a dry run doesn't write.
+6. **The docs.**
+   - `docs/tasks/backup-and-monitoring.md` and `internal/config/config.go:121`
+     say "not seen (fired, or returned again by a polled source) for longer
+     than `seen_events`".
+   - Run `go generate ./docs`.
+
+   → verify: `go test -race ./docs/...`.
 
 ## Tests
 

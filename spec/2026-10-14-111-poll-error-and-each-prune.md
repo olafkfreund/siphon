@@ -1,5 +1,5 @@
 ---
-status: approved
+status: draft
 issue: 111
 intent: intent/2026-10-14-111-poll-error-and-each-prune.md
 ---
@@ -125,3 +125,53 @@ if result.IsError {
   - a zero `EachRules` deletes nothing.
 - **`internal/job`:** `retention` passes the config's `on: each` rule names.
 - **`go vet ./... && go test -race ./...`.**
+
+## Amendment (after the review of the implementation): prune by last seen, not last fired
+
+**Why it changed.** The review found that the Risks premise above is wrong
+for polls that return current state: MCP resources and tools, and HTTP. An
+id still in the poll result after `seen_events` (7 days) would lose its row
+and fire again. For example, `mcp-task-triage` would rerun its agent every
+week for a task that stays failed. The owner chose last-seen tracking.
+
+**The design** replaces the `last_fired_at < cut` condition in §2:
+
+- **The migration `internal/store/migrations/0007_rule_state_seen.sql`:**
+  `ALTER TABLE rule_state ADD COLUMN last_seen_at INTEGER;`. Existing rows
+  are NULL and count as their `last_fired_at`.
+- **Recording a sighting, in `internal/rule/rule.go` `evalItem`, the
+  `on: each` branch.**
+  - **When:** the key's row has already fired (`!st.LastFired.IsZero()`),
+    whatever `when` says now. The id is in this event, so it's still alive.
+  - **What:** it calls `store.TouchRuleSeen(tx, rule, key, now)`. The
+    function runs
+    `UPDATE rule_state SET last_seen_at=? WHERE rule=? AND key=? AND (last_seen_at IS NULL OR last_seen_at < ?)`,
+    with `now` and `now - 1h`.
+  - **The cost** is at most one write per id per hour.
+  - **Dry runs** are covered: they run inside the savepoint that already
+    rolls back.
+- **The prune:**
+  `… AND COALESCE(last_seen_at, last_fired_at) < :cut AND last_fired_at < (SELECT MAX(last_fired_at) …)`.
+  The newest-fired row per rule still stays, for cooldown. Edge rules are
+  still never listed.
+- **Webhook and schedule rules** are never sighted again, so they prune by
+  fire time, as before.
+- **The docs** say: "an `on: each` id that has not been seen (fired, or
+  returned again by a polled source) for longer than `seen_events` can fire
+  again if it comes back".
+
+**The risks this adds:**
+- **Writes:** one UPDATE per already-fired id per poll, at most once an
+  hour. For a 50-record poll every 2 minutes, that's at most 50 small writes
+  an hour.
+- **The migration** adds a nullable column, so no data is rewritten.
+- **An id refires only if it vanished from every poll for longer than
+  `seen_events`,** then came back. That's the intended meaning.
+
+**More verification:**
+- **The rule test:** a fired each id evaluated again sets `last_seen_at`.
+  A second evaluation within an hour doesn't write. One after an hour does.
+- **The store test:** a row fired 30 days ago but seen 1 day ago survives
+  the prune, and one seen 10 days ago goes. The newest-fired row still
+  stays.
+- **The migration** applies on a database at `0006`.
