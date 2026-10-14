@@ -634,7 +634,7 @@ siphon apply -f deploy.yaml --secret sources/deploy-hook.secret=@hook.key
 | `ed25519` + `format: discord` | as `ed25519`, and answers Discord's PING, ignores autocomplete, and delivers each interaction keyed by its `id` with a deferred reply (or `reply_text:` as the message) | Discord slash commands and components |
 | `token` + `format: eventgrid` | as `token`, and answers Azure Event Grid's `OPTIONS` and validation handshakes and delivers each event of a batch (one rate-limit charge per request; keyed by its `id`; `validationUrl` is never fetched) | Azure Event Grid (put the secret in a delivery property) |
 | `google-oidc` | verifies the `Authorization: Bearer` OIDC token Google signs: issuer, `audience:` (default `server.public_url` + `/hook/<name>`), the required `service_account:` email, expiry; no secret | Google Cloud Pub/Sub push, other Google OIDC senders |
-| `google-oidc` + `format: pubsub` | as `google-oidc`, and unwraps the push envelope (base64 `data` as JSON or text, `attributes`, `message_id`, …), keyed by `messageId`, answering 204 (a duplicate too) | Google Cloud Pub/Sub (needs `server.public_url`; large messages need `limits.http_max_body`) |
+| `google-oidc` + `format: pubsub` | as `google-oidc`, and unwraps the push envelope (base64 `data` as JSON or text, `attributes`, `message_id`, …), keyed by `messageId`, answering 204 (a duplicate too) | Google Cloud Pub/Sub (needs `server.public_url`; keep payload wrapping on, since `--push-no-wrapper` gets 400; the creator needs `roles/iam.serviceAccountUser` on the push service account; large messages need `limits.http_max_body`) |
 | `sha256` + `format: notion` | as `sha256` with `X-Notion-Signature` and prefix `sha256=`. With no `secret:` the source only accepts Notion's one-time `{"verification_token": …}` POST and delivers nothing; an operator accepts the token on the Sources page (or `POST /api/sources/<name>/notion-verification` with `{"token": …}`, the token that was shown), which stores it as the secret. Order: create the subscription in Notion, copy the token from the Sources page, paste it into Notion and Verify, then press "Use this token". A wrong token that was accepted: delete `secret:` from the source's YAML and use "Resend token" in Notion; a restart loses an unaccepted token, so resend it too | Notion |
 | `slack` | signs `v0:<timestamp>:<body>` (HMAC-SHA256, `X-Slack-Signature`, ±5 min); Siphon also answers Slack's signed `url_verification` with its challenge | Slack (paste the app's Signing Secret) |
 | `stripe` | signs `<t>.<body>` in `Stripe-Signature` (`t=…,v1=…`; any `v1` may match, so rotation works; ±5 min) | Stripe (paste the endpoint's signing secret) |
@@ -4046,6 +4046,7 @@ rules:
 # title:    Push a notification when a Google Cloud Build fails
 # category: Ops & monitoring
 # needs:    sources/google-pubsub-hooks         (siphon connect google-pubsub)
+#           (push subscription on the Pub/Sub topic cloud-builds)
 # apply:    siphon apply -f gcp-cloud-build-failed.yaml
 rules:
   - name: cloud-build-failed

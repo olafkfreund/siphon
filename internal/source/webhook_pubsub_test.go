@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -194,5 +196,63 @@ func TestPubSubDuplicateAndRateLimit(t *testing.T) {
 	}
 	if a, b, c := post(), post(), post(); a != 204 || b != 204 || c != 429 || n != 1 {
 		t.Fatalf("statuses %d %d %d, delivered %d", a, b, c, n)
+	}
+}
+
+func psServe(t *testing.T, key *rsa.PrivateKey, hits *atomic.Int32) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: "k1", Algorithm: "RS256", Use: "sig"}}})
+	}))
+}
+
+func TestGoogleVerifierRejectsOtherAlgs(t *testing.T) {
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	var hits atomic.Int32
+	jwks := psServe(t, key, &hits)
+	defer jwks.Close()
+	gv := newGoogleVerifier(jwks.Client(), jwks.URL, func() time.Time { return pubsubNow })
+	claims := `{"iss":"https://accounts.google.com","aud":["` + psAud + `"],"email":"` + psSA + `","email_verified":true,"exp":` + strconv.FormatInt(pubsubNow.Add(time.Hour).Unix(), 10) + `}`
+	enc := base64.RawURLEncoding.EncodeToString
+	none := enc([]byte(`{"alg":"none","kid":"k1"}`)) + "." + enc([]byte(claims)) + "."
+	sg, _ := jose.NewSigner(jose.SigningKey{Algorithm: jose.HS256, Key: []byte("0123456789abcdef0123456789abcdef")}, (&jose.SignerOptions{}).WithHeader("kid", "k1"))
+	hs, _ := sg.Sign([]byte(claims))
+	hsTok, _ := hs.CompactSerialize()
+	for name, tok := range map[string]string{"alg none": none, "HS256": hsTok} {
+		if _, err := gv.Verify(context.Background(), tok, psAud); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+}
+
+func TestGoogleVerifierLimitsKeyRefetch(t *testing.T) {
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	var hits atomic.Int32
+	jwks := psServe(t, key, &hits)
+	defer jwks.Close()
+	clock := pubsubNow
+	gv := newGoogleVerifier(jwks.Client(), jwks.URL, func() time.Time { return clock })
+	c := psClaims{"https://accounts.google.com", []string{psAud}, psSA, true, pubsubNow.Add(time.Hour).Unix()}
+	verify := func(kid string) error {
+		sg, _ := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: key}, (&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", kid))
+		tok, _ := jwt.Signed(sg).Claims(c).Serialize()
+		_, err := gv.Verify(context.Background(), tok, psAud)
+		return err
+	}
+	if err := verify("k1"); err != nil {
+		t.Fatal(err)
+	}
+	clock = clock.Add(2 * time.Minute)
+	before := hits.Load()
+	for i := range 2 {
+		if verify("unknown-"+strconv.Itoa(i)) == nil {
+			t.Fatal("unknown kid accepted")
+		}
+	}
+	if n := hits.Load() - before; n > 1 {
+		t.Errorf("%d JWKS fetches for unknown key ids in a minute, want at most 1", n)
+	}
+	if err := verify("k1"); err != nil {
+		t.Errorf("known kid: %v", err)
 	}
 }

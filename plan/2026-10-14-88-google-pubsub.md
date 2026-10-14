@@ -145,3 +145,14 @@ Opus agent reviews them. Step 4 is mine.
     URL.
   - **Pub/Sub is charged by the shared once-per-request limiter check**
     (#99's batch fix), with no extra charge in `servePubSub`.
+- **Review of steps 1–3 (fresh Opus, no HIGH findings):**
+  - **MEDIUM, fixed:** a token with an unknown `kid` makes go-oidc fetch
+    Google's keys again. Now an unseen `kid` may trigger at most one fetch
+    a minute, and a `kid` counts as known only after a token verifies with
+    it. Trade-off: a second new `kid` within that minute, during a key
+    rotation, gets 401 until the gap passes, and Pub/Sub retries.
+  - **New tests:** `alg:none` and HS256 tokens are refused (at the
+    verifier).
+  - **The setup text** covers `actAs`, the token-creator grant (only for
+    projects created before 8 April 2021), that wrapped delivery is
+    required, and the `cloud-builds` topic.

@@ -1,6 +1,7 @@
 # title:    Push a notification when a Google Cloud Build fails
 # category: Ops & monitoring
 # needs:    sources/google-pubsub-hooks         (siphon connect google-pubsub)
+#           (push subscription on the Pub/Sub topic cloud-builds)
 # apply:    siphon apply -f gcp-cloud-build-failed.yaml
 rules:
   - name: cloud-build-failed

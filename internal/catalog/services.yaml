@@ -995,13 +995,18 @@ services:
           {{end -}}
     setup: |
       server.public_url must be set: the audience defaults to the URL above.
-      Grant the Pub/Sub service agent (service-<project number>@gcp-sa-pubsub.iam.gserviceaccount.com)
-      the roles/iam.serviceAccountTokenCreator role on the service account.
-      Then create the subscription:
+      Whoever creates the subscription needs roles/iam.serviceAccountUser
+      (iam.serviceAccounts.actAs) on the push service account.
+      Only for projects created before 8 April 2021: also grant the Pub/Sub
+      service agent (service-<project number>@gcp-sa-pubsub.iam.gserviceaccount.com)
+      roles/iam.serviceAccountTokenCreator on that service account.
+      Then create the subscription (leave payload wrapping on: a
+      --push-no-wrapper subscription gets 400):
         gcloud pubsub subscriptions create <sub> --topic=<topic> \
           --push-endpoint=<the URL above> \
           --push-auth-service-account=<service account>
       With a custom audience, add --push-auth-token-audience=<audience>.
+      For Cloud Build failures, subscribe to the topic cloud-builds.
       A message larger than limits.http_max_body (1 MiB by default) is refused
       with 413; raise it if your messages are large.
   - {id: azure-devops, name: Azure DevOps, mark: AD, category: code, summary: Azure DevOps service hooks and work items., status: not-yet, reason: 'service hooks use basic auth only, and the remote MCP is Entra OAuth only'}
