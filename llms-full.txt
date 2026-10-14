@@ -4608,6 +4608,9 @@ agents:
     kind: claude
     credential: claude-max
     mcp: [notion]
+    # Read-only: Notion's hosted server names its tools notion-fetch, notion-search, …
+    # (check with the source's tool list). A wrong name means no tool, never a write.
+    allowed_tools: [mcp__notion__notion-fetch, mcp__notion__notion-search]
     prompt: |
       Notion event {{.event.type}} on page {{.event.entity.id}}.
       Read the page with the Notion tools and summarise what changed in three lines.
