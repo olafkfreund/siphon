@@ -1,6 +1,6 @@
 {
   "azure-devops": {
-    "package": "azure-devops-mcp",
+    "package": "siphon-azure-devops-mcp",
     "args": [],
     "env": [
       "AZURE_DEVOPS_ORG",

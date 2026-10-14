@@ -213,6 +213,33 @@ spec: spec/2026-10-14-102-azure-devops-agent-tools.md
   needed the new page added to their maps, so it's linked and included in
   `llms-full.txt`.
 
+- **The Opus review of the whole diff:**
+  - **HIGH, fixed: the step 1 proxy finding was wrong.** Upstream's
+    search, wiki, test-plan and some write tools also use native `fetch`,
+    not just the tenant lookup. Under restricted egress (`PrivateNetwork`,
+    proxy only), those tools failed. The wrapper now exports
+    `NODE_USE_ENV_PROXY=1`. It was checked against a logging proxy:
+    `search_code` CONNECTs to `almsearch.dev.azure.com`, and
+    `core_list_projects` to `dev.azure.com` and `vssps.dev.azure.com`.
+  - **MEDIUM, fixed: the triage prompt had no project.** The pipelines
+    tools require one. The prompt now passes
+    `resourceContainers.project.id` and the build id only.
+  - **MEDIUM, fixed: the template header said "only ids reach the
+    prompt",** but the definition name and build number did too. Those are
+    now dropped from the prompt.
+  - **LOW, fixed:**
+    - the flake attribute is renamed to `siphon-azure-devops-mcp`, so a
+      future nixpkgs `azure-devops-mcp` can't shadow the wrapper through the
+      module's `pkgs.${x} or self.packages` fallback;
+    - the connection test gains a failure case (wrong PAT gives `ok:false`,
+      with no PAT or base64 value in the response).
+  - **LOW, noted but not changed:**
+    - the base64 PAT isn't in the bridge mask (upstream never logs it);
+    - the organization field isn't validated;
+    - all 40 tools are exposed, and `allowed_tools` is the boundary, per
+      the spec;
+    - `cooldown` on `on: each`.
+
 ## Tests
 
 ```sh

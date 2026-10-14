@@ -1048,7 +1048,7 @@ services:
     status: needs-package
     needs_package: [azure-devops]
     reason: 'add `azure-devops` to `server.mcp_packages` (`services.siphon.catalogPackages = [ "azure-devops" ]` on NixOS)'
-    nix: {attr: azure-devops-mcp, args: [], env: [AZURE_DEVOPS_ORG, AZURE_DEVOPS_PAT], hosts: [dev.azure.com, vssps.dev.azure.com, almsearch.dev.azure.com]}
+    nix: {attr: siphon-azure-devops-mcp, args: [], env: [AZURE_DEVOPS_ORG, AZURE_DEVOPS_PAT], hosts: [dev.azure.com, vssps.dev.azure.com, almsearch.dev.azure.com]}
     templates: [azure-devops-build-failed, azure-devops-build-triage, azure-devops-new-bug]
     fields:
       - {<<: *f_name, default: azure-devops}

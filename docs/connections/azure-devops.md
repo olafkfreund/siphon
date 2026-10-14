@@ -49,7 +49,7 @@ services.siphon.catalogPackages = [ "azure-devops" ];
 ```
 
 Elsewhere, add `azure-devops` to `server.mcp_packages`, with `command` set to
-`siphon-azure-devops-mcp` from this flake's `azure-devops-mcp` package, `env`
+`siphon-azure-devops-mcp` from this flake's `siphon-azure-devops-mcp` package, `env`
 `[AZURE_DEVOPS_ORG, AZURE_DEVOPS_PAT]` and `hosts`
 `[dev.azure.com, vssps.dev.azure.com, almsearch.dev.azure.com]`.
 
@@ -92,11 +92,17 @@ Ready-made: `siphon template azure-devops-build-triage`.
 
 ### Proxies
 
-The server's API calls (`azure-devops-node-api` over `typed-rest-client`) honour
-`HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`. One start-up call does not: the
-organization's tenant lookup uses Node's built-in `fetch`, which ignores them.
-Behind a proxy that call fails and is logged as `Failed to fetch tenant`; the
-server carries on and the tools work.
+The server reaches Azure DevOps through Siphon's egress proxy:
+- **The API calls** go through `azure-devops-node-api` and
+  `typed-rest-client`, which honour `HTTP_PROXY`, `HTTPS_PROXY` and
+  `NO_PROXY`.
+- **The search, wiki and some write tools** use Node's built-in `fetch`.
+  Node only sends that through the proxy when `NODE_USE_ENV_PROXY=1` is
+  set, and the wrapper sets it.
+
+Both paths were checked against a test proxy. It saw CONNECTs to
+`dev.azure.com`, `vssps.dev.azure.com` and `almsearch.dev.azure.com`, which
+are the three hosts the package allows.
 
 ### Check it live
 

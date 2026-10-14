@@ -37,6 +37,8 @@ writeShellApplication {
     PERSONAL_ACCESS_TOKEN=$(printf 'siphon:%s' "$AZURE_DEVOPS_PAT" | base64 -w0)
     export PERSONAL_ACCESS_TOKEN
     unset AZURE_DEVOPS_PAT
+    # upstream's search, wiki and some write tools use Node's fetch, which ignores HTTPS_PROXY without this
+    export NODE_USE_ENV_PROXY=1
     exec ${lib.getExe server} "$AZURE_DEVOPS_ORG" -a pat "$@"
   '';
   meta.mainProgram = "siphon-azure-devops-mcp";

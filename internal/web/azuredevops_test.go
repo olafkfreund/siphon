@@ -44,4 +44,20 @@ func TestAzureDevOpsConnectionTest(t *testing.T) {
 			t.Fatalf("%s in %s", s, body)
 		}
 	}
+
+	// A wrong PAT fails, and neither it nor its header value is in the answer.
+	const bad = "wrong-ado-pat"
+	if w := ce.api("POST", "/api/services/azure-devops", jbody(map[string]any{"name": "ado2", "organization": "org2", "pat": bad})); w.Code != 200 {
+		t.Fatalf("connect ado2: %d %s", w.Code, w.Body.String())
+	}
+	w = ce.api("POST", "/api/connections/ado2/test", "")
+	body = w.Body.String()
+	if !strings.Contains(body, `"ok":false`) {
+		t.Fatalf("wrong PAT: %d %s", w.Code, body)
+	}
+	for _, s := range []string{bad, base64.StdEncoding.EncodeToString([]byte(":" + bad))} {
+		if strings.Contains(body, s) {
+			t.Fatalf("%s in %s", s, body)
+		}
+	}
 }

@@ -60,7 +60,7 @@
         # AWS MCP servers for services.siphon.aws (pinned; see nix/pkgs).
         aws-cloudwatch-mcp-server = pkgs.callPackage ./nix/pkgs/aws-cloudwatch-mcp-server.nix { };
         aws-documentation-mcp-server = pkgs.callPackage ./nix/pkgs/aws-documentation-mcp-server.nix { };
-        azure-devops-mcp = pkgs.callPackage ./nix/pkgs/azure-devops-mcp.nix { };
+        siphon-azure-devops-mcp = pkgs.callPackage ./nix/pkgs/azure-devops-mcp.nix { };
       });
 
       # Build your own image with agent CLIs: lib.<system>.mkImage { agentPackages = [ ... ]; }
@@ -96,7 +96,7 @@
         azure-devops-mcp-smoke = pkgs.runCommand "azure-devops-mcp-smoke" { nativeBuildInputs = [ pkgs.python3 ]; } ''
           export HOME=$TMPDIR AZURE_DEVOPS_ORG=smoke AZURE_DEVOPS_PAT=smoke-pat-value
           export SMOKE_EXPECT=wit_work_item,pipelines_build_log SMOKE_SECRET=smoke-pat-value
-          python3 ${./nix/aws-mcp-smoke.py} ${pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.azure-devops-mcp}
+          python3 ${./nix/aws-mcp-smoke.py} ${pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.siphon-azure-devops-mcp}
           touch $out
         '';
         # catalogPackages installs a catalogue service's pinned MCP server next to github.
@@ -127,7 +127,7 @@
           assert builtins.elem "--disable-write" pk.grafana.args;
           assert builtins.elem "GRAFANA_URL" pk.grafana.urlEnv;
           assert pk ? azure-devops;
-          assert pk.azure-devops.package == self.packages.${pkgs.stdenv.hostPlatform.system}.azure-devops-mcp;
+          assert pk.azure-devops.package == self.packages.${pkgs.stdenv.hostPlatform.system}.siphon-azure-devops-mcp;
           assert builtins.elem "dev.azure.com" pk.azure-devops.hosts;
           pkgs.runCommand "catalog-module-ok" { } "touch $out";
         # cli.enable (default) puts siphon on PATH with SIPHON_URL at the daemon's port.
