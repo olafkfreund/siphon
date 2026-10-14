@@ -61,6 +61,7 @@ Always follow this order. Every step has `-o json`.
    - `discord-ask-agent` (Discord slash command, `signature: ed25519` with `format: discord`),
    - `teams-ask-agent` (Microsoft Teams outgoing webhook, `signature: teams-hmac`; replies through a Workflows webhook),
    - `matrix-deploy-command` (Matrix application service, `signature: token` with `token_header: Authorization` and `format: matrix`; unencrypted rooms only),
+   - `azure-devops-build-failed` (Azure DevOps service hook, `signature: token` with `token_header: X-Siphon-Key`),
    - `azure-keyvault-secret-expiry` (Azure Event Grid, `signature: token` with `format: eventgrid`),
    - `gcp-cloud-build-failed` (Google Pub/Sub, `signature: google-oidc` with `format: pubsub`, no secret),
    - `notion-page-summary` (Notion, `format: notion`: the source starts with no secret; accept the verification token it captures on the Sources page),

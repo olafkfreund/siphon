@@ -1,0 +1,14 @@
+# title:    Push a phone notification when an Azure DevOps build fails
+# category: Ops & monitoring
+# needs:    sources/azure-devops-hooks             (siphon connect azure-devops; add a "Build completed" service hook)
+# apply:    siphon apply -f azure-devops-build-failed.yaml
+# Uses ntfy.sh: install the ntfy app and subscribe to your topic. Pick a long,
+# random topic name: anyone who knows it can read it.
+rules:
+  - name: azure-devops-build-failed
+    source: azure-devops-hooks
+    when: 'event.eventType == "build.complete" && event.resource.result == "failed"'
+    on: each
+    id: event.id                     # the notification event GUID: the same on a retry, unique across organisations
+    action:
+      cmd: [curl, -fsS, -H, "Title: Azure DevOps build failed", --data-raw, "Build {{.event.resource.buildNumber}} ({{.event.resource.definition.name}}) failed", https://ntfy.sh/siphon-CHANGE-ME]

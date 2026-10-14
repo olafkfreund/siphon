@@ -370,3 +370,27 @@ func TestMatrixEntry(t *testing.T) {
 		t.Fatal("homeserver_name is required")
 	}
 }
+
+func TestAzureDevOpsEntry(t *testing.T) {
+	e := Get("azure-devops")
+	if e == nil || e.Status == "not-yet" {
+		t.Fatal("azure-devops missing or not available")
+	}
+	res, err := e.Render(map[string]string{"name": "ado"}, Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Items) != 1 || res.Items[0].Name != "ado-hooks" {
+		t.Fatalf("%+v", res.Items)
+	}
+	y := res.Items[0].YAML
+	if !strings.Contains(y, "signature: token") || !strings.Contains(y, "token_header: X-Siphon-Key") {
+		t.Fatalf("yaml: %s", y)
+	}
+	if len(res.Secrets) != 1 || res.Done.HookSecret == "" || strings.Contains(y, res.Done.HookSecret) {
+		t.Fatalf("secrets %+v done %+v", res.Secrets, res.Done)
+	}
+	if res.Done.Hook != "ado-hooks" {
+		t.Fatalf("Done.Hook = %q", res.Done.Hook)
+	}
+}

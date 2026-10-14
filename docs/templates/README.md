@@ -34,6 +34,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 |---|---|---|
 | [`alert-to-servicenow-incident`](alert-to-servicenow-incident.yaml) | Open a ServiceNow incident for each alert, with no agent | a webhook source `alerts`, `siphon connect servicenow --instance …` |
 | [`alertmanager-summary`](alertmanager-summary.yaml) | Summarise Prometheus alerts with a local model, then notify | `siphon connect model ollama` · webhook secret |
+| [`azure-devops-build-failed`](azure-devops-build-failed.yaml) | Push a phone notification when an Azure DevOps build fails | `siphon connect azure-devops` |
 | [`azure-keyvault-secret-expiry`](azure-keyvault-secret-expiry.yaml) | Push a notification when an Azure Key Vault secret is near expiry | `siphon connect azure-eventgrid` |
 | [`gcp-cloud-build-failed`](gcp-cloud-build-failed.yaml) | Push a notification when a Google Cloud Build fails | `siphon connect google-pubsub` |
 | [`cloudflare-notification`](cloudflare-notification.yaml) | Explain Cloudflare notifications with an agent, then notify | `siphon connect cloudflare --webhook`, `siphon connect login claude` |
@@ -62,6 +63,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 
 | Template | What it does | Connect first |
 |---|---|---|
+| [`azure-devops-new-bug`](azure-devops-new-bug.yaml) | Push a phone notification for each new Azure DevOps bug | `siphon connect azure-devops` |
 | [`matrix-deploy-command`](matrix-deploy-command.yaml) | A Matrix "!deploy" message runs a routine (unencrypted rooms only) | `siphon connect matrix` |
 | [`teams-ask-agent`](teams-ask-agent.yaml) | A Teams @mention answered by a local model, posted back through a Workflows webhook | `siphon connect teams`, `siphon connect model ollama` |
 | [`discord-ask-agent`](discord-ask-agent.yaml) | A Discord /ask command answered by a local model, posted back to the interaction | `siphon connect discord`, `siphon connect model ollama` |
