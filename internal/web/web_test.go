@@ -590,3 +590,35 @@ func TestRulesViewFields(t *testing.T) {
 		t.Fatalf("%+v", cmd)
 	}
 }
+
+func TestRulesPageMarkup(t *testing.T) {
+	e := newEnv(t, func(o *Options) {
+		o.Cfg.Agents = map[string]*config.Agent{"a": {Kind: "codex"}}
+		o.Cfg.Rules = []config.Rule{
+			{Name: "ag", Source: "disk", When: "true", ForEach: "items", Repeat: config.Duration(time.Hour), Cooldown: config.Duration(time.Minute), Approve: true, Action: config.Action{Agent: "a"}},
+			{Name: "cmd", Source: "disk", When: "true", Action: config.Action{Cmd: []string{"true"}}},
+			{Name: "off", Source: "disk", When: "true", Action: config.Action{Cmd: []string{"true"}}},
+		}
+	})
+	for rule, ago := range map[string]time.Duration{"ag": 5 * time.Minute, "cmd": 20 * time.Minute} {
+		at := e.now.Add(-ago).UnixMilli()
+		e.st.DB.Exec(`INSERT INTO rule_state(rule,key,last_value,last_fired_at,last_seen_at) VALUES (?,'k',1,?,?)`, rule, at, at)
+	}
+	e.do("POST", "/api/rules/off/disable", nil, bearer)
+	c, _ := e.asRole(roleAdmin, "u")
+	b := e.do("GET", "/rules", nil, func(r *http.Request) { r.AddCookie(c) }).Body.String()
+	if n := strings.Count(b, "is-hot"); n != 1 {
+		t.Errorf("is-hot x%d", n)
+	}
+	for _, want := range []string{`class="rules-bar" hidden`, `data-kind="agent"`, `class="prov codex"`, "asks approval", "for each", "repeat 1h0m0s", "cooldown 1m0s", "is-off", "runs automatically", `href="/config/rules/ag"`} {
+		if !strings.Contains(b, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	e2 := newEnv(t, func(o *Options) { o.Cfg.Rules = nil })
+	c, _ = e2.asRole(roleAdmin, "u")
+	b = e2.do("GET", "/rules", nil, func(r *http.Request) { r.AddCookie(c) }).Body.String()
+	if !strings.Contains(b, `href="/help/templates"`) || !strings.Contains(b, `href="/config/rules/new"`) || strings.Contains(b, "rules-bar") {
+		t.Error("empty state")
+	}
+}

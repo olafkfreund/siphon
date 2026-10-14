@@ -147,6 +147,20 @@ spec: spec/2026-10-14-115-rules-page-refresh.md
       - both colour schemes.
    5. Re-enable the rule afterwards.
 
+## Deviations
+
+- **Steps 2–4:**
+  - **The kind chips:** all five are rendered, and the JS hides kinds with
+    no cards. The template can't list the kinds present without a Go
+    helper.
+  - **`data-text`** is lower-cased by the JS, not the server.
+  - **The condition:** clamped with `-webkit-box`, plus `.node { min-width: 0 }`.
+  - **`.rule-card[hidden] { display: none }`** is added, because
+    `display: flex` overrode `hidden`.
+  - **Screen-reader labels** use the existing `.sr-only` class. The
+    plan's new `.sr` duplicated it, so it's dropped.
+  - **The egress pill** reads "egress limited".
+
 ## Tests
 
 ```sh
