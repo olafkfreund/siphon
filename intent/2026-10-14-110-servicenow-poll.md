@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 110
 author: olafkfreund
 ---
@@ -91,3 +91,10 @@ event. The spec will say which.
    only on new incidents? **I'd fire on changes,** like the webhook
    template, and show the "new only" variant in the docs as a one-line
    `when:` change (`item.sys_mod_count == "0"`).
+
+## Decisions (at approval)
+
+1. **Timing:** poll every 2 minutes, over a 10-minute window, with
+   duplicates removed by the `sys_id:sys_mod_count` key.
+2. **Fire on every change.** The "new only" variant is shown in the docs as
+   a one-line `when:` (`item.sys_mod_count == "0"`).
