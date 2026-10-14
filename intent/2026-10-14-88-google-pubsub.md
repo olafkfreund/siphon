@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 88
 author: olafkfreund
 ---
@@ -83,3 +83,9 @@ take them today:
 - **Should JSON `data` be decoded into fields?** **I'd decode JSON into
   fields** (`event.data.status`), and keep it as a string when it isn't
   JSON. Most Google emitters (Cloud Build, GCS) send JSON.
+
+## Decisions (owner, at approval)
+
+- **The service-account email is required.**
+- **The audience defaults to the hook URL,** and can be overridden.
+- **JSON `data` is decoded into fields,** and kept as a string otherwise.
