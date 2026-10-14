@@ -1,0 +1,12 @@
+# title:    Get notified when a P1 or P2 ServiceNow incident is created
+# category: Notifications & glue
+# needs:    sources/servicenow-hooks               (siphon connect servicenow)
+# apply:    siphon apply -f servicenow-incident-notify.yaml
+rules:
+  - name: servicenow-new-p1-p2
+    source: servicenow-hooks
+    when: 'event.table == "incident" && event.event == "insert" && event.priority in ["1","2"]'
+    on: each
+    id: event.sys_id
+    action:
+      cmd: [curl, -fsS, -H, "Title: ServiceNow {{.event.number}}", --data-raw, "New P{{.event.priority}} incident: {{.event.short_description}}", https://ntfy.sh/siphon-CHANGE-ME]

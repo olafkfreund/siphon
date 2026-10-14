@@ -194,3 +194,47 @@ sources:
 		t.Fatal("bad-signature flood never limited")
 	}
 }
+
+func TestNotionPendingToken(t *testing.T) {
+	cfg, err := config.Parse([]byte(`
+server: { sandbox: none }
+sources:
+  n: { type: webhook, signature: sha256, signature_header: X-Notion-Signature, signature_prefix: "sha256=", format: notion }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := time.Unix(1_700_000_000, 0)
+	p := New(cfg, st, func() time.Time { return now })
+	send := func(tok string) int {
+		r := httptest.NewRequest(http.MethodPost, "/hook/n", strings.NewReader(`{"verification_token":"`+tok+`"}`))
+		w := httptest.NewRecorder()
+		p.Webhooks()("n").ServeHTTP(w, r)
+		return w.Code
+	}
+	const a, b = "secret_aaaaaaaaaaaaaaaaaaaaaaaa", "secret_bbbbbbbbbbbbbbbbbbbbbbbb"
+	if _, _, ok := p.NotionPending("n"); ok {
+		t.Fatal("pending before capture")
+	}
+	if send(a) != 200 {
+		t.Fatal("first capture")
+	}
+	now = now.Add(time.Minute)
+	if send(b) != 200 {
+		t.Fatal("second capture")
+	}
+	if tok, at, ok := p.NotionPending("n"); !ok || tok != b || !at.Equal(now) {
+		t.Fatalf("pending = %q %v %v", tok, at, ok)
+	}
+	if tok, ok := p.TakeNotionPending("n"); !ok || tok != b {
+		t.Fatalf("take = %q %v", tok, ok)
+	}
+	if _, ok := p.TakeNotionPending("n"); ok {
+		t.Fatal("take did not clear")
+	}
+}

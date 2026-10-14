@@ -285,6 +285,9 @@ func (c *cli) connectService(id string, fs *flag.FlagSet, o *connectOpts) error 
 				c.say("  header: %s: <the secret>\n", hh)
 			}
 			c.say("  secret: %s\n          (shown once, copy it now)\n", str(done, "hook_secret"))
+			if reg := str(done, "registration"); reg != "" {
+				c.say("\nHomeserver registration (save as a file, shown once):\n%s\n", reg)
+			}
 		}
 		if e := str(done, "apply_error"); e != "" {
 			fmt.Fprintln(c.errw, "warning: saved, but not applied live:", e)

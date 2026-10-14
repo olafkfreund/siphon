@@ -25,7 +25,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 | Bitbucket | tools, webhooks | available | `siphon connect bitbucket` | [`bitbucket-pr-review`](../templates/bitbucket-pr-review.yaml) |
 | Gitea | tools, webhooks | needs package for tools (`catalogPackages = [ "gitea" ]`) | `siphon connect gitea` | [`gitea-pr-review`](../templates/gitea-pr-review.yaml) |
 | Forgejo | tools, webhooks | needs package for tools (`catalogPackages = [ "forgejo" ]`) | `siphon connect forgejo` | [`forgejo-pr-review`](../templates/forgejo-pr-review.yaml) |
-| Azure DevOps |  | not yet: service hooks use basic auth only, and the remote MCP is Entra OAuth only | — |  |
+| Azure DevOps | webhooks | available | `siphon connect azure-devops` | [`azure-devops-build-failed`](../templates/azure-devops-build-failed.yaml) [`azure-devops-new-bug`](../templates/azure-devops-new-bug.yaml) |
 
 ## Issue tracking
 
@@ -33,17 +33,18 @@ lists what's missing. Models and subscription logins are on their own pages:
 |---|---|---|---|---|
 | Linear | tools, webhooks | available | `siphon connect linear` | [`linear-issue-from-alert`](../templates/linear-issue-from-alert.yaml) |
 | Jira | tools, webhooks | available | `siphon connect jira` | [`jira-new-issue-summary`](../templates/jira-new-issue-summary.yaml) |
-| Notion |  | not yet: needs the verification_token handshake; the remote MCP is OAuth only | — |  |
+| [ServiceNow](servicenow.md) | tools, webhooks | available | `siphon connect servicenow` | [`alert-to-servicenow-incident`](../templates/alert-to-servicenow-incident.yaml) [`servicenow-incident-summary`](../templates/servicenow-incident-summary.yaml) [`servicenow-incident-triage`](../templates/servicenow-incident-triage.yaml) [`servicenow-change-on-deploy`](../templates/servicenow-change-on-deploy.yaml) [`servicenow-incident-notify`](../templates/servicenow-incident-notify.yaml) |
+| Notion | tools, webhooks | available | `siphon connect notion` | [`notion-page-summary`](../templates/notion-page-summary.yaml) |
 
 ## Chat
 
 | Service | Gives agents | Status | Connect | Templates |
 |---|---|---|---|---|
 | Slack | webhooks | available | `siphon connect slack` | [`slack-mention-agent`](../templates/slack-mention-agent.yaml) |
-| Discord |  | not yet: needs an ed25519 signature mode and the PING handshake, and does not cover channel messages | — |  |
-| Microsoft Teams |  | not yet: needs a teams-hmac signature mode with a synchronous reply within 5 seconds | — |  |
-| Mattermost |  | not yet: the token is in the request body: needs a body-token mode | — |  |
-| Matrix |  | not yet: needs PUT requests and a {} reply | — |  |
+| Mattermost | webhooks | available | `siphon connect mattermost` | [`mattermost-command-agent`](../templates/mattermost-command-agent.yaml) |
+| Discord | webhooks | available | `siphon connect discord` | [`discord-ask-agent`](../templates/discord-ask-agent.yaml) |
+| Matrix | webhooks | available | `siphon connect matrix` | [`matrix-deploy-command`](../templates/matrix-deploy-command.yaml) |
+| Microsoft Teams | webhooks | available | `siphon connect teams` | [`teams-ask-agent`](../templates/teams-ask-agent.yaml) |
 
 ## Monitoring & alerting
 
@@ -55,17 +56,16 @@ lists what's missing. Models and subscription logins are on their own pages:
 | Alertmanager | webhooks | available | `siphon connect alertmanager` | [`linear-issue-from-alert`](../templates/linear-issue-from-alert.yaml) |
 | Datadog | webhooks | available | `siphon connect datadog` | [`datadog-monitor-alert`](../templates/datadog-monitor-alert.yaml) |
 | Uptime Kuma | webhooks | available | `siphon connect uptime-kuma` | [`uptime-kuma-down`](../templates/uptime-kuma-down.yaml) |
-| Opsgenie |  | not yet: end of support 2027-04-05 | — |  |
 
 ## Cloud
 
 | Service | Gives agents | Status | Connect | Templates |
 |---|---|---|---|---|
 | [AWS](aws.md) | tools, webhooks | needs package: enable `services.siphon.aws` in your NixOS config | `siphon connect aws` | [`aws-cloudwatch-alarm`](../templates/aws-cloudwatch-alarm.yaml) |
+| Azure Event Grid | webhooks | available | `siphon connect azure-eventgrid` | [`azure-keyvault-secret-expiry`](../templates/azure-keyvault-secret-expiry.yaml) |
 | Cloudflare | tools, webhooks | available | `siphon connect cloudflare` | [`cloudflare-notification`](../templates/cloudflare-notification.yaml) |
 | Kubernetes |  | not yet: needs kubeconfig wiring: coming in a later release | — |  |
-| Google Pub/Sub |  | not yet: needs a Google OIDC (RS256 JWT) push-authentication mode | — |  |
-| Azure Event Grid |  | not yet: needs the subscription validation handshake | — |  |
+| Google Pub/Sub | webhooks | available | `siphon connect google-pubsub` | [`gcp-cloud-build-failed`](../templates/gcp-cloud-build-failed.yaml) |
 
 ## Payments
 

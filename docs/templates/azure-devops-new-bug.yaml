@@ -1,0 +1,14 @@
+# title:    Push a phone notification for each new Azure DevOps bug
+# category: Notifications & glue
+# needs:    sources/azure-devops-hooks             (siphon connect azure-devops; add a "Work item created" service hook)
+# apply:    siphon apply -f azure-devops-new-bug.yaml
+# Uses ntfy.sh: install the ntfy app and subscribe to your topic. Pick a long,
+# random topic name: anyone who knows it can read it.
+rules:
+  - name: azure-devops-new-bug
+    source: azure-devops-hooks
+    when: 'event.eventType == "workitem.created" && event.resource.fields["System.WorkItemType"] == "Bug"'
+    on: each
+    id: event.id                     # the notification event GUID: the same on a retry, unique across organisations
+    action:
+      cmd: [curl, -fsS, -H, "Title: New Azure DevOps bug", --data-raw, "Bug: {{index .event.resource.fields \"System.Title\"}}", https://ntfy.sh/siphon-CHANGE-ME]

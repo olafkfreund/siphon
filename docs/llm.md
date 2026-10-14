@@ -30,7 +30,10 @@ source  ──event──▶  rule (when: …)  ──fires──▶  action
   - `cmd: [argv…]`: a sandboxed command;
   - `agent: <name>`: an AI agent;
   - `routine: <name>`: ordered steps;
+  - `servicenow: {connection, op, …}`: one ServiceNow call made by the daemon, no LLM (`siphon explain rule`; writes need a `cooldown`);
   - `unit: <name>.service`: an allowlisted systemd unit.
+
+For agents on ServiceNow, use the built-in tools (`package: servicenow`): ServiceNow's official MCP server does not work from Siphon yet (#104; see `docs/connections/servicenow.md`).
 
 **Agents** run on a **connection**:
 - a subscription login (`kind: claude|codex|agy`);
@@ -56,6 +59,14 @@ Always follow this order. Every step has `-o json`.
    for example:
    - `github-pr-review`, `github-ci-failure`;
    - `disk-full`, `upstream-status`, `alertmanager-summary`;
+   - `mattermost-command-agent` (a chat slash command, `signature: body-token`),
+   - `discord-ask-agent` (Discord slash command, `signature: ed25519` with `format: discord`),
+   - `teams-ask-agent` (Microsoft Teams outgoing webhook, `signature: teams-hmac`; replies through a Workflows webhook),
+   - `matrix-deploy-command` (Matrix application service, `signature: token` with `token_header: Authorization` and `format: matrix`; unencrypted rooms only),
+   - `azure-devops-build-failed` (Azure DevOps service hook, `signature: token` with `token_header: X-Siphon-Key`),
+   - `azure-keyvault-secret-expiry` (Azure Event Grid, `signature: token` with `format: eventgrid`),
+   - `gcp-cloud-build-failed` (Google Pub/Sub, `signature: google-oidc` with `format: pubsub`, no secret),
+   - `notion-page-summary` (Notion, `format: notion`: the source starts with no secret; accept the verification token it captures on the Sources page),
    - `webhook-to-ntfy`, `local-summariser`, `nightly-report`,
      `aws-cloudwatch-alarm`.
 
@@ -128,8 +139,8 @@ approval: otherwise nobody is told that a job is waiting.
 - **Templates are Go templates:** `{{.event.field}}` and `{{.item.field}}`.
   The `when:` field is an expression, not a template:
   `event.status == "failed"`, `headers["x-github-event"] == "push"`.
-- **`cooldown:` is mandatory** on rules whose action is an agent, or a
-  routine containing an agent step.
+- **`cooldown:` is mandatory** on rules whose action is an agent, a
+  servicenow write, or a routine containing either.
 - **Agents default to `approve: true`:** a human must run
   `siphon approve <job>`. Don't set `approve: false` unless the user asks
   for it.

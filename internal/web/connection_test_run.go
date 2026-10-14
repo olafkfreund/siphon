@@ -6,9 +6,12 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/olafkfreund/siphon/internal/catalog"
 	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/servicenow"
+	"github.com/olafkfreund/siphon/internal/source"
 	"github.com/olafkfreund/siphon/internal/store"
 )
 
@@ -18,6 +21,15 @@ type connTestResult struct {
 	Connection string `json:"connection"`
 	OK         bool   `json:"ok"`
 	Detail     string `json:"detail"`
+}
+
+// connectionOf is the connection a source is tested under: its label, or the
+// legacy name key connSources falls back to.
+func connectionOf(name string, src *config.Source) string {
+	if src.Connection != "" {
+		return src.Connection
+	}
+	return legacyKey(name)
 }
 
 // connSources lists the sources labelled with a connection, by name.
@@ -100,6 +112,12 @@ func (s *server) runConnectionTest(ctx context.Context, conn string) (*connTestR
 		} else {
 			t = s.runHTTPTest(ctx, t, orDefault(e.Test.Method, "GET"), testTarget(rp.Replace(e.Test.URL)), strings.TrimSpace(hdr), strings.TrimSpace(val), rp.Replace(e.Test.Body), e.Test.Identity)
 		}
+	case serviceNowSource(cfg, names) != nil:
+		src := serviceNowSource(cfg, names)
+		for _, k := range []string{"SERVICENOW_CLIENT_ID", "SERVICENOW_CLIENT_SECRET", "SERVICENOW_API_KEY"} {
+			secrets = append(secrets, maskParts(src.Env[k].Value)...)
+		}
+		t = s.testServiceNow(ctx, cfg, conn, src)
 	default:
 		for _, n := range names {
 			if cfg.Sources[n].AWS != "" {
@@ -206,3 +224,32 @@ func orDefault(s, d string) string {
 
 // testTarget lets a test point a catalogue test at a fake server.
 var testTarget = func(u string) string { return u }
+
+// serviceNowSource is the connection's built-in servicenow MCP source, if it has one.
+func serviceNowSource(cfg *config.Config, names []string) *config.Source {
+	for _, n := range names {
+		if src := cfg.Sources[n]; src.Package == "servicenow" {
+			return src
+		}
+	}
+	return nil
+}
+
+// testServiceNow asks the instance who the stored credentials act as.
+func (s *server) testServiceNow(ctx context.Context, cfg *config.Config, conn string, src *config.Source) svcTest {
+	t := svcTest{Name: conn}
+	instance := src.Env["SERVICENOW_INSTANCE_URL"].Value
+	c, err := servicenow.ClientFromEnv(func(k string) string { return src.Env[k].Value },
+		source.HTTPClient(cfg.ServiceEndpoint(instance), 15*time.Second, 1<<20))
+	if err != nil {
+		t.Err = err.Error()
+		return t
+	}
+	start := time.Now()
+	t.User, err = c.Whoami(ctx)
+	t.Latency = time.Since(start).Round(time.Millisecond).String()
+	if err != nil {
+		t.Err = err.Error()
+	}
+	return t
+}

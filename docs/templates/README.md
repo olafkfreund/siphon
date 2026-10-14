@@ -32,7 +32,11 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 
 | Template | What it does | Connect first |
 |---|---|---|
+| [`alert-to-servicenow-incident`](alert-to-servicenow-incident.yaml) | Open a ServiceNow incident for each alert, with no agent | a webhook source `alerts`, `siphon connect servicenow --instance …` |
 | [`alertmanager-summary`](alertmanager-summary.yaml) | Summarise Prometheus alerts with a local model, then notify | `siphon connect model ollama` · webhook secret |
+| [`azure-devops-build-failed`](azure-devops-build-failed.yaml) | Push a phone notification when an Azure DevOps build fails | `siphon connect azure-devops` |
+| [`azure-keyvault-secret-expiry`](azure-keyvault-secret-expiry.yaml) | Push a notification when an Azure Key Vault secret is near expiry | `siphon connect azure-eventgrid` |
+| [`gcp-cloud-build-failed`](gcp-cloud-build-failed.yaml) | Push a notification when a Google Cloud Build fails | `siphon connect google-pubsub` |
 | [`cloudflare-notification`](cloudflare-notification.yaml) | Explain Cloudflare notifications with an agent, then notify | `siphon connect cloudflare --webhook`, `siphon connect login claude` |
 | [`datadog-monitor-alert`](datadog-monitor-alert.yaml) | Summarise Datadog monitor alerts with a local model, then notify | `siphon connect datadog`, `siphon connect model ollama` |
 | [`disk-full`](disk-full.yaml) | Warn when a disk is nearly full (and again every 6 hours) | — |
@@ -41,6 +45,8 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 | [`pagerduty-incident-summary`](pagerduty-incident-summary.yaml) | Summarise each triggered PagerDuty incident, then notify | `siphon connect model ollama`, `siphon connect pagerduty` |
 | [`sentry-new-issue`](sentry-new-issue.yaml) | Push a phone notification for each new Sentry issue | `siphon connect sentry` |
 | [`service-failed`](service-failed.yaml) | Get notified when a systemd service fails | — · webhook secret |
+| [`servicenow-incident-summary`](servicenow-incident-summary.yaml) | Summarise each new ServiceNow incident, then notify | `siphon connect model ollama`, `siphon connect servicenow` |
+| [`servicenow-incident-triage`](servicenow-incident-triage.yaml) | Triage each new ServiceNow incident with an agent, and post a work note | `siphon connect servicenow --instance …`, `siphon connect login claude` |
 | [`upstream-status`](upstream-status.yaml) | Know when a provider you depend on has an incident | — |
 | [`uptime-kuma-down`](uptime-kuma-down.yaml) | Push a notification when an Uptime Kuma monitor goes down | `siphon connect uptime-kuma` |
 
@@ -57,6 +63,14 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 
 | Template | What it does | Connect first |
 |---|---|---|
+| [`azure-devops-new-bug`](azure-devops-new-bug.yaml) | Push a phone notification for each new Azure DevOps bug | `siphon connect azure-devops` |
+| [`matrix-deploy-command`](matrix-deploy-command.yaml) | A Matrix "!deploy" message runs a routine (unencrypted rooms only) | `siphon connect matrix` |
+| [`teams-ask-agent`](teams-ask-agent.yaml) | A Teams @mention answered by a local model, posted back through a Workflows webhook | `siphon connect teams`, `siphon connect model ollama` |
+| [`discord-ask-agent`](discord-ask-agent.yaml) | A Discord /ask command answered by a local model, posted back to the interaction | `siphon connect discord`, `siphon connect model ollama` |
+| [`mattermost-command-agent`](mattermost-command-agent.yaml) | A Mattermost /ask command answered by a local model, posted back to the channel | `siphon connect mattermost`, `siphon connect model ollama` |
+| [`notion-page-summary`](notion-page-summary.yaml) | Summarise Notion pages when they are created or edited | `siphon connect notion --webhook`, `siphon connect login claude` |
+| [`servicenow-change-on-deploy`](servicenow-change-on-deploy.yaml) | Note a deploy on its ServiceNow change request | a webhook source `deploys`, `siphon connect servicenow --instance …` |
+| [`servicenow-incident-notify`](servicenow-incident-notify.yaml) | Get notified when a P1 or P2 ServiceNow incident is created | `siphon connect servicenow` |
 | [`slack-mention-agent`](slack-mention-agent.yaml) | An agent that answers when someone @mentions your Slack app | `siphon connect model ollama`, `siphon connect slack` |
 | [`standard-webhooks`](standard-webhooks.yaml) | Receive Standard Webhooks (Svix, Clerk, Resend, …) | — · webhook secret |
 | [`stripe-dispute-notice`](stripe-dispute-notice.yaml) | Get notified when a Stripe dispute is opened | `siphon connect stripe --webhook` |

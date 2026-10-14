@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"github.com/olafkfreund/siphon/internal/source"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -524,5 +525,36 @@ func TestUnsandboxedBanner(t *testing.T) {
 		if got := strings.Contains(body, "Unsandboxed:"); got != on {
 			t.Errorf("Unsandboxed=%v: banner shown=%v", on, got)
 		}
+	}
+}
+
+func TestHooksMatrixRoutes(t *testing.T) {
+	var got []string
+	e := newEnv(t, func(o *Options) {
+		o.Hooks = func(n string) http.Handler {
+			switch n {
+			case "mx":
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got = append(got, r.Method); w.WriteHeader(200) })
+			case "gh": // a real webhook source, not matrix
+				return source.NewWebhook(source.WebhookOptions{Name: "gh", Secret: "k", Signature: "token", TokenHeader: "X-K"}, nil)
+			}
+			return nil
+		}
+	})
+	for _, m := range []string{"PUT", "POST", "GET"} {
+		if w := e.do(m, "/hook/mx/_matrix/app/v1/transactions/1", nil, nil); w.Code != 200 {
+			t.Fatal(m, w.Code)
+		}
+	}
+	if len(got) != 3 {
+		t.Fatal(got)
+	}
+	for _, m := range []string{"PUT", "POST", "GET"} {
+		if w := e.do(m, "/hook/gh/_matrix/app/v1/transactions/1", nil, nil); w.Code != 404 {
+			t.Fatal("non-matrix", m, w.Code)
+		}
+	}
+	if w := e.do("PUT", "/hook/zz/_matrix/app/v1/transactions/1", nil, nil); w.Code != 404 {
+		t.Fatal(w.Code)
 	}
 }

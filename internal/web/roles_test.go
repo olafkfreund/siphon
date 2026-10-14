@@ -100,7 +100,7 @@ func TestActorFromSession(t *testing.T) {
 
 // Every portal POST route is classified: operator, logout, or admin-only.
 func TestPortalPOSTRoles(t *testing.T) {
-	operator := regexp.MustCompile(`^/(approvals/\d+/approve|rules/r/enable|rules/test|agents/egress-preview|connections/n/test|services/n/test|services/c/n/test|notifications/n/test|sources/n/oauth)$`)
+	operator := regexp.MustCompile(`^/(approvals/\d+/approve|rules/r/enable|rules/test|agents/egress-preview|connections/n/test|services/n/test|services/c/n/test|notifications/n/test|sources/n/oauth|sources/n/notion-verification)$`)
 	files, _ := filepath.Glob("*.go")
 	pat := regexp.MustCompile(`"POST (/[^"]*)"`)
 	sub := regexp.MustCompile(`\{[^}]*\}`)

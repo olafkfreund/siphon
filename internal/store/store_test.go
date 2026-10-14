@@ -103,6 +103,27 @@ func TestFinishJobOnlyRunning(t *testing.T) {
 	}
 }
 
+func TestJobActionsServiceNow(t *testing.T) {
+	s, _ := Open(":memory:")
+	defer s.Close()
+	now := time.UnixMilli(1_700_000_000_000)
+	tx, _ := s.DB.Begin()
+	InsertJob(tx, Job{Rule: "a", ActionJSON: `{"action":{"ServiceNow":{"Op":"create_change","Fields":{"type":"normal"}}}}`}, now)
+	InsertJob(tx, Job{Rule: "b", ActionJSON: `{"action":{"ServiceNow":{"Op":"get","Table":"problem"}}}`}, now)
+	InsertJob(tx, Job{Rule: "c", ActionJSON: `{"action":{"ServiceNow":{"Op":"add_work_note"}}}`}, now)
+	tx.Commit()
+	js, err := ListJobActions(s.DB, "", 10)
+	if err != nil || len(js) != 3 {
+		t.Fatal(js, err)
+	}
+	// newest first
+	for i, want := range []string{"add_work_note incident", "get problem", "create_change change_request"} {
+		if js[i].Kind != "servicenow" || js[i].Target != want {
+			t.Errorf("%d: %q %q, want servicenow %q", i, js[i].Kind, js[i].Target, want)
+		}
+	}
+}
+
 func TestRequeueRunning(t *testing.T) {
 	s, _ := Open(":memory:")
 	defer s.Close()
@@ -730,5 +751,36 @@ func TestSourceEventHeaders(t *testing.T) {
 	}
 	if got, err := SourceEventHeaders(s.DB, "none"); err != nil || len(got) != 0 {
 		t.Fatalf("no row: %v %v", got, err)
+	}
+}
+
+func TestSourceStatesEventAndReject(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	before := time.Now().Add(-time.Minute)
+	if err := SetSourceEvent(s.DB, "hook", map[string]any{"a": 1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSourceReject(s.DB, "hook", time.Now(), 401, "bad signature"); err != nil {
+		t.Fatal(err)
+	}
+	all, err := SourceStates(s.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	one, ok, err := SourceStateOf(s.DB, "hook")
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	for _, st := range []SourceState{all["hook"], one} {
+		if st.EventAt == nil || st.EventAt.Before(before) || st.LastRejectAt == nil || st.LastRejectAt.Before(before) {
+			t.Fatalf("times not read: %+v", st)
+		}
+		if st.LastReject != "bad signature (401)" {
+			t.Fatalf("reject = %q", st.LastReject)
+		}
 	}
 }

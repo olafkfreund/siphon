@@ -1,0 +1,20 @@
+[{
+  "topic": "/subscriptions/{subscription-id}/resourceGroups/Storage/providers/Microsoft.Storage/storageAccounts/xstoretestaccount",
+  "subject": "/blobServices/default/containers/testcontainer/blobs/testfile.txt",
+  "eventType": "Microsoft.Storage.BlobCreated",
+  "id": "831e1650-001e-001b-66ab-eeb76e069631",
+  "data": {"api": "PutBlockList", "contentType": "text/plain", "contentLength": 524288, "blobType": "BlockBlob"},
+  "dataVersion": "",
+  "metadataVersion": "1",
+  "eventTime": "2017-06-26T18:41:00.9584103Z"
+},
+{
+  "topic": "/subscriptions/{subscription-id}/resourceGroups/Storage/providers/Microsoft.Storage/storageAccounts/xstoretestaccount",
+  "subject": "/blobServices/default/containers/testcontainer/blobs/testfile2.txt",
+  "eventType": "Microsoft.Storage.BlobCreated",
+  "id": "831e1650-001e-001b-66ab-eeb76e069632",
+  "data": {"api": "PutBlockList", "contentType": "text/plain", "contentLength": 1024, "blobType": "BlockBlob"},
+  "dataVersion": "",
+  "metadataVersion": "1",
+  "eventTime": "2017-06-26T18:42:00.9584103Z"
+}]

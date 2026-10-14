@@ -42,6 +42,8 @@ func (b bearer) RoundTrip(r *http.Request) (*http.Response, error) {
 
 func TestBridgeRelaysToolsOverSocket(t *testing.T) {
 	t.Setenv("OUTER", "must-not-leak")
+	t.Setenv("HTTPS_PROXY", "http://run-x:tok@127.0.0.1:1")
+	t.Setenv("NO_PROXY", "")
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "secrets"), []byte(`{"STUB_MCP":"1","TOKEN":"tok-123"}`), 0o600)
 	sock := filepath.Join(dir, "mcp.sock")
@@ -107,6 +109,9 @@ func TestBridgeRelaysToolsOverSocket(t *testing.T) {
 	}
 	if got := call("OUTER"); strings.Contains(got, "must-not-leak") {
 		t.Errorf("server inherited the bridge's env: %q", got)
+	}
+	if got := call("HTTPS_PROXY"); got != "HTTPS_PROXY=http://run-x:tok@127.0.0.1:1" {
+		t.Errorf("server didn't get the egress proxy variable: %q", got)
 	}
 	sess.Close()
 	cancel()

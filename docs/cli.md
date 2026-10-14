@@ -294,12 +294,18 @@ siphon connect <service>|model|login [--<field> value ...]
 |---|---|---|
 | `--access-key-id` |  | AWS: Base access key ID as - (stdin) or @file |
 | `--api-key` |  | model, login: API key as - (stdin) or @file |
+| `--audience` |  | Google Pub/Sub: Audience |
+| `--auth` |  | ServiceNow: Authentication |
 | `--base` |  | GitLab: GitLab URL |
-| `--client-secret` |  | Sentry: Client secret as - (stdin) or @file |
+| `--client-id` |  | ServiceNow: OAuth client ID |
+| `--client-secret` |  | ServiceNow: OAuth client secret as - (stdin) or @file |
 | `--email` |  | Bitbucket: Atlassian account email |
 | `--external-id` |  | AWS: External ID |
 | `--file` |  | login: a login file (kind login), or - for stdin |
 | `--header` |  | Webhook: Header |
+| `--homeserver-name` |  | Matrix: Homeserver name |
+| `--instance` |  | ServiceNow: Instance URL |
+| `--localpart` |  | Matrix: Bot user localpart |
 | `--logout` | `false` | oauth: delete the source's login |
 | `--mode` |  | GitHub: MCP server |
 | `--name` |  | name of the connection (default: the service or preset) |
@@ -307,11 +313,15 @@ siphon connect <service>|model|login [--<field> value ...]
 | `--no-wait` | `false` | oauth: print the login URL and return |
 | `--profile` |  | AWS: Profile |
 | `--project` |  | GitLab: Project |
+| `--public-key` |  | Discord: Public key |
 | `--region` |  | AWS: Region |
+| `--reply` |  | Mattermost: Immediate reply |
 | `--role-arn` |  | AWS: Role ARN |
+| `--rooms` |  | Matrix: Room aliases |
 | `--secret` |  | Webhook: Secret as - (stdin) or @file |
 | `--secret-access-key` |  | AWS: Base secret access key as - (stdin) or @file |
 | `--servers` |  | AWS: Servers |
+| `--service-account` |  | Google Pub/Sub: Service account |
 | `--setup-token` |  | login claude: a setup token as - (stdin) or @file (kind token) |
 | `--signing-secret` |  | Linear: Webhook signing secret as - (stdin) or @file |
 | `--site` |  | Jira: Jira site URL |

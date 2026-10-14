@@ -72,6 +72,7 @@
     <dt>Payload URL</dt><dd><code id="hook-url" class="wrap">{{.HookURL}}</code> <button type="button" class="btn sm" data-action="copy" data-target="hook-url">{{template "icon" "copy"}}Copy</button></dd>
     {{if .HookSecret}}<dt>{{if .HookHeader}}Secret token{{else}}Secret{{end}}</dt><dd><code id="hook-secret" class="wrap">{{.HookSecret}}</code> <button type="button" class="btn sm" data-action="copy" data-target="hook-secret">{{template "icon" "copy"}}Copy</button></dd>{{end}}
   </dl>
+  {{if .Registration}}<h3>Homeserver registration</h3><p class="small">Save as a file, shown once.</p><pre id="hook-registration">{{.Registration}}</pre> <button type="button" class="btn sm" data-action="copy" data-target="hook-registration">{{template "icon" "copy"}}Copy</button>{{end}}
   {{if .Setup}}<ol class="small">{{range lines .Setup}}<li>{{.}}</li>{{end}}</ol>{{end}}
   {{if not (hasprefix .HookURL "http")}}<p class="muted small">Set <code>server.public_url</code> in <code>siphon.yaml</code> to show the full address. The provider must reach Siphon over HTTPS, usually through a reverse proxy; for local testing use <code>gh webhook forward</code>.</p>{{end}}
 </section>{{end}}

@@ -269,6 +269,10 @@ func (p *Pipeline) execOnce(ctx context.Context, cfg *config.Config, j store.Que
 		if state != "done" && exit == 0 {
 			exit = -1
 		}
+	case st.ServiceNow != nil:
+		sctx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		exit, out, stdout = runServiceNow(sctx, cfg, st.ServiceNow, env)
 	default:
 		return stepResult{Exit: -1, Output: "step has no action"}
 	}

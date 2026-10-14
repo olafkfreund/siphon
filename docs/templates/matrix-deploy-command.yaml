@@ -1,0 +1,21 @@
+# title:    Run a routine when someone writes "!deploy" in a Matrix room
+# category: Notifications & glue
+# needs:    sources/matrix-hooks                   (siphon connect matrix)
+# apply:    siphon apply -f matrix-deploy-command.yaml
+# Siphon is a Matrix application service: it sees the rooms its bot user is in
+# (unencrypted rooms only; an encrypted room's events can't be read). Replies are
+# not covered, so the routine is a stub: put your own steps in place of the echo.
+# The text comes from a chat user: it is passed as one argv element, never to a shell.
+routines:
+  matrix-deploy:
+    steps:
+      - { id: note, cmd: [echo, "deploy asked by {{.event.sender}} in {{.event.room_id}}"] }
+rules:
+  - name: matrix-deploy
+    source: matrix-hooks
+    # List who may deploy: any room member can write "!deploy" otherwise.
+    when: 'event.type == "m.room.message" && event.content.body startsWith "!deploy" && event.sender in ["@you:example.org"]'
+    on: each
+    id: event.event_id
+    cooldown: 1m
+    action: { routine: matrix-deploy }

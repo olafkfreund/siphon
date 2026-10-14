@@ -3,6 +3,7 @@ package config
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"strings"
 	"text/template"
 	"time"
+	"unicode/utf8"
 
 	"github.com/expr-lang/expr"
 	"github.com/robfig/cron/v3"
@@ -315,29 +317,35 @@ type Limits struct {
 }
 
 type Source struct {
-	Type         string            `yaml:"type"` // mcp|http|webhook|schedule
-	URL          string            `yaml:"url"`
-	Command      []string          `yaml:"command"`
-	Read         *Read             `yaml:"read"`
-	Poll         Duration          `yaml:"poll"`
-	Auth         *Auth             `yaml:"auth"`
-	AllowPrivate bool              `yaml:"allow_private"`
-	Method       string            `yaml:"method"`  // http: GET (default) or POST
-	Headers      map[string]Secret `yaml:"headers"` // values may be env:/file: refs or plain literals
-	Body         string            `yaml:"body"`
-	Secret       Secret            `yaml:"secret"`           // webhook HMAC key
-	Signature    string            `yaml:"signature"`        // github|sha256|token|standard-webhooks|slack|stripe
-	SigHeader    string            `yaml:"signature_header"` // sha256 preset
-	TokenHeader  string            `yaml:"token_header"`     // token preset
-	TimestampHdr string            `yaml:"timestamp_header"`
-	SigPrefix    string            `yaml:"signature_prefix"`    // sha256: e.g. "v1="; the header may list several
-	TimestampSep string            `yaml:"timestamp_separator"` // sha256 with timestamp_header: "." (default) or ":"
-	ID           string            `yaml:"id"`                  // delivery id, e.g. header.X-GitHub-Delivery
-	Env          map[string]Secret `yaml:"env"`                 // stdio MCP child env; values are env:/file: refs
-	Package      string            `yaml:"package"`             // name in server.mcp_packages; fills Command
-	AWS          string            `yaml:"aws"`                 // provider: aws credential; the daemon injects short-lived keys
-	Connection   string            `yaml:"connection"`          // metadata: the Services connection this item belongs to
-	Service      string            `yaml:"service"`             // metadata: the catalogue service that made it
+	Type            string            `yaml:"type"` // mcp|http|webhook|schedule
+	URL             string            `yaml:"url"`
+	Command         []string          `yaml:"command"`
+	Read            *Read             `yaml:"read"`
+	Poll            Duration          `yaml:"poll"`
+	Auth            *Auth             `yaml:"auth"`
+	AllowPrivate    bool              `yaml:"allow_private"`
+	Method          string            `yaml:"method"`  // http: GET (default) or POST
+	Headers         map[string]Secret `yaml:"headers"` // values may be env:/file: refs or plain literals
+	Body            string            `yaml:"body"`
+	Secret          Secret            `yaml:"secret"`           // webhook HMAC key
+	Signature       string            `yaml:"signature"`        // github|sha256|token|body-token|standard-webhooks|slack|stripe|ed25519|google-oidc|teams-hmac
+	SigHeader       string            `yaml:"signature_header"` // sha256 preset
+	TokenHeader     string            `yaml:"token_header"`     // token preset
+	TimestampHdr    string            `yaml:"timestamp_header"`
+	TokenField      string            `yaml:"token_field"`         // body-token: the body field holding the token (default token)
+	ReplyText       string            `yaml:"reply_text"`          // body-token: answer 200 {"text": …} instead of 202
+	SigPrefix       string            `yaml:"signature_prefix"`    // sha256: e.g. "v1="; the header may list several
+	TimestampSep    string            `yaml:"timestamp_separator"` // sha256 with timestamp_header: "." (default) or ":"
+	ID              string            `yaml:"id"`                  // delivery id, e.g. header.X-GitHub-Delivery
+	Format          string            `yaml:"format"`              // webhook: eventgrid (Azure Event Grid handshakes and batches) | discord | notion | matrix | pubsub
+	AllowQueryToken bool              `yaml:"allow_query_token"`   // matrix: also accept ?access_token=
+	Audience        string            `yaml:"audience"`            // webhook google-oidc: the token's aud (default server.public_url + /hook/<name>)
+	ServiceAccount  string            `yaml:"service_account"`     // webhook google-oidc: the push subscription's service account email
+	Env             map[string]Secret `yaml:"env"`                 // stdio MCP child env; values are env:/file: refs
+	Package         string            `yaml:"package"`             // name in server.mcp_packages; fills Command
+	AWS             string            `yaml:"aws"`                 // provider: aws credential; the daemon injects short-lived keys
+	Connection      string            `yaml:"connection"`          // metadata: the Services connection this item belongs to
+	Service         string            `yaml:"service"`             // metadata: the catalogue service that made it
 
 	// schedule: fires at moments, no polling.
 	At       string         `yaml:"at"`       // 5-field cron, @hourly|@daily|@weekly|@monthly, or "every <d>" (d >= 1m)
@@ -384,11 +392,33 @@ type Rule struct {
 }
 
 type Action struct {
-	Cmd     []string `yaml:"cmd"`
-	Unit    string   `yaml:"unit"`
-	Agent   string   `yaml:"agent"`
-	Routine string   `yaml:"routine"`
+	Cmd        []string          `yaml:"cmd"`
+	Unit       string            `yaml:"unit"`
+	Agent      string            `yaml:"agent"`
+	Routine    string            `yaml:"routine"`
+	ServiceNow *ServiceNowAction `yaml:"servicenow"`
 }
+
+// ServiceNowAction is one ServiceNow call made by the daemon, no LLM involved.
+// SysID and the Fields values are templates; Table is static.
+type ServiceNowAction struct {
+	Connection string            `yaml:"connection"` // an mcp source with package: servicenow
+	Op         string            `yaml:"op"`
+	Table      string            `yaml:"table"` // default incident; ignored for create_change
+	SysID      string            `yaml:"sys_id"`
+	Fields     map[string]string `yaml:"fields"`
+}
+
+// ServiceNowOps lists the ops; every one but get writes.
+var ServiceNowOps = []string{"get", "create", "update", "add_work_note", "add_comment", "resolve", "create_change"}
+
+var (
+	snTable = regexp.MustCompile(`^[a-z][a-z0-9_]{0,79}$`)
+	snField = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+)
+
+// Writes reports whether the call changes ServiceNow.
+func (a *ServiceNowAction) Writes() bool { return a != nil && a.Op != "get" }
 
 // Credential is a subscription login (no api_key) or an API key for one provider.
 type Credential struct {
@@ -560,15 +590,16 @@ type Routine struct {
 }
 
 type Step struct {
-	ID              string   `yaml:"id"`
-	Cmd             []string `yaml:"cmd"`
-	Unit            string   `yaml:"unit"`
-	Agent           string   `yaml:"agent"`
-	If              string   `yaml:"if"`
-	Retry           *Retry   `yaml:"retry"`
-	Timeout         Duration `yaml:"timeout"`
-	ContinueOnError bool     `yaml:"continue_on_error"`
-	Approve         bool     `yaml:"approve"`
+	ID              string            `yaml:"id"`
+	Cmd             []string          `yaml:"cmd"`
+	Unit            string            `yaml:"unit"`
+	Agent           string            `yaml:"agent"`
+	ServiceNow      *ServiceNowAction `yaml:"servicenow"`
+	If              string            `yaml:"if"`
+	Retry           *Retry            `yaml:"retry"`
+	Timeout         Duration          `yaml:"timeout"`
+	ContinueOnError bool              `yaml:"continue_on_error"`
+	Approve         bool              `yaml:"approve"`
 }
 
 // Retry re-runs a failed step. Attempts is the total number of tries, so 0 or 1
@@ -645,6 +676,19 @@ func parse(b []byte, stub map[string]string) (*Config, error) {
 	}
 	if err := dec.Decode(new(yaml.Node)); !errors.Is(err, io.EOF) {
 		return nil, errors.New("parse config: multiple YAML documents are not supported")
+	}
+	// Built in, so a source can name package: servicenow without operator setup.
+	// It lives only in the parsed Config; export and the overlay work on YAML.
+	if _, ok := c.Server.MCPPackages["servicenow"]; !ok {
+		if c.Server.MCPPackages == nil {
+			c.Server.MCPPackages = map[string]MCPPackage{}
+		}
+		exe, _ := os.Executable()
+		c.Server.MCPPackages["servicenow"] = MCPPackage{
+			Command: []string{exe, "mcp-servicenow"},
+			Env:     []string{"SERVICENOW_INSTANCE_URL", "SERVICENOW_CLIENT_ID", "SERVICENOW_CLIENT_SECRET", "SERVICENOW_API_KEY"},
+			URLEnv:  []string{"SERVICENOW_INSTANCE_URL"},
+		}
 	}
 	for _, s := range c.Sources {
 		if s != nil && s.Poll == 0 && s.Polled() {
@@ -863,6 +907,12 @@ func (c *Config) Warnings() []string {
 		if s := c.Sources[name]; s != nil && s.Type == "webhook" && s.Signature == "token" {
 			w = append(w, fmt.Sprintf("source %s: signature token sends the secret in a header: weaker than an HMAC, and a captured delivery can be replayed", name))
 		}
+		if s := c.Sources[name]; s != nil && s.Type == "webhook" && s.Signature == "body-token" {
+			w = append(w, fmt.Sprintf("source %s: signature body-token sends the secret in the body: weaker than an HMAC, and a captured delivery can be replayed", name))
+		}
+		if s := c.Sources[name]; s != nil && s.Type == "webhook" && s.Format == "notion" && !s.Secret.isSet() {
+			w = append(w, fmt.Sprintf("source %s: format notion has no secret: it only accepts Notion's verification token until one is set", name))
+		}
 		if s := c.Sources[name]; s != nil && s.Auth != nil && s.Auth.OAuth != nil && s.Auth.OAuth.ClientSecret.isSet() && s.Auth.OAuth.Issuer == "" {
 			w = append(w, fmt.Sprintf("source %s: auth.oauth.client_secret without auth.oauth.issuer: the first login trusts whichever authorization server the MCP server names", name))
 		}
@@ -1004,6 +1054,8 @@ func loopbackListen(addr string) bool {
 
 var unitName = regexp.MustCompile(`^[A-Za-z0-9@._:-]+\.(service|target|timer)$`)
 
+var bodyTokenField = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 var webhookID = regexp.MustCompile(`^header\.[A-Za-z0-9-]+$`)
 
 func cleartextRemote(raw string) bool {
@@ -1030,6 +1082,16 @@ func secretHeader(name string) bool {
 }
 
 // Validate returns every problem at once, joined.
+// serviceAccountEmail is a loose email shape; Google has the final say.
+var serviceAccountEmail = regexp.MustCompile(`^[^@\s]+@[^@\s]+$`)
+
+// ed25519Key is a hex ed25519 public key (Discord shows it that way).
+var ed25519Key = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// StubSecret stands in for a pasted secret that is not on disk yet, when the
+// portal validates an edit before committing it (a valid URL, for notify).
+const StubSecret = "https://placeholder.invalid/"
+
 func (c *Config) Validate() error {
 	var errs []error
 	add := func(f string, a ...any) { errs = append(errs, fmt.Errorf(f, a...)) }
@@ -1217,6 +1279,9 @@ func (c *Config) Validate() error {
 		if (r.Action.Agent != "" || (r.Action.Routine != "" && c.RoutineHasAgent(r.Action.Routine))) && r.Cooldown <= 0 {
 			add("%s: cooldown is mandatory for agent actions", p)
 		}
+		if (r.Action.ServiceNow.Writes() || c.RoutineHasServiceNowWrite(r.Action.Routine)) && r.Cooldown <= 0 {
+			add("%s: cooldown is mandatory for servicenow writes", p)
+		}
 	}
 
 	for _, name := range sortedKeys(c.Credentials) {
@@ -1352,8 +1417,11 @@ func (c *Config) Validate() error {
 					add("%s: retry.base must be >= 0 and retry.factor >= 1", sp)
 				}
 			}
+			if st.ServiceNow != nil && st.Retry != nil && (st.ServiceNow.Op == "create" || st.ServiceNow.Op == "create_change") {
+				add("%s: retry is not allowed on servicenow %s steps (a retry could create a duplicate)", sp, st.ServiceNow.Op)
+			}
 			checkExpr(sp+" if", st.If, add)
-			c.validateAction(sp, Action{Cmd: st.Cmd, Unit: st.Unit, Agent: st.Agent}, add)
+			c.validateAction(sp, Action{Cmd: st.Cmd, Unit: st.Unit, Agent: st.Agent, ServiceNow: st.ServiceNow}, add)
 		}
 	}
 	c.validateNotify(add)
@@ -1448,7 +1516,7 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 			add("%s: method must be GET or POST", p)
 		}
 	case "webhook":
-		if !s.Secret.isSet() {
+		if !s.Secret.isSet() && s.Format != "notion" && s.Signature != "google-oidc" { // notion: empty means awaiting the verification token; google-oidc has no secret
 			add("%s: secret is required", p)
 		}
 		if s.ID != "" && !webhookID.MatchString(s.ID) {
@@ -1469,12 +1537,97 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 			if s.TokenHeader == "" {
 				add("%s: signature token needs token_header", p)
 			}
+		case "body-token":
+			if s.SigHeader != "" || s.TimestampHdr != "" || s.TokenHeader != "" {
+				add("%s: signature_header, timestamp_header and token_header are not allowed with signature body-token", p)
+			}
+			if s.TokenField != "" && !bodyTokenField.MatchString(s.TokenField) {
+				add("%s: token_field must match ^[A-Za-z_][A-Za-z0-9_]*$, got %q", p, s.TokenField)
+			}
+			if n := utf8.RuneCountInString(s.ReplyText); n > 500 {
+				add("%s: reply_text is %d characters; the limit is 500", p, n)
+			}
 		case "standard-webhooks", "slack", "stripe":
 			if s.SigHeader != "" || s.TimestampHdr != "" {
 				add("%s: signature_header and timestamp_header are not allowed with signature %s", p, s.Signature)
 			}
+		case "ed25519":
+			if s.SigHeader != "" || s.TimestampHdr != "" || s.TokenHeader != "" || s.TokenField != "" || s.ID != "" {
+				add("%s: signature_header, timestamp_header, token_header, token_field and id are not allowed with signature ed25519", p)
+			}
+			// The portal first validates with StubSecret in place of pasted secrets,
+			// then again with the real value before committing.
+			if v := s.Secret.Value; v != "" && v != StubSecret && !ed25519Key.MatchString(v) {
+				add("%s: secret must be a public key of 64 lowercase hex characters", p)
+			}
+		case "google-oidc":
+			if s.Secret.isSet() || s.SigHeader != "" || s.TokenHeader != "" || s.TimestampHdr != "" || s.TokenField != "" || s.ID != "" {
+				add("%s: secret, signature_header, token_header, timestamp_header, token_field and id are not allowed with signature google-oidc", p)
+			}
+			if !serviceAccountEmail.MatchString(s.ServiceAccount) {
+				add("%s: signature google-oidc needs service_account, an email address", p)
+			}
+			if s.Audience == "" && c.Server.PublicURL == "" {
+				add("%s: signature google-oidc needs audience or server.public_url", p)
+			}
+		case "teams-hmac":
+			if s.SigHeader != "" || s.TimestampHdr != "" || s.TokenHeader != "" || s.TokenField != "" || s.ID != "" {
+				add("%s: signature_header, timestamp_header, token_header, token_field and id are not allowed with signature teams-hmac", p)
+			}
+			// Teams shows the key as base64; StubSecret is the portal's stand-in.
+			if v := s.Secret.Value; v != "" && v != StubSecret {
+				if k, err := base64.StdEncoding.DecodeString(v); err != nil || len(k) < 16 {
+					add("%s: secret must be the base64 security token Teams shows (at least 16 bytes)", p)
+				}
+			}
+			if n := utf8.RuneCountInString(s.ReplyText); n > 500 {
+				add("%s: reply_text is %d characters; the limit is 500", p, n)
+			}
 		default:
-			add("%s: signature must be github, sha256, token, standard-webhooks, slack or stripe, got %q", p, s.Signature)
+			add("%s: signature must be github, sha256, token, body-token, standard-webhooks, slack, stripe, ed25519, google-oidc or teams-hmac, got %q", p, s.Signature)
+		}
+		if (s.Audience != "" || s.ServiceAccount != "") && s.Signature != "google-oidc" {
+			add("%s: audience and service_account are only for signature google-oidc", p)
+		}
+		if s.TokenField != "" && s.Signature != "body-token" {
+			add("%s: token_field is only for signature body-token", p)
+		}
+		if s.ReplyText != "" && s.Signature != "body-token" && s.Signature != "teams-hmac" && s.Format != "discord" {
+			add("%s: reply_text is only for signature body-token, signature teams-hmac or format discord", p)
+		}
+		switch {
+		case s.Format == "":
+		case s.Format == "discord":
+			if s.Signature != "ed25519" {
+				add("%s: format discord needs signature ed25519", p)
+			}
+			if n := utf8.RuneCountInString(s.ReplyText); n > 500 {
+				add("%s: reply_text is %d characters; the limit is 500", p, n)
+			}
+		case s.Format == "notion":
+			if s.Signature != "sha256" || !strings.EqualFold(s.SigHeader, "X-Notion-Signature") || s.SigPrefix != "sha256=" {
+				add("%s: format notion needs signature sha256, signature_header X-Notion-Signature and signature_prefix sha256=", p)
+			}
+		case s.Format == "matrix":
+			if s.Signature != "token" || !strings.EqualFold(s.TokenHeader, "Authorization") {
+				add("%s: format matrix needs signature token and token_header Authorization", p)
+			}
+			if s.ID != "" {
+				add("%s: id is not allowed with format matrix (each event carries its own id)", p)
+			}
+		case s.Format == "pubsub":
+			if s.Signature != "google-oidc" {
+				add("%s: format pubsub needs signature google-oidc", p)
+			}
+		case s.Format != "eventgrid":
+			add("%s: format must be eventgrid, discord, notion, matrix or pubsub, got %q", p, s.Format)
+		case s.Signature != "token":
+			add("%s: format eventgrid needs signature token", p)
+		case s.ID != "":
+			add("%s: id is not allowed with format eventgrid (each event carries its own id)", p)
+		}
+		if s.AllowQueryToken && s.Format != "matrix" {
+			add("%s: allow_query_token is only for format matrix", p)
 		}
 		if s.SigPrefix != "" && s.Signature != "sha256" {
 			add("%s: signature_prefix is only for signature sha256", p)
@@ -1629,9 +1782,94 @@ func (c *Config) validateAction(p string, a Action, add func(string, ...any)) {
 			add("%s: unknown routine %q", p, a.Routine)
 		}
 	}
-	if n != 1 {
-		add("%s: action needs exactly one of cmd, unit, agent, routine", p)
+	if a.ServiceNow != nil {
+		n++
+		c.validateServiceNow(p, a.ServiceNow, add)
 	}
+	if n != 1 {
+		add("%s: action needs exactly one of cmd, unit, agent, routine, servicenow", p)
+	}
+}
+
+func (c *Config) validateServiceNow(p string, a *ServiceNowAction, add func(string, ...any)) {
+	p += " servicenow"
+	if s := c.Sources[a.Connection]; s == nil || s.Type != "mcp" || s.Package != "servicenow" {
+		add("%s: connection %q must be an mcp source with package: servicenow", p, a.Connection)
+	}
+	if !slices.Contains(ServiceNowOps, a.Op) {
+		add("%s: unknown op %q (%s)", p, a.Op, strings.Join(ServiceNowOps, ", "))
+		return
+	}
+	if a.Table != "" && !snTable.MatchString(a.Table) {
+		add("%s: table must match %s (static, not a template)", p, snTable)
+	}
+	checkTemplate(p+" sys_id", a.SysID, add)
+	switch a.Op {
+	case "create", "create_change":
+		if a.SysID != "" {
+			add("%s: sys_id must be empty for %s", p, a.Op)
+		}
+	default:
+		if a.SysID == "" {
+			add("%s: sys_id is required for %s", p, a.Op)
+		}
+	}
+	for _, k := range sortedKeys(a.Fields) {
+		switch {
+		case !snField.MatchString(k):
+			add("%s: field name %q must match %s", p, k, snField)
+		case strings.HasPrefix(k, "sys_"):
+			add("%s: field %q must not start with sys_", p, k)
+		}
+		checkTemplate(p+" field "+k, a.Fields[k], add)
+	}
+	need := func(keys ...string) {
+		for _, k := range keys {
+			if _, ok := a.Fields[k]; !ok {
+				add("%s: %s needs field %s", p, a.Op, k)
+			}
+		}
+	}
+	switch a.Op {
+	case "get":
+		for k := range a.Fields {
+			if k != "fields" {
+				add("%s: get takes only the field \"fields\"", p)
+				break
+			}
+		}
+	case "create", "update":
+		if len(a.Fields) == 0 {
+			add("%s: %s needs at least one field", p, a.Op)
+		}
+	case "add_work_note", "add_comment":
+		if _, ok := a.Fields["text"]; !ok || len(a.Fields) != 1 {
+			add("%s: %s needs exactly text", p, a.Op)
+		}
+	case "resolve":
+		need("close_code", "close_notes")
+		if a.Table != "" && a.Table != "incident" {
+			add("%s: resolve is for incidents only (state 6 means something else on other tables)", p)
+		}
+	case "create_change":
+		if t := a.Fields["type"]; t != "normal" && t != "emergency" && t != "standard" {
+			add("%s: create_change type must be normal, emergency or standard", p)
+		} else if t == "standard" {
+			need("standard_change_template_id")
+		}
+	}
+}
+
+// RoutineHasServiceNowWrite reports whether the named routine has a ServiceNow write step.
+func (c *Config) RoutineHasServiceNowWrite(name string) bool {
+	if rt := c.Routines[name]; rt != nil {
+		for _, s := range rt.Steps {
+			if s.ServiceNow.Writes() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // RoutineHasAgent reports whether the named routine has an agent step.

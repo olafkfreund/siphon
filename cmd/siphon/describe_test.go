@@ -13,7 +13,7 @@ import (
 
 // baseConfig provides what the templates need: the connections and sources
 // their `needs` headers name, and the aws allowlists.
-const baseConfig = `server: { sandbox: none, db: DIR/s.db, aws: { profiles: [p1] }, models: { private_endpoints: ["127.0.0.1:11434"] }, mcp_packages: { aws-cloudwatch: { command: [cw], hosts: ['logs.{region}.amazonaws.com'], env: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, AWS_REGION, AWS_DEFAULT_REGION, AWS_EC2_METADATA_DISABLED, AWS_CONFIG_FILE, AWS_SHARED_CREDENTIALS_FILE] } } }
+const baseConfig = `server: { sandbox: none, public_url: "https://siphon.example.com", db: DIR/s.db, aws: { profiles: [p1] }, models: { private_endpoints: ["127.0.0.1:11434"] }, mcp_packages: { aws-cloudwatch: { command: [cw], hosts: ['logs.{region}.amazonaws.com'], env: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, AWS_REGION, AWS_DEFAULT_REGION, AWS_EC2_METADATA_DISABLED, AWS_CONFIG_FILE, AWS_SHARED_CREDENTIALS_FILE] } } }
 credentials:
   claude-max: { provider: claude }
   ollama-local: { provider: ollama, url: "http://127.0.0.1:11434" }
@@ -22,10 +22,13 @@ sources:
   github: { type: mcp, url: "https://api.githubcopilot.com/mcp/", auth: { bearer: env:AGW_HOOK }, read: { tool: get_me }, poll: 24h }
   github-hooks: { type: webhook, signature: github, secret: env:AGW_HOOK }
   gitlab-hooks: { type: webhook, signature: token, token_header: X-Gitlab-Token, secret: env:AGW_HOOK }
+  azure-devops-hooks: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK }
   aws-cloudwatch: { type: mcp, package: aws-cloudwatch, aws: aws }
   aws-hooks: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK }
   alertmanager: { type: webhook, signature: token, token_header: Authorization, secret: env:AGW_HOOK }
   linear: { type: mcp, url: "https://mcp.linear.app/mcp", headers: { Authorization: env:AGW_HOOK } }
+  notion: { type: mcp, url: "https://mcp.notion.com/mcp", auth: { oauth: {} } }
+  notion-hooks: { type: webhook, signature: sha256, signature_header: X-Notion-Signature, signature_prefix: "sha256=", format: notion }
   jira-hooks: { type: webhook, signature: sha256, signature_header: X-Hub-Signature, secret: env:AGW_HOOK }
   slack: { type: webhook, signature: slack, secret: env:AGW_HOOK }
   sentry: { type: webhook, signature: sha256, signature_header: Sentry-Hook-Signature, secret: env:AGW_HOOK }
@@ -34,6 +37,8 @@ sources:
   grafana-hooks: { type: webhook, signature: sha256, signature_header: X-Grafana-Alerting-Signature, secret: env:AGW_HOOK }
   stripe-hooks: { type: webhook, signature: stripe, secret: env:AGW_HOOK }
   home-assistant: { type: mcp, url: "https://ha.example.com/api/mcp", headers: { Authorization: env:AGW_HOOK } }
+  google-pubsub-hooks: { type: webhook, signature: google-oidc, format: pubsub, service_account: push@p.iam.gserviceaccount.com, audience: https://siphon.example.com/hook/google-pubsub-hooks }
+  azure-eventgrid-hooks: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK, format: eventgrid }
   uptime-kuma: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK }
   bitbucket: { type: mcp, url: "https://mcp.atlassian.com/v2/mcp", headers: { Authorization: env:AGW_HOOK } }
   bitbucket-hooks: { type: webhook, signature: sha256, signature_header: X-Hub-Signature, secret: env:AGW_HOOK }
@@ -44,6 +49,14 @@ sources:
   datadog: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK }
   cloudflare: { type: mcp, url: "https://mcp.cloudflare.com/mcp", auth: { bearer: env:AGW_HOOK } }
   cloudflare-hooks: { type: webhook, signature: token, token_header: cf-webhook-auth, secret: env:AGW_HOOK }
+  servicenow: { type: mcp, package: servicenow, env: { SERVICENOW_INSTANCE_URL: env:AGW_HOOK, SERVICENOW_API_KEY: env:AGW_HOOK } }
+  alerts: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
+  deploys: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
+  matrix-hooks: { type: webhook, signature: token, token_header: Authorization, format: matrix, secret: env:AGW_HOOK }
+  teams-hooks: { type: webhook, signature: teams-hmac, secret: env:AGW_TEAMS_KEY }
+  discord-hooks: { type: webhook, signature: ed25519, format: discord, secret: env:AGW_DISCORD_KEY }
+  mattermost-hooks: { type: webhook, signature: body-token, secret: env:AGW_HOOK }
+  servicenow-hooks: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
 rules:
   - { name: r1, source: github-hooks, when: "true", action: { cmd: [echo, one] } }
 `
@@ -124,7 +137,7 @@ func TestExplainCommand(t *testing.T) {
 			t.Errorf("explain rules lacks %q:\n%s", want, out)
 		}
 	}
-	if out = e.ok("explain", "source"); !strings.Contains(out, "read.tool") || !strings.Contains(out, "[github|sha256|token|standard-webhooks|slack|stripe]") {
+	if out = e.ok("explain", "source"); !strings.Contains(out, "read.tool") || !strings.Contains(out, "[github|sha256|token|body-token|standard-webhooks|slack|stripe|ed25519|google-oidc|teams-hmac]") {
 		t.Errorf("explain source:\n%s", out)
 	}
 	if out = e.ok("explain", "routine"); !strings.Contains(out, "steps[].retry.attempts") {
@@ -189,7 +202,8 @@ rules:
 		inv.Agents[0]["kind"] != "model" || inv.Agents[0]["credential"] != "ollama-local" || inv.Rules[0]["enabled"] != false || len(inv.Routines) != 1 {
 		t.Fatalf("%s", out)
 	}
-	if len(inv.Packages) != 1 || inv.Packages[0].Name != "github" || inv.Packages[0].Env[0] != "GITHUB_PERSONAL_ACCESS_TOKEN" {
+	// servicenow is built in, so it is always listed after the operator's packages.
+	if len(inv.Packages) != 2 || inv.Packages[1].Name != "servicenow" || inv.Packages[0].Name != "github" || inv.Packages[0].Env[0] != "GITHUB_PERSONAL_ACCESS_TOKEN" {
 		t.Fatalf("packages: %+v", inv.Packages)
 	}
 	if inv.Server.AWS.Profiles[0] != "p1" || inv.Server.Models.PrivateEndpoints[0] != "127.0.0.1:11434" || inv.Server.Services.PrivateEndpoints[0] != "gitlab.lan:443" {

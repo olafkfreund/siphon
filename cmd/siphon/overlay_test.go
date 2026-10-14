@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"io"
 	"os"
 	"path/filepath"
@@ -23,6 +24,8 @@ rules:
 func overlayFixture(t *testing.T, items ...store.ConfigItem) string {
 	t.Helper()
 	t.Setenv("AGW_HOOK", "s3cret")
+	t.Setenv("AGW_DISCORD_KEY", strings.Repeat("ab", 32))                                         // an ed25519 public key
+	t.Setenv("AGW_TEAMS_KEY", base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))) // a Teams security token
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "siphon.yaml")
 	if err := os.WriteFile(cfgPath, []byte(overlayBase), 0o600); err != nil {

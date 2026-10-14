@@ -260,3 +260,53 @@ func TestStandardWebhooksReferenceVector(t *testing.T) {
 		t.Fatal("tampered signature accepted")
 	}
 }
+
+func TestWebhookNotionCapture(t *testing.T) {
+	const tok = "secret_" + "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"
+	opts := func(secret string, got *string) WebhookOptions {
+		return WebhookOptions{Secret: secret, Signature: "sha256", SigHeader: "X-Notion-Signature", SigPrefix: "sha256=", Format: "notion",
+			OnVerificationToken: func(s string) { *got = s }}
+	}
+	delivered := 0
+	deliver := func(context.Context, Event, string) (bool, error) { delivered++; return false, nil }
+	post := func(h http.Handler, body, sig string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		if sig != "" {
+			r.Header.Set("X-Notion-Signature", sig)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	sign := func(secret, body string) string {
+		mac := hmac.New(sha256.New, []byte(secret))
+		mac.Write([]byte(body))
+		return "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	}
+	var got string
+	h := NewWebhook(opts("", &got), deliver)
+	if w := post(h, `{"verification_token":"`+tok+`"}`, ""); w.Code != 200 || w.Body.Len() != 0 || got != tok || delivered != 0 {
+		t.Fatalf("capture: %d %q got=%q delivered=%d", w.Code, w.Body.String(), got, delivered)
+	}
+	got = ""
+	for _, body := range []string{
+		`{"verification_token":"` + tok + `","x":1}`,
+		`{"verification_token":"secret_short"}`,
+		`{"verification_token":"other_abcdefghijklmnopqrstuvwxyz"}`,
+		`{"verification_token":5}`,
+		`["` + tok + `"]`,
+		`{"type":"page.created"}`,
+	} {
+		if w := post(h, body, sign("", body)); w.Code != 401 || got != "" || delivered != 0 {
+			t.Errorf("%s: %d got=%q delivered=%d", body, w.Code, got, delivered)
+		}
+	}
+	h = NewWebhook(opts(tok, &got), deliver)
+	body := `{"type":"page.created"}`
+	if w := post(h, body, sign(tok, body)); w.Code != 202 || delivered != 1 {
+		t.Fatalf("signed: %d delivered=%d", w.Code, delivered)
+	}
+	if w := post(h, `{"verification_token":"`+tok+`"}`, ""); w.Code != 401 || got != "" || delivered != 1 {
+		t.Fatalf("verification with secret set: %d got=%q delivered=%d", w.Code, got, delivered)
+	}
+}

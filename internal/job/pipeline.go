@@ -56,6 +56,12 @@ type Pipeline struct {
 	hookRejects sync.Map // source name -> *rejects
 	hookLimits  sync.Map // source name -> *hookLimit; webhook rate limits survive requests and Apply
 
+	googleOnce sync.Once
+	google     *source.GoogleVerifier // Pub/Sub push tokens; see googleVerifier
+
+	notionMu      sync.Mutex
+	notionPending map[string]pendingToken // latest Notion verification token per source; memory only
+
 	applyMu     sync.Mutex // serialises Apply and Serve's poller start
 	serveCtx    context.Context
 	stopPollers func() // nil unless Serve is running
@@ -404,6 +410,14 @@ func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, ex
 		uctx, cancel := context.WithTimeout(ctx, cmdTimeout)
 		defer cancel()
 		if code, out := runUnit(uctx, p, pl.Action.Unit); code != 0 {
+			return "failed", code, out
+		} else {
+			return "done", 0, out
+		}
+	case pl.Action.ServiceNow != nil:
+		sctx, cancel := context.WithTimeout(ctx, cmdTimeout)
+		defer cancel()
+		if code, out, _ := runServiceNow(sctx, cfg, pl.Action.ServiceNow, pl.Env); code != 0 {
 			return "failed", code, out
 		} else {
 			return "done", 0, out

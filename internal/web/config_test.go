@@ -435,3 +435,108 @@ func TestLoginsAddDelete(t *testing.T) {
 		}
 	}
 }
+
+const notionCfg = `server: { sandbox: none, db: DIR/s.db }
+sources:
+  n: { type: webhook, signature: sha256, signature_header: X-Notion-Signature, signature_prefix: "sha256=", format: notion }
+  gh: { type: webhook, secret: env:AGW_HOOK, signature: github }
+`
+
+func TestNotionVerification(t *testing.T) {
+	const tok = "secret_" + "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"
+	var pending atomic.Pointer[string]
+	ce := newCfgEnvFile(t, notionCfg)
+	ce.srv.NotionPending = func(string) (string, time.Time, bool) {
+		p := pending.Load()
+		if p == nil {
+			return "", time.Time{}, false
+		}
+		return *p, time.Now(), true
+	}
+	ce.srv.TakeNotionPending = func(string) (string, bool) { pending.Store(nil); return "", true }
+	set := func(v string) { pending.Store(&v) }
+
+	// Nothing pending: the page waits, the API says 404.
+	if b := ce.get("/sources").Body.String(); !strings.Contains(b, "Awaiting Notion") {
+		t.Fatalf("no waiting text")
+	}
+	if w := ce.api("POST", "/api/sources/n/notion-verification", `{"token":"x"}`); w.Code != 404 {
+		t.Fatalf("nothing pending: %d", w.Code)
+	}
+	body := `{"token":"` + tok + `"}`
+	set(tok)
+	if w := ce.api("POST", "/api/sources/gh/notion-verification", body); w.Code != 404 {
+		t.Fatalf("not notion: %d", w.Code)
+	}
+	if w := ce.api("POST", "/api/sources/n/notion-verification?dry_run=1", body); w.Code != 200 || pending.Load() == nil {
+		t.Fatalf("dry run: %d", w.Code)
+	}
+
+	// Operator sees the token; viewer does not and cannot accept.
+	oc, _ := ce.asRole(roleOperator, "o")
+	vc, vcsrf := ce.asRole(roleViewer, "v")
+	page := func(c *http.Cookie) string {
+		return ce.do("GET", "/sources", nil, func(r *http.Request) { r.AddCookie(c) }).Body.String()
+	}
+	if !strings.Contains(page(oc), tok) || !strings.Contains(page(oc), "Use this token") {
+		t.Fatalf("operator does not see the token")
+	}
+	if b := page(vc); strings.Contains(b, tok) || strings.Contains(b, "Use this token") {
+		t.Fatalf("viewer sees the token")
+	}
+	if code := ce.do("POST", "/sources/n/notion-verification", url.Values{"csrf": {vcsrf}, "token": {tok}}, func(r *http.Request) { r.AddCookie(vc) }).Code; code != 403 || pending.Load() == nil {
+		t.Fatalf("viewer accept: %d", code)
+	}
+	if w := ce.api("GET", "/api/sources", ""); strings.Contains(w.Body.String(), tok) {
+		t.Fatalf("token in the source listing")
+	}
+
+	// A stale or missing token stores nothing: another capture arrived after the page was shown.
+	rev := ce.latest()
+	other := tok + "x"
+	for _, b := range []string{`{"token":"` + other + `"}`, ``, `{}`} {
+		if w := ce.api("POST", "/api/sources/n/notion-verification", b); w.Code != 409 || pending.Load() == nil || ce.latest() != rev {
+			t.Fatalf("stale %q: %d %s", b, w.Code, w.Body.String())
+		}
+	}
+	// An accept that commits but does not apply leaves the token pending.
+	ce.applyFail.Store(true)
+	if w := ce.api("POST", "/api/sources/n/notion-verification", body); w.Code != 200 || pending.Load() == nil {
+		t.Fatalf("not applied: %d %s", w.Code, w.Body.String())
+	}
+	ce.applyFail.Store(false)
+
+	// Accept through the API: a file: ref holds the token, pending is cleared.
+	if w := ce.api("POST", "/api/sources/n/notion-verification", body); w.Code != 200 || pending.Load() != nil {
+		t.Fatalf("accept: %d %s", w.Code, w.Body.String())
+	}
+	src := ce.cur.Load().Sources["n"]
+	if !strings.HasPrefix(src.Secret.Ref, "file:") || src.Secret.Value != tok {
+		t.Fatalf("secret ref %q", src.Secret.Ref)
+	}
+	if b, err := os.ReadFile(strings.TrimPrefix(src.Secret.Ref, "file:")); err != nil || strings.TrimSpace(string(b)) != tok {
+		t.Fatalf("secret file: %q %v", b, err)
+	}
+	set(tok)
+	if w := ce.api("POST", "/api/sources/n/notion-verification", body); w.Code != 409 {
+		t.Fatalf("secret already set: %d", w.Code)
+	}
+}
+
+func TestNotionVerificationPortalAccept(t *testing.T) {
+	const tok = "secret_" + "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"
+	ce := newCfgEnvFile(t, notionCfg)
+	taken := false
+	ce.srv.NotionPending = func(string) (string, time.Time, bool) { return tok, time.Now(), !taken }
+	ce.srv.TakeNotionPending = func(string) (string, bool) { taken = true; return tok, true }
+	c, csrf := ce.asRole(roleOperator, "o")
+	post := func(token string) int {
+		return ce.do("POST", "/sources/n/notion-verification", url.Values{"csrf": {csrf}, "token": {token}}, func(r *http.Request) { r.AddCookie(c) }).Code
+	}
+	if code := post(tok + "x"); code != 409 || taken {
+		t.Fatalf("stale portal accept: %d taken=%v", code, taken)
+	}
+	if code := post(tok); code != 303 || !taken || ce.cur.Load().Sources["n"].Secret.Value != tok {
+		t.Fatalf("portal accept: %d taken=%v", code, taken)
+	}
+}

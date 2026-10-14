@@ -223,6 +223,30 @@
                   },
                   "type": "object"
                 },
+                "servicenow": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "connection": {
+                      "type": "string"
+                    },
+                    "fields": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "op": {
+                      "type": "string"
+                    },
+                    "sys_id": {
+                      "type": "string"
+                    },
+                    "table": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
                 "timeout": {
                   "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$",
                   "type": "string"
@@ -258,6 +282,30 @@
               },
               "routine": {
                 "type": "string"
+              },
+              "servicenow": {
+                "additionalProperties": false,
+                "properties": {
+                  "connection": {
+                    "type": "string"
+                  },
+                  "fields": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "op": {
+                    "type": "string"
+                  },
+                  "sys_id": {
+                    "type": "string"
+                  },
+                  "table": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
               },
               "unit": {
                 "type": "string"
@@ -573,7 +621,13 @@
           "allow_private": {
             "type": "boolean"
           },
+          "allow_query_token": {
+            "type": "boolean"
+          },
           "at": {
+            "type": "string"
+          },
+          "audience": {
             "type": "string"
           },
           "auth": {
@@ -634,6 +688,9 @@
             },
             "type": "object"
           },
+          "format": {
+            "type": "string"
+          },
           "headers": {
             "additionalProperties": {
               "description": "env:NAME, file:/path, or (where allowed) a literal",
@@ -667,11 +724,17 @@
             },
             "type": "object"
           },
+          "reply_text": {
+            "type": "string"
+          },
           "secret": {
             "description": "env:NAME, file:/path, or (where allowed) a literal",
             "type": "string"
           },
           "service": {
+            "type": "string"
+          },
+          "service_account": {
             "type": "string"
           },
           "signature": {
@@ -690,6 +753,9 @@
             "type": "string"
           },
           "timezone": {
+            "type": "string"
+          },
+          "token_field": {
             "type": "string"
           },
           "token_header": {

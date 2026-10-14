@@ -1,0 +1,10 @@
+{
+  "specversion": "1.0",
+  "type": "Microsoft.Storage.BlobCreated",
+  "source": "/subscriptions/{subscription-id}/resourceGroups/Storage/providers/Microsoft.Storage/storageAccounts/xstoretestaccount",
+  "id": "9aeb0fdf-c01e-0131-0922-9eb54906e209",
+  "time": "2019-11-18T15:13:39.4589254Z",
+  "subject": "blobServices/default/containers/{storage-container}/blobs/{new-file}",
+  "dataschema": "#",
+  "data": {"api": "PutBlockList", "contentType": "text/plain", "contentLength": 447, "blobType": "BlockBlob"}
+}

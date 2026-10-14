@@ -100,6 +100,57 @@ func (s *server) editExtras(v *cfgView) error {
 	return nil
 }
 
+// snTable is the table a servicenow action touches.
+func snTable(a *config.ServiceNowAction) string {
+	switch {
+	case a.Op == "create_change":
+		return "change_request"
+	case a.Table == "":
+		return "incident"
+	}
+	return a.Table
+}
+
+// snArgv shows a servicenow action as the sys_id and k=v fields, rendered with env.
+func snArgv(a *config.ServiceNowAction, env map[string]any) ([]string, error) {
+	var out []string
+	if a.SysID != "" {
+		id, err := action.RenderPrompt(a.SysID, env)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	for _, k := range sortedKeys(a.Fields) {
+		v, err := action.RenderPrompt(a.Fields[k], env)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, k+"="+v)
+	}
+	return out, nil
+}
+
+// hasServiceNow reports whether the item YAML (a rule or a routine) has a
+// servicenow action, which the field form cannot show or keep.
+func hasServiceNow(kind, y string) bool {
+	switch kind {
+	case "rules":
+		var r config.Rule
+		return yaml.Unmarshal([]byte(y), &r) == nil && r.Action.ServiceNow != nil
+	case "routines":
+		var rt config.Routine
+		if yaml.Unmarshal([]byte(y), &rt) == nil {
+			for _, st := range rt.Steps {
+				if st.ServiceNow != nil {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func sortedKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
@@ -257,6 +308,11 @@ func ruleTest(ctx context.Context, cfg *config.Config, rl config.Rule, data any,
 			}
 		case a.Unit != "":
 			tf.Kind, tf.Target = "unit", a.Unit
+		case a.ServiceNow != nil:
+			tf.Kind, tf.Target = "servicenow", a.ServiceNow.Op+" "+snTable(a.ServiceNow)
+			if tf.Argv, err = snArgv(a.ServiceNow, f.Env); err != nil {
+				tf.Err = err.Error()
+			}
 		case a.Routine != "":
 			tf.Kind, tf.Target = "routine", a.Routine
 			if rt := cfg.Routines[a.Routine]; rt != nil {

@@ -60,6 +60,10 @@ type Options struct {
 	Now   func() time.Time
 	// OAuth holds the logins of auth.oauth sources (Pipeline.OAuth); nil disables the login routes.
 	OAuth *mcpoauth.Manager
+	// NotionPending and TakeNotionPending read and clear the captured Notion
+	// verification token of a source (Pipeline); nil disables the accept routes.
+	NotionPending     func(source string) (string, time.Time, bool)
+	TakeNotionPending func(source string) (string, bool)
 	// Version is the build version shown by /metrics.
 	Version string
 	// TrustedProxies are the peers whose X-Forwarded-For the failed-login limiter believes.
@@ -156,6 +160,7 @@ func New(o Options) http.Handler {
 			}
 			return t.Format("2006-01-02 15:04 MST")
 		},
+		"agot": func(t time.Time) string { return ago(o.Now(), t) },
 		"agop": func(t *time.Time) string {
 			if t == nil {
 				return "never"
@@ -168,14 +173,20 @@ func New(o Options) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
-	mux.HandleFunc("POST /hook/{source}", func(w http.ResponseWriter, r *http.Request) {
+	hook := func(w http.ResponseWriter, r *http.Request) {
 		if h := s.hook(r.PathValue("source")); h != nil {
 			h.ServeHTTP(w, r)
 			return
 		}
 		http.NotFound(w, r)
-	})
+	}
+	mux.HandleFunc("POST /hook/{source}", hook)
+	mux.HandleFunc("OPTIONS /hook/{source}", hook)     // Azure Event Grid's handshake; the handler refuses it elsewhere
+	for _, m := range []string{"PUT", "POST", "GET"} { // Matrix application-service paths; the handler answers only a matrix source
+		mux.HandleFunc(m+" /hook/{source}/_matrix/app/v1/{rest...}", hook)
+	}
 	s.oauthRoutes(mux)
+	s.notionRoutes(mux)
 	s.apiRoutes(mux)
 	s.portalRoutes(mux)
 	s.oidcRoutes(mux)

@@ -29,13 +29,38 @@ func (p *Pipeline) Webhooks() func(source string) http.Handler {
 			return nil
 		}
 		lim := p.hookLimiters(name)
+		var google *source.GoogleVerifier
+		audience := s.Audience
+		if s.Signature == "google-oidc" {
+			google = p.googleVerifier()
+			if audience == "" {
+				audience = strings.TrimRight(cfg.Server.PublicURL, "/") + "/hook/" + name
+			}
+		}
 		return source.NewWebhook(source.WebhookOptions{
 			Name: name, Secret: s.Secret.Value, Signature: s.Signature, SigHeader: s.SigHeader, TokenHeader: s.TokenHeader,
-			TimestampHeader: s.TimestampHdr, SigPrefix: s.SigPrefix, TimestampSep: s.TimestampSep, IDHeader: strings.TrimPrefix(s.ID, "header."),
+			TimestampHeader: s.TimestampHdr, TokenField: s.TokenField, ReplyText: s.ReplyText, SigPrefix: s.SigPrefix, TimestampSep: s.TimestampSep, IDHeader: strings.TrimPrefix(s.ID, "header."), Format: s.Format, AllowQueryToken: s.AllowQueryToken,
+			Audience: audience, ServiceAccount: s.ServiceAccount, Google: google,
 			MaxBody: int64(cfg.Limits.HTTPMaxBody), Now: p.Now, PreLimit: lim.pre, Limit: lim.post,
 			OnReject: p.rejectThrottle(name).note,
+			OnVerificationToken: func(tok string) {
+				p.notionMu.Lock()
+				defer p.notionMu.Unlock()
+				if p.notionPending == nil {
+					p.notionPending = map[string]pendingToken{}
+				}
+				p.notionPending[name] = pendingToken{tok, p.Now()}
+			},
 		}, p.deliver)
 	}
+}
+
+// googleVerifier returns the daemon's one Google token verifier, made on first use.
+func (p *Pipeline) googleVerifier() *source.GoogleVerifier {
+	p.googleOnce.Do(func() {
+		p.google = source.NewGoogleVerifier(source.HTTPClient(false, 10*time.Second, 1<<20), p.Now)
+	})
+	return p.google
 }
 
 // rejectEvery is the least gap between database writes of one source's refused
@@ -50,7 +75,8 @@ type rejects struct {
 	last    time.Time // of the last write
 	status  int
 	reason  string
-	pending bool // a newer refusal than the last write, flush timer armed
+	at      time.Time // when the latest refusal happened, not when it is written
+	pending bool      // a newer refusal than the last write, flush timer armed
 }
 
 func (p *Pipeline) rejectThrottle(name string) *rejects {
@@ -61,8 +87,9 @@ func (p *Pipeline) rejectThrottle(name string) *rejects {
 func (r *rejects) note(status int, reason string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.status, r.reason = status, reason
-	if wait := rejectEvery - time.Since(r.last); wait > 0 {
+	now := r.p.Now()
+	r.status, r.reason, r.at = status, reason, now
+	if wait := rejectEvery - now.Sub(r.last); wait > 0 {
 		if !r.pending {
 			r.pending = true
 			time.AfterFunc(wait, r.flush)
@@ -82,8 +109,8 @@ func (r *rejects) flush() {
 
 // write stores the latest refusal; r.mu is held.
 func (r *rejects) write() {
-	r.pending, r.last = false, time.Now()
-	if err := store.SetSourceReject(r.p.Store.DB, r.name, r.p.Now(), r.status, r.reason); err != nil {
+	r.pending, r.last = false, r.p.Now()
+	if err := store.SetSourceReject(r.p.Store.DB, r.name, r.at, r.status, r.reason); err != nil {
 		slog.Warn("store webhook rejection", "source", r.name, "err", err)
 	}
 }
@@ -151,4 +178,27 @@ func (p *Pipeline) listen(ctx context.Context, cfg *config.Config, name string, 
 		case <-time.After(time.Duration(s.Poll)):
 		}
 	}
+}
+
+// pendingToken is a Notion verification token awaiting an operator's accept.
+type pendingToken struct {
+	Token string
+	At    time.Time
+}
+
+// NotionPending is the latest captured token of a source and when it came.
+func (p *Pipeline) NotionPending(source string) (string, time.Time, bool) {
+	p.notionMu.Lock()
+	defer p.notionMu.Unlock()
+	t, ok := p.notionPending[source]
+	return t.Token, t.At, ok
+}
+
+// TakeNotionPending returns the pending token and clears it.
+func (p *Pipeline) TakeNotionPending(source string) (string, bool) {
+	p.notionMu.Lock()
+	defer p.notionMu.Unlock()
+	t, ok := p.notionPending[source]
+	delete(p.notionPending, source)
+	return t.Token, ok
 }

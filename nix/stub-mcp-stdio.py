@@ -1,20 +1,21 @@
 # VM test stand-in for a stdio MCP server that needs a secret in its env.
 # Tool "whoami" answers with a hash of STUB_TOKEN (proving the server got
 # it, without echoing it) and the uid it runs as.
+import base64
 import hashlib
+import http.client
 import json
 import os
 import sys
 import time
+import urllib.parse
 
 tok = os.environ.get("STUB_TOKEN", "")
 digest = hashlib.sha256(tok.encode()).hexdigest()[:16] if tok else "missing"
 
-
 def sha(name):
     v = os.environ.get(name, "")
     return hashlib.sha256(v.encode()).hexdigest()[:16] if v else "missing"
-
 
 # As an AWS bridge: hashes of the keys it got (never the keys), and the
 # settings that stop it falling back to other credentials.
@@ -22,6 +23,39 @@ aws = "aws-akid-sha=%s aws-secret-sha=%s aws-token-sha=%s aws-region=%s aws-imds
     sha("AWS_ACCESS_KEY_ID"), sha("AWS_SECRET_ACCESS_KEY"), sha("AWS_SESSION_TOKEN"),
     os.environ.get("AWS_REGION", "missing"), os.environ.get("AWS_EC2_METADATA_DISABLED", "missing"),
     os.environ.get("AWS_CONFIG_FILE", "missing"), os.environ.get("AWS_SHARED_CREDENTIALS_FILE", "missing"))
+
+def fetch(host, port, path):
+    # Siphon's egress proxy only tunnels (CONNECT), as clients do for https.
+    # Returns (body of a 2xx answer, "") or (None, why).
+    try:
+        p = urllib.parse.urlsplit(os.environ.get("http_proxy", ""))
+        auth = base64.b64encode(("%s:%s" % (urllib.parse.unquote(p.username or ""), urllib.parse.unquote(p.password or ""))).encode()).decode()
+        c = http.client.HTTPConnection(p.hostname, p.port, timeout=10)
+        c.set_tunnel(host, port, headers={"Proxy-Authorization": "Basic " + auth})
+        c.request("GET", path)
+        r = c.getresponse()
+        if 200 <= r.status < 300:
+            return r.read().decode().strip(), ""
+        return None, "status-%d" % r.status
+    except Exception as e:
+        # The class, and the tunnel's status line: never the URL (it holds the token).
+        why = type(e).__name__
+        if str(e).startswith("Tunnel connection failed"):
+            why += ":" + str(e).split(":", 1)[1].strip().replace(" ", "-")
+        return None, why
+
+
+def proxy_report():
+    # Only with STUB_FETCH=stub-fetch-on. Never prints a variable's value.
+    if os.environ.get("STUB_FETCH") != "stub-fetch-on":
+        return ""
+    api = urllib.parse.urlsplit(os.environ.get("STUB_URL", ""))
+    body, why = fetch(api.hostname, api.port, "/")
+    blocked, bwhy = fetch("external", 8000, "/v1/models")  # 200 if reachable, so a leak shows
+    return " proxy-env=%s fetch=%s fetch-blocked=%s" % (
+        "set" if os.environ.get("http_proxy") else "missing",
+        body if body is not None else "error(%s)" % why,
+        "ok" if blocked is not None else "refused(%s)" % bwhy)
 
 for line in sys.stdin:
     try:
@@ -40,7 +74,7 @@ for line in sys.stdin:
     elif m == "tools/call":
         # Hold the run open so the VM test can inspect it while it's live.
         time.sleep(float(os.environ.get("STUB_SLOW", "0")))
-        res = {"content": [{"type": "text", "text": "token-sha=%s uid=%d %s" % (digest, os.getuid(), aws)}]}
+        res = {"content": [{"type": "text", "text": "token-sha=%s uid=%d %s%s" % (digest, os.getuid(), aws, proxy_report())}]}
     elif m == "ping":
         res = {}
     else:

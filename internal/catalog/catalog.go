@@ -36,7 +36,8 @@ type Entry struct {
 	Reason       string      `yaml:"reason" json:"reason,omitempty"`
 	Fields       []Field     `yaml:"fields" json:"fields"`
 	Creates      []Create    `yaml:"creates" json:"-"`
-	Setup        string      `yaml:"setup" json:"-"` // template: provider-side steps
+	Setup        string      `yaml:"setup" json:"-"`        // template: provider-side steps
+	Registration string      `yaml:"registration" json:"-"` // template, shown once on the done page, never stored: gets hook_url, hook_secret, as_token too
 	ReadTools    []string    `yaml:"read_tools" json:"-"`
 	WriteTools   []string    `yaml:"write_tools" json:"-"`
 	Test         *Test       `yaml:"test" json:"-"`
@@ -201,6 +202,9 @@ func (e *Entry) check() error {
 		return err
 	}
 	if err := parse("setup", e.Setup); err != nil {
+		return err
+	}
+	if err := parse("registration", e.Registration); err != nil {
 		return err
 	}
 	for i, c := range e.Creates {

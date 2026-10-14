@@ -351,6 +351,53 @@ services:
       Choose the events (for example issue created, issue updated) and save.
     test: {method: GET, url: '{base}/rest/api/3/myself', header: 'Authorization: {token}', identity: displayName, base_from: headers.X-Siphon-Site}
 
+  - id: servicenow
+    name: ServiceNow
+    mark: SN
+    category: issues
+    summary: "Agent tools to read and update incidents and changes through a built-in MCP server, and record events by signed webhook from a Business Rule."
+    capabilities: [tools, webhooks]
+    status: available
+    templates: [alert-to-servicenow-incident, servicenow-change-on-deploy, servicenow-incident-notify, servicenow-incident-summary, servicenow-incident-triage]
+    fields:
+      - {<<: *f_name, default: servicenow}
+      - {key: instance, label: Instance URL, type: url, secure: true, private_listed: true, help: 'For agent tools; leave empty for webhooks only. For example https://dev12345.service-now.com. A LAN host must be listed in server.services.private_endpoints.'}
+      - {key: auth, label: Authentication, type: choice, choices: [oauth, apikey], default: oauth, help: 'OAuth client credentials, or a REST API key (x-sn-apikey).'}
+      - {key: client_id, label: OAuth client ID, type: text, help: 'System OAuth → Application Registry → the OAuth API endpoint for external clients.'}
+      - {key: client_secret, label: OAuth client secret, type: secret}
+      - {key: api_key, label: API key, type: secret, help: 'For authentication apikey: System Web Services → API Access Policies.'}
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: '{{if .instance}}true{{end}}'
+        yaml: |
+          type: mcp
+          package: servicenow
+          env:
+            SERVICENOW_INSTANCE_URL: {{secret "instance" "env.SERVICENOW_INSTANCE_URL"}}
+            {{- if eq .auth "apikey"}}
+            {{- if not (has "api_key")}}{{fail "an API key is required for authentication apikey"}}{{end}}
+            SERVICENOW_API_KEY: {{secret "api_key" "env.SERVICENOW_API_KEY"}}
+            {{- else}}
+            {{- if not (and (has "client_id") (has "client_secret"))}}{{fail "an OAuth client ID and secret are required for authentication oauth"}}{{end}}
+            SERVICENOW_CLIENT_ID: {{secret "client_id" "env.SERVICENOW_CLIENT_ID"}}
+            SERVICENOW_CLIENT_SECRET: {{secret "client_secret" "env.SERVICENOW_CLIENT_SECRET"}}
+            {{- end}}
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: standard-webhooks
+          secret: {{generated "secret" "whsec_"}}
+    setup: |
+      In ServiceNow, add two system properties: siphon.webhook.url (the URL above) and
+      siphon.webhook.key (type password2, the secret above). Then add the after Business
+      Rule from docs/connections/servicenow.md on each table to send. Full guide:
+      docs/connections/servicenow.md. With an instance URL set, agents get ServiceNow
+      tools: see the "Agent tools" section of that guide for the read-only allowed_tools.
+
   # ---- chat
   - id: slack
     name: Slack
@@ -375,6 +422,106 @@ services:
       Slack app → Event Subscriptions (or Slash Commands) → Request URL = the URL above.
       Slack signs each request with your signing secret; Siphon rejects anything older than five minutes.
       Subscribe to the events you want and save.
+
+  - id: mattermost
+    name: Mattermost
+    mark: MM
+    category: chat
+    summary: "Outgoing webhooks and slash commands from Mattermost, verified by the token Mattermost generates."
+    capabilities: [webhooks]
+    status: available
+    templates: [mattermost-command-agent]
+    fields:
+      - {<<: *f_name, default: mattermost}
+      - {key: token, label: Token, type: secret, required: true, help: 'Mattermost shows it after you save the outgoing webhook or slash command (Integrations).', section: 2}
+      - {key: reply, label: Immediate reply, type: text, help: 'Optional: answered at once, for example "Working on it…". A slash command shows it to the user who ran it; an outgoing webhook posts it in the channel every time.'}
+    creates:
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: body-token
+          secret: {{secret "token" "secret"}}
+          {{- if .reply}}
+          reply_text: {{.reply | printf "%q"}}
+          {{- end}}
+    setup: |
+      In Mattermost: Integrations → Outgoing Webhooks or Slash Commands → Add.
+      Callback URL: <your Siphon public URL>/hook/<name>-hooks (method POST).
+      Save, copy the token Mattermost shows, then connect with it.
+
+  - id: discord
+    name: Discord
+    mark: DC
+    category: chat
+    summary: "Slash commands and other interactions from a Discord app, verified by its public key. Channel messages are not covered."
+    capabilities: [webhooks]
+    status: available
+    templates: [discord-ask-agent]
+    fields:
+      - {<<: *f_name, default: discord}
+      - {key: public_key, label: Public key, type: text, required: true, pattern: '[0-9a-f]{64}', pattern_error: 'the public key is 64 lowercase hex characters', help: 'Developer Portal → your app → General Information → Public Key.'}
+      - {key: reply, label: Immediate reply, type: text, help: 'Optional: shown at once as the command response, instead of "thinking…".'}
+    creates:
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: ed25519
+          format: discord
+          secret: {{secret "public_key" "secret"}}
+          {{- if .reply}}
+          reply_text: {{.reply | printf "%q"}}
+          {{- end}}
+    setup: |
+      Developer Portal → General Information → Interactions Endpoint URL = the URL above, then Save.
+      Discord tests the URL, and Siphon answers it. Register your slash commands with Discord as usual.
+
+  - id: matrix
+    name: Matrix
+    mark: MX
+    category: chat
+    summary: "Room events from a Matrix homeserver, as an application service (unencrypted rooms only). Replies are not covered."
+    capabilities: [webhooks]
+    status: available
+    templates: [matrix-deploy-command]
+    fields:
+      - {<<: *f_name, default: matrix}
+      - {key: homeserver_name, label: Homeserver name, type: text, required: true, pattern: '[A-Za-z0-9.-]+(:[0-9]+)?', pattern_error: 'the server name, for example example.org', help: 'The server_name in the homeserver config (the part after the colon in user ids).'}
+      - {key: rooms, label: Room aliases, type: text, help: 'Optional. Empty: the bot gets only the rooms it is invited to (recommended). A regex of room alias localparts (for example .* for all) registers an alias namespace: the homeserver then sends the events of every room with a matching alias, including private ones.'}
+      - {key: localpart, label: Bot user localpart, type: text, default: siphon, pattern: '[a-z0-9._=/-]+', pattern_error: 'lowercase letters, digits and ._=/-'}
+    creates:
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: token
+          token_header: Authorization
+          format: matrix
+          secret: {{generated "secret"}}
+    registration: |
+      id: siphon-{{.name}}
+      url: {{.hook_url | printf "%q"}}
+      as_token: {{.as_token}}
+      hs_token: {{.hook_secret}}
+      sender_localpart: {{.localpart | printf "%q"}}
+      rate_limited: false
+      namespaces:
+        users: []
+        aliases:{{if .rooms}}
+          - {exclusive: false, regex: {{printf "#%s:%s" .rooms .homeserver_name | printf "%q"}}}{{else}} []{{end}}
+        rooms: []
+    setup: |
+      Save the registration below as siphon.yaml on the homeserver and add it to app_service_config_files (Synapse), then restart the homeserver.
+      Invite @{{.localpart}}:{{.homeserver_name}} to the rooms to follow. Only unencrypted rooms work; the bot must be in a room to get its events, unless the alias namespace matches it.
+      The registration's url is only usable when server.public_url is set in siphon.yaml; otherwise it is relative.
+      The as_token in the registration is not stored by Siphon: keep the file.
 
   # ---- monitoring
   - id: sentry
@@ -544,6 +691,38 @@ services:
       Turn on additional headers: {"X-Siphon-Key": "<the secret above>"}.
 
   # ---- cloud
+  - id: azure-eventgrid
+    name: Azure Event Grid
+    mark: EG
+    category: cloud
+    summary: Azure Event Grid event subscriptions, with the validation handshake answered and each event of a batch delivered.
+    capabilities: [webhooks]
+    status: available
+    templates: [azure-keyvault-secret-expiry]
+    fields:
+      - {<<: *f_name, default: azure-eventgrid}
+    creates:
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: 'true'
+        hook_header: X-Siphon-Key
+        yaml: |
+          type: webhook
+          signature: token
+          token_header: X-Siphon-Key
+          secret: {{generated "secret"}}
+          format: eventgrid
+    setup: |
+      In Azure: Event Grid topic or system topic → Event Subscriptions → Create.
+      Endpoint type = Web Hook, endpoint = the URL above (must be https).
+      Under Delivery properties add a header X-Siphon-Key with the secret
+      above, and tick "Is secret". Azure validates the endpoint when you save.
+      Not yet tested against real Azure: if saving fails and Siphon logs a 401
+      for this source, Azure did not send the header on the validation
+      request; please report it (issue #83).
+      A batch larger than limits.http_max_body (1 MiB by default) is refused
+      with 413; raise it if your events are large.
+
   - id: cloudflare
     name: Cloudflare
     mark: CF
@@ -694,7 +873,7 @@ services:
     status: available
     fields:
       - {<<: *f_name, default: webhook}
-      - {key: mode, label: How deliveries are verified, type: choice, choices: [github, sha256, standard-webhooks, token, slack, stripe], default: sha256, help: 'sha256 and token need the header below. slack and stripe need the provider''s signing secret.'}
+      - {key: mode, label: How deliveries are verified, type: choice, choices: [github, sha256, standard-webhooks, token, body-token, slack, stripe], default: sha256, help: 'sha256 and token need the header below. body-token reads the token from the request body and needs no header. slack and stripe need the provider''s signing secret.'}
       - {key: header, label: Header, type: text, pattern: '[A-Za-z][A-Za-z0-9-]*', pattern_error: 'the header is a name like X-Signature', help: 'sha256: the header carrying the signature. token: the header carrying the token.'}
       - {key: secret, label: Secret, type: secret, help: 'Leave empty to generate one (shown once). Slack and Stripe: paste the provider''s signing secret.', section: 2}
     creates:
@@ -740,13 +919,150 @@ services:
           allow_private: true
           {{end -}}
 
+  - id: notion
+    name: Notion
+    mark: NO
+    category: issues
+    summary: Notion's remote MCP server for agents (OAuth login), and page and database events by webhook.
+    capabilities: [tools, webhooks]
+    status: available
+    templates: [notion-page-summary]
+    fields:
+      - {<<: *f_name, default: notion}
+      - *f_webhook
+    creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: 'true'
+        yaml: |
+          type: mcp
+          url: https://mcp.notion.com/mcp
+          auth:
+            oauth: {}
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: '{{.webhook}}'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: sha256
+          signature_header: X-Notion-Signature
+          signature_prefix: "sha256="
+          format: notion
+    setup: |
+      Agent tools: open Sources and log in to the Notion MCP server (OAuth).
+      Not yet verified against Notion's real MCP OAuth: please report problems (issue #85).
+      Webhooks, in this order:
+      1. Notion → Settings → Connections → your integration → Webhooks →
+         Create a subscription, with the URL above. Notion POSTs a one-time
+         verification token to Siphon, which holds it.
+      2. Copy the token shown on Siphon's Sources page.
+      3. Paste it into Notion's "Verify subscription" dialog and press Verify.
+         Only if Notion accepts it is it the real one.
+      4. Then press "Use this token" in Siphon. Until then the webhook accepts
+         nothing else.
+      If the wrong token was accepted, edit the source as YAML, delete its
+      secret: line, and use "Resend token" in Notion. A Siphon restart loses a
+      token that was not accepted yet: use "Resend token" too.
+      Later deliveries are checked with that token as the signing secret.
+
+  - id: teams
+    name: Microsoft Teams
+    mark: MT
+    category: chat
+    summary: "Messages that @mention an outgoing webhook in a Teams channel, verified by its security token. Replies go through a Workflows webhook in your routine."
+    capabilities: [webhooks]
+    status: available
+    templates: [teams-ask-agent]
+    fields:
+      - {<<: *f_name, default: teams}
+      - {key: token, label: Security token, type: secret, required: true, help: 'The base64 security token Teams shows once when you create the outgoing webhook.'}
+      - {key: reply, label: Immediate reply, type: text, help: 'Optional, default "Received.", for example "Working on it…". Teams must get an answer within 5 seconds, so an agent cannot be the reply: post it later from the routine.'}
+    creates:
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: teams-hmac
+          secret: {{secret "token" "secret"}}
+          {{- if .reply}}
+          reply_text: {{.reply | printf "%q"}}
+          {{- end}}
+    setup: |
+      In Teams: the team → Manage team → Apps → Create an outgoing webhook.
+      Callback URL: <your Siphon public URL>/hook/<name>-hooks (needs server.public_url).
+      Copy the security token Teams shows, then connect with it.
+      To answer in the channel, create a Workflows flow "Post to a channel when a webhook
+      request is received" and use its URL in the routine (see the teams-ask-agent template).
+
   # ---- not yet: listed so people know, with the reason
-  - {id: discord, name: Discord, mark: DC, category: chat, summary: Discord interactions and bot events., status: not-yet, reason: 'needs an ed25519 signature mode and the PING handshake, and does not cover channel messages'}
-  - {id: teams, name: Microsoft Teams, mark: MT, category: chat, summary: Microsoft Teams outgoing webhooks., status: not-yet, reason: 'needs a teams-hmac signature mode with a synchronous reply within 5 seconds'}
-  - {id: mattermost, name: Mattermost, mark: MM, category: chat, summary: Mattermost outgoing webhooks and slash commands., status: not-yet, reason: 'the token is in the request body: needs a body-token mode'}
-  - {id: matrix, name: Matrix, mark: MX, category: chat, summary: Matrix application-service events., status: not-yet, reason: 'needs PUT requests and a {} reply'}
-  - {id: notion, name: Notion, mark: NO, category: issues, summary: Notion page and database events., status: not-yet, reason: 'needs the verification_token handshake; the remote MCP is OAuth only'}
-  - {id: google-pubsub, name: Google Pub/Sub, mark: GP, category: cloud, summary: Google Cloud Pub/Sub push subscriptions., status: not-yet, reason: 'needs a Google OIDC (RS256 JWT) push-authentication mode'}
-  - {id: azure-eventgrid, name: Azure Event Grid, mark: EG, category: cloud, summary: Azure Event Grid event subscriptions., status: not-yet, reason: 'needs the subscription validation handshake'}
-  - {id: azure-devops, name: Azure DevOps, mark: AD, category: code, summary: Azure DevOps service hooks and work items., status: not-yet, reason: 'service hooks use basic auth only, and the remote MCP is Entra OAuth only'}
-  - {id: opsgenie, name: Opsgenie, mark: OG, category: monitoring, summary: Opsgenie alert callbacks., status: not-yet, reason: 'end of support 2027-04-05'}
+  - id: google-pubsub
+    name: Google Pub/Sub
+    mark: GP
+    category: cloud
+    summary: Google Cloud Pub/Sub push subscriptions, verified by the OIDC token Google signs, each message delivered once.
+    capabilities: [webhooks]
+    status: available
+    templates: [gcp-cloud-build-failed]
+    fields:
+      - {<<: *f_name, default: google-pubsub}
+      - {key: service_account, label: Service account, type: text, required: true, pattern: '[^@\s{}]+@[^@\s{}]+', pattern_error: 'an email address, like push@my-project.iam.gserviceaccount.com', help: 'The service account the push subscription signs its token as.'}
+      - {key: audience, label: Audience, type: text, pattern: '[^\s{}]*', pattern_error: 'no spaces', help: "Leave empty to use this hook's URL, which is Pub/Sub's default."}
+    creates:
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: google-oidc
+          format: pubsub
+          service_account: {{q .service_account}}
+          {{if .audience -}}
+          audience: {{q .audience}}
+          {{end -}}
+    setup: |
+      server.public_url must be set: the audience defaults to the URL above.
+      Whoever creates the subscription needs roles/iam.serviceAccountUser
+      (iam.serviceAccounts.actAs) on the push service account.
+      Only for projects created before 8 April 2021: also grant the Pub/Sub
+      service agent (service-<project number>@gcp-sa-pubsub.iam.gserviceaccount.com)
+      roles/iam.serviceAccountTokenCreator on that service account.
+      Then create the subscription (leave payload wrapping on: a
+      --push-no-wrapper subscription gets 400):
+        gcloud pubsub subscriptions create <sub> --topic=<topic> \
+          --push-endpoint=<the URL above> \
+          --push-auth-service-account=<service account>
+      With a custom audience, add --push-auth-token-audience=<audience>.
+      For Cloud Build failures, subscribe to the topic cloud-builds.
+      A message larger than limits.http_max_body (1 MiB by default) is refused
+      with 413; raise it if your messages are large.
+  - id: azure-devops
+    name: Azure DevOps
+    mark: AD
+    category: code
+    summary: "Azure DevOps service hooks (builds, releases, work items, pull requests) by webhook with a shared header token. Agent tools come later."
+    capabilities: [webhooks]
+    status: available
+    templates: [azure-devops-build-failed, azure-devops-new-bug]
+    fields:
+      - {<<: *f_name, default: azure-devops}
+    creates:
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: token
+          token_header: X-Siphon-Key
+          secret: {{generated "secret"}}
+    setup: |
+      Project settings → Service hooks → + → Web Hooks → choose the event
+      (Build completed, Work item created, Pull request created, …) → Next.
+      URL: the URL above. HTTP headers: X-Siphon-Key:<the secret above>.
+      Leave Basic authentication empty. Resource details to send: All (the
+      templates read resource fields). Test, then Finish.
+      server.public_url must be set for the URL to be reachable.

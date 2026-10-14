@@ -42,7 +42,7 @@ func TestCatalogEntriesRenderAndCommit(t *testing.T) {
 		if w := ce.post("/services/"+e.ID, form); w.Code != 200 {
 			t.Errorf("%s: commit: %d %s", e.ID, w.Code, alertText(w.Body.String()))
 		}
-		if ce.cur.Load().Sources["t-"+e.ID] == nil && ce.cur.Load().Credentials["t-"+e.ID] == nil {
+		if ce.cur.Load().Sources["t-"+e.ID] == nil && ce.cur.Load().Sources["t-"+e.ID+"-hooks"] == nil && ce.cur.Load().Credentials["t-"+e.ID] == nil {
 			t.Errorf("%s: nothing created", e.ID)
 		}
 	}
@@ -290,8 +290,8 @@ func TestNotYetServicesCannotConnect(t *testing.T) {
 			t.Errorf("%s: connect page offers a form", e.ID)
 		}
 	}
-	if n < 9 {
-		t.Errorf("only %d not-yet entries", n)
+	if n == 0 { // the loop must have checked something; the count shrinks as services ship (#90)
+		t.Error("no not-yet entries were checked")
 	}
 }
 
@@ -305,7 +305,7 @@ func alertText(page string) string {
 
 // dummyValues fills every field of an entry with something valid.
 func dummyValues(e *catalog.Entry, sentinel string) map[string]string {
-	v := map[string]string{"name": "t-" + e.ID, "project": "g/p", "profile": "p", "webhook": "on", "region": "eu-west-1"}
+	v := map[string]string{"name": "t-" + e.ID, "project": "g/p", "profile": "p", "webhook": "on", "region": "eu-west-1", "public_key": strings.Repeat("ab", 32), "service_account": "push@p.iam.gserviceaccount.com"}
 	for _, f := range e.Fields {
 		if _, ok := v[f.Key]; ok {
 			continue
@@ -327,6 +327,9 @@ func dummyValues(e *catalog.Entry, sentinel string) map[string]string {
 				v[f.Key] = "dummy"
 			}
 		}
+	}
+	if e.ID == "teams" { // the secret must be a base64 key of at least 16 bytes
+		v["token"] = base64.StdEncoding.EncodeToString([]byte(sentinel))
 	}
 	if e.ID == "aws" { // profile mode: no base keys
 		delete(v, "access_key_id")

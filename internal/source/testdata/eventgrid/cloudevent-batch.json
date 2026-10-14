@@ -1,0 +1,18 @@
+[{
+  "specversion": "1.0",
+  "type": "Microsoft.KeyVault.SecretNearExpiry",
+  "source": "/subscriptions/{subscription-id}/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv",
+  "id": "ce-1",
+  "time": "2022-03-01T10:00:00Z",
+  "subject": "secret-one",
+  "data": {"ObjectName": "secret-one"}
+},
+{
+  "specversion": "1.0",
+  "type": "Microsoft.KeyVault.SecretNearExpiry",
+  "source": "/subscriptions/{subscription-id}/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv",
+  "id": "ce-2",
+  "time": "2022-03-01T10:01:00Z",
+  "subject": "secret-two",
+  "data": {"ObjectName": "secret-two"}
+}]

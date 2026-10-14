@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"slices"
@@ -316,6 +317,145 @@ func TestWebhookIDAndTimestamp(t *testing.T) {
 		}
 		if got := hasWarning(c, "weaker than an HMAC"); got != strings.HasPrefix(tc.extra, "signature: token") {
 			t.Errorf("%q: token warning = %v", tc.extra, got)
+		}
+	}
+}
+
+func TestBodyTokenValidation(t *testing.T) {
+	t.Setenv("AGW_W", "x")
+	for _, tc := range []struct{ extra, want string }{
+		{"signature: body-token, token_field: key, reply_text: hi", ""},
+		{"signature: body-token", ""},
+		{"signature: body-token, token_header: X-T", "not allowed with signature body-token"},
+		{"signature: body-token, token_field: \"a-b\"", "token_field must match"},
+		{"signature: sha256, signature_header: X-S, reply_text: hi", "reply_text is only for"},
+		{"signature: body-token, reply_text: " + strings.Repeat("a", 501), "limit is 500"},
+	} {
+		c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, " + tc.extra + "}}"))
+		err := c.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%q: %v", tc.extra, err)
+		}
+	}
+}
+
+func TestEventGridFormatValidation(t *testing.T) {
+	t.Setenv("AGW_W", "x")
+	for _, tc := range []struct{ extra, want string }{
+		{"signature: token, token_header: X-Siphon-Key, format: eventgrid", ""},
+		{"signature: sha256, signature_header: X-S, format: eventgrid", "needs signature token"},
+		{"signature: token, token_header: X-K, format: eventgrid, id: header.X-Id", "not allowed with format eventgrid"},
+		{"signature: token, token_header: X-K, format: cloudevents", "format must be eventgrid"},
+	} {
+		c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, " + tc.extra + "}}"))
+		err := c.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%q: %v", tc.extra, err)
+		}
+	}
+}
+
+func TestMatrixFormatValidation(t *testing.T) {
+	t.Setenv("AGW_W", "x")
+	for _, tc := range []struct{ extra, want string }{
+		{"signature: token, token_header: Authorization, format: matrix", ""},
+		{"signature: token, token_header: Authorization, format: matrix, allow_query_token: true", ""},
+		{"signature: sha256, signature_header: X-S, format: matrix", "format matrix needs signature token"},
+		{"signature: token, token_header: X-Foo, format: matrix", "token_header Authorization"},
+		{"signature: token, token_header: Authorization, format: matrix, id: header.X-Id", "not allowed with format matrix"},
+		{"signature: token, token_header: Authorization, allow_query_token: true", "allow_query_token is only for format matrix"},
+	} {
+		c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, " + tc.extra + "}}"))
+		err := c.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%q: %v", tc.extra, err)
+		}
+	}
+}
+
+func TestGoogleOIDCValidation(t *testing.T) {
+	const sa = "service_account: push@p.iam.gserviceaccount.com"
+	for _, tc := range []struct{ pub, src, want string }{
+		{"", "signature: google-oidc, format: pubsub, audience: https://x/hook/w, " + sa, ""},
+		{"https://siphon.example.com", "signature: google-oidc, format: pubsub, " + sa, ""},
+		{"", "signature: google-oidc, " + sa, "audience or server.public_url"},
+		{"", "signature: google-oidc, audience: a", "needs service_account"},
+		{"", "signature: google-oidc, audience: a, service_account: nobody", "needs service_account"},
+		{"", "signature: google-oidc, audience: a, secret: env:AGW_W, " + sa, "not allowed with signature google-oidc"},
+		{"", "signature: sha256, signature_header: X-S, secret: env:AGW_W, format: pubsub", "format pubsub needs signature google-oidc"},
+		{"", "signature: sha256, signature_header: X-S, secret: env:AGW_W, " + sa, "only for signature google-oidc"},
+	} {
+		t.Setenv("AGW_W", "x")
+		y := "server: {public_url: \"" + tc.pub + "\"}\n"
+		if tc.pub == "" {
+			y = ""
+		}
+		c, _ := Parse([]byte(y + "sources: {w: {type: webhook, " + tc.src + "}}"))
+		err := c.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%q: %v", tc.src, err)
+		}
+	}
+}
+
+func TestDiscordValidation(t *testing.T) {
+	for _, tc := range []struct{ extra, key, want string }{
+		{"signature: ed25519, format: discord", strings.Repeat("ab", 32), ""},
+		{"signature: ed25519, format: discord, reply_text: hi", strings.Repeat("ab", 32), ""},
+		{"signature: token, token_header: X-K, format: discord", "x", "format discord needs signature ed25519"},
+		{"signature: ed25519, token_header: X-T", strings.Repeat("ab", 32), "not allowed with signature ed25519"},
+		{"signature: sha256, signature_header: X-S, reply_text: hi", "x", "reply_text is only for"},
+		{"signature: ed25519, format: discord", "not-a-key", "64 lowercase hex"},
+		{"signature: ed25519, format: discord", StubSecret, ""}, // the portal's pre-commit stand-in
+	} {
+		t.Setenv("AGW_W", tc.key)
+		c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, " + tc.extra + "}}"))
+		err := c.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%q: %v", tc.extra, err)
+		}
+	}
+}
+
+func TestTeamsHMACValidation(t *testing.T) {
+	good := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))
+	short := base64.StdEncoding.EncodeToString([]byte("short"))
+	for _, tc := range []struct{ extra, key, want string }{
+		{"signature: teams-hmac", good, ""},
+		{"signature: teams-hmac, reply_text: hi", good, ""},
+		{"signature: teams-hmac", StubSecret, ""},
+		{"signature: teams-hmac", "!!not base64!!", "base64 security token"},
+		{"signature: teams-hmac", short, "at least 16 bytes"},
+		{"signature: teams-hmac, token_header: X-T", good, "not allowed with signature teams-hmac"},
+		{"signature: teams-hmac, reply_text: " + strings.Repeat("x", 501), good, "limit is 500"},
+	} {
+		t.Setenv("AGW_W", tc.key)
+		c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, " + tc.extra + "}}"))
+		err := c.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%q: %v", tc.extra, err)
+		}
+	}
+}
+
+func TestNotionFormatValidation(t *testing.T) {
+	t.Setenv("AGW_W", "x")
+	const ok = "signature: sha256, signature_header: X-Notion-Signature, signature_prefix: \"sha256=\", format: notion"
+	for _, tc := range []struct{ secret, extra, want string }{
+		{"", ok, ""},
+		{"secret: env:AGW_W, ", ok, ""},
+		{"", "signature: sha256, signature_header: X-Notion-Signature, format: notion", "format notion needs"},
+		{"", "signature: sha256, signature_prefix: \"sha256=\", format: notion", "format notion needs"},
+		{"", "signature: token, token_header: X-K, format: notion", "format notion needs"},
+		{"", "signature: sha256, signature_header: X-S, signature_prefix: \"sha256=\"", "secret is required"},
+	} {
+		c, _ := Parse([]byte("sources: {w: {type: webhook, " + tc.secret + tc.extra + "}}"))
+		err := c.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%q %q: %v", tc.secret, tc.extra, err)
+		}
+		if got := hasWarning(c, "format notion has no secret"); got != (tc.secret == "" && strings.Contains(tc.extra, "format: notion")) {
+			t.Errorf("%q %q: warning=%v", tc.secret, tc.extra, got)
 		}
 	}
 }
@@ -1176,5 +1316,111 @@ func TestTrustedProxiesInvalid(t *testing.T) {
 	}
 	if got := (&Server{TrustedProxies: []string{"::ffff:10.0.0.1"}}).Proxies(); len(got) != 1 || got[0].String() != "10.0.0.1/32" {
 		t.Fatalf("mapped: %v", got)
+	}
+}
+
+// The built-in servicenow package needs no mcp_packages entry; the instance
+// URL is the only host its bridge may reach.
+func TestBuiltinServiceNowPackage(t *testing.T) {
+	t.Setenv("T_URL", "https://dev1.service-now.com")
+	t.Setenv("T_KEY", "k")
+	build := func(url, server string) (*Config, error) {
+		t.Setenv("T_URL", url)
+		return Parse([]byte(server + "sources: {sn: {type: mcp, package: servicenow, env: {SERVICENOW_INSTANCE_URL: 'env:T_URL', SERVICENOW_API_KEY: 'env:T_KEY'}, read: {tool: t}}}\n"))
+	}
+	c, err := build("https://dev1.service-now.com", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd := c.Sources["sn"].Command; len(cmd) != 2 || cmd[1] != "mcp-servicenow" {
+		t.Errorf("command: %v", cmd)
+	}
+	if got := c.BridgeEgress(c.Sources["sn"]); len(got) != 1 || got[0].Host != "dev1.service-now.com" || got[0].Port != 443 {
+		t.Errorf("egress: %v", got)
+	}
+	c, _ = build("http://10.0.0.5:8080", "")
+	if err := c.BridgeCheck(c.Sources["sn"]); err == nil || !strings.Contains(err.Error(), "private_endpoints") {
+		t.Errorf("private unlisted: %v", err)
+	}
+	c, err = build("http://10.0.0.5:8080", "server: {services: {private_endpoints: ['10.0.0.5:8080']}}\n")
+	if err != nil || c.BridgeCheck(c.Sources["sn"]) != nil {
+		t.Errorf("private listed: %v", err)
+	}
+	// an operator-defined package wins
+	c, err = build("https://dev1.service-now.com", "server: {mcp_packages: {servicenow: {command: [/opt/sn], env: [SERVICENOW_INSTANCE_URL, SERVICENOW_API_KEY]}}}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd := c.Sources["sn"].Command; len(cmd) != 1 || cmd[0] != "/opt/sn" {
+		t.Errorf("operator package: %v", cmd)
+	}
+}
+
+func TestServiceNowActionValidation(t *testing.T) {
+	setenv(t)
+	const id = "0123456789abcdef0123456789abcdef"
+	base := `
+sources:
+  sn: { type: mcp, package: servicenow, read: { tool: t } }
+  h: { type: http, url: "http://x" }
+`
+	rule := func(sn string) string {
+		return `rules: [{name: r, source: h, when: "true", cooldown: 1m, action: {servicenow: ` + sn + `}}]`
+	}
+	step := func(sn, extra string) string {
+		return `routines: {rt: {steps: [{id: s, ` + extra + ` servicenow: ` + sn + `}]}}
+rules: [{name: r, source: h, when: "true", cooldown: 1m, action: {routine: rt}}]`
+	}
+	cases := []struct{ name, yaml, want string }{
+		{"get", rule(`{connection: sn, op: get, sys_id: "` + id + `"}`), ""},
+		{"get fields", rule(`{connection: sn, op: get, sys_id: "{{.id}}", fields: {fields: "number,state"}}`), ""},
+		{"get other field", rule(`{connection: sn, op: get, sys_id: "` + id + `", fields: {state: "1"}}`), "get takes only"},
+		{"create", rule(`{connection: sn, op: create, fields: {short_description: "{{.title}}"}}`), ""},
+		{"create no fields", rule(`{connection: sn, op: create}`), "needs at least one field"},
+		{"create with sys_id", rule(`{connection: sn, op: create, sys_id: "` + id + `", fields: {a: b}}`), "sys_id must be empty"},
+		{"update", rule(`{connection: sn, op: update, sys_id: "{{.id}}", table: problem, fields: {state: "2"}}`), ""},
+		{"update no sys_id", rule(`{connection: sn, op: update, fields: {state: "2"}}`), "sys_id is required"},
+		{"add_work_note", rule(`{connection: sn, op: add_work_note, sys_id: "{{.id}}", fields: {text: hi}}`), ""},
+		{"add_work_note no text", rule(`{connection: sn, op: add_work_note, sys_id: "{{.id}}", fields: {note: hi}}`), "needs exactly text"},
+		{"add_comment", rule(`{connection: sn, op: add_comment, sys_id: "{{.id}}", fields: {text: hi}}`), ""},
+		{"resolve", rule(`{connection: sn, op: resolve, sys_id: "{{.id}}", fields: {close_code: Solved, close_notes: done}}`), ""},
+		{"resolve no close_notes", rule(`{connection: sn, op: resolve, sys_id: "{{.id}}", fields: {close_code: Solved}}`), "close_notes"},
+		{"create_change", rule(`{connection: sn, op: create_change, fields: {type: normal, short_description: x}}`), ""},
+		{"create_change bad type", rule(`{connection: sn, op: create_change, fields: {type: huge}}`), "type must be"},
+		{"standard change no template", rule(`{connection: sn, op: create_change, fields: {type: standard}}`), "standard_change_template_id"},
+		{"standard change", rule(`{connection: sn, op: create_change, fields: {type: standard, standard_change_template_id: "` + id + `"}}`), ""},
+		{"resolve other table", rule(`{connection: sn, op: resolve, table: problem, sys_id: "{{.id}}", fields: {close_code: Solved, close_notes: done}}`), "incidents only"},
+		{"resolve incident table", rule(`{connection: sn, op: resolve, table: incident, sys_id: "{{.id}}", fields: {close_code: Solved, close_notes: done}}`), ""},
+		{"unknown op", rule(`{connection: sn, op: delete, sys_id: "` + id + `"}`), "unknown op"},
+		{"templated table", rule(`{connection: sn, op: create, table: "{{.t}}", fields: {a: b}}`), "table must match"},
+		{"bad table", rule(`{connection: sn, op: create, table: "Inc;x", fields: {a: b}}`), "table must match"},
+		{"sys_ field", rule(`{connection: sn, op: update, sys_id: "{{.id}}", fields: {sys_id: x}}`), "must not start with sys_"},
+		{"bad field name", rule(`{connection: sn, op: create, fields: {"A b": x}}`), "field name"},
+		{"bad value template", rule(`{connection: sn, op: create, fields: {a: "{{"}}`), "bad template"},
+		{"http connection", rule(`{connection: h, op: get, sys_id: "` + id + `"}`), "servicenow"},
+		{"unknown connection", rule(`{connection: nope, op: get, sys_id: "` + id + `"}`), "servicenow"},
+		{"write needs cooldown", `rules: [{name: r, source: h, when: "true", action: {servicenow: {connection: sn, op: create, fields: {a: b}}}}]`, "cooldown is mandatory"},
+		{"get without cooldown", `rules: [{name: r, source: h, when: "true", action: {servicenow: {connection: sn, op: get, sys_id: "` + id + `"}}}]`, ""},
+		{"routine write needs cooldown", strings.Replace(step(`{connection: sn, op: create, fields: {a: b}}`, ""), "cooldown: 1m, ", "", 1), "cooldown is mandatory"},
+		{"routine get without cooldown", strings.Replace(step(`{connection: sn, op: get, sys_id: "`+id+`"}`, ""), "cooldown: 1m, ", "", 1), ""},
+		{"retry on create", step(`{connection: sn, op: create, fields: {a: b}}`, "retry: {attempts: 3},"), "retry is not allowed"},
+		{"retry on create_change", step(`{connection: sn, op: create_change, fields: {type: normal}}`, "retry: {attempts: 3},"), "retry is not allowed"},
+		{"retry on update", step(`{connection: sn, op: update, sys_id: "{{.id}}", fields: {a: b}}`, "retry: {attempts: 3},"), ""},
+		{"two kinds", `rules: [{name: r, source: h, when: "true", cooldown: 1m, action: {cmd: [a], servicenow: {connection: sn, op: get, sys_id: "` + id + `"}}}]`, "exactly one of cmd, unit, agent, routine, servicenow"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := Parse([]byte(base + tc.yaml))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = c.Validate()
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("unexpected: %v", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("want %q, got %v", tc.want, err)
+			}
+		})
 	}
 }
