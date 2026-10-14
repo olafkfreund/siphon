@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 115
 intent: intent/2026-10-14-115-rules-page-refresh.md
 ---
