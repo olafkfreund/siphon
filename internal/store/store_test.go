@@ -753,3 +753,34 @@ func TestSourceEventHeaders(t *testing.T) {
 		t.Fatalf("no row: %v %v", got, err)
 	}
 }
+
+func TestSourceStatesEventAndReject(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	before := time.Now().Add(-time.Minute)
+	if err := SetSourceEvent(s.DB, "hook", map[string]any{"a": 1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSourceReject(s.DB, "hook", time.Now(), 401, "bad signature"); err != nil {
+		t.Fatal(err)
+	}
+	all, err := SourceStates(s.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	one, ok, err := SourceStateOf(s.DB, "hook")
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	for _, st := range []SourceState{all["hook"], one} {
+		if st.EventAt == nil || st.EventAt.Before(before) || st.LastRejectAt == nil || st.LastRejectAt.Before(before) {
+			t.Fatalf("times not read: %+v", st)
+		}
+		if st.LastReject != "bad signature (401)" {
+			t.Fatalf("reject = %q", st.LastReject)
+		}
+	}
+}
