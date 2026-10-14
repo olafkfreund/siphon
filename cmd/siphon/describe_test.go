@@ -48,7 +48,7 @@ sources:
   servicenow: { type: mcp, package: servicenow, env: { SERVICENOW_INSTANCE_URL: env:AGW_HOOK, SERVICENOW_API_KEY: env:AGW_HOOK } }
   alerts: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
   deploys: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
-  discord-hooks: { type: webhook, signature: ed25519, format: discord, secret: env:AGW_HOOK }
+  discord-hooks: { type: webhook, signature: ed25519, format: discord, secret: env:AGW_DISCORD_KEY }
   mattermost-hooks: { type: webhook, signature: body-token, secret: env:AGW_HOOK }
   servicenow-hooks: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
 rules:

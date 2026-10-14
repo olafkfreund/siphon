@@ -361,6 +361,8 @@ func TestDiscordValidation(t *testing.T) {
 		{"signature: token, token_header: X-K, format: discord", "x", "format discord needs signature ed25519"},
 		{"signature: ed25519, token_header: X-T", strings.Repeat("ab", 32), "not allowed with signature ed25519"},
 		{"signature: sha256, signature_header: X-S, reply_text: hi", "x", "reply_text is only for"},
+		{"signature: ed25519, format: discord", "not-a-key", "64 lowercase hex"},
+		{"signature: ed25519, format: discord", StubSecret, ""}, // the portal's pre-commit stand-in
 	} {
 		t.Setenv("AGW_W", tc.key)
 		c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, " + tc.extra + "}}"))

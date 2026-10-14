@@ -3,7 +3,8 @@
 # needs:    sources/discord-hooks                  (siphon connect discord)
 #           credentials/ollama-local               (siphon connect model ollama)
 # apply:    siphon apply -f discord-ask-agent.yaml
-# Register a slash command /ask with one string option in Discord. Siphon answers
+# Register a slash command /ask with one REQUIRED string option in Discord (an
+# optional one left empty would make the prompt fail to render). Siphon answers
 # Discord at once ("thinking…"); the reply step edits that message with the answer.
 # The interaction token in the URL expires after 15 minutes.
 # The text comes from a chat user: the agent has no tools, so it can only answer.
@@ -26,6 +27,8 @@ routines:
       # valid JSON, so Discord refuses such a message (curl -f fails the step); answers are
       # usually plain text: upgrade to a json template function if that ever bites.
       - { id: reply, if: 'steps.answer.exit == 0', cmd: [curl, -fsS, -X, PATCH, -H, "Content-Type: application/json", --data-raw, "{\"content\": {{printf \"%q\" .steps.answer.json.result}}}", "https://discord.com/api/v10/webhooks/{{.event.application_id}}/{{.event.token}}/messages/@original"] }
+      # Without this, a failed answer leaves Discord showing "thinking…" until the token expires.
+      - { id: sorry, if: 'steps.answer.exit != 0', cmd: [curl, -fsS, -X, PATCH, -H, "Content-Type: application/json", --data-raw, "{\"content\": \"Sorry, I could not answer that.\"}", "https://discord.com/api/v10/webhooks/{{.event.application_id}}/{{.event.token}}/messages/@original"] }
 rules:
   - name: discord-ask
     source: discord-hooks
