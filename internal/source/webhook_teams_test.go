@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -26,9 +27,10 @@ func TestTeamsWebhook(t *testing.T) {
 		want                            string // the exact response body, or "" to skip
 		events                          int
 	}{
-		{"signed", secret, "", body, "HMAC " + sign(body), 200, `{"type":"message","text":""}`, 1},
+		{"signed", secret, "", body, "HMAC " + sign(body), 200, `{"type":"message","text":"Received."}`, 1},
 		{"reply", secret, "ok", body, "HMAC " + sign(body), 200, `{"type":"message","text":"ok"}`, 1},
-		{"body hash key without id", secret, "", `{"text":"x"}`, "HMAC " + sign(`{"text":"x"}`), 200, `{"type":"message","text":""}`, 1},
+		{"body hash key without id", secret, "", `{"text":"x"}`, "HMAC " + sign(`{"text":"x"}`), 200, `{"type":"message","text":"Received."}`, 1},
+		{"non-string id uses the body hash", secret, "", `{"id":7,"text":"x"}`, "HMAC " + sign(`{"id":7,"text":"x"}`), 200, `{"type":"message","text":"Received."}`, 1},
 		{"wrong signature", secret, "", body, "HMAC " + sign("other"), 401, "", 0},
 		{"missing header", secret, "", body, "", 401, "", 0},
 		{"wrong scheme", secret, "", body, "Bearer " + sign(body), 401, "", 0},
@@ -87,5 +89,21 @@ func TestTeamsWebhook(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTeamsWebhookDeliverError(t *testing.T) {
+	raw := []byte(strings.Repeat("k", 32))
+	m := hmac.New(sha256.New, raw)
+	const body = `{"id":"1"}`
+	m.Write([]byte(body))
+	h := NewWebhook(WebhookOptions{Name: "t", Secret: base64.StdEncoding.EncodeToString(raw), Signature: "teams-hmac"},
+		func(context.Context, Event, string) (bool, error) { return false, errors.New("db down") })
+	r := httptest.NewRequest(http.MethodPost, "/hook/t", strings.NewReader(body))
+	r.Header.Set("Authorization", "HMAC "+base64.StdEncoding.EncodeToString(m.Sum(nil)))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 500 || w.Body.Len() != 0 {
+		t.Fatalf("%d %q", w.Code, w.Body)
 	}
 }

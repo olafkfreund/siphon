@@ -977,7 +977,7 @@ services:
     fields:
       - {<<: *f_name, default: teams}
       - {key: token, label: Security token, type: secret, required: true, help: 'The base64 security token Teams shows once when you create the outgoing webhook.'}
-      - {key: reply, label: Immediate reply, type: text, help: 'Optional, for example "Working on it…". Teams must get an answer within 5 seconds, so an agent cannot be the reply: post it later from the routine.'}
+      - {key: reply, label: Immediate reply, type: text, help: 'Optional, default "Received.", for example "Working on it…". Teams must get an answer within 5 seconds, so an agent cannot be the reply: post it later from the routine.'}
     creates:
       - kind: sources
         name: '{{.name}}-hooks'

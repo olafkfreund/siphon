@@ -383,10 +383,14 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 		}
 		dup, err := deliver(r.Context(), Event{Source: o.Name, ReceivedAt: now, Headers: headers, Data: data}, id)
 		if o.Signature == "teams-hmac" && err == nil { // Teams shows whatever we answer, so a duplicate gets the same 200
+			text := o.ReplyText
+			if text == "" {
+				text = "Received." // an empty text may show as an empty bubble or an error in Teams
+			}
 			reply, _ := json.Marshal(struct {
 				Type string `json:"type"`
 				Text string `json:"text"`
-			}{"message", o.ReplyText}) // field order: type first
+			}{"message", text}) // field order: type first
 			w.Header().Set("Content-Type", "application/json")
 			w.Write(reply)
 		} else if err != nil {
