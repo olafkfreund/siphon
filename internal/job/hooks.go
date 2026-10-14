@@ -50,7 +50,8 @@ type rejects struct {
 	last    time.Time // of the last write
 	status  int
 	reason  string
-	pending bool // a newer refusal than the last write, flush timer armed
+	at      time.Time // when the latest refusal happened, not when it is written
+	pending bool      // a newer refusal than the last write, flush timer armed
 }
 
 func (p *Pipeline) rejectThrottle(name string) *rejects {
@@ -61,8 +62,9 @@ func (p *Pipeline) rejectThrottle(name string) *rejects {
 func (r *rejects) note(status int, reason string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.status, r.reason = status, reason
-	if wait := rejectEvery - time.Since(r.last); wait > 0 {
+	now := r.p.Now()
+	r.status, r.reason, r.at = status, reason, now
+	if wait := rejectEvery - now.Sub(r.last); wait > 0 {
 		if !r.pending {
 			r.pending = true
 			time.AfterFunc(wait, r.flush)
@@ -82,8 +84,8 @@ func (r *rejects) flush() {
 
 // write stores the latest refusal; r.mu is held.
 func (r *rejects) write() {
-	r.pending, r.last = false, time.Now()
-	if err := store.SetSourceReject(r.p.Store.DB, r.name, r.p.Now(), r.status, r.reason); err != nil {
+	r.pending, r.last = false, r.p.Now()
+	if err := store.SetSourceReject(r.p.Store.DB, r.name, r.at, r.status, r.reason); err != nil {
 		slog.Warn("store webhook rejection", "source", r.name, "err", err)
 	}
 }

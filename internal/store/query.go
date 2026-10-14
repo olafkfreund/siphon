@@ -12,10 +12,16 @@ type SourceState struct {
 	Source     string     `json:"source"`
 	LastPollAt *time.Time `json:"last_poll_at"`
 	LastError  string     `json:"last_error"`
+	// EventAt is the last webhook delivery; LastReject the last refused one.
+	EventAt      *time.Time `json:"event_at,omitempty"`
+	LastRejectAt *time.Time `json:"last_reject_at,omitempty"`
+	LastReject   string     `json:"last_reject,omitempty"`
 }
 
+const sourceStateCols = `source, last_poll_at, last_error, event_at, last_reject_at, last_reject`
+
 func SourceStates(db *sql.DB) (map[string]SourceState, error) {
-	rows, err := db.Query(`SELECT source, last_poll_at, last_error FROM source_state`)
+	rows, err := db.Query(`SELECT ` + sourceStateCols + ` FROM source_state`)
 	if err != nil {
 		return nil, err
 	}
@@ -23,14 +29,11 @@ func SourceStates(db *sql.DB) (map[string]SourceState, error) {
 	out := map[string]SourceState{}
 	for rows.Next() {
 		var s SourceState
-		var at sql.NullInt64
-		if err := rows.Scan(&s.Source, &at, &s.LastError); err != nil {
+		var at, ev, rj sql.NullInt64
+		if err := rows.Scan(&s.Source, &at, &s.LastError, &ev, &rj, &s.LastReject); err != nil {
 			return nil, err
 		}
-		if at.Valid {
-			t := time.UnixMilli(at.Int64)
-			s.LastPollAt = &t
-		}
+		s.LastPollAt, s.EventAt, s.LastRejectAt = timePtr(at), timePtr(ev), timePtr(rj)
 		out[s.Source] = s
 	}
 	return out, rows.Err()
@@ -204,14 +207,11 @@ func ListAudit(db *sql.DB, limit int) ([]AuditRow, error) {
 
 // SourceStateOf is one source's poll state (ok=false if it has none yet).
 func SourceStateOf(db *sql.DB, source string) (s SourceState, ok bool, err error) {
-	var at sql.NullInt64
-	err = db.QueryRow(`SELECT source, last_poll_at, last_error FROM source_state WHERE source=?`, source).Scan(&s.Source, &at, &s.LastError)
+	var at, ev, rj sql.NullInt64
+	err = db.QueryRow(`SELECT `+sourceStateCols+` FROM source_state WHERE source=?`, source).Scan(&s.Source, &at, &s.LastError, &ev, &rj, &s.LastReject)
 	if err == sql.ErrNoRows {
 		return s, false, nil
 	}
-	if at.Valid {
-		t := time.UnixMilli(at.Int64)
-		s.LastPollAt = &t
-	}
+	s.LastPollAt, s.EventAt, s.LastRejectAt = timePtr(at), timePtr(ev), timePtr(rj)
 	return s, err == nil, err
 }

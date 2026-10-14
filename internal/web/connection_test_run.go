@@ -23,6 +23,15 @@ type connTestResult struct {
 	Detail     string `json:"detail"`
 }
 
+// connectionOf is the connection a source is tested under: its label, or the
+// legacy name key connSources falls back to.
+func connectionOf(name string, src *config.Source) string {
+	if src.Connection != "" {
+		return src.Connection
+	}
+	return legacyKey(name)
+}
+
 // connSources lists the sources labelled with a connection, by name.
 func connSources(cfg *config.Config, conn string) []string {
 	var out []string

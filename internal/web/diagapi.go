@@ -231,6 +231,7 @@ func (s *server) explain(r *http.Request, rl config.Rule) (map[string]any, error
 	srcOut := map[string]any{"name": rl.Source}
 	if src != nil {
 		srcOut["type"], srcOut["health"], srcOut["last_error"], srcOut["last_poll_at"] = src.Type, src.Health, src.LastError, src.LastPollAt
+		srcOut["last_event_at"] = src.LastEventAt
 	}
 	if src != nil && src.Type == "schedule" {
 		facts, err := s.scheduleFacts(src)
