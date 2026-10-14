@@ -715,6 +715,9 @@
             },
             "type": "object"
           },
+          "reply_text": {
+            "type": "string"
+          },
           "secret": {
             "description": "env:NAME, file:/path, or (where allowed) a literal",
             "type": "string"
@@ -738,6 +741,9 @@
             "type": "string"
           },
           "timezone": {
+            "type": "string"
+          },
+          "token_field": {
             "type": "string"
           },
           "token_header": {

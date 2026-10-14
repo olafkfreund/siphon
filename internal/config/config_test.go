@@ -320,6 +320,24 @@ func TestWebhookIDAndTimestamp(t *testing.T) {
 	}
 }
 
+func TestBodyTokenValidation(t *testing.T) {
+	t.Setenv("AGW_W", "x")
+	for _, tc := range []struct{ extra, want string }{
+		{"signature: body-token, token_field: key, reply_text: hi", ""},
+		{"signature: body-token", ""},
+		{"signature: body-token, token_header: X-T", "not allowed with signature body-token"},
+		{"signature: body-token, token_field: \"a-b\"", "token_field must match"},
+		{"signature: sha256, signature_header: X-S, reply_text: hi", "only for signature body-token"},
+		{"signature: body-token, reply_text: " + strings.Repeat("a", 501), "limit is 500"},
+	} {
+		c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, " + tc.extra + "}}"))
+		err := c.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%q: %v", tc.extra, err)
+		}
+	}
+}
+
 func TestRetryValidation(t *testing.T) {
 	for retry, want := range map[string]string{
 		"{attempts: 3, base: 5s, factor: 2}": "",
