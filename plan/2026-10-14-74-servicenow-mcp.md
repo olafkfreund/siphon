@@ -302,3 +302,8 @@ mine.
     change the step's trap anticipated, in a test rather than a golden file.
   - **The injected package isn't saved anywhere.** Export and the overlay
     work on YAML text (`config.Effective`), never on the parsed `Config`.
+- **Step 5:**
+  - **`when` is `{{if .instance}}true{{end}}`.** `has` is a placeholder
+    that is always false in `when`, so it would silently skip the item.
+  - **The MCP source has no `read:` or `poll:`.** Its tools need arguments.
+    gitea doesn't have them either.

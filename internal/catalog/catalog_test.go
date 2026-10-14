@@ -137,4 +137,53 @@ func TestServiceNowEntry(t *testing.T) {
 	if res.Done.Hook != "snow-hooks" {
 		t.Fatalf("Done.Hook = %q", res.Done.Hook)
 	}
+	// Agent tools: the optional MCP source, by authentication mode.
+	const inst = "https://dev1.service-now.com"
+	for _, tc := range []struct {
+		name string
+		in   map[string]string
+		keys []string // env keys of the "snow" source; nil: an error
+		none []string // env keys that must be absent
+	}{
+		{"oauth", map[string]string{"instance": inst, "client_id": "cid", "client_secret": "csec"},
+			[]string{"SERVICENOW_INSTANCE_URL", "SERVICENOW_CLIENT_ID", "SERVICENOW_CLIENT_SECRET"}, []string{"SERVICENOW_API_KEY"}},
+		{"apikey", map[string]string{"instance": inst, "auth": "apikey", "api_key": "k"},
+			[]string{"SERVICENOW_INSTANCE_URL", "SERVICENOW_API_KEY"}, []string{"SERVICENOW_CLIENT_ID", "SERVICENOW_CLIENT_SECRET"}},
+		{"oauth without secret", map[string]string{"instance": inst, "client_id": "cid"}, nil, nil},
+		{"apikey without key", map[string]string{"instance": inst, "auth": "apikey"}, nil, nil},
+	} {
+		in := map[string]string{"name": "snow"}
+		for k, v := range tc.in {
+			in[k] = v
+		}
+		res, err := e.Render(in, Env{})
+		if tc.keys == nil {
+			if err == nil {
+				t.Errorf("%s: no error", tc.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: %v", tc.name, err)
+			continue
+		}
+		if len(res.Items) != 2 || res.Items[0].Name != "snow" || res.Items[1].Name != "snow-hooks" {
+			t.Errorf("%s: items %+v", tc.name, res.Items)
+			continue
+		}
+		y := res.Items[0].YAML
+		if !strings.Contains(y, "package: servicenow") || strings.Contains(y, "dev1.service-now.com") || strings.Contains(y, "csec") {
+			t.Errorf("%s: yaml %s", tc.name, y)
+		}
+		for _, k := range tc.keys {
+			if !strings.Contains(y, k+": ") {
+				t.Errorf("%s: missing %s in %s", tc.name, k, y)
+			}
+		}
+		for _, k := range tc.none {
+			if strings.Contains(y, k) {
+				t.Errorf("%s: unexpected %s", tc.name, k)
+			}
+		}
+	}
 }

@@ -355,13 +355,34 @@ services:
     name: ServiceNow
     mark: SN
     category: issues
-    summary: "ServiceNow record events (incidents, changes, requests) by signed webhook from a Business Rule. Agent tools and writes come in a later release."
-    capabilities: [webhooks]
+    summary: "Agent tools to read and update incidents and changes through a built-in MCP server, and record events by signed webhook from a Business Rule."
+    capabilities: [tools, webhooks]
     status: available
     templates: [servicenow-incident-notify, servicenow-incident-summary]
     fields:
       - {<<: *f_name, default: servicenow}
+      - {key: instance, label: Instance URL, type: url, secure: true, private_listed: true, help: 'For agent tools; leave empty for webhooks only. For example https://dev12345.service-now.com. A LAN host must be listed in server.services.private_endpoints.'}
+      - {key: auth, label: Authentication, type: choice, choices: [oauth, apikey], default: oauth, help: 'OAuth client credentials, or a REST API key (x-sn-apikey).'}
+      - {key: client_id, label: OAuth client ID, type: text, help: 'System OAuth → Application Registry → the OAuth API endpoint for external clients.'}
+      - {key: client_secret, label: OAuth client secret, type: secret}
+      - {key: api_key, label: API key, type: secret, help: 'For authentication apikey: System Web Services → API Access Policies.'}
     creates:
+      - kind: sources
+        name: '{{.name}}'
+        when: '{{if .instance}}true{{end}}'
+        yaml: |
+          type: mcp
+          package: servicenow
+          env:
+            SERVICENOW_INSTANCE_URL: {{secret "instance" "env.SERVICENOW_INSTANCE_URL"}}
+            {{- if eq .auth "apikey"}}
+            {{- if not (has "api_key")}}{{fail "an API key is required for authentication apikey"}}{{end}}
+            SERVICENOW_API_KEY: {{secret "api_key" "env.SERVICENOW_API_KEY"}}
+            {{- else}}
+            {{- if not (and (has "client_id") (has "client_secret"))}}{{fail "an OAuth client ID and secret are required for authentication oauth"}}{{end}}
+            SERVICENOW_CLIENT_ID: {{secret "client_id" "env.SERVICENOW_CLIENT_ID"}}
+            SERVICENOW_CLIENT_SECRET: {{secret "client_secret" "env.SERVICENOW_CLIENT_SECRET"}}
+            {{- end}}
       - kind: sources
         name: '{{.name}}-hooks'
         when: 'true'
@@ -374,7 +395,8 @@ services:
       In ServiceNow, add two system properties: siphon.webhook.url (the URL above) and
       siphon.webhook.key (type password2, the secret above). Then add the after Business
       Rule from docs/connections/servicenow.md on each table to send. Full guide:
-      docs/connections/servicenow.md.
+      docs/connections/servicenow.md. With an instance URL set, agents get ServiceNow
+      tools: see the "Agent tools" section of that guide for the read-only allowed_tools.
 
   # ---- chat
   - id: slack
