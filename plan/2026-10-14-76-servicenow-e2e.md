@@ -161,3 +161,11 @@ if step 3 succeeds. A fresh Opus agent reviews before the PR.
     Step 5 documents the findings, and #104 tracks the `mcpoauth`
     compatibility fix. The spike source was removed from siphon-dev
     afterwards; `public_url` stays.
+- **Step 2:**
+  - **The stub runs on `machine` at `127.0.0.1:8081`,** not on
+    `external:8081`. `internal/servicenow/client.go:62` allows plain
+    `http` only to a loopback host (otherwise `https` is required), so a
+    stub on `external` failed with "instance URL must be https".
+  - **The rest is unchanged:** the call still goes through the guarded
+    client, with `127.0.0.1:8081` in `server.services.private_endpoints`.
+  - **The check** is `checks.x86_64-linux.vm`. It passes.
