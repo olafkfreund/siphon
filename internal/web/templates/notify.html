@@ -11,7 +11,7 @@
     {{if can $.Role "operator"}}<form method="post" action="/notifications/{{pe .Name}}/test" hx-post="/notifications/{{pe .Name}}/test" hx-target="next .conn-test"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{template "icon" "play"}}Test</button></form>{{end}}
     {{if $.Notify.Editable}}{{if can $.Role "admin"}}<form method="post" action="/notifications/{{pe .Name}}/delete" data-confirm="Delete the channel {{.Name}}? It stops receiving messages."><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm no">Delete</button></form>{{end}}{{end}}
   </div>
-  <div class="conn-test"></div>
+  <div class="conn-test" aria-live="polite"></div>
 </article>
 {{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>No channels yet.{{if and .Editable (can $.Role "admin")}} Add one below.{{end}}</section>{{end}}
 </div>

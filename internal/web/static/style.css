@@ -542,6 +542,7 @@ pre .add { color: #5ef0b4 } pre .del { color: #ff8fa0 }
 .chips-check input:checked + span { background: var(--text); color: var(--surface); border-color: var(--text) }
 .chips-check input:focus-visible + span { outline: 2px solid var(--current) }
 .conn-test:empty { display: none }
+.item-card .stamp.err { white-space: normal; overflow-wrap: anywhere }
 .chips-ev { margin: 0; display: flex; flex-wrap: wrap; gap: .3rem }
 #lists ~ .item-card { margin-top: .6rem }
 .item-card.row .wrap { flex: 1 1 14rem }

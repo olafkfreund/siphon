@@ -78,6 +78,12 @@ spec: spec/2026-10-14-118-portal-refresh-slice4.md
     to filter on.
   - **The gallery filter** chips filter by category. The category headings
     stay visible.
+- **Review fixes:**
+  - **Error stamps wrap.** `.stamp` doesn't wrap, and `.item-card` clips
+    overflow, so a long delivery error was cut off. Error stamps inside a
+    card now wrap.
+  - **The Notifications Test result** has `aria-live="polite"`, the same as
+    Connections.
   - **The session deleted** the now-dead `.eg-refused` CSS.
 
 ## Tests
