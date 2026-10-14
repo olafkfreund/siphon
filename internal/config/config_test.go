@@ -1215,3 +1215,68 @@ func TestBuiltinServiceNowPackage(t *testing.T) {
 		t.Errorf("operator package: %v", cmd)
 	}
 }
+
+func TestServiceNowActionValidation(t *testing.T) {
+	setenv(t)
+	const id = "0123456789abcdef0123456789abcdef"
+	base := `
+sources:
+  sn: { type: mcp, package: servicenow, read: { tool: t } }
+  h: { type: http, url: "http://x" }
+`
+	rule := func(sn string) string {
+		return `rules: [{name: r, source: h, when: "true", cooldown: 1m, action: {servicenow: ` + sn + `}}]`
+	}
+	step := func(sn, extra string) string {
+		return `routines: {rt: {steps: [{id: s, ` + extra + ` servicenow: ` + sn + `}]}}
+rules: [{name: r, source: h, when: "true", cooldown: 1m, action: {routine: rt}}]`
+	}
+	cases := []struct{ name, yaml, want string }{
+		{"get", rule(`{connection: sn, op: get, sys_id: "` + id + `"}`), ""},
+		{"get fields", rule(`{connection: sn, op: get, sys_id: "{{.id}}", fields: {fields: "number,state"}}`), ""},
+		{"get other field", rule(`{connection: sn, op: get, sys_id: "` + id + `", fields: {state: "1"}}`), "get takes only"},
+		{"create", rule(`{connection: sn, op: create, fields: {short_description: "{{.title}}"}}`), ""},
+		{"create no fields", rule(`{connection: sn, op: create}`), "needs at least one field"},
+		{"create with sys_id", rule(`{connection: sn, op: create, sys_id: "` + id + `", fields: {a: b}}`), "sys_id must be empty"},
+		{"update", rule(`{connection: sn, op: update, sys_id: "{{.id}}", table: problem, fields: {state: "2"}}`), ""},
+		{"update no sys_id", rule(`{connection: sn, op: update, fields: {state: "2"}}`), "sys_id is required"},
+		{"add_work_note", rule(`{connection: sn, op: add_work_note, sys_id: "{{.id}}", fields: {text: hi}}`), ""},
+		{"add_work_note no text", rule(`{connection: sn, op: add_work_note, sys_id: "{{.id}}", fields: {note: hi}}`), "needs exactly text"},
+		{"add_comment", rule(`{connection: sn, op: add_comment, sys_id: "{{.id}}", fields: {text: hi}}`), ""},
+		{"resolve", rule(`{connection: sn, op: resolve, sys_id: "{{.id}}", fields: {close_code: Solved, close_notes: done}}`), ""},
+		{"resolve no close_notes", rule(`{connection: sn, op: resolve, sys_id: "{{.id}}", fields: {close_code: Solved}}`), "close_notes"},
+		{"create_change", rule(`{connection: sn, op: create_change, fields: {type: normal, short_description: x}}`), ""},
+		{"create_change bad type", rule(`{connection: sn, op: create_change, fields: {type: huge}}`), "type must be"},
+		{"unknown op", rule(`{connection: sn, op: delete, sys_id: "` + id + `"}`), "unknown op"},
+		{"templated table", rule(`{connection: sn, op: create, table: "{{.t}}", fields: {a: b}}`), "table must match"},
+		{"bad table", rule(`{connection: sn, op: create, table: "Inc;x", fields: {a: b}}`), "table must match"},
+		{"sys_ field", rule(`{connection: sn, op: update, sys_id: "{{.id}}", fields: {sys_id: x}}`), "must not start with sys_"},
+		{"bad field name", rule(`{connection: sn, op: create, fields: {"A b": x}}`), "field name"},
+		{"bad value template", rule(`{connection: sn, op: create, fields: {a: "{{"}}`), "bad template"},
+		{"http connection", rule(`{connection: h, op: get, sys_id: "` + id + `"}`), "servicenow"},
+		{"unknown connection", rule(`{connection: nope, op: get, sys_id: "` + id + `"}`), "servicenow"},
+		{"write needs cooldown", `rules: [{name: r, source: h, when: "true", action: {servicenow: {connection: sn, op: create, fields: {a: b}}}}]`, "cooldown is mandatory"},
+		{"get without cooldown", `rules: [{name: r, source: h, when: "true", action: {servicenow: {connection: sn, op: get, sys_id: "` + id + `"}}}]`, ""},
+		{"routine write needs cooldown", strings.Replace(step(`{connection: sn, op: create, fields: {a: b}}`, ""), "cooldown: 1m, ", "", 1), "cooldown is mandatory"},
+		{"routine get without cooldown", strings.Replace(step(`{connection: sn, op: get, sys_id: "`+id+`"}`, ""), "cooldown: 1m, ", "", 1), ""},
+		{"retry on create", step(`{connection: sn, op: create, fields: {a: b}}`, "retry: {attempts: 3},"), "retry is not allowed"},
+		{"retry on create_change", step(`{connection: sn, op: create_change, fields: {type: normal}}`, "retry: {attempts: 3},"), "retry is not allowed"},
+		{"retry on update", step(`{connection: sn, op: update, sys_id: "{{.id}}", fields: {a: b}}`, "retry: {attempts: 3},"), ""},
+		{"two kinds", `rules: [{name: r, source: h, when: "true", cooldown: 1m, action: {cmd: [a], servicenow: {connection: sn, op: get, sys_id: "` + id + `"}}}]`, "exactly one of cmd, unit, agent, routine, servicenow"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := Parse([]byte(base + tc.yaml))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = c.Validate()
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("unexpected: %v", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("want %q, got %v", tc.want, err)
+			}
+		})
+	}
+}

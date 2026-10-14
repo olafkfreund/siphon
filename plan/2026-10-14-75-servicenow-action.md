@@ -224,3 +224,11 @@ migration change.
 
 Steps 1–5 edit about 15 files, so a `coder` agent does them and a fresh
 Opus agent reviews them. Step 6 is mine.
+
+## Deviations
+
+- **Step 1:**
+  - **Explain entries pulled forward.** `TestExplainCoversSchema` required
+    them, so the `explain.go` entries from step 5 came in now.
+  - **`get`'s `fields` value** is not checked as a comma list. Only the key
+    name is checked, and the client validates each name at run time.
