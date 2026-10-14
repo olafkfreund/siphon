@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 76
 intent: intent/2026-10-14-76-servicenow-e2e.md
 ---
