@@ -34,6 +34,14 @@ func (p *Pipeline) Webhooks() func(source string) http.Handler {
 			TimestampHeader: s.TimestampHdr, TokenField: s.TokenField, ReplyText: s.ReplyText, SigPrefix: s.SigPrefix, TimestampSep: s.TimestampSep, IDHeader: strings.TrimPrefix(s.ID, "header."), Format: s.Format,
 			MaxBody: int64(cfg.Limits.HTTPMaxBody), Now: p.Now, PreLimit: lim.pre, Limit: lim.post,
 			OnReject: p.rejectThrottle(name).note,
+			OnVerificationToken: func(tok string) {
+				p.notionMu.Lock()
+				defer p.notionMu.Unlock()
+				if p.notionPending == nil {
+					p.notionPending = map[string]pendingToken{}
+				}
+				p.notionPending[name] = pendingToken{tok, p.Now()}
+			},
 		}, p.deliver)
 	}
 }
@@ -153,4 +161,27 @@ func (p *Pipeline) listen(ctx context.Context, cfg *config.Config, name string, 
 		case <-time.After(time.Duration(s.Poll)):
 		}
 	}
+}
+
+// pendingToken is a Notion verification token awaiting an operator's accept.
+type pendingToken struct {
+	Token string
+	At    time.Time
+}
+
+// NotionPending is the latest captured token of a source and when it came.
+func (p *Pipeline) NotionPending(source string) (string, time.Time, bool) {
+	p.notionMu.Lock()
+	defer p.notionMu.Unlock()
+	t, ok := p.notionPending[source]
+	return t.Token, t.At, ok
+}
+
+// TakeNotionPending returns the pending token and clears it.
+func (p *Pipeline) TakeNotionPending(source string) (string, bool) {
+	p.notionMu.Lock()
+	defer p.notionMu.Unlock()
+	t, ok := p.notionPending[source]
+	delete(p.notionPending, source)
+	return t.Token, ok
 }
