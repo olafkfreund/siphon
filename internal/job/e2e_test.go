@@ -130,3 +130,61 @@ func TestRunOnceEdgeEndToEnd(t *testing.T) {
 		}
 	}
 }
+
+func TestEachRules(t *testing.T) {
+	cfg := &config.Config{Rules: []config.Rule{{Name: "a", On: "each"}, {Name: "b", On: "edge"}, {Name: "c", On: "each"}, {Name: "d"}}}
+	if got := eachRules(cfg); strings.Join(got, ",") != "a,c" {
+		t.Fatal(got)
+	}
+}
+
+// A failing tool's text reaches the stored poll error, masked and with quoted parts blanked.
+func TestPollErrorText(t *testing.T) {
+	t.Setenv("POLL_TOK", "tok-secret-123")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cfg, err := config.Parse([]byte(`
+server: { sandbox: none }
+sources:
+  factory:
+    type: mcp
+    command: [unused]
+    env: { TOK: "env:POLL_TOK" }
+    read: { tool: fail }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+	server.AddTool(&mcp.Tool{Name: "fail", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: `403 ACL for tok-secret-123, user "alice"`}}}, nil
+	})
+	now := time.Unix(1_700_000_000, 0)
+	p := New(cfg, st, func() time.Time { return now })
+	p.MCPTransport = func(string) mcp.Transport {
+		serverSide, clientSide := mcp.NewInMemoryTransports()
+		if _, err := server.Connect(ctx, serverSide, nil); err != nil {
+			t.Fatal(err)
+		}
+		return clientSide
+	}
+	if _, err := p.Tick(ctx, "factory"); err == nil {
+		t.Fatal("want an error")
+	}
+	states, err := store.SourceStates(st.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := states["factory"].LastError
+	if !strings.Contains(got, "MCP tool fail returned an error: 403 ACL for ") || strings.Contains(got, "tok-secret-123") || strings.Contains(got, "alice") {
+		t.Fatalf("%q", got)
+	}
+}

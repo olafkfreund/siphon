@@ -215,6 +215,9 @@ server:
     seen_events: 168h   # ids used to drop duplicate webhook deliveries (default 168h = 7 days)
 ```
 
+`seen_events` also covers the ids of `on: each` rules: an `on: each` id that
+fired longer ago than this can fire again if it comes back.
+
 - **Units:** values are durations in hours (`h`). Unset or `0` keeps the
   default.
 - **Minimum:** each value must be at least `24h`.
