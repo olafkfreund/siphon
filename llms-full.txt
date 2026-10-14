@@ -461,6 +461,7 @@ Always follow this order. Every step has `-o json`.
    - `disk-full`, `upstream-status`, `alertmanager-summary`;
    - `mattermost-command-agent` (a chat slash command, `signature: body-token`),
    - `discord-ask-agent` (Discord slash command, `signature: ed25519` with `format: discord`),
+   - `matrix-deploy-command` (Matrix application service, `signature: token` with `token_header: Authorization` and `format: matrix`; unencrypted rooms only),
    - `azure-keyvault-secret-expiry` (Azure Event Grid, `signature: token` with `format: eventgrid`),
    - `notion-page-summary` (Notion, `format: notion`: the source starts with no secret; accept the verification token it captures on the Sources page),
    - `webhook-to-ntfy`, `local-summariser`, `nightly-report`,
@@ -627,9 +628,10 @@ siphon apply -f deploy.yaml --secret sources/deploy-hook.secret=@hook.key
 | `standard-webhooks` | signs per the Standard Webhooks spec (`whsec_…`) | Svix, Clerk, Resend, … |
 | `token` | sends the secret itself in a header you name | GitLab, EventBridge, Alertmanager, Home Assistant, scripts |
 | `body-token` | puts the secret in the request body (JSON or form field `token`, or `token_field:`); Siphon removes it from the event, and `reply_text:` answers 200 `{"text": …}` | Mattermost outgoing webhooks and slash commands |
+| `token` + `format: matrix` | `token_header: Authorization`, the secret is the homeserver's `hs_token` sent as `Bearer <secret>`; answers `PUT /hook/<name>/_matrix/app/v1/transactions/<id>` with `{}` and delivers each event keyed by `event_id`, answers ping, declines user and room queries; `allow_query_token: true` also accepts `?access_token=` (it puts the `hs_token` in the URL, so reverse-proxy logs will record it). A missing token gets 401 `M_UNAUTHORIZED`, a wrong one 403 `M_FORBIDDEN`. Unencrypted rooms only | Matrix application services |
 | `ed25519` | verifies `X-Signature-Ed25519` over `X-Signature-Timestamp` + body with a hex public key as the secret (5-minute window) | Discord (a public key is not a secret) |
 | `ed25519` + `format: discord` | as `ed25519`, and answers Discord's PING, ignores autocomplete, and delivers each interaction keyed by its `id` with a deferred reply (or `reply_text:` as the message) | Discord slash commands and components |
-| `token` + `format: eventgrid` | as `token`, and answers Azure Event Grid's `OPTIONS` and validation handshakes and delivers each event of a batch (keyed by its `id`; `validationUrl` is never fetched) | Azure Event Grid (put the secret in a delivery property) |
+| `token` + `format: eventgrid` | as `token`, and answers Azure Event Grid's `OPTIONS` and validation handshakes and delivers each event of a batch (one rate-limit charge per request; keyed by its `id`; `validationUrl` is never fetched) | Azure Event Grid (put the secret in a delivery property) |
 | `sha256` + `format: notion` | as `sha256` with `X-Notion-Signature` and prefix `sha256=`. With no `secret:` the source only accepts Notion's one-time `{"verification_token": …}` POST and delivers nothing; an operator accepts the token on the Sources page (or `POST /api/sources/<name>/notion-verification` with `{"token": …}`, the token that was shown), which stores it as the secret. Order: create the subscription in Notion, copy the token from the Sources page, paste it into Notion and Verify, then press "Use this token". A wrong token that was accepted: delete `secret:` from the source's YAML and use "Resend token" in Notion; a restart loses an unaccepted token, so resend it too | Notion |
 | `slack` | signs `v0:<timestamp>:<body>` (HMAC-SHA256, `X-Slack-Signature`, ±5 min); Siphon also answers Slack's signed `url_verification` with its challenge | Slack (paste the app's Signing Secret) |
 | `stripe` | signs `<t>.<body>` in `Stripe-Signature` (`t=…,v1=…`; any `v1` may match, so rotation works; ±5 min) | Stripe (paste the endpoint's signing secret) |
@@ -2058,7 +2060,9 @@ siphon connect <service>|model|login [--<field> value ...]
 | `--external-id` |  | AWS: External ID |
 | `--file` |  | login: a login file (kind login), or - for stdin |
 | `--header` |  | Webhook: Header |
+| `--homeserver-name` |  | Matrix: Homeserver name |
 | `--instance` |  | ServiceNow: Instance URL |
+| `--localpart` |  | Matrix: Bot user localpart |
 | `--logout` | `false` | oauth: delete the source's login |
 | `--mode` |  | GitHub: MCP server |
 | `--name` |  | name of the connection (default: the service or preset) |
@@ -2070,6 +2074,7 @@ siphon connect <service>|model|login [--<field> value ...]
 | `--region` |  | AWS: Region |
 | `--reply` |  | Mattermost: Immediate reply |
 | `--role-arn` |  | AWS: Role ARN |
+| `--rooms` |  | Matrix: Room aliases |
 | `--secret` |  | Webhook: Secret as - (stdin) or @file |
 | `--secret-access-key` |  | AWS: Base secret access key as - (stdin) or @file |
 | `--servers` |  | AWS: Servers |
@@ -2585,6 +2590,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 
 | Template | What it does | Connect first |
 |---|---|---|
+| [`matrix-deploy-command`](matrix-deploy-command.yaml) | A Matrix "!deploy" message runs a routine (unencrypted rooms only) | `siphon connect matrix` |
 | [`discord-ask-agent`](discord-ask-agent.yaml) | A Discord /ask command answered by a local model, posted back to the interaction | `siphon connect discord`, `siphon connect model ollama` |
 | [`mattermost-command-agent`](mattermost-command-agent.yaml) | A Mattermost /ask command answered by a local model, posted back to the channel | `siphon connect mattermost`, `siphon connect model ollama` |
 | [`notion-page-summary`](notion-page-summary.yaml) | Summarise Notion pages when they are created or edited | `siphon connect notion --webhook`, `siphon connect login claude` |
@@ -2673,8 +2679,8 @@ lists what's missing. Models and subscription logins are on their own pages:
 | Slack | webhooks | available | `siphon connect slack` | [`slack-mention-agent`](../templates/slack-mention-agent.yaml) |
 | Mattermost | webhooks | available | `siphon connect mattermost` | [`mattermost-command-agent`](../templates/mattermost-command-agent.yaml) |
 | Discord | webhooks | available | `siphon connect discord` | [`discord-ask-agent`](../templates/discord-ask-agent.yaml) |
+| Matrix | webhooks | available | `siphon connect matrix` | [`matrix-deploy-command`](../templates/matrix-deploy-command.yaml) |
 | Microsoft Teams |  | not yet: needs a teams-hmac signature mode with a synchronous reply within 5 seconds | — |  |
-| Matrix |  | not yet: needs PUT requests and a {} reply | — |  |
 
 ## Monitoring & alerting
 
@@ -4425,6 +4431,35 @@ agents:
     prompt: "Summarise this event in one sentence for a busy engineer: {{.event}}"
     max_turns: 2
     timeout: 5m
+```
+
+
+---
+
+<!-- file: docs/templates/matrix-deploy-command.yaml -->
+
+```yaml
+# title:    Run a routine when someone writes "!deploy" in a Matrix room
+# category: Notifications & glue
+# needs:    sources/matrix-hooks                   (siphon connect matrix)
+# apply:    siphon apply -f matrix-deploy-command.yaml
+# Siphon is a Matrix application service: it sees the rooms its bot user is in
+# (unencrypted rooms only; an encrypted room's events can't be read). Replies are
+# not covered, so the routine is a stub: put your own steps in place of the echo.
+# The text comes from a chat user: it is passed as one argv element, never to a shell.
+routines:
+  matrix-deploy:
+    steps:
+      - { id: note, cmd: [echo, "deploy asked by {{.event.sender}} in {{.event.room_id}}"] }
+rules:
+  - name: matrix-deploy
+    source: matrix-hooks
+    # List who may deploy: any room member can write "!deploy" otherwise.
+    when: 'event.type == "m.room.message" && event.content.body startsWith "!deploy" && event.sender in ["@you:example.org"]'
+    on: each
+    id: event.event_id
+    cooldown: 1m
+    action: { routine: matrix-deploy }
 ```
 
 

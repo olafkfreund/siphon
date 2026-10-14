@@ -31,7 +31,7 @@ func (p *Pipeline) Webhooks() func(source string) http.Handler {
 		lim := p.hookLimiters(name)
 		return source.NewWebhook(source.WebhookOptions{
 			Name: name, Secret: s.Secret.Value, Signature: s.Signature, SigHeader: s.SigHeader, TokenHeader: s.TokenHeader,
-			TimestampHeader: s.TimestampHdr, TokenField: s.TokenField, ReplyText: s.ReplyText, SigPrefix: s.SigPrefix, TimestampSep: s.TimestampSep, IDHeader: strings.TrimPrefix(s.ID, "header."), Format: s.Format,
+			TimestampHeader: s.TimestampHdr, TokenField: s.TokenField, ReplyText: s.ReplyText, SigPrefix: s.SigPrefix, TimestampSep: s.TimestampSep, IDHeader: strings.TrimPrefix(s.ID, "header."), Format: s.Format, AllowQueryToken: s.AllowQueryToken,
 			MaxBody: int64(cfg.Limits.HTTPMaxBody), Now: p.Now, PreLimit: lim.pre, Limit: lim.post,
 			OnReject: p.rejectThrottle(name).note,
 			OnVerificationToken: func(tok string) {

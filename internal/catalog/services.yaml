@@ -481,6 +481,48 @@ services:
       Developer Portal → General Information → Interactions Endpoint URL = the URL above, then Save.
       Discord tests the URL, and Siphon answers it. Register your slash commands with Discord as usual.
 
+  - id: matrix
+    name: Matrix
+    mark: MX
+    category: chat
+    summary: "Room events from a Matrix homeserver, as an application service (unencrypted rooms only). Replies are not covered."
+    capabilities: [webhooks]
+    status: available
+    templates: [matrix-deploy-command]
+    fields:
+      - {<<: *f_name, default: matrix}
+      - {key: homeserver_name, label: Homeserver name, type: text, required: true, pattern: '[A-Za-z0-9.-]+(:[0-9]+)?', pattern_error: 'the server name, for example example.org', help: 'The server_name in the homeserver config (the part after the colon in user ids).'}
+      - {key: rooms, label: Room aliases, type: text, help: 'Optional. Empty: the bot gets only the rooms it is invited to (recommended). A regex of room alias localparts (for example .* for all) registers an alias namespace: the homeserver then sends the events of every room with a matching alias, including private ones.'}
+      - {key: localpart, label: Bot user localpart, type: text, default: siphon, pattern: '[a-z0-9._=/-]+', pattern_error: 'lowercase letters, digits and ._=/-'}
+    creates:
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: token
+          token_header: Authorization
+          format: matrix
+          secret: {{generated "secret"}}
+    registration: |
+      id: siphon-{{.name}}
+      url: {{.hook_url | printf "%q"}}
+      as_token: {{.as_token}}
+      hs_token: {{.hook_secret}}
+      sender_localpart: {{.localpart | printf "%q"}}
+      rate_limited: false
+      namespaces:
+        users: []
+        aliases:{{if .rooms}}
+          - {exclusive: false, regex: {{printf "#%s:%s" .rooms .homeserver_name | printf "%q"}}}{{else}} []{{end}}
+        rooms: []
+    setup: |
+      Save the registration below as siphon.yaml on the homeserver and add it to app_service_config_files (Synapse), then restart the homeserver.
+      Invite @{{.localpart}}:{{.homeserver_name}} to the rooms to follow. Only unencrypted rooms work; the bot must be in a room to get its events, unless the alias namespace matches it.
+      The registration's url is only usable when server.public_url is set in siphon.yaml; otherwise it is relative.
+      The as_token in the registration is not stored by Siphon: keep the file.
+
   # ---- monitoring
   - id: sentry
     name: Sentry
@@ -926,6 +968,5 @@ services:
 
   # ---- not yet: listed so people know, with the reason
   - {id: teams, name: Microsoft Teams, mark: MT, category: chat, summary: Microsoft Teams outgoing webhooks., status: not-yet, reason: 'needs a teams-hmac signature mode with a synchronous reply within 5 seconds'}
-  - {id: matrix, name: Matrix, mark: MX, category: chat, summary: Matrix application-service events., status: not-yet, reason: 'needs PUT requests and a {} reply'}
   - {id: google-pubsub, name: Google Pub/Sub, mark: GP, category: cloud, summary: Google Cloud Pub/Sub push subscriptions., status: not-yet, reason: 'needs a Google OIDC (RS256 JWT) push-authentication mode'}
   - {id: azure-devops, name: Azure DevOps, mark: AD, category: code, summary: Azure DevOps service hooks and work items., status: not-yet, reason: 'service hooks use basic auth only, and the remote MCP is Entra OAuth only'}

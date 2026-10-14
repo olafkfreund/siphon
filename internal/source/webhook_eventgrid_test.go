@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -118,8 +119,25 @@ func TestEventGridRefusals(t *testing.T) {
 	if w, _ := egCall(t, WebhookOptions{}, "POST", "batch.json", egAuth, nil, errors.New("db down")); w.Code != 500 {
 		t.Errorf("deliver error: %d", w.Code)
 	}
-	w, got = egCall(t, WebhookOptions{Limit: NewLimiter(1, 0)}, "POST", "batch.json", egAuth, nil, nil)
-	if w.Code != 429 || len(got) != 1 {
+	w, got = egCall(t, WebhookOptions{Limit: NewLimiter(0, 0)}, "POST", "batch.json", egAuth, nil, nil)
+	if w.Code != 429 || len(got) != 0 {
 		t.Errorf("limiter: %d delivered %d", w.Code, len(got))
+	}
+}
+
+func TestEventGridBatchOverBurst(t *testing.T) {
+	var evs []string
+	for i := 0; i < 50; i++ {
+		evs = append(evs, fmt.Sprintf(`{"id":"e%d","eventType":"x"}`, i))
+	}
+	n := 0
+	h := NewWebhook(WebhookOptions{Name: "eg", Secret: "k", Signature: "token", TokenHeader: "X-Siphon-Key", Format: "eventgrid", Limit: NewLimiter(20, 0)},
+		func(context.Context, Event, string) (bool, error) { n++; return false, nil })
+	r := httptest.NewRequest("POST", "/hook/eg", strings.NewReader("["+strings.Join(evs, ",")+"]"))
+	r.Header.Set("X-Siphon-Key", "k")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 200 || n != 50 {
+		t.Fatal(w.Code, n)
 	}
 }

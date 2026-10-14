@@ -354,6 +354,24 @@ func TestEventGridFormatValidation(t *testing.T) {
 	}
 }
 
+func TestMatrixFormatValidation(t *testing.T) {
+	t.Setenv("AGW_W", "x")
+	for _, tc := range []struct{ extra, want string }{
+		{"signature: token, token_header: Authorization, format: matrix", ""},
+		{"signature: token, token_header: Authorization, format: matrix, allow_query_token: true", ""},
+		{"signature: sha256, signature_header: X-S, format: matrix", "format matrix needs signature token"},
+		{"signature: token, token_header: X-Foo, format: matrix", "token_header Authorization"},
+		{"signature: token, token_header: Authorization, format: matrix, id: header.X-Id", "not allowed with format matrix"},
+		{"signature: token, token_header: Authorization, allow_query_token: true", "allow_query_token is only for format matrix"},
+	} {
+		c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, " + tc.extra + "}}"))
+		err := c.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%q: %v", tc.extra, err)
+		}
+	}
+}
+
 func TestDiscordValidation(t *testing.T) {
 	for _, tc := range []struct{ extra, key, want string }{
 		{"signature: ed25519, format: discord", strings.Repeat("ab", 32), ""},

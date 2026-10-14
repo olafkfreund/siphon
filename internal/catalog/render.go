@@ -50,10 +50,13 @@ type Done struct {
 	HookURL    string `json:"hook_url,omitempty"`
 	HookSecret string `json:"hook_secret,omitempty"`
 	HookHeader string `json:"hook_header,omitempty"`
-	ReadTools  string `json:"read_tools,omitempty"`
-	WriteTools string `json:"write_tools,omitempty"`
-	Setup      string `json:"setup,omitempty"`
-	ApplyErr   string `json:"apply_error,omitempty"` // the save worked but applying it live failed
+	// Registration is a file to hand to the service (Matrix's appservice YAML),
+	// shown once with its fresh as_token; it is never stored or logged.
+	Registration string `json:"registration,omitempty"`
+	ReadTools    string `json:"read_tools,omitempty"`
+	WriteTools   string `json:"write_tools,omitempty"`
+	Setup        string `json:"setup,omitempty"`
+	ApplyErr     string `json:"apply_error,omitempty"` // the save worked but applying it live failed
 }
 
 type Result struct {
@@ -196,6 +199,15 @@ func (e *Entry) Render(values map[string]string, env Env) (*Result, error) {
 			if it.Kind == "credentials" && env.Config.Credentials[it.Name] != nil {
 				return nil, badf("name", "a credential named %s already exists; pick another name", it.Name)
 			}
+		}
+	}
+	if e.Registration != "" {
+		rd := map[string]any{"hook_url": res.Done.HookURL, "hook_secret": res.Done.HookSecret, "as_token": NewSecret()}
+		for k, v := range data {
+			rd[k] = v
+		}
+		if res.Done.Registration, err = e.exec("registration", rd, nil); err != nil {
+			return nil, err
 		}
 	}
 	if e.Setup != "" {

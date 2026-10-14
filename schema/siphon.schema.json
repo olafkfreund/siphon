@@ -621,6 +621,9 @@
           "allow_private": {
             "type": "boolean"
           },
+          "allow_query_token": {
+            "type": "boolean"
+          },
           "at": {
             "type": "string"
           },
