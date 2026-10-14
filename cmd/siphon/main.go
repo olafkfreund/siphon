@@ -516,6 +516,13 @@ func serve(ctx context.Context, args []string) error {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	var skey []byte
+	if cfg.Server.DB != ":memory:" { // no state directory to keep it in
+		if skey, err = web.LoadSessionKey(filepath.Dir(cfg.Server.DB)); err != nil {
+			slog.Warn("portal sessions will not survive a restart", "err", err)
+			skey = nil
+		}
+	}
 	srv := &http.Server{
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
@@ -523,7 +530,7 @@ func serve(ctx context.Context, args []string) error {
 		IdleTimeout:       120 * time.Second,
 		Handler: web.New(web.Options{
 			Token: cfg.Server.Token.Value, MetricsToken: cfg.Server.Metrics.Token.Value, Store: st, Config: p.Config, Apply: p.Apply, Banner: banner, Unsandboxed: cfg.Server.Sandbox == "none", ConfigPath: cfgPath, Decide: p.Decide, TestAWS: p.TestAWS,
-			Hooks: p.Webhooks(), OAuth: p.OAuth, NotionPending: p.NotionPending, TakeNotionPending: p.TakeNotionPending, Now: time.Now, Version: version, TrustedProxies: cfg.Server.Proxies(),
+			Hooks: p.Webhooks(), OAuth: p.OAuth, NotionPending: p.NotionPending, TakeNotionPending: p.TakeNotionPending, Now: time.Now, Version: version, TrustedProxies: cfg.Server.Proxies(), SessionKey: skey,
 		}),
 	}
 	httpErr := make(chan error, 1)

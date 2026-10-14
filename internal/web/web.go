@@ -68,11 +68,14 @@ type Options struct {
 	Version string
 	// TrustedProxies are the peers whose X-Forwarded-For the failed-login limiter believes.
 	TrustedProxies []netip.Prefix
+	// SessionKey is the stored key from LoadSessionKey. When it is 32 bytes the
+	// portal's sessions survive a restart; nil keeps a random per-process key.
+	SessionKey []byte
 }
 
 type server struct {
 	Options
-	key         []byte // per-process; a restart logs everyone out
+	key         []byte // per-process unless Options.SessionKey is set
 	tokHash     [32]byte
 	metricsHash [32]byte
 	lim         *limiter
@@ -98,7 +101,11 @@ func New(o Options) http.Handler {
 		o.Now = time.Now
 	}
 	s := &server{Options: o, key: make([]byte, 32), tokHash: sha256.Sum256([]byte(o.Token)), metricsHash: sha256.Sum256([]byte(o.MetricsToken)), lim: &limiter{now: o.Now, m: map[string]*bucket{}}}
-	if _, err := rand.Read(s.key); err != nil {
+	if len(o.SessionKey) == 32 {
+		m := hmac.New(sha256.New, o.SessionKey)
+		m.Write([]byte("siphon-portal-session|" + hex.EncodeToString(s.tokHash[:])))
+		s.key = m.Sum(nil)
+	} else if _, err := rand.Read(s.key); err != nil {
 		panic(err)
 	}
 	if s.Config == nil {
@@ -267,11 +274,11 @@ type session struct {
 	actor string
 }
 
-// The cookie is stateless and signed under the per-process key; the raw token
-// never reaches the browser. Value:
+// The cookie is stateless and signed under a key tied to server.token; the raw
+// token never reaches the browser. Value:
 // "<unix ts>|<role>|<base64url(actor)>|<HMAC(key, "session:"+ts+"|"+role+"|"+actor)>".
 // logout only clears the browser's cookie; the value stays valid until it
-// expires or the process restarts.
+// expires or server.token changes.
 const (
 	sessionTTL     = 24 * time.Hour
 	oidcSessionTTL = 12 * time.Hour

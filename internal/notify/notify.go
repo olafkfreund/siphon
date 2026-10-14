@@ -170,6 +170,9 @@ func (n *Notifier) scanChannel(cfg *config.Config, name string, ch *config.Notif
 		}
 		failing := map[string]bool{}
 		for _, f := range fs {
+			if !polled(cfg, f.Name) {
+				continue // nothing polls it any more: its episode is over (#121)
+			}
 			key := fmt.Sprintf("src:%s:%d", f.Name, f.Since.UnixMilli())
 			failing[key] = true
 			if now.Sub(f.Since) >= sourceAfter && !f.Since.Before(since) {
@@ -185,8 +188,13 @@ func (n *Notifier) scanChannel(cfg *config.Config, name string, ch *config.Notif
 		}
 		for _, e := range eps {
 			if !failing[e.Key] { // healthy again (or failing anew under a new key)
-				if err := add(Message{Event: "source_ok", Title: "Source recovered", Source: e.Source,
-					Body: fmt.Sprintf("Source %s is polling again.", e.Source)}, e.Key); err != nil {
+				body := fmt.Sprintf("Source %s is polling again.", e.Source)
+				if src := cfg.Sources[e.Source]; src == nil {
+					body = fmt.Sprintf("Source %s was removed.", e.Source)
+				} else if !polled(cfg, e.Source) {
+					body = fmt.Sprintf("Source %s no longer polls.", e.Source)
+				}
+				if err := add(Message{Event: "source_ok", Title: "Source recovered", Source: e.Source, Body: body}, e.Key); err != nil {
 					return err
 				}
 			}
@@ -330,4 +338,11 @@ func (n *Notifier) Send(ctx context.Context, name string, m Message, actor strin
 // TestMessage is what `notify test` sends.
 func TestMessage() Message {
 	return Message{Event: "test", Title: "Siphon test", Body: "This is a test message from Siphon."}
+}
+
+// polled reports whether a configured source still polls (schedules record
+// their runs the same way), as the Sources page decides since #114.
+func polled(cfg *config.Config, name string) bool {
+	src := cfg.Sources[name]
+	return src != nil && (src.Polled() || src.Type == "schedule")
 }

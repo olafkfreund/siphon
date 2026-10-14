@@ -117,3 +117,20 @@ func TestSourcesStatusPolledUnchanged(t *testing.T) {
 		t.Errorf("polled: %s", p)
 	}
 }
+
+func TestSourcesStatusUnpolledHidesStaleError(t *testing.T) {
+	r := config.Rule{Name: "r", Source: "tools", When: "true", Action: config.Action{Cmd: []string{"true"}}}
+	e := newEnv(t, func(o *Options) {
+		o.Cfg.Sources["tools"] = &config.Source{Type: "mcp", Connection: "sn"}
+		o.Cfg.Rules = []config.Rule{r}
+	})
+	must(t, store.PutSourceState(e.st.DB, "tools", e.now, "stale tools failure"))
+	must(t, store.PutSourceState(e.st.DB, "disk", e.now, "disk is failing"))
+	p := sourcesPage(t, e)
+	if strings.Contains(p, "stale tools failure") || !strings.Contains(p, "disk is failing") {
+		t.Errorf("page: %s", p)
+	}
+	if _, c := e.explain(t, "r"); hasCode(c, "source_error") {
+		t.Errorf("source_error for an unpolled source: %v", c)
+	}
+}
