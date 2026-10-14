@@ -97,3 +97,14 @@ fresh Opus agent reviews them. Step 3 is mine.
   `agop` takes a pointer, and `ConnectionCheck.At` is a value. A failed
   check shows as the error line "Connection test failed: <detail>", with no
   separate time.
+- **Review of steps 1–2 (fresh Opus, no HIGH findings):**
+  - **Refusal times:** a refusal is stamped with its own time (`note()`
+    keeps `p.Now()`), not the time of the batched write, so "Refused …"
+    can't outlive a later good delivery. The throttle uses the pipeline
+    clock.
+  - **More tests:** an older reject is hidden, idle health, the failed
+    check on the page, the legacy key lookup, and the `/api/sources`
+    fields.
+  - **Skipped:** moving `SetSourceEvent` to the pipeline clock. It's a
+    signature change across 3 callers and 22 test calls; both clocks are
+    the wall clock in production.
