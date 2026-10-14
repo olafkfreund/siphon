@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -42,7 +43,7 @@ type (
 	workNoteIn struct {
 		SysID string `json:"sys_id"`
 		Text  string `json:"text"`
-		Table string `json:"table,omitempty" jsonschema:"default incident"`
+		Table string `json:"table,omitempty" jsonschema:"incident, change_request or problem; default incident"`
 	}
 	resolveIn struct {
 		SysID      string `json:"sys_id"`
@@ -59,7 +60,7 @@ type (
 	cmdbIn struct {
 		Name  string `json:"name,omitempty" jsonschema:"CI name, matched with LIKE; must not contain ^"`
 		SysID string `json:"sys_id,omitempty" jsonschema:"used when name is empty"`
-		Class string `json:"class,omitempty" jsonschema:"CMDB table; default cmdb_ci"`
+		Class string `json:"class,omitempty" jsonschema:"CMDB table: cmdb_ci or cmdb_ci_*; default cmdb_ci"`
 	}
 )
 
@@ -122,6 +123,9 @@ func ServeMCP(ctx context.Context, c *Client, t mcp.Transport) error {
 			if in.Table == "" {
 				in.Table = "incident"
 			}
+			if !slices.Contains([]string{"incident", "change_request", "problem"}, in.Table) {
+				return out(nil, errors.New("servicenow: table must be incident, change_request or problem"))
+			}
 			return out(c.Patch(ctx, in.Table, in.SysID, map[string]any{"work_notes": in.Text}))
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "resolve_incident", Description: "WRITE: resolve an incident (state 6). close_code values differ by release."},
@@ -144,6 +148,9 @@ func ServeMCP(ctx context.Context, c *Client, t mcp.Transport) error {
 		func(ctx context.Context, _ *mcp.CallToolRequest, in cmdbIn) (*mcp.CallToolResult, any, error) {
 			if in.Class == "" {
 				in.Class = "cmdb_ci"
+			}
+			if in.Class != "cmdb_ci" && !strings.HasPrefix(in.Class, "cmdb_ci_") {
+				return out(nil, errors.New("servicenow: class must be cmdb_ci or start with cmdb_ci_"))
 			}
 			switch {
 			case in.Name != "":

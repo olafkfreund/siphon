@@ -3,10 +3,11 @@
 # needs:    sources/servicenow, sources/servicenow-hooks   (siphon connect servicenow --instance https://<instance>.service-now.com)
 #           credentials/claude-max                        (siphon connect login claude)
 # apply:    siphon apply -f servicenow-incident-triage.yaml
-# The agent reads the incident and its configuration item, then proposes a
-# work note. add_work_note writes to ServiceNow, so approval stays on (the
-# default): you see the note before it is posted. Only the number and sys_id
-# reach the prompt; the agent reads the ticket text itself, as untrusted data.
+# Approval gates the run: the job waits for you before the agent starts, so
+# you do not see the note it will write. The agent can only read incidents and
+# configuration items, and add a work note on incident, change or problem
+# records. The ticket text is untrusted: only the number and sys_id reach the
+# prompt, and the agent is told to treat what it reads as data.
 agents:
   servicenow-incident-triage:
     kind: claude

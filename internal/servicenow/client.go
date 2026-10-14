@@ -16,7 +16,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -45,7 +44,7 @@ type Client struct {
 	now   func() time.Time
 	sleep func(context.Context, time.Duration) error // injectable for tests
 
-	mu     sync.Mutex
+	lock   chan struct{} // 1-buffered mutex, so a waiter can give up on ctx
 	token  string
 	expiry time.Time
 }
@@ -69,7 +68,7 @@ func New(base string, auth Auth, hc *http.Client) (*Client, error) {
 	// Copy so the caller's client is untouched. Go would forward x-sn-apikey on a redirect.
 	h := *hc
 	h.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &Client{base: u.Scheme + "://" + u.Host, auth: auth, hc: &h, now: time.Now, sleep: ctxSleep}, nil
+	return &Client{base: u.Scheme + "://" + u.Host, auth: auth, hc: &h, now: time.Now, sleep: ctxSleep, lock: make(chan struct{}, 1)}, nil
 }
 
 // ClientFromEnv builds a Client from the SERVICENOW_* variables.
@@ -265,7 +264,7 @@ func (c *Client) call(ctx context.Context, method, path string, q url.Values, bo
 		switch {
 		case status == http.StatusUnauthorized && c.auth.APIKey == "" && !refreshed:
 			refreshed = true
-			c.dropToken()
+			c.dropToken(ctx)
 			continue
 		case status == http.StatusTooManyRequests && !waited:
 			waited = true
@@ -286,8 +285,11 @@ func (c *Client) call(ctx context.Context, method, path string, q url.Values, bo
 		if json.Unmarshal(data, &env) != nil {
 			return fail(ErrUnavailable)
 		}
-		if out == nil || len(env.Result) == 0 {
+		if out == nil {
 			return nil
+		}
+		if len(env.Result) == 0 { // JSON, but not an API answer: a login or status page
+			return fail(ErrUnavailable)
 		}
 		if err := json.Unmarshal(env.Result, out); err != nil {
 			return fail(fmt.Errorf("unexpected result shape: %w", err))
@@ -331,16 +333,23 @@ func errMessage(status int, data []byte) string {
 	return http.StatusText(status)
 }
 
-func (c *Client) dropToken() {
-	c.mu.Lock()
-	c.token = ""
-	c.mu.Unlock()
+func (c *Client) dropToken(ctx context.Context) {
+	select {
+	case c.lock <- struct{}{}:
+		c.token = ""
+		<-c.lock
+	case <-ctx.Done(): // the next call fails on ctx anyway
+	}
 }
 
 // bearer returns the cached OAuth token, fetching one when it is missing or near expiry.
 func (c *Client) bearer(ctx context.Context) (string, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	select {
+	case c.lock <- struct{}{}:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	defer func() { <-c.lock }()
 	if c.token != "" && c.now().Before(c.expiry) {
 		return c.token, nil
 	}
@@ -371,6 +380,11 @@ func (c *Client) bearer(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("servicenow: POST %s: no access_token in the response", path)
 	}
 	c.token = tok.AccessToken
-	c.expiry = c.now().Add(time.Duration(tok.ExpiresIn)*time.Second - tokenMargin)
+	// Refresh early, but never later than half the lifetime. No expires_in: don't cache.
+	ttl := max(time.Duration(tok.ExpiresIn)*time.Second, 0)
+	c.expiry = c.now().Add(ttl - min(tokenMargin, ttl/2))
+	if ttl == 0 {
+		c.expiry = time.Time{}
+	}
 	return c.token, nil
 }

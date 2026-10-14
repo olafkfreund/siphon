@@ -417,3 +417,83 @@ func TestClientFromEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTokenWaiterGivesUpOnContext(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	c, _ := oauthClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started <- struct{}{}
+		<-release
+		io.WriteString(w, `{"access_token":"t","expires_in":1800}`)
+	}))
+	defer close(release)
+	go c.Get(context.Background(), "incident", sysID, nil) // holds the token lock
+	<-started
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, err := c.Get(ctx, "incident", sysID, nil); done <- err }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("err=%v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("waiter blocked behind the token fetch")
+	}
+}
+
+func TestShortLivedTokenUsesHalfLifetime(t *testing.T) {
+	var tokens atomic.Int32
+	c, _ := oauthClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/oauth_token.do" {
+			tokens.Add(1)
+			io.WriteString(w, `{"access_token":"t","expires_in":30}`)
+			return
+		}
+		io.WriteString(w, `{"result":{}}`)
+	}))
+	now := time.Unix(1000, 0)
+	c.now = func() time.Time { return now }
+	c.Get(context.Background(), "incident", sysID, nil)
+	now = now.Add(10 * time.Second)
+	c.Get(context.Background(), "incident", sysID, nil)
+	if tokens.Load() != 1 {
+		t.Fatalf("tokens=%d, want 1", tokens.Load())
+	}
+	now = now.Add(10 * time.Second) // 20 s: past 15 s
+	c.Get(context.Background(), "incident", sysID, nil)
+	if tokens.Load() != 2 {
+		t.Fatalf("tokens=%d, want 2", tokens.Load())
+	}
+}
+
+func TestMissingExpiresInIsNotCached(t *testing.T) {
+	var tokens atomic.Int32
+	c, _ := oauthClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/oauth_token.do" {
+			tokens.Add(1)
+			io.WriteString(w, `{"access_token":"t"}`)
+			return
+		}
+		io.WriteString(w, `{"result":{}}`)
+	}))
+	c.Get(context.Background(), "incident", sysID, nil)
+	c.Get(context.Background(), "incident", sysID, nil)
+	if tokens.Load() != 2 {
+		t.Fatalf("tokens=%d, want 2", tokens.Load())
+	}
+}
+
+func TestJSONWithoutResultIsUnavailable(t *testing.T) {
+	c, _ := oauthClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/oauth_token.do" {
+			io.WriteString(w, `{"access_token":"t","expires_in":1800}`)
+			return
+		}
+		io.WriteString(w, `{"status":"maintenance"}`)
+	}))
+	if _, err := c.Get(context.Background(), "incident", sysID, nil); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("err=%v", err)
+	}
+}

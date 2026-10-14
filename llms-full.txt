@@ -1346,14 +1346,23 @@ install and no `mcp_packages` entry to write.
 
 ### Credentials
 
-Use one of these. Both act as the integration user from step 3, so its roles
-and ACLs bound what an agent can do.
+Use one of these.
 
-- **OAuth client credentials** (the default). In *System OAuth → Application
-  Registry*, create an *OAuth API endpoint for external clients*. Note the
-  client ID and secret, and set the integration user on the registry entry.
-- **An API key.** In *System Web Services → API Access Policies*, create a
-  REST API key bound to the integration user.
+- **OAuth client credentials** (the default).
+  - Set the system property `glide.oauth.inbound.client.credential.grant_type.enabled`
+    to `true`.
+  - In *System OAuth → Application Registry*, create an *OAuth API endpoint
+    for external clients*. Note the client ID and secret.
+  - Set the integration user as the **OAuth Application User** on that
+    registry entry. Without it, tokens are issued for no one.
+- **An API key.** All of these are needed, or `x-sn-apikey` gets a 401:
+  - a *REST API Key* record, bound to the integration user;
+  - an *Inbound Authentication Profile* of type API key, using that key;
+  - an *API Access Policy* on the Table API (and on the Change Management
+    API if agents use `create_change`) that uses that profile.
+
+Both act as the integration user from step 3, so its roles and ACLs bound
+what an agent can do.
 
 ```sh
 # OAuth: the client secret on stdin
@@ -1385,8 +1394,10 @@ Agents list the source in `mcp:`; the tools are named
 | `resolve_incident` | set state 6 with `close_code` and `close_notes` | **yes** |
 | `create_change` | create a normal, emergency or standard change | **yes** |
 
-A read-only agent lists only the reading tools, and can be set not to need
-approval. Agents that write keep the default `approve`.
+A read-only agent lists only the reading tools. Approval gates the whole
+run: an agent action waits for a human before it starts (the default), and
+the approver does not see what the agent will write. Keep writing agents on
+the default `approve`, and limit them with `allowed_tools`.
 
 ```yaml
 agents:
@@ -1405,6 +1416,9 @@ Ready-made: `siphon template servicenow-incident-triage`.
 - **ACLs decide.** A tool call the integration user may not make fails with
   the instance's status and message (for example `403 ... ACL`); the agent
   sees it. Grant the user only the tables the agents need.
+- **Where writes can go.** `add_work_note` takes only `incident`,
+  `change_request` and `problem`; `cmdb_lookup` only `cmdb_ci` and
+  `cmdb_ci_*` tables.
 - **Record text is untrusted.** Incident text is written by whoever filed it.
   An agent that reads it should hold only the tools it needs.
 - **`close_code` values differ by release** ("Solution provided" or
@@ -1430,6 +1444,9 @@ Ready-made: `siphon template servicenow-incident-triage`.
   `gs.getProperty`, `changes()` on every element, and that a title with
   non-ASCII text (for example `Café`) is accepted: the body must be sent as
   UTF-8, the encoding it was signed in.
+- **Query power.** An agent can send `javascript:` and `NQ` in
+  `search_records` queries. The integration user's ACLs and the instance's
+  script sandbox are the limit.
 
 
 ---
@@ -4509,10 +4526,11 @@ rules:
 # needs:    sources/servicenow, sources/servicenow-hooks   (siphon connect servicenow --instance https://<instance>.service-now.com)
 #           credentials/claude-max                        (siphon connect login claude)
 # apply:    siphon apply -f servicenow-incident-triage.yaml
-# The agent reads the incident and its configuration item, then proposes a
-# work note. add_work_note writes to ServiceNow, so approval stays on (the
-# default): you see the note before it is posted. Only the number and sys_id
-# reach the prompt; the agent reads the ticket text itself, as untrusted data.
+# Approval gates the run: the job waits for you before the agent starts, so
+# you do not see the note it will write. The agent can only read incidents and
+# configuration items, and add a work note on incident, change or problem
+# records. The ticket text is untrusted: only the number and sys_id reach the
+# prompt, and the agent is told to treat what it reads as data.
 agents:
   servicenow-incident-triage:
     kind: claude

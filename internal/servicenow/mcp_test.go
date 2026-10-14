@@ -169,3 +169,34 @@ func TestUpdateRefusesSysFields(t *testing.T) {
 		t.Fatalf("%+v seen=%v", res, seen())
 	}
 }
+
+func TestScopedTables(t *testing.T) {
+	cs, seen := session(t, 200)
+	for _, tc := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"cmdb_lookup", map[string]any{"name": "x", "class": "sys_user"}},
+		{"cmdb_lookup", map[string]any{"sys_id": sysID, "class": "cmdb_cix"}},
+		{"add_work_note", map[string]any{"sys_id": sysID, "text": "x", "table": "sys_user"}},
+	} {
+		if res := call(t, cs, tc.tool, tc.args); !res.IsError {
+			t.Errorf("%s accepted %v", tc.tool, tc.args)
+		}
+	}
+	if len(seen()) != 0 {
+		t.Fatalf("requests sent: %v", seen())
+	}
+	for _, tc := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"cmdb_lookup", map[string]any{"name": "x", "class": "cmdb_ci_server"}},
+		{"add_work_note", map[string]any{"sys_id": sysID, "text": "x", "table": "change_request"}},
+		{"add_work_note", map[string]any{"sys_id": sysID, "text": "x", "table": "problem"}},
+	} {
+		if res := call(t, cs, tc.tool, tc.args); res.IsError {
+			t.Errorf("%s refused %v: %s", tc.tool, tc.args, text(res))
+		}
+	}
+}

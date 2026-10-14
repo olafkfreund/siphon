@@ -314,3 +314,21 @@ mine.
     `cmd/siphon/guided.go:145` lets the first catalog service that uses a
     field key describe the flag, and `servicenow` comes before `sentry`.
     The flag still works for both.
+- **Review of steps 1-7 (fresh Opus):**
+  - **`cmdb_lookup`'s `class`** must be `cmdb_ci` or `cmdb_ci_*`, so the
+    tool can't read `sys_user` and other tables.
+  - **`add_work_note`'s `table`** is limited to `incident`, `change_request`
+    and `problem`.
+  - **The token lock** is a ctx-aware channel, so waiters behind a slow
+    token fetch can give up.
+  - **The token margin** is `min(60s, ttl/2)`, and a missing `expires_in` is
+    not cached.
+  - **A JSON 2xx with no `result`** is `ErrUnavailable`.
+  - **The triage template and the guide** no longer claim the approver sees
+    the work note. Approval gates the run.
+  - **The guide gained setup steps:** the OAuth grant property and the
+    OAuth Application User, the API key's inbound auth profile and access
+    policy, and a caveat on `javascript:` in `search_records`.
+  - **Left as is (LOW):** a 401 can drop a token another call just fetched
+    (costs one fetch), and a `Retry-After` given as an HTTP date waits the
+    1 s default.
