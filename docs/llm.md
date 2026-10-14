@@ -30,6 +30,7 @@ source  ──event──▶  rule (when: …)  ──fires──▶  action
   - `cmd: [argv…]`: a sandboxed command;
   - `agent: <name>`: an AI agent;
   - `routine: <name>`: ordered steps;
+  - `servicenow: {connection, op, …}`: one ServiceNow call made by the daemon, no LLM (`siphon explain rule`; writes need a `cooldown`);
   - `unit: <name>.service`: an allowlisted systemd unit.
 
 **Agents** run on a **connection**:
@@ -128,8 +129,8 @@ approval: otherwise nobody is told that a job is waiting.
 - **Templates are Go templates:** `{{.event.field}}` and `{{.item.field}}`.
   The `when:` field is an expression, not a template:
   `event.status == "failed"`, `headers["x-github-event"] == "push"`.
-- **`cooldown:` is mandatory** on rules whose action is an agent, or a
-  routine containing an agent step.
+- **`cooldown:` is mandatory** on rules whose action is an agent, a
+  servicenow write, or a routine containing either.
 - **Agents default to `approve: true`:** a human must run
   `siphon approve <job>`. Don't set `approve: false` unless the user asks
   for it.

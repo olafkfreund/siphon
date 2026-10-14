@@ -1,0 +1,23 @@
+# title:    Open a ServiceNow incident for each alert, with no agent
+# category: Ops & monitoring
+# needs:    sources/alerts                         (siphon connect webhook --name alerts --mode standard-webhooks)
+#           sources/servicenow                     (siphon connect servicenow --instance https://<instance>.service-now.com)
+# apply:    siphon apply -f alert-to-servicenow-incident.yaml
+# The daemon makes the call itself: no LLM, no approval. It writes a record, so
+# the rule needs a cooldown. Alert text is untrusted data: it goes into
+# short_description, which ServiceNow stores as plain text.
+rules:
+  - name: alert-to-servicenow-incident
+    source: alerts
+    when: 'event.title != ""'
+    on: each
+    id: event.id
+    cooldown: 5m
+    action:
+      servicenow:
+        connection: servicenow
+        op: create
+        fields:
+          short_description: "Alert: {{.event.title}}"
+          urgency: "2"
+          impact: "2"

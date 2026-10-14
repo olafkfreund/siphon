@@ -408,6 +408,14 @@ func (p *Pipeline) run(ctx context.Context, j store.QueuedJob) (state string, ex
 		} else {
 			return "done", 0, out
 		}
+	case pl.Action.ServiceNow != nil:
+		sctx, cancel := context.WithTimeout(ctx, cmdTimeout)
+		defer cancel()
+		if code, out, _ := runServiceNow(sctx, cfg, pl.Action.ServiceNow, pl.Env); code != 0 {
+			return "failed", code, out
+		} else {
+			return "done", 0, out
+		}
 	case pl.Action.Routine != "":
 		return p.runRoutine(ctx, cfg, j, pl)
 	default:

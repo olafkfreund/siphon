@@ -68,6 +68,8 @@ func jobActions(db *sql.DB, where string, args []any, limit int) ([]JobAction, e
 		COALESCE(json_extract(action_json,'$.action.Cmd[0]'),''),
 		COALESCE(json_extract(action_json,'$.action.Unit'),''),
 		COALESCE(json_extract(action_json,'$.action.Routine'),''),
+		COALESCE(json_extract(action_json,'$.action.ServiceNow.Op'),''),
+		COALESCE(json_extract(action_json,'$.action.ServiceNow.Table'),''),
 		COALESCE(json_extract(action_json,'$.agents."' || json_extract(action_json,'$.action.Agent') || '".Kind'),'')
 		FROM jobs WHERE ` + where + ` ORDER BY id DESC LIMIT ?`
 	args = append(args, limit)
@@ -81,8 +83,8 @@ func jobActions(db *sql.DB, where string, args []any, limit int) ([]JobAction, e
 		var j JobAction
 		var created int64
 		var exit sql.NullInt64
-		var agent, cmd, unit, routine string
-		if err := rows.Scan(&j.ID, &j.Rule, &j.State, &j.Attempt, &created, &exit, &agent, &cmd, &unit, &routine, &j.Provider); err != nil {
+		var agent, cmd, unit, routine, snOp, snTable string
+		if err := rows.Scan(&j.ID, &j.Rule, &j.State, &j.Attempt, &created, &exit, &agent, &cmd, &unit, &routine, &snOp, &snTable, &j.Provider); err != nil {
 			return nil, err
 		}
 		j.CreatedAt = time.UnixMilli(created)
@@ -95,6 +97,15 @@ func jobActions(db *sql.DB, where string, args []any, limit int) ([]JobAction, e
 			j.Kind, j.Target = "agent", agent
 		case routine != "":
 			j.Kind, j.Target = "routine", routine
+		case snOp != "":
+			// Same table the daemon uses: create_change is change_request, else incident by default.
+			switch {
+			case snOp == "create_change":
+				snTable = "change_request"
+			case snTable == "":
+				snTable = "incident"
+			}
+			j.Kind, j.Target = "servicenow", snOp+" "+snTable
 		case unit != "":
 			j.Kind, j.Target = "unit", unit
 		case cmd != "":

@@ -384,11 +384,33 @@ type Rule struct {
 }
 
 type Action struct {
-	Cmd     []string `yaml:"cmd"`
-	Unit    string   `yaml:"unit"`
-	Agent   string   `yaml:"agent"`
-	Routine string   `yaml:"routine"`
+	Cmd        []string          `yaml:"cmd"`
+	Unit       string            `yaml:"unit"`
+	Agent      string            `yaml:"agent"`
+	Routine    string            `yaml:"routine"`
+	ServiceNow *ServiceNowAction `yaml:"servicenow"`
 }
+
+// ServiceNowAction is one ServiceNow call made by the daemon, no LLM involved.
+// SysID and the Fields values are templates; Table is static.
+type ServiceNowAction struct {
+	Connection string            `yaml:"connection"` // an mcp source with package: servicenow
+	Op         string            `yaml:"op"`
+	Table      string            `yaml:"table"` // default incident; ignored for create_change
+	SysID      string            `yaml:"sys_id"`
+	Fields     map[string]string `yaml:"fields"`
+}
+
+// ServiceNowOps lists the ops; every one but get writes.
+var ServiceNowOps = []string{"get", "create", "update", "add_work_note", "add_comment", "resolve", "create_change"}
+
+var (
+	snTable = regexp.MustCompile(`^[a-z][a-z0-9_]{0,79}$`)
+	snField = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+)
+
+// Writes reports whether the call changes ServiceNow.
+func (a *ServiceNowAction) Writes() bool { return a != nil && a.Op != "get" }
 
 // Credential is a subscription login (no api_key) or an API key for one provider.
 type Credential struct {
@@ -560,15 +582,16 @@ type Routine struct {
 }
 
 type Step struct {
-	ID              string   `yaml:"id"`
-	Cmd             []string `yaml:"cmd"`
-	Unit            string   `yaml:"unit"`
-	Agent           string   `yaml:"agent"`
-	If              string   `yaml:"if"`
-	Retry           *Retry   `yaml:"retry"`
-	Timeout         Duration `yaml:"timeout"`
-	ContinueOnError bool     `yaml:"continue_on_error"`
-	Approve         bool     `yaml:"approve"`
+	ID              string            `yaml:"id"`
+	Cmd             []string          `yaml:"cmd"`
+	Unit            string            `yaml:"unit"`
+	Agent           string            `yaml:"agent"`
+	ServiceNow      *ServiceNowAction `yaml:"servicenow"`
+	If              string            `yaml:"if"`
+	Retry           *Retry            `yaml:"retry"`
+	Timeout         Duration          `yaml:"timeout"`
+	ContinueOnError bool              `yaml:"continue_on_error"`
+	Approve         bool              `yaml:"approve"`
 }
 
 // Retry re-runs a failed step. Attempts is the total number of tries, so 0 or 1
@@ -1230,6 +1253,9 @@ func (c *Config) Validate() error {
 		if (r.Action.Agent != "" || (r.Action.Routine != "" && c.RoutineHasAgent(r.Action.Routine))) && r.Cooldown <= 0 {
 			add("%s: cooldown is mandatory for agent actions", p)
 		}
+		if (r.Action.ServiceNow.Writes() || c.RoutineHasServiceNowWrite(r.Action.Routine)) && r.Cooldown <= 0 {
+			add("%s: cooldown is mandatory for servicenow writes", p)
+		}
 	}
 
 	for _, name := range sortedKeys(c.Credentials) {
@@ -1365,8 +1391,11 @@ func (c *Config) Validate() error {
 					add("%s: retry.base must be >= 0 and retry.factor >= 1", sp)
 				}
 			}
+			if st.ServiceNow != nil && st.Retry != nil && (st.ServiceNow.Op == "create" || st.ServiceNow.Op == "create_change") {
+				add("%s: retry is not allowed on servicenow %s steps (a retry could create a duplicate)", sp, st.ServiceNow.Op)
+			}
 			checkExpr(sp+" if", st.If, add)
-			c.validateAction(sp, Action{Cmd: st.Cmd, Unit: st.Unit, Agent: st.Agent}, add)
+			c.validateAction(sp, Action{Cmd: st.Cmd, Unit: st.Unit, Agent: st.Agent, ServiceNow: st.ServiceNow}, add)
 		}
 	}
 	c.validateNotify(add)
@@ -1642,9 +1671,94 @@ func (c *Config) validateAction(p string, a Action, add func(string, ...any)) {
 			add("%s: unknown routine %q", p, a.Routine)
 		}
 	}
-	if n != 1 {
-		add("%s: action needs exactly one of cmd, unit, agent, routine", p)
+	if a.ServiceNow != nil {
+		n++
+		c.validateServiceNow(p, a.ServiceNow, add)
 	}
+	if n != 1 {
+		add("%s: action needs exactly one of cmd, unit, agent, routine, servicenow", p)
+	}
+}
+
+func (c *Config) validateServiceNow(p string, a *ServiceNowAction, add func(string, ...any)) {
+	p += " servicenow"
+	if s := c.Sources[a.Connection]; s == nil || s.Type != "mcp" || s.Package != "servicenow" {
+		add("%s: connection %q must be an mcp source with package: servicenow", p, a.Connection)
+	}
+	if !slices.Contains(ServiceNowOps, a.Op) {
+		add("%s: unknown op %q (%s)", p, a.Op, strings.Join(ServiceNowOps, ", "))
+		return
+	}
+	if a.Table != "" && !snTable.MatchString(a.Table) {
+		add("%s: table must match %s (static, not a template)", p, snTable)
+	}
+	checkTemplate(p+" sys_id", a.SysID, add)
+	switch a.Op {
+	case "create", "create_change":
+		if a.SysID != "" {
+			add("%s: sys_id must be empty for %s", p, a.Op)
+		}
+	default:
+		if a.SysID == "" {
+			add("%s: sys_id is required for %s", p, a.Op)
+		}
+	}
+	for _, k := range sortedKeys(a.Fields) {
+		switch {
+		case !snField.MatchString(k):
+			add("%s: field name %q must match %s", p, k, snField)
+		case strings.HasPrefix(k, "sys_"):
+			add("%s: field %q must not start with sys_", p, k)
+		}
+		checkTemplate(p+" field "+k, a.Fields[k], add)
+	}
+	need := func(keys ...string) {
+		for _, k := range keys {
+			if _, ok := a.Fields[k]; !ok {
+				add("%s: %s needs field %s", p, a.Op, k)
+			}
+		}
+	}
+	switch a.Op {
+	case "get":
+		for k := range a.Fields {
+			if k != "fields" {
+				add("%s: get takes only the field \"fields\"", p)
+				break
+			}
+		}
+	case "create", "update":
+		if len(a.Fields) == 0 {
+			add("%s: %s needs at least one field", p, a.Op)
+		}
+	case "add_work_note", "add_comment":
+		if _, ok := a.Fields["text"]; !ok || len(a.Fields) != 1 {
+			add("%s: %s needs exactly text", p, a.Op)
+		}
+	case "resolve":
+		need("close_code", "close_notes")
+		if a.Table != "" && a.Table != "incident" {
+			add("%s: resolve is for incidents only (state 6 means something else on other tables)", p)
+		}
+	case "create_change":
+		if t := a.Fields["type"]; t != "normal" && t != "emergency" && t != "standard" {
+			add("%s: create_change type must be normal, emergency or standard", p)
+		} else if t == "standard" {
+			need("standard_change_template_id")
+		}
+	}
+}
+
+// RoutineHasServiceNowWrite reports whether the named routine has a ServiceNow write step.
+func (c *Config) RoutineHasServiceNowWrite(name string) bool {
+	if rt := c.Routines[name]; rt != nil {
+		for _, s := range rt.Steps {
+			if s.ServiceNow.Writes() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // RoutineHasAgent reports whether the named routine has an agent step.

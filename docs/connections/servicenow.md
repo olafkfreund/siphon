@@ -179,6 +179,57 @@ agents:
 
 Ready-made: `siphon template servicenow-incident-triage`.
 
+### Writes without an agent
+
+A rule or a routine step can call ServiceNow itself, with no LLM and no
+agent budget. The daemon makes the call as the integration user, using the
+`servicenow` source's credentials.
+
+```yaml
+rules:
+  - name: alert-to-incident
+    source: alerts
+    when: 'event.title != ""'
+    on: each
+    id: event.id
+    cooldown: 5m
+    action:
+      servicenow:
+        connection: servicenow
+        op: create
+        fields: { short_description: "Alert: {{.event.title}}", urgency: "2" }
+```
+
+- **Ops:** `get`, `create`, `update`, `add_work_note`, `add_comment`,
+  `resolve` and `create_change`.
+- **`table`** is plain text, not a template (default `incident`; ignored by
+  `create_change`). **`sys_id`** is a template that must render to 32 hex
+  characters; leave it out for `create` and `create_change`.
+- **`fields`** values are templates. `add_work_note` and `add_comment` take
+  only `text`; `resolve` needs `close_code` and `close_notes`; `create_change`
+  needs `type` (`normal`, `emergency` or `standard`); `get` takes an optional
+  `fields` comma list. Field names may not start with `sys_`.
+- **A write needs a `cooldown`** on its rule, or on a rule whose routine has
+  one. `get` does not.
+- **No retry** on a `create` or `create_change` step: a retry could file a
+  duplicate.
+- **`get` is for routines.** A rule-level `get` only records
+  `servicenow get … <number>` in the job output; use it as a step and read
+  `{{.steps.<id>.json.<field>}}` in a later one.
+- **Routines are at-least-once.** A daemon restart during a `create` or
+  `create_change` step can file a duplicate.
+- **`standard` changes** need the field `standard_change_template_id`.
+- **`resolve` is for incidents only** (`table: incident` or none): state 6
+  means something else on other tables.
+- **No approval by default.** Set `approve: true` on the rule or step to wait
+  for a person. The job output is `servicenow <op> <table> <number>`, and
+  a later step reads `{{.steps.<id>.json.number}}`.
+- **The portal** shows these rules, but its form cannot edit them: use the
+  YAML tab.
+
+Ready-made: `siphon template alert-to-servicenow-incident` and
+`siphon template servicenow-change-on-deploy`.
+
 ### Notes
 
 - **ACLs decide.** A tool call the integration user may not make fails with

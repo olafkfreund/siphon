@@ -32,6 +32,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 
 | Template | What it does | Connect first |
 |---|---|---|
+| [`alert-to-servicenow-incident`](alert-to-servicenow-incident.yaml) | Open a ServiceNow incident for each alert, with no agent | a webhook source `alerts`, `siphon connect servicenow --instance …` |
 | [`alertmanager-summary`](alertmanager-summary.yaml) | Summarise Prometheus alerts with a local model, then notify | `siphon connect model ollama` · webhook secret |
 | [`cloudflare-notification`](cloudflare-notification.yaml) | Explain Cloudflare notifications with an agent, then notify | `siphon connect cloudflare --webhook`, `siphon connect login claude` |
 | [`datadog-monitor-alert`](datadog-monitor-alert.yaml) | Summarise Datadog monitor alerts with a local model, then notify | `siphon connect datadog`, `siphon connect model ollama` |
@@ -59,6 +60,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 
 | Template | What it does | Connect first |
 |---|---|---|
+| [`servicenow-change-on-deploy`](servicenow-change-on-deploy.yaml) | Note a deploy on its ServiceNow change request | a webhook source `deploys`, `siphon connect servicenow --instance …` |
 | [`servicenow-incident-notify`](servicenow-incident-notify.yaml) | Get notified when a P1 or P2 ServiceNow incident is created | `siphon connect servicenow` |
 | [`slack-mention-agent`](slack-mention-agent.yaml) | An agent that answers when someone @mentions your Slack app | `siphon connect model ollama`, `siphon connect slack` |
 | [`standard-webhooks`](standard-webhooks.yaml) | Receive Standard Webhooks (Svix, Clerk, Resend, …) | — · webhook secret |
