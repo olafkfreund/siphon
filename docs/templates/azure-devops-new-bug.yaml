@@ -9,6 +9,6 @@ rules:
     source: azure-devops-hooks
     when: 'event.eventType == "workitem.created" && event.resource.fields["System.WorkItemType"] == "Bug"'
     on: each
-    id: string(event.resource.id)
+    id: event.id                     # the notification event GUID: the same on a retry, unique across organisations
     action:
       cmd: [curl, -fsS, -H, "Title: New Azure DevOps bug", --data-raw, "Bug: {{index .event.resource.fields \"System.Title\"}}", https://ntfy.sh/siphon-CHANGE-ME]

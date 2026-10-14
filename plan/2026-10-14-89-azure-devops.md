@@ -91,3 +91,8 @@ Opus agent reviews them. Step 4 is mine.
   `event.resource.fields["System.WorkItemType"]` in `when` as written.
 - **Step 3:** `docs/llm.md` names the build template only, to keep it to
   one line.
+- **Review (fresh Opus, no HIGH or MEDIUM findings):** the template rules
+  use `id: event.id`, the notification event GUID, instead of
+  `string(event.resource.id)`. The GUID is the same on a retry and unique
+  across organisations, so two organisations posting to one source can't
+  hide each other's events.

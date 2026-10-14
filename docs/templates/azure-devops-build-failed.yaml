@@ -9,6 +9,6 @@ rules:
     source: azure-devops-hooks
     when: 'event.eventType == "build.complete" && event.resource.result == "failed"'
     on: each
-    id: string(event.resource.id)
+    id: event.id                     # the notification event GUID: the same on a retry, unique across organisations
     action:
       cmd: [curl, -fsS, -H, "Title: Azure DevOps build failed", --data-raw, "Build {{.event.resource.buildNumber}} ({{.event.resource.definition.name}}) failed", https://ntfy.sh/siphon-CHANGE-ME]
