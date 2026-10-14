@@ -1,0 +1,27 @@
+# title:    Note a deploy on its ServiceNow change request
+# category: Notifications & glue
+# needs:    sources/deploys                        (siphon connect webhook --name deploys --mode standard-webhooks; it posts change_sys_id and version)
+#           sources/servicenow                     (siphon connect servicenow --instance https://<instance>.service-now.com)
+# apply:    siphon apply -f servicenow-change-on-deploy.yaml
+# Two steps in the daemon, no agent: read the change request, then add a work
+# note with its number. change_sys_id must be 32 hex characters, or the step fails.
+routines:
+  servicenow-change-on-deploy:
+    steps:
+      - id: get
+        servicenow: { connection: servicenow, op: get, table: change_request, sys_id: "{{.event.change_sys_id}}" }
+      - id: note
+        servicenow:
+          connection: servicenow
+          op: add_work_note
+          table: change_request
+          sys_id: "{{.event.change_sys_id}}"
+          fields: { text: "Deployed {{.event.version}} ({{.steps.get.json.number}})" }
+rules:
+  - name: servicenow-change-on-deploy
+    source: deploys
+    when: 'event.change_sys_id != ""'
+    on: each
+    id: event.change_sys_id + ":" + event.version
+    cooldown: 1m
+    action: { routine: servicenow-change-on-deploy }

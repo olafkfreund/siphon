@@ -432,6 +432,7 @@ source  ──event──▶  rule (when: …)  ──fires──▶  action
   - `cmd: [argv…]`: a sandboxed command;
   - `agent: <name>`: an AI agent;
   - `routine: <name>`: ordered steps;
+  - `servicenow: {connection, op, …}`: one ServiceNow call made by the daemon, no LLM (`siphon explain rule`; writes need a `cooldown`);
   - `unit: <name>.service`: an allowlisted systemd unit.
 
 **Agents** run on a **connection**:
@@ -530,8 +531,8 @@ approval: otherwise nobody is told that a job is waiting.
 - **Templates are Go templates:** `{{.event.field}}` and `{{.item.field}}`.
   The `when:` field is an expression, not a template:
   `event.status == "failed"`, `headers["x-github-event"] == "push"`.
-- **`cooldown:` is mandatory** on rules whose action is an agent, or a
-  routine containing an agent step.
+- **`cooldown:` is mandatory** on rules whose action is an agent, a
+  servicenow write, or a routine containing either.
 - **Agents default to `approve: true`:** a human must run
   `siphon approve <job>`. Don't set `approve: false` unless the user asks
   for it.
@@ -1410,6 +1411,49 @@ agents:
 ```
 
 Ready-made: `siphon template servicenow-incident-triage`.
+
+### Writes without an agent
+
+A rule or a routine step can call ServiceNow itself, with no LLM and no
+agent budget. The daemon makes the call as the integration user, using the
+`servicenow` source's credentials.
+
+```yaml
+rules:
+  - name: alert-to-incident
+    source: alerts
+    when: 'event.title != ""'
+    on: each
+    id: event.id
+    cooldown: 5m
+    action:
+      servicenow:
+        connection: servicenow
+        op: create
+        fields: { short_description: "Alert: {{.event.title}}", urgency: "2" }
+```
+
+- **Ops:** `get`, `create`, `update`, `add_work_note`, `add_comment`,
+  `resolve` and `create_change`.
+- **`table`** is plain text, not a template (default `incident`; ignored by
+  `create_change`). **`sys_id`** is a template that must render to 32 hex
+  characters; leave it out for `create` and `create_change`.
+- **`fields`** values are templates. `add_work_note` and `add_comment` take
+  only `text`; `resolve` needs `close_code` and `close_notes`; `create_change`
+  needs `type` (`normal`, `emergency` or `standard`); `get` takes an optional
+  `fields` comma list. Field names may not start with `sys_`.
+- **A write needs a `cooldown`** on its rule, or on a rule whose routine has
+  one. `get` does not.
+- **No retry** on a `create` or `create_change` step: a retry could file a
+  duplicate.
+- **No approval by default.** Set `approve: true` on the rule or step to wait
+  for a person. The job output is `servicenow <op> <table> <number>`, and
+  a later step reads `{{.steps.<id>.json.number}}`.
+- **The portal** shows these rules, but its form cannot edit them: use the
+  YAML tab.
+
+Ready-made: `siphon template alert-to-servicenow-incident` and
+`siphon template servicenow-change-on-deploy`.
 
 ### Notes
 
@@ -2493,6 +2537,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 
 | Template | What it does | Connect first |
 |---|---|---|
+| [`alert-to-servicenow-incident`](alert-to-servicenow-incident.yaml) | Open a ServiceNow incident for each alert, with no agent | a webhook source `alerts`, `siphon connect servicenow --instance …` |
 | [`alertmanager-summary`](alertmanager-summary.yaml) | Summarise Prometheus alerts with a local model, then notify | `siphon connect model ollama` · webhook secret |
 | [`cloudflare-notification`](cloudflare-notification.yaml) | Explain Cloudflare notifications with an agent, then notify | `siphon connect cloudflare --webhook`, `siphon connect login claude` |
 | [`datadog-monitor-alert`](datadog-monitor-alert.yaml) | Summarise Datadog monitor alerts with a local model, then notify | `siphon connect datadog`, `siphon connect model ollama` |
@@ -2520,6 +2565,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 
 | Template | What it does | Connect first |
 |---|---|---|
+| [`servicenow-change-on-deploy`](servicenow-change-on-deploy.yaml) | Note a deploy on its ServiceNow change request | a webhook source `deploys`, `siphon connect servicenow --instance …` |
 | [`servicenow-incident-notify`](servicenow-incident-notify.yaml) | Get notified when a P1 or P2 ServiceNow incident is created | `siphon connect servicenow` |
 | [`slack-mention-agent`](slack-mention-agent.yaml) | An agent that answers when someone @mentions your Slack app | `siphon connect model ollama`, `siphon connect slack` |
 | [`standard-webhooks`](standard-webhooks.yaml) | Receive Standard Webhooks (Svix, Clerk, Resend, …) | — · webhook secret |
@@ -2594,7 +2640,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 |---|---|---|---|---|
 | Linear | tools, webhooks | available | `siphon connect linear` | [`linear-issue-from-alert`](../templates/linear-issue-from-alert.yaml) |
 | Jira | tools, webhooks | available | `siphon connect jira` | [`jira-new-issue-summary`](../templates/jira-new-issue-summary.yaml) |
-| [ServiceNow](servicenow.md) | tools, webhooks | available | `siphon connect servicenow` | [`servicenow-incident-summary`](../templates/servicenow-incident-summary.yaml) [`servicenow-incident-triage`](../templates/servicenow-incident-triage.yaml) [`servicenow-incident-notify`](../templates/servicenow-incident-notify.yaml) |
+| [ServiceNow](servicenow.md) | tools, webhooks | available | `siphon connect servicenow` | [`alert-to-servicenow-incident`](../templates/alert-to-servicenow-incident.yaml) [`servicenow-incident-summary`](../templates/servicenow-incident-summary.yaml) [`servicenow-incident-triage`](../templates/servicenow-incident-triage.yaml) [`servicenow-change-on-deploy`](../templates/servicenow-change-on-deploy.yaml) [`servicenow-incident-notify`](../templates/servicenow-incident-notify.yaml) |
 | Notion |  | not yet: needs the verification_token handshake; the remote MCP is OAuth only | — |  |
 
 ## Chat
@@ -3587,6 +3633,37 @@ once more after the upgrade.
 
 ---
 
+<!-- file: docs/templates/alert-to-servicenow-incident.yaml -->
+
+```yaml
+# title:    Open a ServiceNow incident for each alert, with no agent
+# category: Ops & monitoring
+# needs:    sources/alerts                         (siphon connect webhook --name alerts --mode standard-webhooks)
+#           sources/servicenow                     (siphon connect servicenow --instance https://<instance>.service-now.com)
+# apply:    siphon apply -f alert-to-servicenow-incident.yaml
+# The daemon makes the call itself: no LLM, no approval. It writes a record, so
+# the rule needs a cooldown. Alert text is untrusted data: it goes into
+# short_description, which ServiceNow stores as plain text.
+rules:
+  - name: alert-to-servicenow-incident
+    source: alerts
+    when: 'event.title != ""'
+    on: each
+    id: event.id
+    cooldown: 5m
+    action:
+      servicenow:
+        connection: servicenow
+        op: create
+        fields:
+          short_description: "Alert: {{.event.title}}"
+          urgency: "2"
+          impact: "2"
+```
+
+
+---
+
 <!-- file: docs/templates/alertmanager-summary.yaml -->
 
 ```yaml
@@ -4465,6 +4542,41 @@ rules:
     id: event.host + "/" + event.unit + "/" + string(int(now().Unix() / 600))   # at most one per unit per 10 min
     action:
       cmd: [curl, -fsS, -H, "Title: {{.event.unit}} failed", --data-raw, "on {{.event.host}}", https://ntfy.sh/siphon-CHANGE-ME]
+```
+
+
+---
+
+<!-- file: docs/templates/servicenow-change-on-deploy.yaml -->
+
+```yaml
+# title:    Note a deploy on its ServiceNow change request
+# category: Notifications & glue
+# needs:    sources/deploys                        (siphon connect webhook --name deploys --mode standard-webhooks; it posts change_sys_id and version)
+#           sources/servicenow                     (siphon connect servicenow --instance https://<instance>.service-now.com)
+# apply:    siphon apply -f servicenow-change-on-deploy.yaml
+# Two steps in the daemon, no agent: read the change request, then add a work
+# note with its number. change_sys_id must be 32 hex characters, or the step fails.
+routines:
+  servicenow-change-on-deploy:
+    steps:
+      - id: get
+        servicenow: { connection: servicenow, op: get, table: change_request, sys_id: "{{.event.change_sys_id}}" }
+      - id: note
+        servicenow:
+          connection: servicenow
+          op: add_work_note
+          table: change_request
+          sys_id: "{{.event.change_sys_id}}"
+          fields: { text: "Deployed {{.event.version}} ({{.steps.get.json.number}})" }
+rules:
+  - name: servicenow-change-on-deploy
+    source: deploys
+    when: 'event.change_sys_id != ""'
+    on: each
+    id: event.change_sys_id + ":" + event.version
+    cooldown: 1m
+    action: { routine: servicenow-change-on-deploy }
 ```
 
 

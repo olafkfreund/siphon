@@ -45,6 +45,8 @@ sources:
   cloudflare: { type: mcp, url: "https://mcp.cloudflare.com/mcp", auth: { bearer: env:AGW_HOOK } }
   cloudflare-hooks: { type: webhook, signature: token, token_header: cf-webhook-auth, secret: env:AGW_HOOK }
   servicenow: { type: mcp, package: servicenow, env: { SERVICENOW_INSTANCE_URL: env:AGW_HOOK, SERVICENOW_API_KEY: env:AGW_HOOK } }
+  alerts: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
+  deploys: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
   servicenow-hooks: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
 rules:
   - { name: r1, source: github-hooks, when: "true", action: { cmd: [echo, one] } }

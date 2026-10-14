@@ -238,3 +238,9 @@ Opus agent reviews them. Step 6 is mine.
   - **Routines have no field form,** so their guard only covers a form-mode
     post. YAML-mode saves of servicenow items work, and are the intended
     edit path.
+- **Step 5:**
+  - **Template sources:** the templates need the webhook sources `alerts`
+    and `deploys` (`siphon connect webhook --name … --mode standard-webhooks`),
+    added to `baseConfig`.
+  - **`docs/llm.md`:** its `cooldown:` rule now also names servicenow
+    writes.
