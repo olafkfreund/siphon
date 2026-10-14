@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 83
 author: olafkfreund
 ---
@@ -81,3 +81,13 @@ can't receive them today, for three reasons:
   `format: eventgrid` option on top of `token`? **I'd use the option.**
   Authentication and envelope stay separate, and a later Entra mode can
   combine with it.
+
+## Decisions (owner, at approval)
+
+- **The handshake requires the token** (the delivery-property header). An
+  unauthenticated fallback only comes if real Event Grid turns out not to
+  send it on validation.
+- **Both schemas:** Event Grid and CloudEvents 1.0.
+- **Configured as `format: eventgrid`** on a `token`-mode webhook source.
+- **No Azure subscription was named.** It's tested against Microsoft's
+  documented payloads, and a real Event Grid check is left as a follow-up.
