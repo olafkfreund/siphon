@@ -1,14 +1,29 @@
+{{define "jobrow"}}<div class="card item-card row{{if eq .State "running"}} is-hot{{else if eq .State "failed"}} is-err{{else if eq .State "pending_approval"}} is-wait{{else if eq .State "cancelled"}} is-off{{end}}" data-filter-item data-kind="{{.Kind}}" data-state="{{.State}}" data-text="{{.ID}} {{.Rule}} {{.Target}} {{.Provider}}">
+  <a class="c-id" href="/jobs/{{.ID}}" aria-label="Job {{.ID}}">#{{.ID}}</a><span class="c-rule">{{.Rule}}</span><span class="c-run">{{template "run" .}}</span><span class="c-state">{{template "pill" .State}}</span>{{if .Attempt}}<span class="c-att muted small">{{if gt .Attempt 1}}<span class="mode">attempt {{.Attempt}}</span>{{end}}</span>{{end}}<span class="c-time muted small" title="{{tm .CreatedAt}}">{{ago .CreatedAt}}</span><span class="c-exit small">{{exit .ExitCode}}</span>
+</div>{{end}}
 {{define "jobs"}}<div class="top"><div><h1>Jobs</h1><div class="muted">Every run Siphon has jetted out, newest first.</div></div></div>
 <nav class="chips" aria-label="Filter by state">
   <a class="chip" href="/jobs"{{if not .State}} aria-current="page"{{end}}>All</a>
-  <a class="chip" href="/jobs?state=pending_approval"{{if eq .State "pending_approval"}} aria-current="page"{{end}}>✋ Waiting <span class="muted">{{index .Counts "pending_approval"}}</span></a>
-  <a class="chip" href="/jobs?state=running"{{if eq .State "running"}} aria-current="page"{{end}}>⟳ Running <span class="muted">{{index .Counts "running"}}</span></a>
-  <a class="chip" href="/jobs?state=queued"{{if eq .State "queued"}} aria-current="page"{{end}}>◷ Queued <span class="muted">{{index .Counts "queued"}}</span></a>
-  <a class="chip" href="/jobs?state=done"{{if eq .State "done"}} aria-current="page"{{end}}>✓ Done <span class="muted">{{index .Counts "done"}}</span></a>
-  <a class="chip" href="/jobs?state=failed"{{if eq .State "failed"}} aria-current="page"{{end}}>✕ Failed <span class="muted">{{index .Counts "failed"}}</span></a>
-  <a class="chip" href="/jobs?state=cancelled"{{if eq .State "cancelled"}} aria-current="page"{{end}}>⊘ Cancelled <span class="muted">{{index .Counts "cancelled"}}</span></a>
+  <a class="chip{{if not (index .Counts "pending_approval")}} dim{{end}}" href="/jobs?state=pending_approval"{{if eq .State "pending_approval"}} aria-current="page"{{end}}>{{template "icon" "hand"}} Waiting <span class="muted">{{index .Counts "pending_approval"}}</span></a>
+  <a class="chip{{if not (index .Counts "running")}} dim{{end}}" href="/jobs?state=running"{{if eq .State "running"}} aria-current="page"{{end}}>{{template "icon" "play"}} Running <span class="muted">{{index .Counts "running"}}</span></a>
+  <a class="chip{{if not (index .Counts "queued")}} dim{{end}}" href="/jobs?state=queued"{{if eq .State "queued"}} aria-current="page"{{end}}>{{template "icon" "timer"}} Queued <span class="muted">{{index .Counts "queued"}}</span></a>
+  <a class="chip{{if not (index .Counts "done")}} dim{{end}}" href="/jobs?state=done"{{if eq .State "done"}} aria-current="page"{{end}}>{{template "icon" "check"}} Done <span class="muted">{{index .Counts "done"}}</span></a>
+  <a class="chip{{if not (index .Counts "failed")}} dim{{end}}" href="/jobs?state=failed"{{if eq .State "failed"}} aria-current="page"{{end}}>{{template "icon" "x"}} Failed <span class="muted">{{index .Counts "failed"}}</span></a>
+  <a class="chip{{if not (index .Counts "cancelled")}} dim{{end}}" href="/jobs?state=cancelled"{{if eq .State "cancelled"}} aria-current="page"{{end}}>Cancelled <span class="muted">{{index .Counts "cancelled"}}</span></a>
 </nav>
-<section class="card"><table class="cards"><thead><tr><th>#</th><th>Rule</th><th>Runs</th><th>State</th><th class="hide-sm">Attempt</th><th class="hide-sm">Created</th><th>Exit</th></tr></thead><tbody>
-{{range .Jobs}}<tr><td data-label="#"><a href="/jobs/{{.ID}}">{{.ID}}</a></td><td data-label="Rule">{{.Rule}}</td><td data-label="Runs">{{template "run" .}}</td><td data-label="State">{{template "pill" .State}}</td><td class="hide-sm" data-label="Attempt">{{.Attempt}}</td><td class="hide-sm muted" title="{{tm .CreatedAt}}" data-label="Created">{{ago .CreatedAt}}</td><td data-label="Exit">{{exit .ExitCode}}</td></tr>
-{{else}}<tr><td colspan="7"><div class="empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>{{if .State}}No jobs in this state.{{else}}Nothing in the current yet. Runs appear here when a rule fires.{{end}}</div></td></tr>{{end}}
-</tbody></table></section>{{end}}
+{{if .Jobs}}<div class="filter-bar" data-filter-scope="jobs" hidden>
+  <input type="search" class="filter-search" aria-label="Filter jobs" placeholder="Filter by id, rule, target…  /" autocomplete="off">
+  <div class="chips" role="group" aria-label="Filter by kind">
+    <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
+    <button type="button" class="chip" data-filter="agent" aria-pressed="false">agent</button>
+    <button type="button" class="chip" data-filter="cmd" aria-pressed="false">cmd</button>
+    <button type="button" class="chip" data-filter="unit" aria-pressed="false">unit</button>
+    <button type="button" class="chip" data-filter="routine" aria-pressed="false">routine</button>
+    <button type="button" class="chip" data-filter="servicenow" aria-pressed="false">servicenow</button>
+  </div>
+</div>
+<p class="filter-none muted" data-filter-scope="jobs" hidden>No jobs match. <button type="button" class="btn sm" data-action="clear-filter">Clear filter</button></p>
+{{end}}<div class="joblist" data-filter-list="jobs">
+{{range .Jobs}}{{template "jobrow" .}}
+{{else}}<section class="card"><div class="empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>{{if .State}}No jobs in this state.{{else}}Nothing in the current yet. Runs appear here when a rule fires.{{end}}</div></section>{{end}}
+</div>{{end}}

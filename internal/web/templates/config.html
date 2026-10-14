@@ -39,12 +39,15 @@
 <form method="post" action="{{.Base}}/save">
 <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><input type="hidden" name="mode" value="yaml">
 {{if .New}}<label class="f">Name<input name="name" value="{{.Name}}" required></label>{{else}}<input type="hidden" name="name" value="{{.Name}}">{{end}}
-<textarea name="yaml" rows="14" class="mono" aria-label="YAML">{{.YAML}}</textarea>
+<textarea name="yaml" rows="14" class="mono code-input" aria-label="YAML" spellcheck="false"{{if can $.Role "admin"}} hx-post="{{.Base}}/validate" hx-trigger="input changed delay:600ms" hx-target="#yaml-status" hx-swap="outerHTML" hx-include="closest form"{{end}}>{{.YAML}}</textarea>
+{{if can $.Role "admin"}}<div id="yaml-status" class="yaml-status" role="status" aria-live="polite"></div>{{end}}
 {{if can $.Role "admin"}}<div class="row-actions"><button class="btn" formaction="{{.Base}}/check">Review changes</button><button class="btn primary">Save &amp; apply</button></div>{{end}}
 </form></details>
 {{if and .Exists (ne .Prov "file")}}{{if can $.Role "admin"}}<form method="post" action="{{.Base}}/reset" class="sm"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><button>Reset to file</button></form>{{end}}{{end}}
 {{if .Exists}}{{if can $.Role "admin"}}<form method="post" action="{{.Base}}/delete" class="sm"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><button class="btn no">Delete</button></form>{{end}}{{end}}
 {{end}}{{end}}
+
+{{define "cfgvalid"}}<div id="yaml-status" class="yaml-status {{if .Err}}err{{else}}ok{{end}}" role="status" aria-live="polite"{{if .Line}} data-line="{{.Line}}"{{end}}>{{if .Err}}{{template "icon" "x"}} {{.Err}}{{else}}{{template "icon" "check"}} {{if .Changes}}Valid · {{.Changes}} changes{{else}}Valid · no change{{end}}{{end}}</div>{{end}}
 
 {{define "genfields"}}{{range .Fields}}{{if not .Adv}}{{template "field" .}}{{end}}{{end}}
 {{$adv := false}}{{range .Fields}}{{if .Adv}}{{$adv = true}}{{end}}{{end}}{{if $adv}}<details class="more"><summary>More options</summary>{{range .Fields}}{{if .Adv}}{{template "field" .}}{{end}}{{end}}</details>{{end}}{{end}}

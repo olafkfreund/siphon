@@ -5,11 +5,30 @@
   {{if can $.Role "operator"}}<form method="post" action="/approvals/{{.ID}}/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="back" value="/jobs/{{.ID}}"><button class="btn ok">Approve &amp; run</button></form>{{end}}
 {{end}}</div>
 {{if .Summary}}<div class="banner fail" role="alert"><div><b>Why it failed:</b> <code class="wrap">{{.Summary}}</code></div>{{if .Connect}}<a class="btn sm primary" href="/connections?connect={{pe .Connect}}#add">{{template "icon" "key"}}Connect {{.Connect}}</a>{{end}}</div>{{end}}
+<section class="card item-card hero{{if eq .State "running"}} is-hot{{else if eq .State "failed"}} is-err{{else if eq .State "pending_approval"}} is-wait{{else if eq .State "cancelled"}} is-off{{end}} mb" data-kind="{{.Kind}}" aria-label="Where this job came from">
+  <div class="flow">
+    <div class="node"><small><span class="sr-only">Source: </span>{{template "srcicon" .SourceType}}<span>{{if .SourceType}}{{.SourceType}}{{else}}source{{end}}</span></small><code class="node-target" title="{{.Source}}">{{if .Source}}{{.Source}}{{else}}unknown{{end}}</code></div>
+    <span class="pipe" aria-hidden="true"></span>
+    <div class="node cond"><small><span class="sr-only">Rule: </span><span>rule</span>{{if .On}}<span class="mode">{{if eq .On "each"}}each event{{else}}on edge{{end}}</span>{{end}}</small><a class="item-title" href="/config/rules/{{pe .Rule}}">{{.Rule}}</a></div>
+    <span class="pipe" aria-hidden="true"></span>
+    <div class="node"><small><span class="sr-only">Action: </span>{{if .Kind}}{{.Kind}}{{else}}action{{end}}</small>{{if .Kind}}{{template "run" .}}{{else}}<span class="muted">not stored</span>{{end}}</div>
+  </div>
+  <div class="item-foot">
+    <span class="stamp" title="{{tm .CreatedAt}}">created {{ago .CreatedAt}}</span>
+    {{if .StartedAt}}<span class="stamp">started {{tp .StartedAt}}</span>{{end}}
+    {{if .FinishedAt}}<span class="stamp">finished {{tp .FinishedAt}}</span>{{end}}
+    {{if .Duration}}<span class="stamp">took {{.Duration}}</span>{{end}}
+    <span class="stamp{{if eq .State "failed"}} err{{end}}">exit {{exit .ExitCode}}</span>
+    <span class="stamp">attempt {{.Attempt}}</span>
+    {{if .ParentID}}<span class="stamp">parent <a href="/jobs/{{.ParentID}}">#{{.ParentID}}</a></span>{{end}}
+    {{if .Depth}}<span class="stamp">depth {{.Depth}}</span>{{end}}
+  </div>
+</section>
 <div class="grid g2">
   <div class="stack">
     <section class="card" aria-labelledby="what"><h2 id="what">{{if eq .State "pending_approval"}}What will run{{else}}What ran{{end}}</h2>
+      {{if .Kind}}<p class="run-head">{{template "run" .}}{{with .Agent}}{{if .Credential}} <span class="muted">· login <b>{{.Credential}}</b></span>{{end}}{{end}}</p>{{end}}
       {{if eq .Kind "agent"}}<dl>
-        <dt>Agent</dt><dd><span class="run"><span class="run-ico k-agent">{{template "kindicon" "agent"}}</span><b>{{.Target}}</b>{{with .Agent}} {{template "provider" .Kind}}{{end}}</span>{{with .Agent}}{{if .Credential}} · login <b>{{.Credential}}</b>{{end}}{{end}}</dd>
         {{with .Agent}}<dt>Limits</dt><dd>{{if .MaxTurns}}{{.MaxTurns}} turns · {{end}}{{if .MaxBudgetUSD}}${{.MaxBudgetUSD}} · {{end}}{{dur .Timeout}}</dd>{{end}}
         <dt>Can reach</dt><dd>{{range $i, $h := .CanReach}}{{if $i}} · {{end}}<code>{{$h.Host}}{{if ne $h.Port 443}}:{{$h.Port}}{{end}}</code>{{else}}<span class="muted">any host (egress off)</span>{{end}}</dd>
       </dl>
@@ -28,23 +47,12 @@
     </section>
   </div>
   <div class="stack">
-    <section class="card" aria-labelledby="det"><h2 id="det">Details</h2><dl>
-      <dt>Rule</dt><dd><a href="/config/rules/{{pe .Rule}}">{{.Rule}}</a></dd>
-      <dt>Created</dt><dd>{{tm .CreatedAt}} · {{ago .CreatedAt}}</dd>
-      {{if .StartedAt}}<dt>Started</dt><dd>{{tp .StartedAt}}</dd>{{end}}
-      {{if .FinishedAt}}<dt>Finished</dt><dd>{{tp .FinishedAt}}</dd>{{end}}
-      {{if .Duration}}<dt>Duration</dt><dd>{{.Duration}}</dd>{{end}}
-      <dt>Exit</dt><dd>{{exit .ExitCode}}</dd>
-      <dt>Attempt</dt><dd>{{.Attempt}}</dd>
-      {{if .ParentID}}<dt>Parent</dt><dd><a href="/jobs/{{.ParentID}}">{{.ParentID}}</a></dd>{{end}}
-      {{if .Depth}}<dt>Depth</dt><dd>{{.Depth}}</dd>{{end}}
-    </dl></section>
     {{if .Notes}}<section class="card" aria-labelledby="nt"><h2 id="nt">Notifications</h2><ul class="plain">
       {{range .Notes}}<li><b>{{.Channel}}</b> · {{.Event}} · {{template "pill" .State}}<div class="muted small">{{if .SentAt}}sent {{tp .SentAt}}{{else}}queued {{ago .CreatedAt}}{{end}}{{if .Error}} · {{.Error}}{{end}}</div></li>{{end}}
     </ul></section>{{end}}
-    {{if .Event}}<section class="card" aria-labelledby="ev"><h2 id="ev">Triggering event</h2><pre>{{.Event}}</pre></section>{{end}}
-    {{if .Steps}}<section class="card" aria-labelledby="st"><h2 id="st">Routine steps</h2><ol class="timeline">
-      {{range .Steps}}<li>{{template "pill" .State}}<div><b>{{.ID}}</b><div class="muted small">{{.Kind}} {{.Target}}</div></div></li>{{end}}
+    {{if .Event}}<section class="card" aria-labelledby="ev"><div class="top tight"><h2 id="ev">Triggering event</h2><span class="sp"></span><button type="button" class="btn sm" data-action="copy" data-target="job-event">{{template "icon" "copy"}}Copy</button></div><pre id="job-event">{{.Event}}</pre></section>{{end}}
+    {{if .Steps}}<section class="card" aria-labelledby="st"><h2 id="st">Routine steps</h2><ol class="timeline rail">
+      {{range .Steps}}<li class="st-{{.State}}"><span class="run-ico k-{{.Kind}}">{{template "kindicon" .Kind}}</span><div><b>{{.ID}}</b> {{template "pill" .State}}<div class="muted small">{{.Kind}} {{.Target}}</div></div></li>{{end}}
     </ol></section>{{end}}
   </div>
 </div>

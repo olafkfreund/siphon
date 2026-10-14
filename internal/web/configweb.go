@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -71,7 +72,7 @@ func (s *server) configRoutes(mux *http.ServeMux) {
 	h("GET /config/{kind}", s.cfgList)
 	h("GET /config/{kind}/new", s.cfgEdit)
 	h("GET /config/{kind}/{name}", s.cfgEdit)
-	for _, verb := range []string{"check", "save", "delete", "reset"} {
+	for _, verb := range []string{"check", "validate", "save", "delete", "reset"} {
 		h("POST /config/{kind}/{name}/"+verb, func(w http.ResponseWriter, r *http.Request, csrf string) { s.cfgPost(w, r, csrf, verb) })
 	}
 	h("GET /history", s.histList)
@@ -226,6 +227,10 @@ func (s *server) cfgPost(w http.ResponseWriter, r *http.Request, csrf, verb stri
 		return
 	}
 	bad := func(y, msg string, code int) {
+		if verb == "validate" { // a fragment for the live status line, not a page
+			s.render(w, "cfgvalid", validView(msg, 0))
+			return
+		}
 		v, err := s.editView(kind, name, isNew, y)
 		if err != nil {
 			s.fail(w, err)
@@ -251,7 +256,7 @@ func (s *server) cfgPost(w http.ResponseWriter, r *http.Request, csrf, verb stri
 	}
 	_, exists := prov[itemKey{Kind: kind, Name: name}]
 	switch verb {
-	case "check", "save":
+	case "check", "validate", "save":
 		if y, pending, err = s.itemYAMLFromRequest(r, kind, name); err != nil {
 			shown := r.PostFormValue("yaml")
 			if errors.Is(err, errServiceNowForm) {
@@ -271,15 +276,8 @@ func (s *server) cfgPost(w http.ResponseWriter, r *http.Request, csrf, verb stri
 	case "reset":
 		mutate, summary = resetItem(kind, name), fmt.Sprintf("%s/%s reset to file", kind, name)
 	}
-	if verb == "check" {
-		cur, latest, err := s.overlay()
-		if err == nil && latest != rev {
-			err = errStale
-		}
-		var e *edit
-		if err == nil {
-			e, err = s.prepare(cur, mutate, pending)
-		}
+	if verb == "check" || verb == "validate" {
+		e, err := s.checkEdit(rev, mutate, pending)
 		var inv errInvalid
 		switch {
 		case errors.As(err, &inv):
@@ -288,6 +286,8 @@ func (s *server) cfgPost(w http.ResponseWriter, r *http.Request, csrf, verb stri
 			bad(y, err.Error(), http.StatusConflict)
 		case err != nil:
 			s.fail(w, err)
+		case verb == "validate":
+			s.render(w, "cfgvalid", validView("", changeCount(e.diff)))
 		default:
 			v, verr := s.editView(kind, name, isNew, y)
 			if verr != nil {
@@ -319,6 +319,41 @@ func (s *server) cfgPost(w http.ResponseWriter, r *http.Request, csrf, verb stri
 		_ = applyErr // shown through the banner
 		http.Redirect(w, r, "/config/"+kind+"?done="+verb, http.StatusSeeOther)
 	}
+}
+
+// checkEdit is the dry run behind check and validate: the stale-revision
+// check, then prepare. Nothing is stored.
+func (s *server) checkEdit(rev int64, mutate func(map[itemKey]store.ConfigItem), pending []pendingSecret) (*edit, error) {
+	cur, latest, err := s.overlay()
+	if err != nil {
+		return nil, err
+	}
+	if latest != rev {
+		return nil, errStale
+	}
+	return s.prepare(cur, mutate, pending)
+}
+
+// changeCount is the added and removed lines of a unified diff.
+func changeCount(d string) (n int) {
+	for _, l := range strings.Split(d, "\n") {
+		if strings.HasPrefix(l, "+") || strings.HasPrefix(l, "-") {
+			n++
+		}
+	}
+	return
+}
+
+var errLine = regexp.MustCompile(`line (\d+)`)
+
+// validView is the data of the cfgvalid fragment: msg is the error, if any,
+// and Line the first line number it names.
+func validView(msg string, changes int) map[string]any {
+	line := 0
+	if m := errLine.FindStringSubmatch(msg); m != nil {
+		line, _ = strconv.Atoi(m[1])
+	}
+	return map[string]any{"Err": msg, "Line": line, "Changes": changes}
 }
 
 func (s *server) histList(w http.ResponseWriter, r *http.Request, csrf string) {

@@ -1,6 +1,6 @@
 {{define "rules"}}<div class="top"><div><h1>Rules</h1><div class="muted">What Siphon watches for, and what it jets out.</div></div><span class="sp"></span>{{if can $.Role "admin"}}<a class="btn primary" href="/config/rules/new">New rule</a>{{end}}</div>
-{{if .Rules}}<div class="rules-bar" hidden>
-  <input type="search" class="rules-search" aria-label="Filter rules" placeholder="Filter rules…  /" autocomplete="off">
+{{if .Rules}}<div class="filter-bar" data-filter-scope="rules" hidden>
+  <input type="search" class="filter-search" aria-label="Filter rules" placeholder="Filter rules…  /" autocomplete="off">
   <div class="chips" role="group" aria-label="Filter by kind or status">
     <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
     <button type="button" class="chip" data-filter="agent" aria-pressed="false">agent</button>
@@ -13,11 +13,11 @@
     <button type="button" class="chip" data-filter="hot" aria-pressed="false">fired recently</button>
   </div>
 </div>
-<p class="rules-none muted" hidden>No rules match. <button type="button" class="btn sm" data-action="clear-filter">Clear filter</button></p>
-{{end}}<div class="grid g2e">
-{{range .Rules}}<section class="card rule-card{{if .Hot}} is-hot{{end}}{{if not .Enabled}} is-off{{end}}" aria-label="Rule {{.Name}}" data-kind="{{.Kind}}" data-status="{{if .Enabled}}on{{else}}off{{end}}" data-hot="{{.Hot}}" data-text="{{.Name}} {{.Source}} {{.When}} {{.Target}}">
-  <div class="rule-head"><span class="dot {{if not .Enabled}}off{{else if .Hot}}ok{{else}}idle{{end}}" aria-hidden="true"></span><a class="rule-name" href="/config/rules/{{pe .Name}}">{{.Name}}</a>{{if .Overridden}}<span class="badge ovr">turned off in the portal</span>{{end}}<span class="sp"></span>
-    <span class="fired{{if .Hot}} hot{{end}}">{{if .Enabled}}{{if .LastFired}}fired {{agop .LastFired}}{{else}}not fired yet{{end}}{{else}}disabled{{end}}</span>
+<p class="filter-none muted" data-filter-scope="rules" hidden>No rules match. <button type="button" class="btn sm" data-action="clear-filter">Clear filter</button></p>
+{{end}}<div class="grid g2e" data-filter-list="rules">
+{{range .Rules}}<section data-filter-item class="card item-card{{if .Hot}} is-hot{{end}}{{if not .Enabled}} is-off{{end}}" aria-label="Rule {{.Name}}" data-kind="{{.Kind}}" data-status="{{if .Enabled}}on{{else}}off{{end}}" data-hot="{{.Hot}}" data-text="{{.Name}} {{.Source}} {{.When}} {{.Target}}">
+  <div class="item-head"><span class="dot {{if not .Enabled}}off{{else if .Hot}}ok{{else}}idle{{end}}" aria-hidden="true"></span><a class="item-title" href="/config/rules/{{pe .Name}}">{{.Name}}</a>{{if .Overridden}}<span class="badge ovr">turned off in the portal</span>{{end}}<span class="sp"></span>
+    <span class="stamp{{if .Hot}} hot{{end}}">{{if .Enabled}}{{if .LastFired}}fired {{agop .LastFired}}{{else}}not fired yet{{end}}{{else}}disabled{{end}}</span>
     <a class="btn sm" href="/config/rules/{{pe .Name}}">Edit</a>
     {{$verb := "disable"}}{{if not .Enabled}}{{$verb = "enable"}}{{end}}
     {{if can $.Role "operator"}}<form method="post" action="/rules/{{pe .Name}}/{{$verb}}" hx-post="/rules/{{pe .Name}}/{{$verb}}" hx-target="#main"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="switch{{if .Enabled}} on{{end}}" role="switch" aria-checked="{{if .Enabled}}true{{else}}false{{end}}" aria-label="{{if .Enabled}}Disable{{else}}Enable{{end}} {{.Name}}"></button></form>{{else}}<button type="button" class="switch{{if .Enabled}} on{{end}}" role="switch" aria-checked="{{if .Enabled}}true{{else}}false{{end}}" aria-label="{{.Name}} is {{if .Enabled}}on{{else}}off{{end}}" disabled></button>{{end}}
@@ -25,11 +25,11 @@
   <div class="flow{{if not .Enabled}} off{{end}}">
     <div class="node"><small><span class="sr-only">Source: </span>{{template "srcicon" .SourceType}}{{if .SourceType}}<span>{{.SourceType}}</span>{{else}}<span>source</span>{{end}}</small><code class="node-target" title="{{.Source}}">{{.Source}}</code></div>
     <span class="pipe" aria-hidden="true"></span>
-    <div class="node cond"><small><span class="sr-only">When: </span><span class="trig">{{if eq .On "each"}}each event{{else}}on edge{{end}}</span></small><code title="{{.When}}">{{.When}}</code></div>
+    <div class="node cond"><small><span class="sr-only">When: </span><span class="mode">{{if eq .On "each"}}each event{{else}}on edge{{end}}</span></small><code title="{{.When}}">{{.When}}</code></div>
     <span class="pipe" aria-hidden="true"></span>
     <div class="node"><small><span class="sr-only">Action: </span>{{template "kindicon" .Kind}}<span>{{.Kind}}</span>{{if .Provider}} {{template "provider" .Provider}}{{end}}</small><code class="node-target" title="{{.Target}}">{{.Target}}</code></div>
   </div>
-  <div class="rule-foot">{{if or .Cooldown .Approval .ForEach .Repeat .Egress}}{{if .Cooldown}}<span class="pill tag">cooldown {{.Cooldown}}</span>{{end}}{{if .Approval}}<span class="pill pending_approval">asks approval</span>{{end}}{{if .ForEach}}<span class="pill tag">for each</span>{{end}}{{if .Repeat}}<span class="pill tag">repeat {{.Repeat}}</span>{{end}}{{if .Egress}}<span class="pill tag">egress limited</span>{{end}}{{else}}<span class="muted small">runs automatically</span>{{end}}</div>
+  <div class="item-foot">{{if or .Cooldown .Approval .ForEach .Repeat .Egress}}{{if .Cooldown}}<span class="pill tag">cooldown {{.Cooldown}}</span>{{end}}{{if .Approval}}<span class="pill pending_approval">asks approval</span>{{end}}{{if .ForEach}}<span class="pill tag">for each</span>{{end}}{{if .Repeat}}<span class="pill tag">repeat {{.Repeat}}</span>{{end}}{{if .Egress}}<span class="pill tag">egress limited</span>{{end}}{{else}}<span class="muted small">runs automatically</span>{{end}}</div>
 </section>
 {{else}}<section class="card empty"><div class="bubbles" aria-hidden="true"><span></span><span></span><span></span></div>Nothing in the current yet. <a href="/help/templates">Start from a template</a>{{if can $.Role "admin"}} or <a href="/config/rules/new">add a new rule</a>{{end}}.</section>{{end}}
 </div>{{end}}
