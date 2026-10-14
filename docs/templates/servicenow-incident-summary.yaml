@@ -1,0 +1,27 @@
+# title:    Summarise each new ServiceNow incident, then notify
+# category: Ops & monitoring
+# needs:    sources/servicenow-hooks               (siphon connect servicenow)
+#           credentials/ollama-local               (siphon connect model ollama)
+# apply:    siphon apply -f servicenow-incident-summary.yaml
+agents:
+  servicenow-incident-summary:
+    kind: model
+    credential: ollama-local
+    model: llama3.2
+    prompt: "Summarise this ServiceNow incident for the on-call engineer in three lines. Number: {{.event.number}}. Priority: {{.event.priority}}. State: {{.event.state}}. Description: {{.event.short_description}}"
+    max_turns: 2
+    timeout: 5m
+    approve: false                  # a read-only summary
+routines:
+  servicenow-incident-to-phone:
+    steps:
+      - { id: summary, agent: servicenow-incident-summary, timeout: 5m }
+      - { id: notify, if: 'steps.summary.exit == 0', cmd: [curl, -fsS, -H, "Title: ServiceNow incident", --data-raw, "Summary:\n{{.steps.summary.json.result}}", https://ntfy.sh/siphon-CHANGE-ME] }
+rules:
+  - name: servicenow-incident-created
+    source: servicenow-hooks
+    when: 'event.table == "incident" && event.event == "insert"'
+    on: each
+    id: event.sys_id
+    cooldown: 1m                    # per rule: a second incident within a minute gets no summary
+    action: { routine: servicenow-incident-to-phone }

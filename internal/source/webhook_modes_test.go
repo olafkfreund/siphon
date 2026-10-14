@@ -3,7 +3,9 @@ package source
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
@@ -178,5 +180,63 @@ func TestWebhookSlackStripeRetryIsDuplicate(t *testing.T) {
 		if codes[0] != 202 || codes[1] != 409 {
 			t.Errorf("%s: %v", mode, codes)
 		}
+	}
+}
+
+// ServiceNow's generateMac signs id.ts.body with the base64-decoded hex key;
+// this pins that a delivery signed that way passes standard-webhooks.
+func TestWebhookServiceNowSigning(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		t.Fatal(err)
+	}
+	k := hex.EncodeToString(raw)
+	key, err := base64.StdEncoding.DecodeString(k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sign := func(key []byte, id, ts, body string) string {
+		mac := hmac.New(sha256.New, key)
+		mac.Write([]byte(id + "." + ts + "." + body))
+		return "v1," + base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	}
+	id := hex.EncodeToString(raw[:16]) + ":3"
+	body := `{"number":"INC0010001"}`
+	calls, seen := 0, ""
+	h := NewWebhook(WebhookOptions{Name: "w", Secret: "whsec_" + k, Signature: "standard-webhooks", Now: func() time.Time { return now }}, func(_ context.Context, _ Event, got string) (bool, error) {
+		calls++
+		seen = got
+		return calls > 1, nil
+	})
+	do := func(ts, sig, b string) int {
+		r := httptest.NewRequest(http.MethodPost, "/hook/w", strings.NewReader(b))
+		r.Header.Set("Webhook-Id", id)
+		r.Header.Set("Webhook-Timestamp", ts)
+		r.Header.Set("Webhook-Signature", sig)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	ts := strconv.FormatInt(now.Unix(), 10)
+	good := sign(key, id, ts, body)
+	old := strconv.FormatInt(now.Add(-6*time.Minute).Unix(), 10)
+	if c := do(ts, good, body+" "); c != 401 {
+		t.Errorf("changed body: %d, want 401", c)
+	}
+	if c := do(old, sign(key, id, old, body), body); c != 401 {
+		t.Errorf("6 minutes old: %d, want 401", c)
+	}
+	if c := do(ts, sign([]byte(k), id, ts, body), body); c != 401 {
+		t.Errorf("raw ASCII key: %d, want 401", c)
+	}
+	if calls != 0 {
+		t.Fatalf("refused deliveries reached the handler: %d", calls)
+	}
+	if c := do(ts, good, body); c != 202 || seen != id {
+		t.Errorf("valid: %d id %q, want 202 id %q", c, seen, id)
+	}
+	if c := do(ts, good, body); c != 409 || calls != 2 {
+		t.Errorf("replay: %d calls %d, want 409 and 2", c, calls)
 	}
 }

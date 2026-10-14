@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -110,5 +111,30 @@ func TestSecretAndGeneratedPrefix(t *testing.T) {
 	}
 	if res.Secrets[0].Value != "Bearer abc" || !strings.HasPrefix(res.Secrets[1].Value, "Bearer ") || res.Done.HookSecret != strings.TrimPrefix(res.Secrets[1].Value, "Bearer ") {
 		t.Fatalf("%+v %+v", res.Secrets, res.Done)
+	}
+}
+
+func TestServiceNowEntry(t *testing.T) {
+	e := Get("servicenow")
+	if e == nil {
+		t.Fatal("servicenow missing")
+	}
+	res, err := e.Render(map[string]string{"name": "snow"}, Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Items) != 1 || res.Items[0].Kind != "sources" || res.Items[0].Name != "snow-hooks" || !strings.Contains(res.Items[0].YAML, "signature: standard-webhooks") {
+		t.Fatalf("%+v", res.Items)
+	}
+	// The secret itself is stored write-only (the YAML holds a file ref), as in
+	// TestSecretAndGeneratedPrefix.
+	if len(res.Secrets) != 1 || !regexp.MustCompile(`^whsec_[0-9a-f]{64}$`).MatchString(res.Secrets[0].Value) {
+		t.Fatalf("secret not whsec_ + 64 hex: %d secrets", len(res.Secrets))
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(res.Done.HookSecret) || res.Secrets[0].Value != "whsec_"+res.Done.HookSecret {
+		t.Fatal("Done.HookSecret is not the 64-hex key behind the stored secret")
+	}
+	if res.Done.Hook != "snow-hooks" {
+		t.Fatalf("Done.Hook = %q", res.Done.Hook)
 	}
 }

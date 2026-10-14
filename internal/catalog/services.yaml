@@ -351,6 +351,31 @@ services:
       Choose the events (for example issue created, issue updated) and save.
     test: {method: GET, url: '{base}/rest/api/3/myself', header: 'Authorization: {token}', identity: displayName, base_from: headers.X-Siphon-Site}
 
+  - id: servicenow
+    name: ServiceNow
+    mark: SN
+    category: issues
+    summary: "ServiceNow record events (incidents, changes, requests) by signed webhook from a Business Rule. Agent tools and writes come in a later release."
+    capabilities: [webhooks]
+    status: available
+    templates: [servicenow-incident-notify, servicenow-incident-summary]
+    fields:
+      - {<<: *f_name, default: servicenow}
+    creates:
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: standard-webhooks
+          secret: {{generated "secret" "whsec_"}}
+    setup: |
+      In ServiceNow, add two system properties: siphon.webhook.url (the URL above) and
+      siphon.webhook.key (type password2, the secret above). Then add the after Business
+      Rule from docs/connections/servicenow.md on each table to send. Full guide:
+      docs/connections/servicenow.md.
+
   # ---- chat
   - id: slack
     name: Slack

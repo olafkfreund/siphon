@@ -17,7 +17,7 @@ var order = []string{
 	"tasks/webhook-command.md", "tasks/poll-threshold.md", "tasks/github-pr-agent.md",
 	"tasks/mcp-watch.md", "tasks/routine.md", "tasks/approvals.md",
 	"connections/models.md", "connections/logins.md", "connections/github.md",
-	"connections/gitlab.md", "connections/aws.md",
+	"connections/gitlab.md", "connections/aws.md", "connections/servicenow.md",
 	"troubleshooting.md", "drafting.md", "cli.md", "templates/README.md",
 }
 
