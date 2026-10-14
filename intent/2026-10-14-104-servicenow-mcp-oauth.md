@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 104
 author: olafkfreund
 ---
@@ -79,3 +79,10 @@ server, the Now Assist "MCP Server Console", such as
   successful login (an expired session) also be treated as "log in again"?
   **I'd treat it the same way:** the source shows "login required", rather
   than an opaque "Found" error.
+
+## Decisions (at approval)
+
+- **Live consent:** scripted with the admin login. If the page resists
+  scripting, I ask the owner for one click.
+- **A 302 after a login** counts as "log in again". The source shows "login
+  required", not "Found".
