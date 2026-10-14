@@ -111,6 +111,10 @@ func TestEventGridRefusals(t *testing.T) {
 	if w.Code != 400 || len(got) != 0 {
 		t.Errorf("no id: %d delivered %d", w.Code, len(got))
 	}
+	// A non-object element refuses the whole request too.
+	if w, got := egCall(t, WebhookOptions{}, "POST", "nonobject.json", egAuth, nil, nil); w.Code != 400 || len(got) != 0 {
+		t.Errorf("non-object element: %d delivered %d", w.Code, len(got))
+	}
 	if w, _ := egCall(t, WebhookOptions{}, "POST", "batch.json", egAuth, nil, errors.New("db down")); w.Code != 500 {
 		t.Errorf("deliver error: %d", w.Code)
 	}

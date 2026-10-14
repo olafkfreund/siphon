@@ -646,6 +646,9 @@ services:
       Endpoint type = Web Hook, endpoint = the URL above (must be https).
       Under Delivery properties add a header X-Siphon-Key with the secret
       above, and tick "Is secret". Azure validates the endpoint when you save.
+      Not yet tested against real Azure: if saving fails and Siphon logs a 401
+      for this source, Azure did not send the header on the validation
+      request; please report it (issue #83).
       A batch larger than limits.http_max_body (1 MiB by default) is refused
       with 413; raise it if your events are large.
 

@@ -141,3 +141,14 @@ Opus agent reviews them. Steps 0 and 4 are mine.
   - **The catalog entry** sits at the top of the cloud section.
   - **The template's rule** has `id: event.id`. Its notification uses
     `{{.event.subject}}`, which both schemas carry.
+- **Review of steps 1–3 (fresh Opus, no HIGH findings; one MEDIUM
+  deployment risk):**
+  - **Real Azure isn't tested.** If Azure doesn't send the delivery-property
+    header on the handshake, saving a subscription fails with 401. The
+    setup text now says so and asks for a report. A check on real Azure is
+    the follow-up.
+  - **`cloudevent-batch.json`** is a made-up fixture too, not a Microsoft
+    example.
+  - **New test:** a non-object element gets 400.
+  - **A comment** explains why a 429 partway through a batch is safe.
+  - **Checked:** replay keys are scoped per source (`seen_event.scope`).

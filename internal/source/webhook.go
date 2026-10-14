@@ -338,6 +338,8 @@ func serveEventGrid(w http.ResponseWriter, r *http.Request, o WebhookOptions, no
 		return
 	}
 	for _, m := range events {
+		// A 429 here leaves earlier events delivered; Event Grid retries the whole
+		// batch and their ids come back as duplicates.
 		if !o.Limit.Allow(now) {
 			reject(http.StatusTooManyRequests, "rate limited")
 			return
