@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 76
 author: olafkfreund
 ---
@@ -81,3 +81,10 @@ demo instance `calitiiltddemo3`. Three gaps remain.
   unless you want a polling fallback.
 - **The official-MCP spike needs you once,** to complete the OAuth login
   in a browser against `calitiiltddemo3`. Is that OK?
+
+## Decisions (owner, at approval)
+
+- **The polling template is dropped.** Webhooks and the native action
+  cover both directions.
+- **The owner will complete the OAuth consent** in a browser for the
+  official-MCP spike.
