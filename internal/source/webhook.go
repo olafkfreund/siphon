@@ -9,7 +9,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +25,8 @@ type WebhookOptions struct {
 	SigHeader       string
 	TokenHeader     string
 	TimestampHeader string
+	TokenField      string // body-token: the body field holding the token (default "token")
+	ReplyText       string // body-token: answer 200 {"text": …} instead of 202
 	SigPrefix       string // sha256: the header may hold a comma-separated list of PREFIX+hex; any match counts
 	TimestampSep    string // sha256 with a timestamp: what joins timestamp and body (default ".")
 	IDHeader        string
@@ -115,7 +119,26 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 		header := o.SigHeader
 		var signed []byte
 		var key string
+		var data any
 		switch o.Signature {
+		case "body-token":
+			header = "" // the token is in the body, so no header is dropped
+			field := o.TokenField
+			if field == "" {
+				field = "token"
+			}
+			data = decodeBody(r, body)
+			m, _ := data.(map[string]any) // a JSON array or scalar has no token
+			tok, _ := m[field].(string)
+			a, b := sha256.Sum256([]byte(tok)), sha256.Sum256([]byte(o.Secret))
+			if o.Secret == "" || subtle.ConstantTimeCompare(a[:], b[:]) != 1 {
+				reject(http.StatusUnauthorized, "token missing or wrong")
+				return
+			}
+			delete(m, field)
+			enc, _ := json.Marshal(m) // map[string]any from JSON or a form always encodes
+			sum := sha256.Sum256(enc)
+			key = hex.EncodeToString(sum[:])
 		case "token":
 			header = o.TokenHeader
 			a, b := sha256.Sum256([]byte(r.Header.Get(header))), sha256.Sum256([]byte(o.Secret))
@@ -240,19 +263,49 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 				headers[name] = r.Header.Get(k)
 			}
 		}
-		data, err := DecodeJSON(body)
-		if err != nil {
-			data = map[string]any{"raw": string(body)}
+		if data == nil {
+			data = decodeBody(r, body)
 		}
 		dup, err := deliver(r.Context(), Event{Source: o.Name, ReceivedAt: now, Headers: headers, Data: data}, id)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 		} else if dup {
 			w.WriteHeader(http.StatusConflict)
+		} else if o.ReplyText != "" {
+			reply, _ := json.Marshal(map[string]string{"text": o.ReplyText})
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(reply)
 		} else {
 			w.WriteHeader(http.StatusAccepted)
 		}
 	})
+}
+
+// decodeBody reads a form body (a string per single value, a []any per
+// repeated key) or JSON; anything else becomes {"raw": body}.
+func decodeBody(r *http.Request, body []byte) any {
+	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err == nil && mt == "application/x-www-form-urlencoded" {
+		if q, err := url.ParseQuery(string(body)); err == nil {
+			data := make(map[string]any, len(q))
+			for k, v := range q {
+				if len(v) == 1 {
+					data[k] = v[0]
+				} else {
+					list := make([]any, len(v))
+					for i, x := range v {
+						list[i] = x
+					}
+					data[k] = list
+				}
+			}
+			return data
+		}
+	}
+	data, err := DecodeJSON(body)
+	if err != nil {
+		return map[string]any{"raw": string(body)}
+	}
+	return data
 }
 
 // verifyStandard checks a Standard Webhooks delivery and returns its signed
