@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 74
 author: olafkfreund
 ---
@@ -94,3 +94,10 @@ This is Phase 2 of the ServiceNow integration (#71).
   `mcp__<source>__get_incident`. Is the unprefixed set (`get_incident`,
   `search_records`, …) fine, or do you want a `sn_` prefix?
   - **I'd go unprefixed.** The source name already namespaces them.
+
+## Decisions (owner, at approval)
+
+- **Tools:** ship 9. `order_catalog_item` is deferred.
+- **Auth:** both OAuth client credentials and the API key; the connect
+  form asks for one.
+- **Tool names:** unprefixed (`get_incident`, `search_records`, …).
