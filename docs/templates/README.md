@@ -42,6 +42,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 | [`sentry-new-issue`](sentry-new-issue.yaml) | Push a phone notification for each new Sentry issue | `siphon connect sentry` |
 | [`service-failed`](service-failed.yaml) | Get notified when a systemd service fails | — · webhook secret |
 | [`servicenow-incident-summary`](servicenow-incident-summary.yaml) | Summarise each new ServiceNow incident, then notify | `siphon connect model ollama`, `siphon connect servicenow` |
+| [`servicenow-incident-triage`](servicenow-incident-triage.yaml) | Triage each new ServiceNow incident with an agent, and post a work note | `siphon connect servicenow --instance …`, `siphon connect login claude` |
 | [`upstream-status`](upstream-status.yaml) | Know when a provider you depend on has an incident | — |
 | [`uptime-kuma-down`](uptime-kuma-down.yaml) | Push a notification when an Uptime Kuma monitor goes down | `siphon connect uptime-kuma` |
 

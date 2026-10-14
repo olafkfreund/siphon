@@ -294,12 +294,15 @@ siphon connect <service>|model|login [--<field> value ...]
 |---|---|---|
 | `--access-key-id` |  | AWS: Base access key ID as - (stdin) or @file |
 | `--api-key` |  | model, login: API key as - (stdin) or @file |
+| `--auth` |  | ServiceNow: Authentication |
 | `--base` |  | GitLab: GitLab URL |
-| `--client-secret` |  | Sentry: Client secret as - (stdin) or @file |
+| `--client-id` |  | ServiceNow: OAuth client ID |
+| `--client-secret` |  | ServiceNow: OAuth client secret as - (stdin) or @file |
 | `--email` |  | Bitbucket: Atlassian account email |
 | `--external-id` |  | AWS: External ID |
 | `--file` |  | login: a login file (kind login), or - for stdin |
 | `--header` |  | Webhook: Header |
+| `--instance` |  | ServiceNow: Instance URL |
 | `--logout` | `false` | oauth: delete the source's login |
 | `--mode` |  | GitHub: MCP server |
 | `--name` |  | name of the connection (default: the service or preset) |

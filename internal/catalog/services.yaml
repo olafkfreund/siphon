@@ -358,7 +358,7 @@ services:
     summary: "Agent tools to read and update incidents and changes through a built-in MCP server, and record events by signed webhook from a Business Rule."
     capabilities: [tools, webhooks]
     status: available
-    templates: [servicenow-incident-notify, servicenow-incident-summary]
+    templates: [servicenow-incident-notify, servicenow-incident-summary, servicenow-incident-triage]
     fields:
       - {<<: *f_name, default: servicenow}
       - {key: instance, label: Instance URL, type: url, secure: true, private_listed: true, help: 'For agent tools; leave empty for webhooks only. For example https://dev12345.service-now.com. A LAN host must be listed in server.services.private_endpoints.'}

@@ -307,3 +307,10 @@ mine.
     that is always false in `when`, so it would silently skip the item.
   - **The MCP source has no `read:` or `poll:`.** Its tools need arguments.
     gitea doesn't have them either.
+- **Step 7:**
+  - **The triage template's cooldown is on the rule.** Agents have no
+    `cooldown` field.
+  - **The `--client-secret` help now says "ServiceNow: …".**
+    `cmd/siphon/guided.go:145` lets the first catalog service that uses a
+    field key describe the flag, and `servicenow` comes before `sentry`.
+    The flag still works for both.

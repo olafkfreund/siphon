@@ -1,8 +1,8 @@
 # ServiceNow
 
 ServiceNow record events (incidents, changes, requests) reach Siphon as a
-**signed webhook** sent by a Business Rule. Agent tools and writes are not
-part of this release.
+**signed webhook** sent by a Business Rule. Agents can also read and update
+records through built-in tools: see [Agent tools](#agent-tools).
 
 ## 1. Connect
 
@@ -24,8 +24,8 @@ In ServiceNow, open `sys_properties.list` and add:
 
 ## 3. Integration user
 
-Siphon's own later writes (not in this release) need a user, and the Business
-Rule below must know its name so those writes never echo back. Create it
+Siphon's own writes (the agent tools) need a user, and the Business Rule
+below must know its name so those writes never echo back. Create it
 now: *Web service access only*, with the roles `snc_platform_rest_api_access`
 and `itil`. Put its user name in a third property, `siphon.integration_user`
 (string). If unset, the script assumes `siphon.integration`.
@@ -105,6 +105,86 @@ rules:
 
 Ready-made: `siphon template servicenow-incident-notify` and
 `siphon template servicenow-incident-summary`.
+
+## Agent tools
+
+Give `siphon connect` the instance URL and Siphon adds a `servicenow` MCP
+source next to the webhook. Its server is built in: there is nothing to
+install and no `mcp_packages` entry to write.
+
+### Credentials
+
+Use one of these. Both act as the integration user from step 3, so its roles
+and ACLs bound what an agent can do.
+
+- **OAuth client credentials** (the default). In *System OAuth → Application
+  Registry*, create an *OAuth API endpoint for external clients*. Note the
+  client ID and secret, and set the integration user on the registry entry.
+- **An API key.** In *System Web Services → API Access Policies*, create a
+  REST API key bound to the integration user.
+
+```sh
+# OAuth: the client secret on stdin
+printf '%s' "$CLIENT_SECRET" | siphon connect servicenow --instance https://dev12345.service-now.com \
+  --client-id <the client id> --client-secret -
+
+# API key: the key on stdin
+printf '%s' "$API_KEY" | siphon connect servicenow --instance https://dev12345.service-now.com \
+  --auth apikey --api-key -
+```
+
+A LAN instance must be listed in `server.services.private_endpoints` first.
+After saving, the connection's **Test** shows the integration user.
+
+### The tools
+
+Agents list the source in `mcp:`; the tools are named
+`mcp__servicenow__<tool>`.
+
+| Tool | Does | Writes |
+|---|---|---|
+| `get_incident` | read an incident by number or `sys_id` | no |
+| `search_records` | search any table with an encoded query | no |
+| `get_change` | read a change request by number or `sys_id` | no |
+| `cmdb_lookup` | find configuration items by name (`LIKE`) or `sys_id` | no |
+| `create_incident` | create an incident | **yes** |
+| `update_incident` | change fields on an incident | **yes** |
+| `add_work_note` | add a work note to a record | **yes** |
+| `resolve_incident` | set state 6 with `close_code` and `close_notes` | **yes** |
+| `create_change` | create a normal, emergency or standard change | **yes** |
+
+A read-only agent lists only the reading tools, and can be set not to need
+approval. Agents that write keep the default `approve`.
+
+```yaml
+agents:
+  incident-reader:
+    kind: claude
+    credential: claude-max
+    mcp: [servicenow]
+    allowed_tools: [mcp__servicenow__get_incident, mcp__servicenow__search_records, mcp__servicenow__cmdb_lookup]
+    prompt: "Summarise incident {{.event.number}}."
+```
+
+Ready-made: `siphon template servicenow-incident-triage`.
+
+### Notes
+
+- **ACLs decide.** A tool call the integration user may not make fails with
+  the instance's status and message (for example `403 ... ACL`); the agent
+  sees it. Grant the user only the tables the agents need.
+- **Record text is untrusted.** Incident text is written by whoever filed it.
+  An agent that reads it should hold only the tools it needs.
+- **`close_code` values differ by release** ("Solution provided" or
+  "Resolved by caller", and so on). Check *System Definition → Choice Lists*
+  for `incident.close_code` on your instance.
+- **`javascript:gs.getUserID()`** is what the connection Test sends to find
+  the user (`sys_id=javascript:gs.getUserID()` on `sys_user`). If your
+  instance blocks `javascript:` in encoded queries, the Test reports an
+  error even though the tools work.
+- **Redirects and HTML.** A hibernating or SSO-fronted instance answers
+  with a login page or a redirect; Siphon reports it as unavailable and
+  never follows it.
 
 ## Caveats
 
