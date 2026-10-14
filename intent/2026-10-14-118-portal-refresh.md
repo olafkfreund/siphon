@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 118
 author: olafkfreund
 ---
@@ -102,3 +102,14 @@ would fork the stylesheet.
 2. **A design review first?** Should `agy` (Gemini) review the other
    pages first, as it did for Rules, so each slice's spec starts from
    concrete critique? I'd do it per slice, just before its spec.
+
+## Decisions (at approval)
+
+1. **Four slices:**
+   1. the shared primitives, with Rules moved onto them, Dashboard and
+      Jobs;
+   2. Approvals and Sources;
+   3. Agents, Routines, Services and Connections;
+   4. Notifications, Egress, Audit, History and Help.
+2. **A Gemini (`agy`) design review of each slice's pages,** just before
+   that slice's spec.
