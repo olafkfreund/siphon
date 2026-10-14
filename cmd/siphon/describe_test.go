@@ -36,6 +36,7 @@ sources:
   grafana-hooks: { type: webhook, signature: sha256, signature_header: X-Grafana-Alerting-Signature, secret: env:AGW_HOOK }
   stripe-hooks: { type: webhook, signature: stripe, secret: env:AGW_HOOK }
   home-assistant: { type: mcp, url: "https://ha.example.com/api/mcp", headers: { Authorization: env:AGW_HOOK } }
+  google-pubsub-hooks: { type: webhook, signature: google-oidc, format: pubsub, service_account: push@p.iam.gserviceaccount.com, audience: https://siphon.example.com/hook/google-pubsub-hooks }
   azure-eventgrid-hooks: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK, format: eventgrid }
   uptime-kuma: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK }
   bitbucket: { type: mcp, url: "https://mcp.atlassian.com/v2/mcp", headers: { Authorization: env:AGW_HOOK } }

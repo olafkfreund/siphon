@@ -136,3 +136,5 @@ Opus agent reviews them. Step 4 is mine.
     argument.
   - **The key set** gets a background context carrying the guarded client,
     because go-oidc keeps that context for later key fetches.
+- **Step 3:** `services_catalog_test.go`'s `dummyValues` supplies a valid
+  `service_account`, because the email pattern refuses "dummy".

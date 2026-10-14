@@ -65,7 +65,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 | Azure Event Grid | webhooks | available | `siphon connect azure-eventgrid` | [`azure-keyvault-secret-expiry`](../templates/azure-keyvault-secret-expiry.yaml) |
 | Cloudflare | tools, webhooks | available | `siphon connect cloudflare` | [`cloudflare-notification`](../templates/cloudflare-notification.yaml) |
 | Kubernetes |  | not yet: needs kubeconfig wiring: coming in a later release | — |  |
-| Google Pub/Sub |  | not yet: needs a Google OIDC (RS256 JWT) push-authentication mode | — |  |
+| Google Pub/Sub | webhooks | available | `siphon connect google-pubsub` | [`gcp-cloud-build-failed`](../templates/gcp-cloud-build-failed.yaml) |
 
 ## Payments
 

@@ -1,0 +1,12 @@
+# title:    Push a notification when a Google Cloud Build fails
+# category: Ops & monitoring
+# needs:    sources/google-pubsub-hooks         (siphon connect google-pubsub)
+# apply:    siphon apply -f gcp-cloud-build-failed.yaml
+rules:
+  - name: cloud-build-failed
+    source: google-pubsub-hooks
+    when: 'event.data.status in ["FAILURE", "TIMEOUT", "INTERNAL_ERROR"]'
+    on: each
+    id: event.message_id
+    action:
+      cmd: [curl, -fsS, -H, "Title: Cloud Build failed", --data-raw, "Cloud Build {{.event.data.id}} {{.event.data.status}}", https://ntfy.sh/siphon-CHANGE-ME]
