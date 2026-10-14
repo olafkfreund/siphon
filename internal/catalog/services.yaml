@@ -492,7 +492,7 @@ services:
     fields:
       - {<<: *f_name, default: matrix}
       - {key: homeserver_name, label: Homeserver name, type: text, required: true, pattern: '[A-Za-z0-9.-]+(:[0-9]+)?', pattern_error: 'the server name, for example example.org', help: 'The server_name in the homeserver config (the part after the colon in user ids).'}
-      - {key: rooms, label: Room aliases, type: text, default: '.*', help: 'A regex of the room alias localparts to receive.'}
+      - {key: rooms, label: Room aliases, type: text, help: 'Optional. Empty: the bot gets only the rooms it is invited to (recommended). A regex of room alias localparts (for example .* for all) registers an alias namespace: the homeserver then sends the events of every room with a matching alias, including private ones.'}
       - {key: localpart, label: Bot user localpart, type: text, default: siphon, pattern: '[a-z0-9._=/-]+', pattern_error: 'lowercase letters, digits and ._=/-'}
     creates:
       - kind: sources
@@ -514,12 +514,13 @@ services:
       rate_limited: false
       namespaces:
         users: []
-        aliases:
-          - {exclusive: false, regex: {{printf "#%s:%s" .rooms .homeserver_name | printf "%q"}}}
+        aliases:{{if .rooms}}
+          - {exclusive: false, regex: {{printf "#%s:%s" .rooms .homeserver_name | printf "%q"}}}{{else}} []{{end}}
         rooms: []
     setup: |
       Save the registration below as siphon.yaml on the homeserver and add it to app_service_config_files (Synapse), then restart the homeserver.
       Invite @{{.localpart}}:{{.homeserver_name}} to the rooms to follow. Only unencrypted rooms work; the bot must be in a room to get its events, unless the alias namespace matches it.
+      The registration's url is only usable when server.public_url is set in siphon.yaml; otherwise it is relative.
       The as_token in the registration is not stored by Siphon: keep the file.
 
   # ---- monitoring

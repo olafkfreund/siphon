@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -69,12 +70,12 @@ func TestMatrixWebhook(t *testing.T) {
 		code int
 		body string
 	}{
-		{"no bearer", WebhookOptions{}, put(""), 401, "M_FORBIDDEN"},
-		{"wrong bearer", WebhookOptions{}, put("Bearer nope"), 401, "M_FORBIDDEN"},
-		{"bare secret", WebhookOptions{}, put(mxSecret), 401, "M_FORBIDDEN"},
-		{"query refused", WebhookOptions{}, mxReq{"PUT", mxBase + "transactions/1?access_token=" + mxSecret, mxTxn, ""}, 401, "M_FORBIDDEN"},
+		{"no bearer", WebhookOptions{}, put(""), 401, "M_UNAUTHORIZED"},
+		{"wrong bearer", WebhookOptions{}, put("Bearer nope"), 403, "M_FORBIDDEN"},
+		{"bare secret", WebhookOptions{}, put(mxSecret), 403, "M_FORBIDDEN"},
+		{"query refused", WebhookOptions{}, mxReq{"PUT", mxBase + "transactions/1?access_token=" + mxSecret, mxTxn, ""}, 401, "M_UNAUTHORIZED"},
 		{"query allowed", WebhookOptions{AllowQueryToken: true}, mxReq{"PUT", mxBase + "transactions/1?access_token=" + mxSecret, mxTxn, ""}, 200, "{}"},
-		{"query wrong", WebhookOptions{AllowQueryToken: true}, mxReq{"PUT", mxBase + "transactions/1?access_token=x", mxTxn, ""}, 401, "M_FORBIDDEN"},
+		{"query wrong", WebhookOptions{AllowQueryToken: true}, mxReq{"PUT", mxBase + "transactions/1?access_token=x", mxTxn, ""}, 403, "M_FORBIDDEN"},
 		{"ping", WebhookOptions{}, mxReq{"POST", mxBase + "ping", `{"transaction_id":"x"}`, good}, 200, "{}"},
 		{"user query", WebhookOptions{}, mxReq{"GET", mxBase + "users/@a:b", "", good}, 404, "M_NOT_FOUND"},
 		{"room query", WebhookOptions{}, mxReq{"GET", mxBase + "rooms/%23a:b", "", good}, 404, "M_NOT_FOUND"},
@@ -86,7 +87,7 @@ func TestMatrixWebhook(t *testing.T) {
 		{"plain path on matrix source", WebhookOptions{}, mxReq{"POST", "/hook/m", `{}`, good}, 404, ""},
 		{"non-matrix source", WebhookOptions{Format: "-"}, put(good), 404, ""},
 		{"PUT elsewhere is refused", WebhookOptions{Format: "-"}, mxReq{"PUT", "/hook/m", `{}`, good}, 405, ""},
-		{"rate limited", WebhookOptions{Limit: NewLimiter(1, 0.0001)}, put(good), 429, "M_LIMIT_EXCEEDED"},
+		{"rate limited", WebhookOptions{Limit: NewLimiter(0, 0)}, put(good), 429, "M_LIMIT_EXCEEDED"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w, got := mxCall(t, tc.o, map[string]bool{}, tc.q)
@@ -106,5 +107,23 @@ func TestMatrixNoTimeDependence(t *testing.T) {
 	w, _ := mxCall(t, WebhookOptions{Now: func() time.Time { return now }}, map[string]bool{}, mxReq{"PUT", mxBase + "transactions/1", mxTxn, "Bearer " + mxSecret})
 	if w.Code != http.StatusOK {
 		t.Fatal(w.Code)
+	}
+}
+
+func TestMatrixBatchOverBurst(t *testing.T) {
+	var evs []string
+	for i := 0; i < 50; i++ {
+		evs = append(evs, fmt.Sprintf(`{"event_id":"$e%d"}`, i))
+	}
+	txn := `{"events":[` + strings.Join(evs, ",") + `]}`
+	seen := map[string]bool{}
+	o := WebhookOptions{Limit: NewLimiter(20, 0)}
+	q := mxReq{"PUT", mxBase + "transactions/1", txn, "Bearer " + mxSecret}
+	if w, got := mxCall(t, o, seen, q); w.Code != 200 || len(got) != 50 {
+		t.Fatal(w.Code, len(got))
+	}
+	o.Limit = NewLimiter(20, 0)
+	if w, got := mxCall(t, o, seen, q); w.Code != 200 || len(got) != 0 {
+		t.Fatal("resend", w.Code, len(got))
 	}
 }

@@ -13,7 +13,8 @@ routines:
 rules:
   - name: matrix-deploy
     source: matrix-hooks
-    when: 'event.type == "m.room.message" && event.content.body startsWith "!deploy"'
+    # List who may deploy: any room member can write "!deploy" otherwise.
+    when: 'event.type == "m.room.message" && event.content.body startsWith "!deploy" && event.sender in ["@you:example.org"]'
     on: each
     id: event.event_id
     cooldown: 1m

@@ -305,8 +305,11 @@ func TestMatrixEntry(t *testing.T) {
 		}
 	}
 	if hs == "" || as == "" || as == hs || !strings.Contains(reg, "hs_token: "+hs) || !strings.Contains(reg, `url: "https://s.example/hook/mx-hooks"`) ||
-		!strings.Contains(reg, `regex: "#.*:example.org"`) || !strings.Contains(reg, `sender_localpart: "siphon"`) {
+		!strings.Contains(reg, "aliases: []") || !strings.Contains(reg, `sender_localpart: "siphon"`) {
 		t.Fatalf("registration:\n%s", reg)
+	}
+	if r2, err := e.Render(map[string]string{"name": "mx", "homeserver_name": "example.org", "rooms": "ops-.*"}, env); err != nil || !strings.Contains(r2.Done.Registration, `regex: "#ops-.*:example.org"`) {
+		t.Fatal(err)
 	}
 	for _, it := range res.Items {
 		if strings.Contains(it.YAML, as) || strings.Contains(it.YAML, "as_token") {

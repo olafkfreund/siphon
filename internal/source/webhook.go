@@ -186,7 +186,11 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 			a, b := sha256.Sum256([]byte(got)), sha256.Sum256([]byte(want))
 			ok := o.Secret != "" && subtle.ConstantTimeCompare(a[:], b[:]) == 1
 			if !ok {
-				reject(http.StatusUnauthorized, "token missing or wrong")
+				if matrix && got != "" {
+					reject(http.StatusForbidden, "token wrong")
+				} else {
+					reject(http.StatusUnauthorized, "token missing or wrong")
+				}
 				return
 			}
 			signed = body
@@ -290,7 +294,7 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 			reject(http.StatusBadRequest, "delivery id header missing")
 			return
 		}
-		if o.Format != "eventgrid" && o.Format != "discord" && !matrix && !o.Limit.Allow(now) { // those count per event
+		if o.Format != "discord" && !o.Limit.Allow(now) { // discord counts per interaction, after its PING; a batch is one request, so a batch over the burst still gets through
 			reject(http.StatusTooManyRequests, "rate limited")
 			return
 		}
@@ -402,12 +406,6 @@ func serveEventGrid(w http.ResponseWriter, r *http.Request, o WebhookOptions, no
 		return
 	}
 	for _, m := range events {
-		// A 429 here leaves earlier events delivered; Event Grid retries the whole
-		// batch and their ids come back as duplicates.
-		if !o.Limit.Allow(now) {
-			reject(http.StatusTooManyRequests, "rate limited")
-			return
-		}
 		if _, err := deliver(r.Context(), Event{Source: o.Name, ReceivedAt: now, Headers: headers, Data: m}, m["id"].(string)); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -472,7 +470,7 @@ const matrixPrefix = "/_matrix/app/v1/"
 // (least of all the token) is echoed.
 func matrixError(w http.ResponseWriter, code int, errcode string) {
 	if errcode == "" {
-		errcode = map[int]string{400: "M_BAD_JSON", 401: "M_FORBIDDEN", 403: "M_FORBIDDEN", 404: "M_NOT_FOUND", 413: "M_TOO_LARGE", 429: "M_LIMIT_EXCEEDED"}[code]
+		errcode = map[int]string{400: "M_BAD_JSON", 401: "M_UNAUTHORIZED", 403: "M_FORBIDDEN", 404: "M_NOT_FOUND", 413: "M_TOO_LARGE", 429: "M_LIMIT_EXCEEDED"}[code]
 	}
 	if errcode == "" {
 		errcode = "M_UNKNOWN"
@@ -512,15 +510,6 @@ func serveMatrix(w http.ResponseWriter, r *http.Request, o WebhookOptions, now t
 			}
 		}
 		for _, m := range txn.Events {
-			// A 429 leaves earlier events delivered; the homeserver retries the
-			// transaction and their event_ids come back as duplicates.
-			if !o.Limit.Allow(now) {
-				if o.OnReject != nil {
-					o.OnReject(http.StatusTooManyRequests, "rate limited")
-				}
-				matrixError(w, http.StatusTooManyRequests, "M_LIMIT_EXCEEDED")
-				return
-			}
 			if _, err := deliver(r.Context(), Event{Source: o.Name, ReceivedAt: now, Headers: headers, Data: m}, m["event_id"].(string)); err != nil {
 				matrixError(w, http.StatusInternalServerError, "M_UNKNOWN")
 				return
