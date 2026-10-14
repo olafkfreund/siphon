@@ -222,6 +222,17 @@ The endpoint is X = `https://<inst>/sncapps/mcp-server/mcp/sn_mcp_server_default
    - Use the PIDs from `serve.pid`.
    - Back up `siphon.yaml` first.
 
+## Deviations
+
+- **Step 7 found** that `siphon apply --secret` refused
+  `auth.oauth.client_secret`: `secretPath` in `internal/web/configapi.go`
+  didn't list it, though `explain` calls it a secret field.
+  - Step 5's docs pass it that way, so the path is added, with a test in
+    `apiwrite_test.go`.
+- **Review of step 3:**
+  - the alias checks the path prefix on whole segments;
+  - it ignores a pin's trailing `/`, as the pin does elsewhere.
+
 ## Tests
 
 ```sh

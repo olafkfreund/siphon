@@ -125,6 +125,10 @@ func TestAPISecrets(t *testing.T) {
 	if w := put("/api/config/sources/web", "type: http\nurl: https://example.com\npoll: 1m\n", map[string]string{"auth.bearer": val, "headers.X-Key": val}); w.Code != 200 {
 		t.Fatalf("nested: %d %s", w.Code, w.Body.String())
 	}
+	// accepted as a secret path (validation then wants server.public_url, which this env lacks)
+	if w := put("/api/config/sources/om", "type: mcp\nurl: https://example.com/mcp\nauth:\n  oauth:\n    client_id: c\n", map[string]string{"auth.oauth.client_secret": val}); strings.Contains(w.Body.String(), "not a secret field") || strings.Contains(w.Body.String(), val) {
+		t.Fatalf("oauth client_secret: %d %s", w.Code, w.Body.String())
+	}
 }
 
 func TestAPIApplyError(t *testing.T) {
