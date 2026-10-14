@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 83
 intent: intent/2026-10-14-83-azure-eventgrid.md
 ---
