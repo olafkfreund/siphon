@@ -156,6 +156,7 @@ func New(o Options) http.Handler {
 			}
 			return t.Format("2006-01-02 15:04 MST")
 		},
+		"agot": func(t time.Time) string { return ago(o.Now(), t) },
 		"agop": func(t *time.Time) string {
 			if t == nil {
 				return "never"

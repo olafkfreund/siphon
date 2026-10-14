@@ -90,3 +90,10 @@ Revert the PR. It's read-only display code, with no data change.
 
 Steps 1–2 touch four files plus tests, so a `coder` agent does them and a
 fresh Opus agent reviews them. Step 3 is mine.
+
+## Deviations
+
+- **Step 2:** a new template function, `agot`, takes a `time.Time` value.
+  `agop` takes a pointer, and `ConnectionCheck.At` is a value. A failed
+  check shows as the error line "Connection test failed: <detail>", with no
+  separate time.

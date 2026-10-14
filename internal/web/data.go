@@ -23,6 +23,15 @@ type sourceView struct {
 	Health     string     `json:"health"`          // ok | stale | error | idle
 	OAuth      string     `json:"oauth,omitempty"` // auth.oauth sources: none | pending | ok | expired
 
+	// webhook sources: the last delivery, and a refusal newer than it
+	LastEventAt  *time.Time `json:"last_event_at,omitempty"`
+	LastReject   string     `json:"last_reject,omitempty"`
+	LastRejectAt *time.Time `json:"last_reject_at,omitempty"`
+
+	// tool-only mcp sources: nothing is polled, so show the last connection test
+	ToolsOnly bool                   `json:"tools_only,omitempty"`
+	Check     *store.ConnectionCheck `json:"check,omitempty"`
+
 	// schedule sources only
 	At        string     `json:"at,omitempty"`
 	Timezone  string     `json:"timezone,omitempty"`
@@ -88,15 +97,40 @@ func (s *server) sources() ([]sourceView, error) {
 		if st, ok := states[name]; ok {
 			v.LastPollAt, v.LastError = st.LastPollAt, st.LastError
 		}
+		if st, ok := states[name]; ok && src.Type == "webhook" {
+			v.LastEventAt = st.EventAt
+			if st.LastRejectAt != nil && (st.EventAt == nil || st.LastRejectAt.After(*st.EventAt)) {
+				v.LastReject, v.LastRejectAt = st.LastReject, st.LastRejectAt
+			}
+		}
+		if src.Type == "mcp" && !src.Polled() {
+			v.ToolsOnly = true
+			if v.Check, err = store.GetConnectionCheck(s.Store.DB, connectionOf(name, src)); err != nil {
+				return nil, err
+			}
+		}
 		if src.Type == "schedule" {
 			s.fillSchedule(&v, src)
 		}
 		if s.OAuth != nil && src.Auth != nil && src.Auth.OAuth != nil {
 			v.OAuth, _ = s.OAuth.Status(name)
 		}
+		if v.ToolsOnly && v.Check != nil && !v.Check.OK {
+			v.LastError = "Connection test failed: " + v.Check.Detail
+		}
 		switch {
 		case v.LastError != "":
 			v.Health = "error"
+		case src.Type == "webhook":
+			v.Health = "idle"
+			if v.LastEventAt != nil {
+				v.Health = "ok"
+			}
+		case v.ToolsOnly:
+			v.Health = "idle"
+			if v.Check != nil {
+				v.Health = "ok"
+			}
 		case v.LastPollAt == nil:
 			v.Health = "idle"
 		case src.Polled() && s.Now().Sub(*v.LastPollAt) > 2*time.Duration(src.Poll)+time.Minute:
