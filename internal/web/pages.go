@@ -178,8 +178,9 @@ func (s *server) jobDetail(id int64) (*jobView, bool, error) {
 // loginView is one credential's metadata; secrets never leave the store.
 type loginView struct {
 	Name, Provider, Type, Expiry, ExpiryClass, Written string
-	Key                                                string // claude | codex | agy
-	Status                                             string // connected | expiring | expired | missing | apikey
+	Key                                                string   // claude | codex | agy
+	Status                                             string   // connected | expiring | expired | missing | apikey
+	Agents                                             []string // agents whose credential this is
 }
 
 // loginForm is the "Add / connect a login" form state.
@@ -190,11 +191,12 @@ type loginForm struct {
 func (s *server) logins() []loginView {
 	st := cred.StoreFor(s.Config())
 	out := []loginView{}
+	users := s.credentialUsers()
 	for name, c := range s.Config().Credentials {
 		if c.Provider == "ollama" || c.Provider == "openai" || c.Provider == "aws" {
 			continue // listed under Models, or managed on Services
 		}
-		v := loginView{Name: name, Provider: providerName[c.Provider], Key: c.Provider, Type: "Subscription", Expiry: "not connected", ExpiryClass: "cancelled", Written: "—", Status: "missing"}
+		v := loginView{Name: name, Provider: providerName[c.Provider], Key: c.Provider, Type: "Subscription", Expiry: "not connected", ExpiryClass: "cancelled", Written: "—", Status: "missing", Agents: users[name]}
 		if c.APIKey.Ref != "" {
 			v.Type, v.Expiry, v.Status = "API key", "no expiry", "apikey"
 		} else if exp, wrote, err := st.Info(name); err == nil {
@@ -214,6 +216,18 @@ func (s *server) logins() []loginView {
 		out = append(out, v)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// credentialUsers maps a credential to the sorted names of the agents that use it.
+func (s *server) credentialUsers() map[string][]string {
+	cfg := s.Config()
+	out := map[string][]string{}
+	for _, n := range sortedKeysOf(cfg.Agents) {
+		if c := cfg.Agents[n].Credential; c != "" {
+			out[c] = append(out[c], n)
+		}
+	}
 	return out
 }
 

@@ -2,15 +2,15 @@
 {{with .Svc}}
 <section class="services-connected" aria-labelledby="connected-h">
   <h2 id="connected-h" class="section-h">Connected <span class="muted">{{len .Connected}}</span></h2>
-  {{if .Connected}}<div class="card connection-list">
-  {{range .Connected}}<article class="connection-row" aria-label="{{.ServiceName}} connection {{.Name}}">
+  {{if .Connected}}<div class="connection-list">
+  {{range .Connected}}<article class="card item-card row conn-svc{{if eq .Status "attention"}} is-err{{else if eq .Status "working"}} is-ok{{end}}" aria-label="{{.ServiceName}} connection {{.Name}}">
     <span class="service-mark" aria-hidden="true">{{.Mark}}</span>
     <div class="connection-main">
       <h3>{{.ServiceName}} · {{.Name}}</h3>
-      <div class="service-capabilities">{{range .Caps}}<span class="pill tag">{{.}}</span>{{end}}</div>
+      <div class="service-capabilities">{{range .Caps}}<span class="mode">{{.}}</span>{{end}}</div>
     </div>
     <span class="pill status-{{.Status}}"{{if .StatusTitle}} title="{{.StatusTitle}}"{{end}}>{{if eq .Status "working"}}{{template "icon" "check"}}{{else if eq .Status "attention"}}{{template "icon" "x"}}{{end}}{{.StatusLabel}}</span>
-    <span class="muted small connection-event">Last event: {{.LastEvent}}</span>
+    <span class="muted small connection-event">{{if .HasEvents}}{{if .LastEventAt}}Last event <span title="{{.LastEvent}}">{{agop .LastEventAt}}</span>{{else}}No events yet{{end}}{{else}}agent tools{{end}}</span>
     <div class="connection-actions">
       {{if .Hint}}<span class="muted small">{{.Hint}}</span>{{end}}
       {{if .CanTest}}{{if can $.Role "operator"}}<form method="post" action="/services/c/{{pe .Name}}/test" hx-post="/services/c/{{pe .Name}}/test" hx-target="next .connection-result"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="btn sm primary">{{template "icon" "play"}}Test</button></form>{{end}}{{end}}
@@ -23,19 +23,19 @@
 
 <section class="services-catalog" aria-labelledby="catalog-h">
   <h2 id="catalog-h" class="section-h">Explore services</h2>
-  <form method="get" action="/services" role="search" class="service-search" hx-get="/services" hx-target="#service-results" hx-select="#service-results" hx-swap="outerHTML" hx-trigger="input changed delay:250ms, submit" hx-push-url="true">
-    {{if .Cat}}<input type="hidden" name="cat" value="{{.Cat}}">{{end}}
+  <form id="service-search" method="get" action="/services" role="search" class="service-search" hx-get="/services" hx-target="#service-results" hx-select="#service-results" hx-swap="outerHTML" hx-trigger="input changed delay:250ms, submit" hx-push-url="true">
     <label class="f">Search services<input type="search" name="q" value="{{.Q}}" placeholder="Search by name or capability" autocomplete="off"></label>
     <button class="btn">Search</button>
   </form>
   <div id="service-results">
-    <nav class="category-filters" aria-label="Service categories">{{range .Cats}}<a class="pill tag" href="{{.Href}}" hx-get="{{.Href}}" hx-target="#service-results" hx-select="#service-results" hx-swap="outerHTML" hx-push-url="true"{{if .Selected}} aria-current="true"{{end}}>{{.Label}}</a>{{end}}</nav>
+    {{if .Cat}}<input type="hidden" name="cat" value="{{.Cat}}" form="service-search">{{end}}
+    <nav class="chips" aria-label="Service categories">{{range .Cats}}<a class="chip" href="{{.Href}}" hx-get="{{.Href}}" hx-target="#service-results" hx-select="#service-results" hx-swap="outerHTML" hx-push-url="true"{{if .Selected}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>
     <div class="grid service-grid">
     {{range .Tiles}}<article class="card service-tile{{if ne .Avail "available"}} unavailable{{end}}" aria-label="{{.Name}}">
-      <div class="tile-head"><span class="service-mark" aria-hidden="true">{{.Mark}}</span><h3>{{.Name}}</h3><span class="sp"></span><span class="pill avail-{{.Avail}}">{{.AvailLabel}}</span></div>
+      <div class="tile-head"><span class="service-mark" aria-hidden="true">{{.Mark}}</span><h3>{{.Name}}</h3><span class="sp"></span><span class="pill avail-{{.Avail}}">{{if eq .Avail "available"}}{{template "icon" "check"}}{{else if eq .Avail "needs-package"}}{{template "icon" "unit"}}{{end}}{{.AvailLabel}}</span></div>
       <p class="muted small">{{.Summary}}</p>
-      <div class="service-capabilities">{{range .Caps}}<span class="pill tag">{{.}}</span>{{end}}</div>
-      <div class="tile-action">{{if eq .Avail "available"}}<a class="btn sm primary" href="/services/{{pe .ID}}">Connect</a>{{else}}<span class="muted small">{{ticks .Why}}</span>{{end}}</div>
+      <div class="service-capabilities">{{range .Caps}}<span class="mode">{{.}}</span>{{end}}</div>
+      <div class="tile-action">{{if eq .Avail "available"}}{{if can $.Role "admin"}}<a class="btn sm primary" href="/services/{{pe .ID}}">Connect</a>{{else}}<span class="muted small">An admin connects services.</span>{{end}}{{else}}<span class="muted small">{{ticks .Why}}</span>{{end}}</div>
     </article>{{else}}<section class="card empty">No services match. Clear the search or pick another category.</section>{{end}}
     </div>
   </div>

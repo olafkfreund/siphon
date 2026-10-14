@@ -44,6 +44,18 @@
     if (u) u.placeholder = t.dataset.url || "https://…/v1";
   });
 
+  // Changing the provider can hide the checked "How to connect" choice
+  // (token is Claude only, API key is not for agy); fall back to the login file.
+  document.addEventListener("change", function (e) {
+    var t = e.target;
+    if (t.name !== "provider" || !t.form || !t.form.classList.contains("login-add")) return;
+    var k = t.form.querySelector("input[name=kind]:checked");
+    if (k && k.closest("label").offsetParent === null) {
+      var l = t.form.querySelector("input[name=kind][value=login]");
+      if (l) l.checked = true;
+    }
+  });
+
   // Forms that delete something ask first (data-confirm holds the question).
   document.addEventListener("submit", function (e) {
     var q = e.target.getAttribute && e.target.getAttribute("data-confirm");

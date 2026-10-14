@@ -1,12 +1,20 @@
 {{define "cfglist"}}{{with .Cfg}}<div class="top"><div><h1>{{kindtitle .Kind}}</h1><div class="muted">From <code>siphon.yaml</code> and from portal edits. Every save is a revision you can restore.</div></div><span class="sp"></span>
 {{if can $.Role "admin"}}<a class="btn primary" href="/config/{{.Kind}}/new">New {{kindone .Kind}}</a>{{end}}</div>
-<nav class="small mb">{{$k := .Kind}}{{range .Kinds}}<a href="/config/{{.}}"{{if eq . $k}} aria-current="page"{{end}}>{{.}}</a> {{end}} · <a href="/history">History</a></nav>
+<nav class="chips" aria-label="Config kinds">{{$k := .Kind}}{{range .Kinds}}<a class="chip" href="/config/{{.}}"{{if eq . $k}} aria-current="page"{{end}}>{{.}}</a>{{end}}<a class="chip" href="/history">History</a></nav>
 {{if .Notice}}<div class="banner" role="status">{{.Notice}}</div>{{end}}
-<section class="card"><table><thead><tr><th>Name</th><th>From</th><th></th></tr></thead><tbody>
-{{range .Rows}}<tr><td>{{if eq .Prov "deleted"}}<s>{{.Name}}</s>{{else}}<a href="/config/{{$k}}/{{pe .Name}}"><b>{{.Name}}</b></a>{{end}}</td><td><span class="badge{{if eq .Prov "portal"}} portal{{else if eq .Prov "override"}} ovr{{end}}">{{prov .Prov}}</span></td>
-<td>{{if ne .Prov "file"}}{{if can $.Role "admin"}}<form method="post" action="/config/{{$k}}/{{pe .Name}}/reset" class="sm"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{$.Cfg.Rev}}"><button>Reset to file</button></form>{{end}}{{end}}</td></tr>
-{{else}}<tr><td colspan="3"><div class="empty">Nothing here yet.</div></td></tr>{{end}}
-</tbody></table></section>{{end}}{{end}}
+{{if gt (len .Rows) 6}}<div class="filter-bar" data-filter-scope="cfg" hidden>
+  <input type="search" class="filter-search" aria-label="Filter {{.Kind}}" placeholder="Filter {{.Kind}}…  /" autocomplete="off">
+</div>
+<p class="filter-none muted" data-filter-scope="cfg" hidden>Nothing matches. <button type="button" class="btn sm" data-action="clear-filter">Clear filter</button></p>
+{{end}}<div data-filter-list="cfg">
+{{range .Rows}}<div class="card item-card row" data-filter-item data-text="{{.Name}} {{.Provider}} {{.Model}} {{.Credential}}"><div class="cfg-main">
+<div>{{if eq .Prov "deleted"}}<s>{{.Name}}</s>{{else}}<a href="/config/{{$k}}/{{pe .Name}}"><b>{{.Name}}</b></a>{{end}} <span class="badge{{if eq .Prov "portal"}} portal{{else if eq .Prov "override"}} ovr{{end}}">{{prov .Prov}}</span></div>
+{{if eq $k "agents"}}<div class="small muted">{{if .Provider}}{{template "provider" .Provider}} {{end}}{{if .Model}}<code>{{.Model}}</code> {{end}}{{if .Credential}}· credential <code>{{.Credential}}</code> {{end}}{{range .MCP}}<span class="mode">{{.}}</span> {{end}}{{if .Egress}}· egress limited {{end}}· {{if .Rules}}used by {{.Rules}} rule{{if ne .Rules 1}}s{{end}}{{else}}no rules use it{{end}}</div>
+{{else if eq $k "routines"}}<div class="small muted">{{len .Steps}} step{{if ne (len .Steps) 1}}s{{end}} <span class="steps-mini">{{range .Steps}}<span class="chip" title="{{.}}">{{template "kindicon" .}}{{.}}</span>{{end}}</span>{{if .Approval}} · asks approval{{end}} · {{if .Rules}}used by {{.Rules}} rule{{if ne .Rules 1}}s{{end}}{{else}}no rules use it{{end}}</div>{{end}}
+</div><span class="sp"></span>
+{{if ne .Prov "file"}}{{if can $.Role "admin"}}<form method="post" action="/config/{{$k}}/{{pe .Name}}/reset" class="sm" data-confirm="Reset {{.Name}} to the file version?"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{$.Cfg.Rev}}"><button>Reset to file</button></form>{{end}}{{end}}</div>
+{{else}}<section class="card empty">Nothing here yet.{{if can $.Role "admin"}} <a href="/config/{{$k}}/new">New {{kindone $k}}</a> or{{end}} <a href="/help/templates">start from a template</a>.</section>{{end}}
+</div>{{end}}{{end}}
 
 {{define "cfgedit"}}{{with .Cfg}}{{$c := .}}<div class="top"><div><div class="muted small"><a href="/config/{{.Kind}}">{{kindtitle .Kind}}</a> / {{if .New}}new{{else}}{{.Name}}{{end}}</div><h1>{{if .New}}New {{kindone .Kind}}{{else}}Edit {{kindone .Kind}} <span class="muted">{{.Name}}</span>{{end}}</h1></div><span class="sp"></span>{{if .Prov}}<span class="badge{{if eq .Prov "portal"}} portal{{else if eq .Prov "override"}} ovr{{end}}">{{prov .Prov}}</span>{{end}}</div>
 {{if .Errors}}<div class="banner" role="alert"><pre>{{.Errors}}</pre></div>{{end}}

@@ -71,6 +71,24 @@ spec: spec/2026-10-14-118-portal-refresh-slice3.md
 
 5. **The visual check (mine).**
 
+## Deviations
+
+- **Steps 1–4:**
+  - **The `.g3` override** is removed, together with its 900px media rule.
+    No `.helplayout` scoping was needed: help's only `.g3` grid is outside
+    `.helplayout`, and the responsive auto-fill rule covers it.
+  - **Dead CSS removed:** `.connection-row`, `.connection-list` and
+    `.category-filters`, plus their mobile rules. Old test assertions are
+    updated to the new markup.
+  - **Connected service rows** use `overflow: visible`, so the Edit
+    popover isn't clipped.
+  - **Connection cards** show their status twice, in the existing pill and
+    the new footer (a dot plus text). Kept for now, and to be reviewed in
+    the visual check.
+  - **The login-radio fix** in `app.js` has no automated test. It's
+    checked by hand: Claude with a setup token, then switch to Codex or
+    agy.
+
 ## Tests
 
 ```sh
