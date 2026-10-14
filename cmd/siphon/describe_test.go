@@ -22,6 +22,7 @@ sources:
   github: { type: mcp, url: "https://api.githubcopilot.com/mcp/", auth: { bearer: env:AGW_HOOK }, read: { tool: get_me }, poll: 24h }
   github-hooks: { type: webhook, signature: github, secret: env:AGW_HOOK }
   gitlab-hooks: { type: webhook, signature: token, token_header: X-Gitlab-Token, secret: env:AGW_HOOK }
+  azure-devops-hooks: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK }
   aws-cloudwatch: { type: mcp, package: aws-cloudwatch, aws: aws }
   aws-hooks: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK }
   alertmanager: { type: webhook, signature: token, token_header: Authorization, secret: env:AGW_HOOK }

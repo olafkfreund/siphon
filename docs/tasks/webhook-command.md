@@ -34,7 +34,7 @@ siphon apply -f deploy.yaml --secret sources/deploy-hook.secret=@hook.key
 | `github` | signs with HMAC in `X-Hub-Signature-256` | GitHub |
 | `sha256` | signs with HMAC-SHA256 (hex) in a header you name | most custom senders |
 | `standard-webhooks` | signs per the Standard Webhooks spec (`whsec_…`) | Svix, Clerk, Resend, … |
-| `token` | sends the secret itself in a header you name | GitLab, EventBridge, Alertmanager, Home Assistant, scripts |
+| `token` | sends the secret itself in a header you name | GitLab, EventBridge, Alertmanager, Home Assistant, Azure DevOps (HTTP headers field: `X-Siphon-Key:<secret>`; leave basic auth empty), scripts |
 | `body-token` | puts the secret in the request body (JSON or form field `token`, or `token_field:`); Siphon removes it from the event, and `reply_text:` answers 200 `{"text": …}` | Mattermost outgoing webhooks and slash commands |
 | `token` + `format: matrix` | `token_header: Authorization`, the secret is the homeserver's `hs_token` sent as `Bearer <secret>`; answers `PUT /hook/<name>/_matrix/app/v1/transactions/<id>` with `{}` and delivers each event keyed by `event_id`, answers ping, declines user and room queries; `allow_query_token: true` also accepts `?access_token=` (it puts the `hs_token` in the URL, so reverse-proxy logs will record it). A missing token gets 401 `M_UNAUTHORIZED`, a wrong one 403 `M_FORBIDDEN`. Unencrypted rooms only | Matrix application services |
 | `ed25519` | verifies `X-Signature-Ed25519` over `X-Signature-Timestamp` + body with a hex public key as the secret (5-minute window) | Discord (a public key is not a secret) |

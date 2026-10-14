@@ -463,6 +463,7 @@ Always follow this order. Every step has `-o json`.
    - `discord-ask-agent` (Discord slash command, `signature: ed25519` with `format: discord`),
    - `teams-ask-agent` (Microsoft Teams outgoing webhook, `signature: teams-hmac`; replies through a Workflows webhook),
    - `matrix-deploy-command` (Matrix application service, `signature: token` with `token_header: Authorization` and `format: matrix`; unencrypted rooms only),
+   - `azure-devops-build-failed` (Azure DevOps service hook, `signature: token` with `token_header: X-Siphon-Key`),
    - `azure-keyvault-secret-expiry` (Azure Event Grid, `signature: token` with `format: eventgrid`),
    - `gcp-cloud-build-failed` (Google Pub/Sub, `signature: google-oidc` with `format: pubsub`, no secret),
    - `notion-page-summary` (Notion, `format: notion`: the source starts with no secret; accept the verification token it captures on the Sources page),
@@ -628,7 +629,7 @@ siphon apply -f deploy.yaml --secret sources/deploy-hook.secret=@hook.key
 | `github` | signs with HMAC in `X-Hub-Signature-256` | GitHub |
 | `sha256` | signs with HMAC-SHA256 (hex) in a header you name | most custom senders |
 | `standard-webhooks` | signs per the Standard Webhooks spec (`whsec_…`) | Svix, Clerk, Resend, … |
-| `token` | sends the secret itself in a header you name | GitLab, EventBridge, Alertmanager, Home Assistant, scripts |
+| `token` | sends the secret itself in a header you name | GitLab, EventBridge, Alertmanager, Home Assistant, Azure DevOps (HTTP headers field: `X-Siphon-Key:<secret>`; leave basic auth empty), scripts |
 | `body-token` | puts the secret in the request body (JSON or form field `token`, or `token_field:`); Siphon removes it from the event, and `reply_text:` answers 200 `{"text": …}` | Mattermost outgoing webhooks and slash commands |
 | `token` + `format: matrix` | `token_header: Authorization`, the secret is the homeserver's `hs_token` sent as `Bearer <secret>`; answers `PUT /hook/<name>/_matrix/app/v1/transactions/<id>` with `{}` and delivers each event keyed by `event_id`, answers ping, declines user and room queries; `allow_query_token: true` also accepts `?access_token=` (it puts the `hs_token` in the URL, so reverse-proxy logs will record it). A missing token gets 401 `M_UNAUTHORIZED`, a wrong one 403 `M_FORBIDDEN`. Unencrypted rooms only | Matrix application services |
 | `ed25519` | verifies `X-Signature-Ed25519` over `X-Signature-Timestamp` + body with a hex public key as the secret (5-minute window) | Discord (a public key is not a secret) |
@@ -2570,6 +2571,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 |---|---|---|
 | [`alert-to-servicenow-incident`](alert-to-servicenow-incident.yaml) | Open a ServiceNow incident for each alert, with no agent | a webhook source `alerts`, `siphon connect servicenow --instance …` |
 | [`alertmanager-summary`](alertmanager-summary.yaml) | Summarise Prometheus alerts with a local model, then notify | `siphon connect model ollama` · webhook secret |
+| [`azure-devops-build-failed`](azure-devops-build-failed.yaml) | Push a phone notification when an Azure DevOps build fails | `siphon connect azure-devops` |
 | [`azure-keyvault-secret-expiry`](azure-keyvault-secret-expiry.yaml) | Push a notification when an Azure Key Vault secret is near expiry | `siphon connect azure-eventgrid` |
 | [`gcp-cloud-build-failed`](gcp-cloud-build-failed.yaml) | Push a notification when a Google Cloud Build fails | `siphon connect google-pubsub` |
 | [`cloudflare-notification`](cloudflare-notification.yaml) | Explain Cloudflare notifications with an agent, then notify | `siphon connect cloudflare --webhook`, `siphon connect login claude` |
@@ -2598,6 +2600,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 
 | Template | What it does | Connect first |
 |---|---|---|
+| [`azure-devops-new-bug`](azure-devops-new-bug.yaml) | Push a phone notification for each new Azure DevOps bug | `siphon connect azure-devops` |
 | [`matrix-deploy-command`](matrix-deploy-command.yaml) | A Matrix "!deploy" message runs a routine (unencrypted rooms only) | `siphon connect matrix` |
 | [`teams-ask-agent`](teams-ask-agent.yaml) | A Teams @mention answered by a local model, posted back through a Workflows webhook | `siphon connect teams`, `siphon connect model ollama` |
 | [`discord-ask-agent`](discord-ask-agent.yaml) | A Discord /ask command answered by a local model, posted back to the interaction | `siphon connect discord`, `siphon connect model ollama` |
@@ -2670,7 +2673,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 | Bitbucket | tools, webhooks | available | `siphon connect bitbucket` | [`bitbucket-pr-review`](../templates/bitbucket-pr-review.yaml) |
 | Gitea | tools, webhooks | needs package for tools (`catalogPackages = [ "gitea" ]`) | `siphon connect gitea` | [`gitea-pr-review`](../templates/gitea-pr-review.yaml) |
 | Forgejo | tools, webhooks | needs package for tools (`catalogPackages = [ "forgejo" ]`) | `siphon connect forgejo` | [`forgejo-pr-review`](../templates/forgejo-pr-review.yaml) |
-| Azure DevOps |  | not yet: service hooks use basic auth only, and the remote MCP is Entra OAuth only | — |  |
+| Azure DevOps | webhooks | available | `siphon connect azure-devops` | [`azure-devops-build-failed`](../templates/azure-devops-build-failed.yaml) [`azure-devops-new-bug`](../templates/azure-devops-new-bug.yaml) |
 
 ## Issue tracking
 
@@ -3779,6 +3782,50 @@ rules:
     id: event.id
     cooldown: 5m
     action: { agent: alarm-investigator }
+```
+
+
+---
+
+<!-- file: docs/templates/azure-devops-build-failed.yaml -->
+
+```yaml
+# title:    Push a phone notification when an Azure DevOps build fails
+# category: Ops & monitoring
+# needs:    sources/azure-devops-hooks             (siphon connect azure-devops; add a "Build completed" service hook)
+# apply:    siphon apply -f azure-devops-build-failed.yaml
+# Uses ntfy.sh: install the ntfy app and subscribe to your topic. Pick a long,
+# random topic name: anyone who knows it can read it.
+rules:
+  - name: azure-devops-build-failed
+    source: azure-devops-hooks
+    when: 'event.eventType == "build.complete" && event.resource.result == "failed"'
+    on: each
+    id: string(event.resource.id)
+    action:
+      cmd: [curl, -fsS, -H, "Title: Azure DevOps build failed", --data-raw, "Build {{.event.resource.buildNumber}} ({{.event.resource.definition.name}}) failed", https://ntfy.sh/siphon-CHANGE-ME]
+```
+
+
+---
+
+<!-- file: docs/templates/azure-devops-new-bug.yaml -->
+
+```yaml
+# title:    Push a phone notification for each new Azure DevOps bug
+# category: Notifications & glue
+# needs:    sources/azure-devops-hooks             (siphon connect azure-devops; add a "Work item created" service hook)
+# apply:    siphon apply -f azure-devops-new-bug.yaml
+# Uses ntfy.sh: install the ntfy app and subscribe to your topic. Pick a long,
+# random topic name: anyone who knows it can read it.
+rules:
+  - name: azure-devops-new-bug
+    source: azure-devops-hooks
+    when: 'event.eventType == "workitem.created" && event.resource.fields["System.WorkItemType"] == "Bug"'
+    on: each
+    id: string(event.resource.id)
+    action:
+      cmd: [curl, -fsS, -H, "Title: New Azure DevOps bug", --data-raw, "Bug: {{index .event.resource.fields \"System.Title\"}}", https://ntfy.sh/siphon-CHANGE-ME]
 ```
 
 

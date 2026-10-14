@@ -82,3 +82,12 @@ Revert the PR. Existing `token` sources are unaffected.
 
 Steps 1–3 edit about 8 files, so a `coder` agent does them and a fresh
 Opus agent reviews them. Step 4 is mine.
+
+## Deviations
+
+- **Step 2:** the new-bug notification reads the title with
+  `{{index .event.resource.fields "System.Title"}}`, because a dotted key
+  can't be read as `.field`. expr-lang accepts
+  `event.resource.fields["System.WorkItemType"]` in `when` as written.
+- **Step 3:** `docs/llm.md` names the build template only, to keep it to
+  one line.
