@@ -1435,12 +1435,19 @@ Ready-made: `siphon template servicenow-incident-triage`.
 ## Caveats
 
 - **The instance must reach the URL:** a public endpoint, or a MID server.
+- **Not Tailscale Funnel.** On the demo instance, deliveries through Funnel
+  failed intermittently with `Session contains no certificates - Untrusted`,
+  most often in the minutes after Funnel starts. The same deliveries through a
+  Cloudflare Tunnel all arrived. Use a Cloudflare Tunnel, or a reverse proxy
+  with its own public certificate.
+- **A failed delivery is not retried.** It shows only in ServiceNow's
+  *Outbound HTTP Requests* log (`sys_outbound_http_log`).
 - **The 5-minute window:** a backed-up ECC queue can delay a delivery past
   it, and it is refused. Check *ECC Queue* if events go missing.
 - **Event text is untrusted.** A ticket's description is written by whoever
   filed it. Use only envelope fields in command arguments, and give agents
   that read it no tools.
-- **To confirm on your release:** `password2` handling in
+- **Tested on the Australia release; confirm on older ones:** `password2` handling in
   `gs.getProperty`, `changes()` on every element, and that a title with
   non-ASCII text (for example `Café`) is accepted: the body must be sent as
   UTF-8, the encoding it was signed in.
