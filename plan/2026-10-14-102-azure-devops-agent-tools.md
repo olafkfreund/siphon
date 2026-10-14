@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 102
 spec: spec/2026-10-14-102-azure-devops-agent-tools.md
 ---
