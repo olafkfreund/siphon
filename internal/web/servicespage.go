@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/olafkfreund/siphon/internal/catalog"
 	"github.com/olafkfreund/siphon/internal/config"
@@ -32,6 +33,8 @@ type connRow struct {
 	Caps                             []string
 	Status, StatusLabel, StatusTitle string // unchecked | working | attention
 	LastEvent                        string
+	LastEventAt                      *time.Time // newest event of its sources; nil when none
+	HasEvents                        bool       // some source polls or takes webhooks
 	CanTest                          bool
 	Hint                             string // why there is no Test
 	Items                            []connItem
@@ -131,13 +134,16 @@ func (s *server) connectedRows() []connRow {
 				caps["tools"] = true
 			case "http":
 				caps["polling"] = true
+				r.HasEvents = true
 			case "webhook":
 				caps["webhooks"] = true
+				r.HasEvents = true
 			}
 			if src.AWS != "" || src.Package == "servicenow" {
 				r.CanTest = true
 			}
 			r.Items = append(r.Items, connItem{"sources", n, "/config/sources/" + url.PathEscape(n)})
+			r.HasEvents = r.HasEvents || src.Polled() // an mcp source with read: polls too
 			if d, err := store.SourceDiagnostics(s.Store.DB, n); err == nil && d.EventAt != nil && (newest == nil || d.EventAt.After(*newest.EventAt)) {
 				newest = &d
 			}
@@ -160,6 +166,7 @@ func (s *server) connectedRows() []connRow {
 		r.LastEvent = "No events yet"
 		if newest != nil {
 			r.LastEvent = newest.EventAt.Local().Format("2006-01-02 15:04")
+			r.LastEventAt = newest.EventAt
 		}
 		r.Status, r.StatusLabel = "unchecked", "Not checked"
 		if c, err := store.GetConnectionCheck(s.Store.DB, key); err == nil && c != nil {

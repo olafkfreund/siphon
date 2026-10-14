@@ -42,9 +42,22 @@ type cfgView struct {
 	Health     *sourceView
 	LastEvent  string
 	Steps      []stepRow
+	Recipes    []recipe
+	Recipe     *recipeView
+	NoRecipe   string // a ?recipe= that names no template
+	RefFields  []config.ExplainField
+	Tokens     []string
 }
 
-type cfgRow struct{ Name, Prov string }
+// cfgRow is one list row; the detail fields are filled for agents and routines only.
+type cfgRow struct {
+	Name, Prov                  string
+	Provider, Model, Credential string
+	MCP                         []string
+	Egress, Approval            bool
+	Steps                       []string // routine step kinds, in order
+	Rules                       int      // rules that run this agent or routine
+}
 
 // histView is the revision list or one revision.
 type histView struct {
@@ -131,16 +144,59 @@ func (s *server) cfgList(w http.ResponseWriter, r *http.Request, csrf string) {
 	v := &cfgView{Kinds: sortedKinds(), Kind: kind, Rev: rev, Notice: doneText[r.URL.Query().Get("done")]}
 	for k, p := range prov {
 		if k.Kind == kind {
-			v.Rows = append(v.Rows, cfgRow{k.Name, string(p)})
+			v.Rows = append(v.Rows, s.cfgDetail(kind, cfgRow{Name: k.Name, Prov: string(p)}))
 		}
 	}
 	for _, it := range items {
 		if it.Kind == kind && it.Deleted {
-			v.Rows = append(v.Rows, cfgRow{it.Name, "deleted"})
+			v.Rows = append(v.Rows, cfgRow{Name: it.Name, Prov: "deleted"})
 		}
 	}
 	sort.Slice(v.Rows, func(i, j int) bool { return v.Rows[i].Name < v.Rows[j].Name })
 	s.page(w, r, "cfglist", view{CSRF: csrf, Cfg: v})
+}
+
+// cfgDetail adds an agent's or routine's summary to its list row.
+func (s *server) cfgDetail(kind string, r cfgRow) cfgRow {
+	cfg := s.Config()
+	switch kind {
+	case "agents":
+		a := cfg.Agents[r.Name]
+		if a == nil {
+			return r
+		}
+		r.Provider, r.Model, r.Credential, r.MCP = agentProvider(a, cfg.Credentials), a.Model, a.Credential, a.MCP
+		r.Egress = a.Egress.Enabled != nil && *a.Egress.Enabled && cfg.Server.Sandbox != "none" // not enforced without a sandbox
+		for _, ru := range cfg.Rules {
+			if ru.Action.Agent == r.Name {
+				r.Rules++
+			}
+		}
+	case "routines":
+		rt := cfg.Routines[r.Name]
+		if rt == nil {
+			return r
+		}
+		for _, st := range rt.Steps {
+			k := "cmd"
+			switch {
+			case st.Agent != "":
+				k = "agent"
+			case st.Unit != "":
+				k = "unit"
+			case st.ServiceNow != nil:
+				k = "servicenow"
+			}
+			r.Steps = append(r.Steps, k)
+			r.Approval = r.Approval || cfg.StepNeedsApproval(st)
+		}
+		for _, ru := range cfg.Rules {
+			if ru.Action.Routine == r.Name {
+				r.Rules++
+			}
+		}
+	}
+	return r
 }
 
 func sortedKinds() []string {
@@ -159,7 +215,7 @@ func (s *server) editView(kind, name string, isNew bool, y string) (*cfgView, er
 		return nil, err
 	}
 	p, exists := prov[itemKey{Kind: kind, Name: name}]
-	v := &cfgView{Kinds: sortedKinds(), Kind: kind, Name: name, New: isNew, Exists: exists, Prov: string(p), YAML: y,
+	v := &cfgView{Kinds: sortedKinds(), Kind: kind, Name: name, New: isNew, Exists: exists && !isNew, Prov: string(p), YAML: y,
 		Rev: rev, Fields: formFields(kind, y)}
 	v.ServiceNow = hasServiceNow(kind, y)
 	v.HasForm = len(v.Fields) > 0 && !v.ServiceNow
@@ -176,6 +232,14 @@ func (s *server) cfgEdit(w http.ResponseWriter, r *http.Request, csrf string) {
 	kind, name := r.PathValue("kind"), r.PathValue("name")
 	isNew := name == ""
 	y := ""
+	var rv *recipeView
+	noRecipe := ""
+	if isNew && kind == "routines" {
+		q := r.URL.Query().Get("recipe")
+		if rv, name, y, _ = recipeFor(q); rv == nil {
+			name, y, noRecipe = "", "", q
+		}
+	}
 	if !isNew {
 		eff, _, _, _, err := s.state()
 		if err != nil {
@@ -193,6 +257,7 @@ func (s *server) cfgEdit(w http.ResponseWriter, r *http.Request, csrf string) {
 		s.fail(w, err)
 		return
 	}
+	v.Recipe, v.NoRecipe = rv, noRecipe
 	s.page(w, r, "cfgedit", view{CSRF: csrf, Cfg: v})
 }
 
@@ -255,6 +320,11 @@ func (s *server) cfgPost(w http.ResponseWriter, r *http.Request, csrf, verb stri
 		return
 	}
 	_, exists := prov[itemKey{Kind: kind, Name: name}]
+	if isNew && exists && (verb == "check" || verb == "validate" || verb == "save") {
+		// the "new" page never replaces an item: a recipe prefills a name that may already be taken
+		bad(r.PostFormValue("yaml"), fmt.Sprintf("%s %q already exists: open it to edit it, or choose another name", strings.TrimSuffix(kind, "s"), name), http.StatusConflict)
+		return
+	}
 	switch verb {
 	case "check", "validate", "save":
 		if y, pending, err = s.itemYAMLFromRequest(r, kind, name); err != nil {

@@ -44,6 +44,18 @@
     if (u) u.placeholder = t.dataset.url || "https://…/v1";
   });
 
+  // Changing the provider can hide the checked "How to connect" choice
+  // (token is Claude only, API key is not for agy); fall back to the login file.
+  document.addEventListener("change", function (e) {
+    var t = e.target;
+    if (t.name !== "provider" || !t.form || !t.form.classList.contains("login-add")) return;
+    var k = t.form.querySelector("input[name=kind]:checked");
+    if (k && k.closest("label").offsetParent === null) {
+      var l = t.form.querySelector("input[name=kind][value=login]");
+      if (l) l.checked = true;
+    }
+  });
+
   // Forms that delete something ask first (data-confirm holds the question).
   document.addEventListener("submit", function (e) {
     var q = e.target.getAttribute && e.target.getAttribute("data-confirm");
@@ -193,6 +205,15 @@
   document.addEventListener("htmx:responseError", function (e) {
     var st = document.getElementById("yaml-status");
     if (st && e.detail && e.detail.target === st) { st.className = "yaml-status"; st.textContent = "Could not check: reload the page"; delete st.dataset.line; markErrorLine(); }
+  });
+
+  // Reference chips: insert their text at the caret of the YAML box.
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-insert]"), ta = document.querySelector("textarea.code-input");
+    if (!b || !ta) return;
+    ta.focus();
+    ta.setRangeText(b.dataset.insert, ta.selectionStart, ta.selectionEnd, "end");
+    ta.dispatchEvent(new Event("input", { bubbles: true })); // numbers lines, runs validation
   });
 
   // Announce htmx swaps for screen readers.

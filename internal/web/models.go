@@ -229,17 +229,19 @@ func toolsHint(model string) bool {
 type modelConnView struct {
 	Name, Provider, Preset, Host string
 	Test                         *connTest
+	Agents                       []string
 }
 
 type modelForm struct{ Name, Preset, URL, Err string }
 
 func (s *server) modelConns() []modelConnView {
 	out := []modelConnView{}
+	users := s.credentialUsers()
 	for name, c := range s.Config().Credentials {
 		if c.Provider != "ollama" && c.Provider != "openai" {
 			continue
 		}
-		v := modelConnView{Name: name, Provider: c.Provider, Preset: c.Preset}
+		v := modelConnView{Name: name, Provider: c.Provider, Preset: c.Preset, Agents: users[name]}
 		if v.Preset == "" {
 			v.Preset = c.Provider
 		}

@@ -162,7 +162,7 @@ func TestServicesPageConnectedGroupingAndStatus(t *testing.T) {
 		}
 	}
 	// One row per connection, not per source.
-	if n := strings.Count(page, `class="connection-row"`); n != 3 {
+	if n := strings.Count(page, `item-card row conn-svc`); n != 3 {
 		t.Errorf("rows: %d", n)
 	}
 	for _, link := range []string{"/config/sources/work-hooks", "/config/sources/prod-docs", "/config/credentials/prod"} {
@@ -170,7 +170,7 @@ func TestServicesPageConnectedGroupingAndStatus(t *testing.T) {
 			t.Errorf("no edit link %s", link)
 		}
 	}
-	if strings.Count(page, "status-unchecked") != 3 || !strings.Contains(page, "Last event: No events yet") {
+	if strings.Count(page, "status-unchecked") != 3 || !strings.Contains(page, "No events yet") {
 		t.Error("expected Not checked everywhere")
 	}
 	store.SetConnectionCheck(ce.st.DB, store.ConnectionCheck{Connection: "work", At: time.Now(), OK: true, Detail: "olaf"})
@@ -202,7 +202,7 @@ func TestServicesExploreSearchAndFilter(t *testing.T) {
 		t.Error("search")
 	}
 	c := ce.get("/services?cat=cloud").Body.String()
-	if !strings.Contains(c, `aria-current="true"`) || strings.Contains(c, `href="/services/gitlab"`) {
+	if !strings.Contains(c, `aria-current="page"`) || strings.Contains(c, `href="/services/gitlab"`) {
 		t.Error("category filter")
 	}
 	if none := ce.get("/services?q=zzzz").Body.String(); !strings.Contains(none, "No services match") {
