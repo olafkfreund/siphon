@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 73
 spec: spec/2026-10-13-73-servicenow-inbound.md
 ---
