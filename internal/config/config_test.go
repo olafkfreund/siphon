@@ -327,7 +327,7 @@ func TestBodyTokenValidation(t *testing.T) {
 		{"signature: body-token", ""},
 		{"signature: body-token, token_header: X-T", "not allowed with signature body-token"},
 		{"signature: body-token, token_field: \"a-b\"", "token_field must match"},
-		{"signature: sha256, signature_header: X-S, reply_text: hi", "only for signature body-token"},
+		{"signature: sha256, signature_header: X-S, reply_text: hi", "reply_text is only for"},
 		{"signature: body-token, reply_text: " + strings.Repeat("a", 501), "limit is 500"},
 	} {
 		c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, " + tc.extra + "}}"))
@@ -346,6 +346,24 @@ func TestEventGridFormatValidation(t *testing.T) {
 		{"signature: token, token_header: X-K, format: eventgrid, id: header.X-Id", "not allowed with format eventgrid"},
 		{"signature: token, token_header: X-K, format: cloudevents", "format must be eventgrid"},
 	} {
+		c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, " + tc.extra + "}}"))
+		err := c.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%q: %v", tc.extra, err)
+		}
+	}
+}
+
+func TestDiscordValidation(t *testing.T) {
+	for _, tc := range []struct{ extra, key, want string }{
+		{"signature: ed25519, format: discord", strings.Repeat("ab", 32), ""},
+		{"signature: ed25519, format: discord, reply_text: hi", strings.Repeat("ab", 32), ""},
+		{"signature: token, token_header: X-K, format: discord", "x", "format discord needs signature ed25519"},
+		{"signature: ed25519", "not-hex", "64 lowercase hex"},
+		{"signature: ed25519, token_header: X-T", strings.Repeat("ab", 32), "not allowed with signature ed25519"},
+		{"signature: sha256, signature_header: X-S, reply_text: hi", "x", "reply_text is only for"},
+	} {
+		t.Setenv("AGW_W", tc.key)
 		c, _ := Parse([]byte("sources: {w: {type: webhook, secret: env:AGW_W, " + tc.extra + "}}"))
 		err := c.Validate()
 		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
