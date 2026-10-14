@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 93
 intent: intent/2026-10-14-93-sources-status.md
 ---
