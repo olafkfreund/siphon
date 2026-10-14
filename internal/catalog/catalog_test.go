@@ -217,6 +217,11 @@ func TestServiceNowPollIncidents(t *testing.T) {
 	if off := src(""); off["poll"] != nil || off["read"] != nil {
 		t.Fatalf("off: %v", off)
 	}
+	// the apikey branch renders the same block
+	base = map[string]string{"name": "snow", "instance": "https://dev1.service-now.com", "auth": "apikey", "api_key": "k"}
+	if ak := src("on"); ak["poll"] != "2m" || ak["read"] == nil {
+		t.Fatalf("apikey: %v", ak)
+	}
 	res, err := e.Render(map[string]string{"name": "snow", "poll_incidents": "on"}, Env{})
 	if err != nil || len(res.Items) != 1 || res.Items[0].Name != "snow-hooks" {
 		t.Fatalf("no instance: %v %+v", err, res.Items)

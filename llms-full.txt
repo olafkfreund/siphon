@@ -1389,17 +1389,28 @@ table, such as `change_request`, change `table` (and the fields).
 
 What to know:
 
-- Latency is up to one interval (2 minutes here).
-- The window (10 minutes) must be longer than the interval.
-- At most 50 records per poll, newest first. A burst of more than 50 in the
-  window drops the oldest.
-- Deletes aren't seen.
-- A record changed several times between polls fires once, at its latest
-  `sys_mod_count`.
-- `sys_mod_count` is a display value (`5,551`).
-- It costs one Table API call per interval.
-- `javascript:` in the query needs script in encoded queries, which is on by
-  default.
+- **Latency:** up to one interval (2 minutes here).
+- **The window must be longer than the interval.** Changes older than the
+  window when polling resumes are missed, and nothing reports it. That
+  happens after Siphon was down, or polls failed, for longer than the
+  window minus the interval: about 8 minutes here. A wider window costs
+  nothing extra, because the rule's `id` drops repeats, and it buys a
+  longer catch-up.
+- **At most 50 records per poll,** newest first. Records are dropped only
+  when more than 50 change between two successful polls.
+- **Deletes aren't seen.**
+- **A record changed several times between polls** fires once, at its
+  latest `sys_mod_count`.
+- **`sys_mod_count` is a display value** (`5,551`).
+- **The cost per interval:** one Table API call, plus an OAuth token
+  request with OAuth authentication.
+- **Turning polling on fires for every incident changed in the last
+  window,** up to 50 at once.
+- **Polling as well as the webhook:** if you also apply the webhook
+  templates, the same incident can notify twice, once from each path.
+- **`javascript:` in the query** needs script in encoded queries, which is
+  on by default. If nothing ever fires, paste the query into an incident
+  list view filter to check it returns rows.
 
 ## Agent tools
 

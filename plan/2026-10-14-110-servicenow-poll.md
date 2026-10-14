@@ -150,6 +150,21 @@ spec: spec/2026-10-14-110-servicenow-poll.md
   `vm-test.nix:647`) counted every `done` job and expected 2. The polled job
   makes a third, so that query now excludes `rule='sn-poll'`.
 
+- **The Opus review of the whole diff:** no HIGH, and two MEDIUM, both
+  fixed in the docs.
+  - **Missed changes:** changes older than the window when polling resumes,
+    after downtime or failed polls, are missed silently. The burst limit is
+    "more than 50 between two successful polls", not "50 in the window".
+  - **Token requests:** each poll also requests an OAuth token.
+  - **LOW, fixed:**
+    - a docs note on the burst when polling is turned on, and on double
+      notifications with the webhook;
+    - checking the query in a list view;
+    - an apikey render case.
+  - **LOW, moved to #111:** a failed tool's error text is
+    dropped, and `on: each` rule state is never pruned. Both are in
+    existing code.
+
 ## Tests
 
 ```sh
