@@ -22,6 +22,7 @@ type sourceView struct {
 	LastError  string     `json:"last_error"`
 	Health     string     `json:"health"`          // ok | stale | error | idle
 	OAuth      string     `json:"oauth,omitempty"` // auth.oauth sources: none | pending | ok | expired
+	Hot        bool       `json:"hot"`             // health ok and a poll or event within hotWindow
 
 	// webhook sources: the last delivery, and a refusal newer than it
 	LastEventAt  *time.Time `json:"last_event_at,omitempty"`
@@ -152,6 +153,13 @@ func (s *server) sources() ([]sourceView, error) {
 		default:
 			v.Health = "ok"
 		}
+		if v.Health == "ok" {
+			for _, t := range []*time.Time{v.LastPollAt, v.LastEventAt} {
+				if t != nil && s.Now().Sub(*t) < hotWindow {
+					v.Hot = true
+				}
+			}
+		}
 		out = append(out, v)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -174,6 +182,22 @@ func actionSummary(a config.Action) string {
 	return ""
 }
 
+// providerOf is the provider an agent runs on: its kind, or for a model agent
+// its credential's preset (groq, openrouter, …) else its provider (ollama, openai, …).
+func providerOf(cfg *config.Config, agent string) string {
+	a := cfg.Agents[agent]
+	if agent == "" || a == nil {
+		return ""
+	}
+	if cr := cfg.Credentials[a.Credential]; a.Kind == "model" && cr != nil {
+		if cr.Preset != "" {
+			return cr.Preset
+		}
+		return cr.Provider
+	}
+	return a.Kind
+}
+
 func (s *server) rules() ([]ruleView, error) {
 	off, err := store.RuleOverrides(s.Store.DB)
 	if err != nil {
@@ -191,15 +215,7 @@ func (s *server) rules() ([]ruleView, error) {
 		}
 		v := ruleView{Name: r.Name, Source: r.Source, When: r.When, On: on, Action: actionSummary(r.Action), Enabled: !off[r.Name], Overridden: off[r.Name],
 			Approval: s.Config().NeedsApproval(r), ForEach: r.ForEach != "", Egress: r.Egress.Enabled}
-		if a := s.Config().Agents[r.Action.Agent]; r.Action.Agent != "" && a != nil {
-			v.Provider = a.Kind
-			if cr := s.Config().Credentials[a.Credential]; a.Kind == "model" && cr != nil {
-				v.Provider = cr.Provider // a model agent runs on its credential's provider (ollama, openai, …)
-				if cr.Preset != "" {
-					v.Provider = cr.Preset // the openai-compatible tile it was set up from (groq, openrouter, …)
-				}
-			}
-		}
+		v.Provider = providerOf(s.Config(), r.Action.Agent)
 		if r.Repeat > 0 {
 			v.Repeat = time.Duration(r.Repeat).String()
 		}

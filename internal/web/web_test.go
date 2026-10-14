@@ -612,7 +612,7 @@ func TestRulesPageMarkup(t *testing.T) {
 	if n := strings.Count(b, "is-hot"); n != 1 {
 		t.Errorf("is-hot x%d", n)
 	}
-	for _, want := range []string{`class="rules-bar" hidden`, `data-kind="agent"`, `class="prov codex"`, "asks approval", "for each", "repeat 1h0m0s", "cooldown 1m0s", "is-off", "runs automatically", `href="/config/rules/ag"`} {
+	for _, want := range []string{`class="filter-bar" data-filter-scope="rules" hidden`, `data-kind="agent"`, `class="prov codex"`, "asks approval", "for each", "repeat 1h0m0s", "cooldown 1m0s", "is-off", "runs automatically", `href="/config/rules/ag"`} {
 		if !strings.Contains(b, want) {
 			t.Errorf("missing %q", want)
 		}
@@ -620,7 +620,7 @@ func TestRulesPageMarkup(t *testing.T) {
 	e2 := newEnv(t, func(o *Options) { o.Cfg.Rules = nil })
 	c, _ = e2.asRole(roleAdmin, "u")
 	b = e2.do("GET", "/rules", nil, func(r *http.Request) { r.AddCookie(c) }).Body.String()
-	if !strings.Contains(b, `href="/help/templates"`) || !strings.Contains(b, `href="/config/rules/new"`) || strings.Contains(b, "rules-bar") {
+	if !strings.Contains(b, `href="/help/templates"`) || !strings.Contains(b, `href="/config/rules/new"`) || strings.Contains(b, "filter-bar") {
 		t.Error("empty state")
 	}
 }
