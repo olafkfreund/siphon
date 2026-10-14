@@ -186,6 +186,21 @@ spec: spec/2026-10-14-102-azure-devops-agent-tools.md
    Then link it from the step 5 docs, in the same commit as step 5 or a
    follow-up.
 
+## Deviations
+
+- **Step 1: the build needs native-addon inputs.** Upstream loads `keytar`
+  at start-up even with `-a pat`. The build adds
+  `nativeBuildInputs = [pkg-config python3]`, `buildInputs = [libsecret]`
+  and `npm_config_nodedir`.
+- **Step 1's findings:**
+  - `tools/list` works offline: 40 tools, with no fallback needed. The
+    start-up tenant lookup, `dist/org-tenants.js:30`, fails and is logged.
+  - **The API calls honour the proxy variables:** `typed-rest-client`
+    `HttpClient.js:467-472` reads `HTTP(S)_PROXY`.
+  - **The tenant lookup doesn't:** it uses Node's native `fetch`, which
+    ignores them. That's harmless, because only the tenant lookup uses it.
+  - Step 5's docs say this.
+
 ## Tests
 
 ```sh
