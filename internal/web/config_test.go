@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -538,5 +539,42 @@ func TestNotionVerificationPortalAccept(t *testing.T) {
 	}
 	if code := post(tok); code != 303 || !taken || ce.cur.Load().Sources["n"].Secret.Value != tok {
 		t.Fatalf("portal accept: %d taken=%v", code, taken)
+	}
+}
+
+func TestConfigValidateFragment(t *testing.T) {
+	ce := newCfgEnv(t)
+	form := func(y string) url.Values {
+		return url.Values{"mode": {"yaml"}, "name": {"r2"}, "rev": {"0"}, "yaml": {y}}
+	}
+	w := ce.post("/config/rules/r2/validate", form(`{source: gh, when: "true", action: {cmd: [echo, two]}}`))
+	if b := w.Body.String(); w.Code != 200 || !strings.Contains(b, "yaml-status ok") || !strings.Contains(b, "Valid") || strings.Contains(b, "<html") {
+		t.Fatalf("valid: %d %s", w.Code, b)
+	}
+	w = ce.post("/config/rules/r2/validate", form("source: gh\nwhen: [unclosed\n"))
+	if b := w.Body.String(); w.Code != 200 || !strings.Contains(b, "yaml-status err") || !regexp.MustCompile(`data-line="\d+"`).MatchString(b) {
+		t.Fatalf("invalid: %d %s", w.Code, b)
+	}
+	// a type error comes from re-parsing the merged config: its line is not the textarea's
+	w = ce.post("/config/rules/r2/validate", form("source: gh\nwhen: \"true\"\ncooldown: [1, 2]\naction: {cmd: [echo]}\n"))
+	if b := w.Body.String(); w.Code != 200 || !strings.Contains(b, "yaml-status err") || strings.Contains(b, "data-line") {
+		t.Fatalf("type error marked a line: %d %s", w.Code, b)
+	}
+	if n, _ := store.ConfigItems(ce.st.DB); len(n) != 0 || ce.latest() != 0 {
+		t.Fatal("validate wrote")
+	}
+	// No CSRF token: refused.
+	v := form("{}")
+	if w := ce.do("POST", "/config/rules/r2/validate", v, func(r *http.Request) { r.AddCookie(ce.c) }); w.Code != 403 {
+		t.Fatalf("no csrf: %d", w.Code)
+	}
+	// A pasted secret is validated but never stored or echoed.
+	const secret = "SUPERSECRET456"
+	sf := url.Values{"mode": {"form"}, "name": {"s4"}, "rev": {"0"}, "f.type": {"webhook"}, "f.signature": {"github"}, "f.secret": {secret}}
+	if w := ce.post("/config/sources/new/validate", sf); w.Code != 200 || strings.Contains(w.Body.String(), secret) {
+		t.Fatalf("secret: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(ce.dir, "secrets", "sources--s4+secret")); err == nil || ce.latest() != 0 {
+		t.Fatal("validate stored a secret")
 	}
 }

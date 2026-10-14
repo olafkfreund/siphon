@@ -116,7 +116,7 @@ func TestPortalPOSTRoles(t *testing.T) {
 				continue
 			}
 			if strings.HasSuffix(p, "/") { // built with + verb in configRoutes
-				for _, v := range []string{"check", "save", "delete", "reset"} {
+				for _, v := range []string{"check", "validate", "save", "delete", "reset"} {
 					seen[strings.Replace(sub.ReplaceAllString(p, "n"), "n/n/", "rules/n/", 1)+v] = true
 				}
 				continue
