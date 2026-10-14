@@ -327,7 +327,7 @@ type Source struct {
 	Headers         map[string]Secret `yaml:"headers"` // values may be env:/file: refs or plain literals
 	Body            string            `yaml:"body"`
 	Secret          Secret            `yaml:"secret"`           // webhook HMAC key
-	Signature       string            `yaml:"signature"`        // github|sha256|token|body-token|standard-webhooks|slack|stripe|ed25519
+	Signature       string            `yaml:"signature"`        // github|sha256|token|body-token|standard-webhooks|slack|stripe|ed25519|google-oidc
 	SigHeader       string            `yaml:"signature_header"` // sha256 preset
 	TokenHeader     string            `yaml:"token_header"`     // token preset
 	TimestampHdr    string            `yaml:"timestamp_header"`
@@ -336,8 +336,10 @@ type Source struct {
 	SigPrefix       string            `yaml:"signature_prefix"`    // sha256: e.g. "v1="; the header may list several
 	TimestampSep    string            `yaml:"timestamp_separator"` // sha256 with timestamp_header: "." (default) or ":"
 	ID              string            `yaml:"id"`                  // delivery id, e.g. header.X-GitHub-Delivery
-	Format          string            `yaml:"format"`              // webhook: eventgrid (Azure Event Grid handshakes and batches), discord, notion, matrix
+	Format          string            `yaml:"format"`              // webhook: eventgrid (Azure Event Grid handshakes and batches) | discord | notion | matrix | pubsub
 	AllowQueryToken bool              `yaml:"allow_query_token"`   // matrix: also accept ?access_token=
+	Audience        string            `yaml:"audience"`            // webhook google-oidc: the token's aud (default server.public_url + /hook/<name>)
+	ServiceAccount  string            `yaml:"service_account"`     // webhook google-oidc: the push subscription's service account email
 	Env             map[string]Secret `yaml:"env"`                 // stdio MCP child env; values are env:/file: refs
 	Package         string            `yaml:"package"`             // name in server.mcp_packages; fills Command
 	AWS             string            `yaml:"aws"`                 // provider: aws credential; the daemon injects short-lived keys
@@ -1079,6 +1081,9 @@ func secretHeader(name string) bool {
 }
 
 // Validate returns every problem at once, joined.
+// serviceAccountEmail is a loose email shape; Google has the final say.
+var serviceAccountEmail = regexp.MustCompile(`^[^@\s]+@[^@\s]+$`)
+
 // ed25519Key is a hex ed25519 public key (Discord shows it that way).
 var ed25519Key = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
@@ -1510,7 +1515,7 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 			add("%s: method must be GET or POST", p)
 		}
 	case "webhook":
-		if !s.Secret.isSet() && s.Format != "notion" { // notion: empty means awaiting the verification token
+		if !s.Secret.isSet() && s.Format != "notion" && s.Signature != "google-oidc" { // notion: empty means awaiting the verification token; google-oidc has no secret
 			add("%s: secret is required", p)
 		}
 		if s.ID != "" && !webhookID.MatchString(s.ID) {
@@ -1554,8 +1559,21 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 			if v := s.Secret.Value; v != "" && v != StubSecret && !ed25519Key.MatchString(v) {
 				add("%s: secret must be a public key of 64 lowercase hex characters", p)
 			}
+		case "google-oidc":
+			if s.Secret.isSet() || s.SigHeader != "" || s.TokenHeader != "" || s.TimestampHdr != "" || s.TokenField != "" || s.ID != "" {
+				add("%s: secret, signature_header, token_header, timestamp_header, token_field and id are not allowed with signature google-oidc", p)
+			}
+			if !serviceAccountEmail.MatchString(s.ServiceAccount) {
+				add("%s: signature google-oidc needs service_account, an email address", p)
+			}
+			if s.Audience == "" && c.Server.PublicURL == "" {
+				add("%s: signature google-oidc needs audience or server.public_url", p)
+			}
 		default:
-			add("%s: signature must be github, sha256, token, body-token, standard-webhooks, slack, stripe or ed25519, got %q", p, s.Signature)
+			add("%s: signature must be github, sha256, token, body-token, standard-webhooks, slack, stripe, ed25519 or google-oidc, got %q", p, s.Signature)
+		}
+		if (s.Audience != "" || s.ServiceAccount != "") && s.Signature != "google-oidc" {
+			add("%s: audience and service_account are only for signature google-oidc", p)
 		}
 		if s.TokenField != "" && s.Signature != "body-token" {
 			add("%s: token_field is only for signature body-token", p)
@@ -1583,8 +1601,12 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 			if s.ID != "" {
 				add("%s: id is not allowed with format matrix (each event carries its own id)", p)
 			}
+		case s.Format == "pubsub":
+			if s.Signature != "google-oidc" {
+				add("%s: format pubsub needs signature google-oidc", p)
+			}
 		case s.Format != "eventgrid":
-			add("%s: format must be eventgrid, discord, notion or matrix, got %q", p, s.Format)
+			add("%s: format must be eventgrid, discord, notion, matrix or pubsub, got %q", p, s.Format)
 		case s.Signature != "token":
 			add("%s: format eventgrid needs signature token", p)
 		case s.ID != "":

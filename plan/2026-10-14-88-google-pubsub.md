@@ -125,3 +125,9 @@ validation.
 
 Steps 1–3 edit about 14 files, so a `coder` agent does them and a fresh
 Opus agent reviews them. Step 4 is mine.
+
+## Deviations
+
+- **Step 1:** `TestExplainCommand`'s expected signature list gains
+  `google-oidc`. Matrix (#99) wasn't on main yet, so its format case is
+  merged at rebase.

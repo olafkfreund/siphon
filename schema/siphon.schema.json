@@ -627,6 +627,9 @@
           "at": {
             "type": "string"
           },
+          "audience": {
+            "type": "string"
+          },
           "auth": {
             "additionalProperties": false,
             "properties": {
@@ -729,6 +732,9 @@
             "type": "string"
           },
           "service": {
+            "type": "string"
+          },
+          "service_account": {
             "type": "string"
           },
           "signature": {
