@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 issue: 89
 spec: spec/2026-10-14-89-azure-devops.md
 ---
