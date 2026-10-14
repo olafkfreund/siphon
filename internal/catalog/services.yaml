@@ -434,7 +434,7 @@ services:
     fields:
       - {<<: *f_name, default: mattermost}
       - {key: token, label: Token, type: secret, required: true, help: 'Mattermost shows it after you save the outgoing webhook or slash command (Integrations).', section: 2}
-      - {key: reply, label: Immediate reply, type: text, help: 'Optional: shown to the user at once, for example "Working on it…".'}
+      - {key: reply, label: Immediate reply, type: text, help: 'Optional: answered at once, for example "Working on it…". A slash command shows it to the user who ran it; an outgoing webhook posts it in the channel every time.'}
     creates:
       - kind: sources
         name: '{{.name}}-hooks'

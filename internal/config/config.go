@@ -20,6 +20,7 @@ import (
 	"strings"
 	"text/template"
 	"time"
+	"unicode/utf8"
 
 	"github.com/expr-lang/expr"
 	"github.com/robfig/cron/v3"
@@ -1525,8 +1526,8 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 			if s.TokenField != "" && !bodyTokenField.MatchString(s.TokenField) {
 				add("%s: token_field must match ^[A-Za-z_][A-Za-z0-9_]*$, got %q", p, s.TokenField)
 			}
-			if len(s.ReplyText) > 500 {
-				add("%s: reply_text is %d characters; the limit is 500", p, len(s.ReplyText))
+			if n := utf8.RuneCountInString(s.ReplyText); n > 500 {
+				add("%s: reply_text is %d characters; the limit is 500", p, n)
 			}
 		case "standard-webhooks", "slack", "stripe":
 			if s.SigHeader != "" || s.TimestampHdr != "" {

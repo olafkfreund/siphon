@@ -21,8 +21,9 @@ routines:
   mattermost-ask-reply:
     steps:
       - { id: answer, agent: mattermost-ask, timeout: 2m }
-      # shortcut: %q escapes control characters as \x.., which is not valid JSON; the
-      # answer is usually plain text, so upgrade to a json template function if it is not.
+      # shortcut: %q writes control characters as \x.., \a, \v or \U…, none of which is
+      # valid JSON, so Mattermost refuses such a post (curl -f fails the step); answers are
+      # usually plain text: upgrade to a json template function if that ever bites.
       - { id: post, if: 'steps.answer.exit == 0', cmd: [curl, -fsS, -H, "Content-Type: application/json", --data-raw, "{\"text\": {{printf \"%q\" .steps.answer.json.result}}}", https://mattermost.example.com/hooks/CHANGE-ME] }
 rules:
   - name: mattermost-ask

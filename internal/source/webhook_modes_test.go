@@ -285,6 +285,14 @@ func TestWebhookBodyToken(t *testing.T) {
 			t.Errorf("%s: %d %q delivered=%v", b, code, out, ev != nil)
 		}
 	}
+	// Two token fields: a repeated form key is a list and is refused; a repeated
+	// JSON key keeps the last value, and none is left in the event.
+	if code, _, ev, _ := bodyTokenPost(t, WebhookOptions{}, form, "token=s3cret&token=x", nil); code != 401 || ev != nil {
+		t.Errorf("repeated form token: %d delivered=%v", code, ev != nil)
+	}
+	if code, _, ev, _ := bodyTokenPost(t, WebhookOptions{}, "application/json", `{"token":"x","token":"s3cret","text":"hi"}`, nil); code != 202 || ev.Data.(map[string]any)["token"] != nil {
+		t.Errorf("repeated JSON token: %d", code)
+	}
 	// A custom field.
 	if code, _, ev, _ := bodyTokenPost(t, WebhookOptions{TokenField: "key"}, "application/json", `{"key":"s3cret","token":"x"}`, nil); code != 202 || ev.Data.(map[string]any)["token"] != "x" {
 		t.Errorf("custom field: %d", code)
