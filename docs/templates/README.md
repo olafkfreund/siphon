@@ -41,6 +41,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 | [`pagerduty-incident-summary`](pagerduty-incident-summary.yaml) | Summarise each triggered PagerDuty incident, then notify | `siphon connect model ollama`, `siphon connect pagerduty` |
 | [`sentry-new-issue`](sentry-new-issue.yaml) | Push a phone notification for each new Sentry issue | `siphon connect sentry` |
 | [`service-failed`](service-failed.yaml) | Get notified when a systemd service fails | — · webhook secret |
+| [`servicenow-incident-summary`](servicenow-incident-summary.yaml) | Summarise each new ServiceNow incident, then notify | `siphon connect model ollama`, `siphon connect servicenow` |
 | [`upstream-status`](upstream-status.yaml) | Know when a provider you depend on has an incident | — |
 | [`uptime-kuma-down`](uptime-kuma-down.yaml) | Push a notification when an Uptime Kuma monitor goes down | `siphon connect uptime-kuma` |
 
@@ -57,6 +58,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 
 | Template | What it does | Connect first |
 |---|---|---|
+| [`servicenow-incident-notify`](servicenow-incident-notify.yaml) | Get notified when a P1 or P2 ServiceNow incident is created | `siphon connect servicenow` |
 | [`slack-mention-agent`](slack-mention-agent.yaml) | An agent that answers when someone @mentions your Slack app | `siphon connect model ollama`, `siphon connect slack` |
 | [`standard-webhooks`](standard-webhooks.yaml) | Receive Standard Webhooks (Svix, Clerk, Resend, …) | — · webhook secret |
 | [`stripe-dispute-notice`](stripe-dispute-notice.yaml) | Get notified when a Stripe dispute is opened | `siphon connect stripe --webhook` |

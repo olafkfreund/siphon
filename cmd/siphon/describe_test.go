@@ -44,6 +44,7 @@ sources:
   datadog: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK }
   cloudflare: { type: mcp, url: "https://mcp.cloudflare.com/mcp", auth: { bearer: env:AGW_HOOK } }
   cloudflare-hooks: { type: webhook, signature: token, token_header: cf-webhook-auth, secret: env:AGW_HOOK }
+  servicenow-hooks: { type: webhook, signature: standard-webhooks, secret: env:AGW_HOOK }
 rules:
   - { name: r1, source: github-hooks, when: "true", action: { cmd: [echo, one] } }
 `
