@@ -41,9 +41,9 @@ lists what's missing. Models and subscription logins are on their own pages:
 | Service | Gives agents | Status | Connect | Templates |
 |---|---|---|---|---|
 | Slack | webhooks | available | `siphon connect slack` | [`slack-mention-agent`](../templates/slack-mention-agent.yaml) |
+| Mattermost | webhooks | available | `siphon connect mattermost` | [`mattermost-command-agent`](../templates/mattermost-command-agent.yaml) |
 | Discord |  | not yet: needs an ed25519 signature mode and the PING handshake, and does not cover channel messages | — |  |
 | Microsoft Teams |  | not yet: needs a teams-hmac signature mode with a synchronous reply within 5 seconds | — |  |
-| Mattermost |  | not yet: the token is in the request body: needs a body-token mode | — |  |
 | Matrix |  | not yet: needs PUT requests and a {} reply | — |  |
 
 ## Monitoring & alerting

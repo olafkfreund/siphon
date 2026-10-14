@@ -20,6 +20,7 @@ import (
 	"strings"
 	"text/template"
 	"time"
+	"unicode/utf8"
 
 	"github.com/expr-lang/expr"
 	"github.com/robfig/cron/v3"
@@ -326,10 +327,12 @@ type Source struct {
 	Headers      map[string]Secret `yaml:"headers"` // values may be env:/file: refs or plain literals
 	Body         string            `yaml:"body"`
 	Secret       Secret            `yaml:"secret"`           // webhook HMAC key
-	Signature    string            `yaml:"signature"`        // github|sha256|token|standard-webhooks|slack|stripe
+	Signature    string            `yaml:"signature"`        // github|sha256|token|body-token|standard-webhooks|slack|stripe
 	SigHeader    string            `yaml:"signature_header"` // sha256 preset
 	TokenHeader  string            `yaml:"token_header"`     // token preset
 	TimestampHdr string            `yaml:"timestamp_header"`
+	TokenField   string            `yaml:"token_field"`         // body-token: the body field holding the token (default token)
+	ReplyText    string            `yaml:"reply_text"`          // body-token: answer 200 {"text": …} instead of 202
 	SigPrefix    string            `yaml:"signature_prefix"`    // sha256: e.g. "v1="; the header may list several
 	TimestampSep string            `yaml:"timestamp_separator"` // sha256 with timestamp_header: "." (default) or ":"
 	ID           string            `yaml:"id"`                  // delivery id, e.g. header.X-GitHub-Delivery
@@ -899,6 +902,9 @@ func (c *Config) Warnings() []string {
 		if s := c.Sources[name]; s != nil && s.Type == "webhook" && s.Signature == "token" {
 			w = append(w, fmt.Sprintf("source %s: signature token sends the secret in a header: weaker than an HMAC, and a captured delivery can be replayed", name))
 		}
+		if s := c.Sources[name]; s != nil && s.Type == "webhook" && s.Signature == "body-token" {
+			w = append(w, fmt.Sprintf("source %s: signature body-token sends the secret in the body: weaker than an HMAC, and a captured delivery can be replayed", name))
+		}
 		if s := c.Sources[name]; s != nil && s.Auth != nil && s.Auth.OAuth != nil && s.Auth.OAuth.ClientSecret.isSet() && s.Auth.OAuth.Issuer == "" {
 			w = append(w, fmt.Sprintf("source %s: auth.oauth.client_secret without auth.oauth.issuer: the first login trusts whichever authorization server the MCP server names", name))
 		}
@@ -1039,6 +1045,8 @@ func loopbackListen(addr string) bool {
 }
 
 var unitName = regexp.MustCompile(`^[A-Za-z0-9@._:-]+\.(service|target|timer)$`)
+
+var bodyTokenField = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 var webhookID = regexp.MustCompile(`^header\.[A-Za-z0-9-]+$`)
 
@@ -1511,12 +1519,25 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 			if s.TokenHeader == "" {
 				add("%s: signature token needs token_header", p)
 			}
+		case "body-token":
+			if s.SigHeader != "" || s.TimestampHdr != "" || s.TokenHeader != "" {
+				add("%s: signature_header, timestamp_header and token_header are not allowed with signature body-token", p)
+			}
+			if s.TokenField != "" && !bodyTokenField.MatchString(s.TokenField) {
+				add("%s: token_field must match ^[A-Za-z_][A-Za-z0-9_]*$, got %q", p, s.TokenField)
+			}
+			if n := utf8.RuneCountInString(s.ReplyText); n > 500 {
+				add("%s: reply_text is %d characters; the limit is 500", p, n)
+			}
 		case "standard-webhooks", "slack", "stripe":
 			if s.SigHeader != "" || s.TimestampHdr != "" {
 				add("%s: signature_header and timestamp_header are not allowed with signature %s", p, s.Signature)
 			}
 		default:
-			add("%s: signature must be github, sha256, token, standard-webhooks, slack or stripe, got %q", p, s.Signature)
+			add("%s: signature must be github, sha256, token, body-token, standard-webhooks, slack or stripe, got %q", p, s.Signature)
+		}
+		if (s.TokenField != "" || s.ReplyText != "") && s.Signature != "body-token" {
+			add("%s: token_field and reply_text are only for signature body-token", p)
 		}
 		if s.SigPrefix != "" && s.Signature != "sha256" {
 			add("%s: signature_prefix is only for signature sha256", p)

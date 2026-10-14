@@ -240,3 +240,96 @@ func TestWebhookServiceNowSigning(t *testing.T) {
 		t.Errorf("replay: %d calls %d, want 409 and 2", c, calls)
 	}
 }
+
+// bodyTokenPost sends body as ctype to a body-token webhook and returns the
+// status, response body, delivered event and delivery id.
+func bodyTokenPost(t *testing.T, o WebhookOptions, ctype, body string, seen map[string]bool) (int, string, *Event, string) {
+	t.Helper()
+	o.Name, o.Signature, o.Secret = "w", "body-token", "s3cret"
+	var ev *Event
+	var id string
+	h := NewWebhook(o, func(_ context.Context, e Event, i string) (bool, error) {
+		ev, id = &e, i
+		dup := seen[i]
+		if seen != nil {
+			seen[i] = true
+		}
+		return dup, nil
+	})
+	r := httptest.NewRequest(http.MethodPost, "/hook/w", strings.NewReader(body))
+	r.Header.Set("Content-Type", ctype)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w.Code, w.Body.String(), ev, id
+}
+
+func TestWebhookBodyToken(t *testing.T) {
+	const form = "application/x-www-form-urlencoded"
+	// Form and JSON are accepted; the token is gone, the rest is there.
+	code, _, ev, _ := bodyTokenPost(t, WebhookOptions{}, form+"; charset=utf-8", "token=s3cret&command=%2Fask&text=hi&tag=a&tag=b", nil)
+	m, _ := ev.Data.(map[string]any)
+	if code != 202 || ev == nil || m["token"] != nil || m["command"] != "/ask" || m["text"] != "hi" {
+		t.Fatalf("form: %d %v", code, ev)
+	}
+	if l, ok := m["tag"].([]any); !ok || len(l) != 2 || l[0] != "a" || l[1] != "b" {
+		t.Errorf("repeated key: %#v", m["tag"])
+	}
+	code, _, ev, _ = bodyTokenPost(t, WebhookOptions{}, "application/json", `{"token":"s3cret","text":"hi"}`, nil)
+	m, _ = ev.Data.(map[string]any)
+	if code != 202 || m["token"] != nil || m["text"] != "hi" {
+		t.Fatalf("json: %d %v", code, ev)
+	}
+	// A wrong, missing, numeric or non-object token is refused and never delivered.
+	for _, b := range []string{`{"token":"nope"}`, `{"text":"hi"}`, `{"token":123}`, `["s3cret"]`, `not json`} {
+		if code, out, ev, _ := bodyTokenPost(t, WebhookOptions{}, "application/json", b, nil); code != 401 || ev != nil || out != "" {
+			t.Errorf("%s: %d %q delivered=%v", b, code, out, ev != nil)
+		}
+	}
+	// Two token fields: a repeated form key is a list and is refused; a repeated
+	// JSON key keeps the last value, and none is left in the event.
+	if code, _, ev, _ := bodyTokenPost(t, WebhookOptions{}, form, "token=s3cret&token=x", nil); code != 401 || ev != nil {
+		t.Errorf("repeated form token: %d delivered=%v", code, ev != nil)
+	}
+	if code, _, ev, _ := bodyTokenPost(t, WebhookOptions{}, "application/json", `{"token":"x","token":"s3cret","text":"hi"}`, nil); code != 202 || ev.Data.(map[string]any)["token"] != nil {
+		t.Errorf("repeated JSON token: %d", code)
+	}
+	// A custom field.
+	if code, _, ev, _ := bodyTokenPost(t, WebhookOptions{TokenField: "key"}, "application/json", `{"key":"s3cret","token":"x"}`, nil); code != 202 || ev.Data.(map[string]any)["token"] != "x" {
+		t.Errorf("custom field: %d", code)
+	}
+	// reply_text answers 200 with JSON.
+	if code, out, _, _ := bodyTokenPost(t, WebhookOptions{ReplyText: "Working on it"}, "application/json", `{"token":"s3cret"}`, nil); code != 200 || out != `{"text":"Working on it"}` {
+		t.Errorf("reply: %d %q", code, out)
+	}
+	// The same delivery twice is a duplicate, with or without the token changing nothing else.
+	seen := map[string]bool{}
+	bodyTokenPost(t, WebhookOptions{}, "application/json", `{"token":"s3cret","text":"hi"}`, seen)
+	if code, _, _, _ := bodyTokenPost(t, WebhookOptions{}, "application/json", `{"text":"hi","token":"s3cret"}`, seen); code != 409 {
+		t.Errorf("duplicate: %d", code)
+	}
+}
+
+// Form bodies now decode for every mode; JSON deliveries are unchanged.
+func TestWebhookFormAndJSONOtherModes(t *testing.T) {
+	// curl -d labels a JSON body as a form: it must still decode as JSON.
+	if code, _, ev, _ := bodyTokenPost(t, WebhookOptions{}, "application/x-www-form-urlencoded", `{"token":"s3cret","ref":"main"}`, nil); code != 202 || ev.Data.(map[string]any)["ref"] != "main" {
+		t.Fatalf("JSON under a form Content-Type: %d %v", code, ev)
+	}
+	var got Event
+	h := NewWebhook(WebhookOptions{Name: "w", Secret: "k", Signature: "token", TokenHeader: "X-T"}, func(_ context.Context, e Event, _ string) (bool, error) { got = e; return false, nil })
+	r := httptest.NewRequest(http.MethodPost, "/hook/w", strings.NewReader("a=1&b=2"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("X-T", "k")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if m, _ := got.Data.(map[string]any); w.Code != 202 || m["a"] != "1" || m["raw"] != nil {
+		t.Errorf("form under token mode: %d %v", w.Code, got.Data)
+	}
+	body := `{"a":1}`
+	mac := hmac.New(sha256.New, []byte("k"))
+	mac.Write([]byte(body))
+	code, _ := post(t, WebhookOptions{Secret: "k", Signature: "github"}, time.Now(), body, map[string]string{"X-Hub-Signature-256": "sha256=" + hex.EncodeToString(mac.Sum(nil))})
+	if code != 202 {
+		t.Errorf("github json: %d", code)
+	}
+}

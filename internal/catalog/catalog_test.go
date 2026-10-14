@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestEmbeddedCatalogueLoads(t *testing.T) {
@@ -185,5 +187,34 @@ func TestServiceNowEntry(t *testing.T) {
 				t.Errorf("%s: unexpected %s", tc.name, k)
 			}
 		}
+	}
+}
+
+func TestMattermostEntry(t *testing.T) {
+	e := Get("mattermost")
+	if e == nil {
+		t.Fatal("mattermost missing")
+	}
+	res, err := e.Render(map[string]string{"name": "mm", "token": "tok", "reply": "Working on it"}, Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Items) != 1 || res.Items[0].Name != "mm-hooks" || !strings.Contains(res.Items[0].YAML, "signature: body-token") || !strings.Contains(res.Items[0].YAML, `reply_text: "Working on it"`) {
+		t.Fatalf("%+v", res.Items)
+	}
+	if len(res.Secrets) != 1 || res.Secrets[0].Value != "tok" || strings.Contains(res.Items[0].YAML, "tok\n") {
+		t.Fatalf("secrets %+v", res.Secrets)
+	}
+	var v map[string]any
+	if err := yaml.Unmarshal([]byte(res.Items[0].YAML), &v); err != nil || v["reply_text"] != "Working on it" {
+		t.Fatalf("yaml: %v %v", err, v)
+	}
+	res, err = e.Render(map[string]string{"name": "mm", "token": "tok"}, Env{})
+	if err != nil || strings.Contains(res.Items[0].YAML, "reply_text") {
+		t.Fatalf("no reply: %v %s", err, res.Items[0].YAML)
+	}
+	res, err = Get("webhook").Render(map[string]string{"name": "w", "mode": "body-token"}, Env{})
+	if err != nil || !strings.Contains(res.Items[0].YAML, "signature: body-token") || strings.Contains(res.Items[0].YAML, "_header") {
+		t.Fatalf("generic body-token: %v %+v", err, res)
 	}
 }

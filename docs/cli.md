@@ -311,6 +311,7 @@ siphon connect <service>|model|login [--<field> value ...]
 | `--profile` |  | AWS: Profile |
 | `--project` |  | GitLab: Project |
 | `--region` |  | AWS: Region |
+| `--reply` |  | Mattermost: Immediate reply |
 | `--role-arn` |  | AWS: Role ARN |
 | `--secret` |  | Webhook: Secret as - (stdin) or @file |
 | `--secret-access-key` |  | AWS: Base secret access key as - (stdin) or @file |

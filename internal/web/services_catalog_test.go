@@ -290,8 +290,8 @@ func TestNotYetServicesCannotConnect(t *testing.T) {
 			t.Errorf("%s: connect page offers a form", e.ID)
 		}
 	}
-	if n < 9 {
-		t.Errorf("only %d not-yet entries", n)
+	if n == 0 { // the loop must have checked something; the count shrinks as services ship (#90)
+		t.Error("no not-yet entries were checked")
 	}
 }
 
