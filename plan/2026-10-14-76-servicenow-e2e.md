@@ -144,3 +144,20 @@ if step 3 succeeds. A fresh Opus agent reviews before the PR.
     `internal/servicenow` sends) or as HTTP Basic.
   - **A PATCH with a bad bearer** is recorded with `bearer_ok: false` and
     answered 401.
+- **Step 3 (the spike), done 2026-10-14. Outcome: it fails, so the plan's
+  "fails" branch applies.**
+  - **Setup:** a "Siphon MCP" auth-code OAuth app on `calitiiltddemo3`
+    (credentials in agenix, nixos_config PR #2301), and siphon-dev
+    `public_url` set to `http://127.0.0.1:8090`.
+  - **The login didn't start:** `siphon connect oauth servicenow-official`
+    failed at once with `calling initialize: sending initialize: Found`.
+    ServiceNow answers an unauthenticated MCP request with `302` to
+    `/auth_redirect.do`, not a `401` with `WWW-Authenticate`, so the
+    go-sdk never starts OAuth.
+  - **Other credentials:** a valid client-credentials bearer, and HTTP
+    Basic with an admin account, also get `302`. The endpoint seems to
+    accept only tokens from its own authorization-code flow.
+  - **Result:** step 4 (the catalog `mcp_server` choice) is **skipped**.
+    Step 5 documents the findings, and #104 tracks the `mcpoauth`
+    compatibility fix. The spike source was removed from siphon-dev
+    afterwards; `public_url` stays.
