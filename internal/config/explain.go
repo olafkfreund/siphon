@@ -69,7 +69,7 @@ var explainKinds = map[string]struct {
 		"token_header":             {false, "", "webhook, signature token: the header carrying the token", nil},
 		"token_field":              {false, "token", "webhook, signature body-token: the JSON or form body field carrying the token; it is removed from the event", nil},
 		"reply_text":               {false, "", "webhook, signature body-token or format discord: answer 200 with {\"text\": reply_text} (up to 500 characters) instead of 202, as Mattermost shows it in chat", nil},
-		"format":                   {false, "", "webhook: eventgrid (signature token) answers Azure Event Grid's validation handshake and delivers each event of a batch; discord (signature ed25519) answers Discord's PING and interactions", e("eventgrid", "discord")},
+		"format":                   {false, "", "webhook: eventgrid (signature token) answers Azure Event Grid's validation handshake and delivers each event of a batch; discord (signature ed25519) answers Discord's PING and interactions; notion (signature sha256, X-Notion-Signature, sha256=) may have no secret until Notion's verification token is accepted", e("eventgrid", "discord", "notion")},
 		"signature_prefix":         {false, "", "webhook, signature sha256: a prefix such as v1=; the header may then list several signatures, any one may match", nil},
 		"timestamp_separator":      {false, "\".\"", "webhook, signature sha256 with timestamp_header: what joins the timestamp and body (\":\" for Grafana)", nil},
 		"timestamp_header":         {false, "", "webhook, signature sha256: the header carrying a signed timestamp", nil},

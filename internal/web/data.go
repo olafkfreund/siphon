@@ -28,6 +28,11 @@ type sourceView struct {
 	LastReject   string     `json:"last_reject,omitempty"`
 	LastRejectAt *time.Time `json:"last_reject_at,omitempty"`
 
+	// notion webhook sources with no secret yet; the token is for the portal only
+	NotionAwait bool       `json:"-"`
+	NotionToken string     `json:"-"`
+	NotionAt    *time.Time `json:"-"`
+
 	// tool-only mcp sources: nothing is polled, so show the last connection test
 	ToolsOnly bool                   `json:"tools_only,omitempty"`
 	Check     *store.ConnectionCheck `json:"check,omitempty"`
@@ -112,6 +117,7 @@ func (s *server) sources() ([]sourceView, error) {
 		if src.Type == "schedule" {
 			s.fillSchedule(&v, src)
 		}
+		s.notionView(&v, name)
 		if s.OAuth != nil && src.Auth != nil && src.Auth.OAuth != nil {
 			v.OAuth, _ = s.OAuth.Status(name)
 		}

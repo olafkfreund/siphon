@@ -462,6 +462,7 @@ Always follow this order. Every step has `-o json`.
    - `mattermost-command-agent` (a chat slash command, `signature: body-token`),
    - `discord-ask-agent` (Discord slash command, `signature: ed25519` with `format: discord`),
    - `azure-keyvault-secret-expiry` (Azure Event Grid, `signature: token` with `format: eventgrid`),
+   - `notion-page-summary` (Notion, `format: notion`: the source starts with no secret; accept the verification token it captures on the Sources page),
    - `webhook-to-ntfy`, `local-summariser`, `nightly-report`,
      `aws-cloudwatch-alarm`.
 
@@ -629,6 +630,7 @@ siphon apply -f deploy.yaml --secret sources/deploy-hook.secret=@hook.key
 | `ed25519` | verifies `X-Signature-Ed25519` over `X-Signature-Timestamp` + body with a hex public key as the secret (5-minute window) | Discord (a public key is not a secret) |
 | `ed25519` + `format: discord` | as `ed25519`, and answers Discord's PING, ignores autocomplete, and delivers each interaction keyed by its `id` with a deferred reply (or `reply_text:` as the message) | Discord slash commands and components |
 | `token` + `format: eventgrid` | as `token`, and answers Azure Event Grid's `OPTIONS` and validation handshakes and delivers each event of a batch (keyed by its `id`; `validationUrl` is never fetched) | Azure Event Grid (put the secret in a delivery property) |
+| `sha256` + `format: notion` | as `sha256` with `X-Notion-Signature` and prefix `sha256=`. With no `secret:` the source only accepts Notion's one-time `{"verification_token": …}` POST and delivers nothing; an operator accepts the token on the Sources page (or `POST /api/sources/<name>/notion-verification` with `{"token": …}`, the token that was shown), which stores it as the secret. Order: create the subscription in Notion, copy the token from the Sources page, paste it into Notion and Verify, then press "Use this token". A wrong token that was accepted: delete `secret:` from the source's YAML and use "Resend token" in Notion; a restart loses an unaccepted token, so resend it too | Notion |
 | `slack` | signs `v0:<timestamp>:<body>` (HMAC-SHA256, `X-Slack-Signature`, ±5 min); Siphon also answers Slack's signed `url_verification` with its challenge | Slack (paste the app's Signing Secret) |
 | `stripe` | signs `<t>.<body>` in `Stripe-Signature` (`t=…,v1=…`; any `v1` may match, so rotation works; ±5 min) | Stripe (paste the endpoint's signing secret) |
 
@@ -2585,6 +2587,7 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 |---|---|---|
 | [`discord-ask-agent`](discord-ask-agent.yaml) | A Discord /ask command answered by a local model, posted back to the interaction | `siphon connect discord`, `siphon connect model ollama` |
 | [`mattermost-command-agent`](mattermost-command-agent.yaml) | A Mattermost /ask command answered by a local model, posted back to the channel | `siphon connect mattermost`, `siphon connect model ollama` |
+| [`notion-page-summary`](notion-page-summary.yaml) | Summarise Notion pages when they are created or edited | `siphon connect notion --webhook`, `siphon connect login claude` |
 | [`servicenow-change-on-deploy`](servicenow-change-on-deploy.yaml) | Note a deploy on its ServiceNow change request | a webhook source `deploys`, `siphon connect servicenow --instance …` |
 | [`servicenow-incident-notify`](servicenow-incident-notify.yaml) | Get notified when a P1 or P2 ServiceNow incident is created | `siphon connect servicenow` |
 | [`slack-mention-agent`](slack-mention-agent.yaml) | An agent that answers when someone @mentions your Slack app | `siphon connect model ollama`, `siphon connect slack` |
@@ -2661,7 +2664,7 @@ lists what's missing. Models and subscription logins are on their own pages:
 | Linear | tools, webhooks | available | `siphon connect linear` | [`linear-issue-from-alert`](../templates/linear-issue-from-alert.yaml) |
 | Jira | tools, webhooks | available | `siphon connect jira` | [`jira-new-issue-summary`](../templates/jira-new-issue-summary.yaml) |
 | [ServiceNow](servicenow.md) | tools, webhooks | available | `siphon connect servicenow` | [`alert-to-servicenow-incident`](../templates/alert-to-servicenow-incident.yaml) [`servicenow-incident-summary`](../templates/servicenow-incident-summary.yaml) [`servicenow-incident-triage`](../templates/servicenow-incident-triage.yaml) [`servicenow-change-on-deploy`](../templates/servicenow-change-on-deploy.yaml) [`servicenow-incident-notify`](../templates/servicenow-incident-notify.yaml) |
-| Notion |  | not yet: needs the verification_token handshake; the remote MCP is OAuth only | — |  |
+| Notion | tools, webhooks | available | `siphon connect notion` | [`notion-page-summary`](../templates/notion-page-summary.yaml) |
 
 ## Chat
 
@@ -4586,6 +4589,41 @@ rules:
     id: event.scheduled_at          # one run per scheduled moment, even across restarts
     cooldown: 1h
     action: { routine: nightly }
+```
+
+
+---
+
+<!-- file: docs/templates/notion-page-summary.yaml -->
+
+```yaml
+# title:    Summarise Notion pages and ask an agent about them
+# category: Notifications & glue
+# needs:    sources/notion                         (siphon connect notion; then log in on the Sources page)
+#           sources/notion-hooks                   (siphon connect notion --webhook)
+#           credentials/claude-max                 (siphon connect login claude)
+# apply:    siphon apply -f notion-page-summary.yaml
+agents:
+  notion-summary:
+    kind: claude
+    credential: claude-max
+    mcp: [notion]
+    # Read-only: Notion's hosted server names its tools notion-fetch, notion-search, …
+    # (check with the source's tool list). A wrong name means no tool, never a write.
+    allowed_tools: [mcp__notion__notion-fetch, mcp__notion__notion-search]
+    prompt: |
+      Notion event {{.event.type}} on page {{.event.entity.id}}.
+      Read the page with the Notion tools and summarise what changed in three lines.
+    max_turns: 6
+    timeout: 10m
+rules:
+  - name: notion-page-summary
+    source: notion-hooks
+    when: 'event.type == "page.created" || event.type == "page.content_updated"'
+    on: each
+    id: event.id
+    cooldown: 5m
+    action: { agent: notion-summary }
 ```
 
 

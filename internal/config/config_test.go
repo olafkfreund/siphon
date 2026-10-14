@@ -373,6 +373,28 @@ func TestDiscordValidation(t *testing.T) {
 	}
 }
 
+func TestNotionFormatValidation(t *testing.T) {
+	t.Setenv("AGW_W", "x")
+	const ok = "signature: sha256, signature_header: X-Notion-Signature, signature_prefix: \"sha256=\", format: notion"
+	for _, tc := range []struct{ secret, extra, want string }{
+		{"", ok, ""},
+		{"secret: env:AGW_W, ", ok, ""},
+		{"", "signature: sha256, signature_header: X-Notion-Signature, format: notion", "format notion needs"},
+		{"", "signature: sha256, signature_prefix: \"sha256=\", format: notion", "format notion needs"},
+		{"", "signature: token, token_header: X-K, format: notion", "format notion needs"},
+		{"", "signature: sha256, signature_header: X-S, signature_prefix: \"sha256=\"", "secret is required"},
+	} {
+		c, _ := Parse([]byte("sources: {w: {type: webhook, " + tc.secret + tc.extra + "}}"))
+		err := c.Validate()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%q %q: %v", tc.secret, tc.extra, err)
+		}
+		if got := hasWarning(c, "format notion has no secret"); got != (tc.secret == "" && strings.Contains(tc.extra, "format: notion")) {
+			t.Errorf("%q %q: warning=%v", tc.secret, tc.extra, got)
+		}
+	}
+}
+
 func TestRetryValidation(t *testing.T) {
 	for retry, want := range map[string]string{
 		"{attempts: 3, base: 5s, factor: 2}": "",

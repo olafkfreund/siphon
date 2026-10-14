@@ -13,7 +13,7 @@ import (
 
 // baseConfig provides what the templates need: the connections and sources
 // their `needs` headers name, and the aws allowlists.
-const baseConfig = `server: { sandbox: none, db: DIR/s.db, aws: { profiles: [p1] }, models: { private_endpoints: ["127.0.0.1:11434"] }, mcp_packages: { aws-cloudwatch: { command: [cw], hosts: ['logs.{region}.amazonaws.com'], env: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, AWS_REGION, AWS_DEFAULT_REGION, AWS_EC2_METADATA_DISABLED, AWS_CONFIG_FILE, AWS_SHARED_CREDENTIALS_FILE] } } }
+const baseConfig = `server: { sandbox: none, public_url: "https://siphon.example.com", db: DIR/s.db, aws: { profiles: [p1] }, models: { private_endpoints: ["127.0.0.1:11434"] }, mcp_packages: { aws-cloudwatch: { command: [cw], hosts: ['logs.{region}.amazonaws.com'], env: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, AWS_REGION, AWS_DEFAULT_REGION, AWS_EC2_METADATA_DISABLED, AWS_CONFIG_FILE, AWS_SHARED_CREDENTIALS_FILE] } } }
 credentials:
   claude-max: { provider: claude }
   ollama-local: { provider: ollama, url: "http://127.0.0.1:11434" }
@@ -26,6 +26,8 @@ sources:
   aws-hooks: { type: webhook, signature: token, token_header: X-Siphon-Key, secret: env:AGW_HOOK }
   alertmanager: { type: webhook, signature: token, token_header: Authorization, secret: env:AGW_HOOK }
   linear: { type: mcp, url: "https://mcp.linear.app/mcp", headers: { Authorization: env:AGW_HOOK } }
+  notion: { type: mcp, url: "https://mcp.notion.com/mcp", auth: { oauth: {} } }
+  notion-hooks: { type: webhook, signature: sha256, signature_header: X-Notion-Signature, signature_prefix: "sha256=", format: notion }
   jira-hooks: { type: webhook, signature: sha256, signature_header: X-Hub-Signature, secret: env:AGW_HOOK }
   slack: { type: webhook, signature: slack, secret: env:AGW_HOOK }
   sentry: { type: webhook, signature: sha256, signature_header: Sentry-Hook-Signature, secret: env:AGW_HOOK }

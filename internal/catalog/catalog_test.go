@@ -258,3 +258,24 @@ func TestDiscordEntry(t *testing.T) {
 		t.Fatal("a bad public key was accepted")
 	}
 }
+
+func TestNotionEntry(t *testing.T) {
+	e := Get("notion")
+	if e == nil || e.Status != "available" {
+		t.Fatalf("entry: %+v", e)
+	}
+	res, err := e.Render(map[string]string{"name": "nt", "webhook": "on"}, Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Items) != 2 || res.Items[0].Name != "nt" || res.Items[1].Name != "nt-hooks" {
+		t.Fatalf("%+v", res.Items)
+	}
+	if m, h := res.Items[0].YAML, res.Items[1].YAML; !strings.Contains(m, "url: https://mcp.notion.com/mcp") || !strings.Contains(m, "oauth: {}") ||
+		!strings.Contains(h, "format: notion") || !strings.Contains(h, "signature_header: X-Notion-Signature") || !strings.Contains(h, `signature_prefix: "sha256="`) || strings.Contains(h, "secret:") {
+		t.Fatalf("yaml: %s\n%s", m, h)
+	}
+	if len(res.Secrets) != 0 || !strings.Contains(e.Setup, "not yet verified") && !strings.Contains(e.Setup, "Not yet verified") {
+		t.Fatalf("secrets %+v setup %q", res.Secrets, e.Setup)
+	}
+}

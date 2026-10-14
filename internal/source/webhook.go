@@ -32,9 +32,11 @@ type WebhookOptions struct {
 	SigPrefix       string // sha256: the header may hold a comma-separated list of PREFIX+hex; any match counts
 	TimestampSep    string // sha256 with a timestamp: what joins timestamp and body (default ".")
 	IDHeader        string
-	Format          string // "eventgrid": answer Azure Event Grid's handshakes and deliver each event of a batch; "discord" (signature ed25519): answer Discord's PING and interactions
-	MaxBody         int64
-	Now             func() time.Time
+	Format          string // "eventgrid": answer Azure Event Grid's handshakes and deliver each event of a batch; "discord" (signature ed25519): answer Discord's PING and interactions; "notion": capture Notion's verification token until a secret is set
+	// OnVerificationToken receives Notion's verification token (format notion, no secret).
+	OnVerificationToken func(string)
+	MaxBody             int64
+	Now                 func() time.Time
 	// PreLimit counts every request before it is read or verified (a flood of
 	// unauthenticated posts); Limit counts verified deliveries. Both are per
 	// source; nil means a private limiter (fine for tests, not for per-request use).
@@ -78,6 +80,8 @@ func (l *Limiter) Allow(now time.Time) bool {
 
 type Deliver func(ctx context.Context, ev Event, deliveryID string) (dup bool, err error)
 
+var notionToken = regexp.MustCompile(`^secret_[A-Za-z0-9]{20,100}$`)
+
 func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 	if o.MaxBody <= 0 {
 		o.MaxBody = 1 << 20
@@ -117,6 +121,21 @@ func NewWebhook(o WebhookOptions, deliver Deliver) http.Handler {
 		}
 		if int64(len(body)) > o.MaxBody {
 			reject(http.StatusRequestEntityTooLarge, "body too large")
+			return
+		}
+		if o.Format == "notion" && o.Secret == "" {
+			// Awaiting Notion's one-time token: take exactly {"verification_token":"secret_…"}, deliver nothing.
+			var m map[string]any
+			ok := json.Unmarshal(body, &m) == nil && len(m) == 1
+			tok, _ := m["verification_token"].(string)
+			if !ok || !notionToken.MatchString(tok) {
+				reject(http.StatusUnauthorized, "awaiting verification token")
+				return
+			}
+			if o.OnVerificationToken != nil {
+				o.OnVerificationToken(tok)
+			}
+			w.WriteHeader(http.StatusOK)
 			return
 		}
 		header := o.SigHeader

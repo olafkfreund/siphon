@@ -56,6 +56,9 @@ type Pipeline struct {
 	hookRejects sync.Map // source name -> *rejects
 	hookLimits  sync.Map // source name -> *hookLimit; webhook rate limits survive requests and Apply
 
+	notionMu      sync.Mutex
+	notionPending map[string]pendingToken // latest Notion verification token per source; memory only
+
 	applyMu     sync.Mutex // serialises Apply and Serve's poller start
 	serveCtx    context.Context
 	stopPollers func() // nil unless Serve is running
