@@ -423,6 +423,34 @@ services:
       Slack signs each request with your signing secret; Siphon rejects anything older than five minutes.
       Subscribe to the events you want and save.
 
+  - id: mattermost
+    name: Mattermost
+    mark: MM
+    category: chat
+    summary: "Outgoing webhooks and slash commands from Mattermost, verified by the token Mattermost generates."
+    capabilities: [webhooks]
+    status: available
+    fields:
+      - {<<: *f_name, default: mattermost}
+      - {key: token, label: Token, type: secret, required: true, help: 'Mattermost shows it after you save the outgoing webhook or slash command (Integrations).', section: 2}
+      - {key: reply, label: Immediate reply, type: text, help: 'Optional: shown to the user at once, for example "Working on it…".'}
+    creates:
+      - kind: sources
+        name: '{{.name}}-hooks'
+        when: 'true'
+        hook: true
+        yaml: |
+          type: webhook
+          signature: body-token
+          secret: {{secret "token" "secret"}}
+          {{- if .reply}}
+          reply_text: {{.reply | printf "%q"}}
+          {{- end}}
+    setup: |
+      In Mattermost: Integrations → Outgoing Webhooks or Slash Commands → Add.
+      Callback URL: <your Siphon public URL>/hook/<name>-hooks (method POST).
+      Save, copy the token Mattermost shows, then connect with it.
+
   # ---- monitoring
   - id: sentry
     name: Sentry
@@ -741,7 +769,7 @@ services:
     status: available
     fields:
       - {<<: *f_name, default: webhook}
-      - {key: mode, label: How deliveries are verified, type: choice, choices: [github, sha256, standard-webhooks, token, slack, stripe], default: sha256, help: 'sha256 and token need the header below. slack and stripe need the provider''s signing secret.'}
+      - {key: mode, label: How deliveries are verified, type: choice, choices: [github, sha256, standard-webhooks, token, body-token, slack, stripe], default: sha256, help: 'sha256 and token need the header below. body-token reads the token from the request body and needs no header. slack and stripe need the provider''s signing secret.'}
       - {key: header, label: Header, type: text, pattern: '[A-Za-z][A-Za-z0-9-]*', pattern_error: 'the header is a name like X-Signature', help: 'sha256: the header carrying the signature. token: the header carrying the token.'}
       - {key: secret, label: Secret, type: secret, help: 'Leave empty to generate one (shown once). Slack and Stripe: paste the provider''s signing secret.', section: 2}
     creates:
@@ -790,7 +818,6 @@ services:
   # ---- not yet: listed so people know, with the reason
   - {id: discord, name: Discord, mark: DC, category: chat, summary: Discord interactions and bot events., status: not-yet, reason: 'needs an ed25519 signature mode and the PING handshake, and does not cover channel messages'}
   - {id: teams, name: Microsoft Teams, mark: MT, category: chat, summary: Microsoft Teams outgoing webhooks., status: not-yet, reason: 'needs a teams-hmac signature mode with a synchronous reply within 5 seconds'}
-  - {id: mattermost, name: Mattermost, mark: MM, category: chat, summary: Mattermost outgoing webhooks and slash commands., status: not-yet, reason: 'the token is in the request body: needs a body-token mode'}
   - {id: matrix, name: Matrix, mark: MX, category: chat, summary: Matrix application-service events., status: not-yet, reason: 'needs PUT requests and a {} reply'}
   - {id: notion, name: Notion, mark: NO, category: issues, summary: Notion page and database events., status: not-yet, reason: 'needs the verification_token handshake; the remote MCP is OAuth only'}
   - {id: google-pubsub, name: Google Pub/Sub, mark: GP, category: cloud, summary: Google Cloud Pub/Sub push subscriptions., status: not-yet, reason: 'needs a Google OIDC (RS256 JWT) push-authentication mode'}
