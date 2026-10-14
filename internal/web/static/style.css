@@ -532,8 +532,8 @@ pre .add { color: #5ef0b4 } pre .del { color: #ff8fa0 }
 /* YAML editor (app.js initCodeEditors): the gutter mirrors the textarea's lines. */
 .code-editor { display: grid; grid-template-columns: auto 1fr; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden }
 .code-gutter, .code-input { font-family: var(--mono); font-size: .85rem; line-height: 1.5; padding-block: .55rem }
-.code-gutter { text-align: right; color: var(--muted); background: var(--surface-2); user-select: none; overflow: hidden; padding-inline: .6rem }
-.code-gutter .is-err { background: color-mix(in srgb, var(--coral) 25%, transparent); color: var(--bad-text) }
+.code-gutter { contain: size; text-align: right; color: var(--muted); background: var(--surface-2); user-select: none; overflow: hidden; padding-inline: .6rem }
+.code-gutter .is-err { background: color-mix(in srgb, var(--coral) 12%, transparent); color: var(--bad-text); font-weight: 650 }
 .code-input { tab-size: 2; white-space: pre; overflow: auto }
 .code-editor .code-input { border: 0; border-radius: 0; min-width: 0 }
 .yaml-status { margin-top: .4rem; font-size: .85rem; min-height: 1.3em }

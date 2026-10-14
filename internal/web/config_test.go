@@ -555,6 +555,11 @@ func TestConfigValidateFragment(t *testing.T) {
 	if b := w.Body.String(); w.Code != 200 || !strings.Contains(b, "yaml-status err") || !regexp.MustCompile(`data-line="\d+"`).MatchString(b) {
 		t.Fatalf("invalid: %d %s", w.Code, b)
 	}
+	// a type error comes from re-parsing the merged config: its line is not the textarea's
+	w = ce.post("/config/rules/r2/validate", form("source: gh\nwhen: \"true\"\ncooldown: [1, 2]\naction: {cmd: [echo]}\n"))
+	if b := w.Body.String(); w.Code != 200 || !strings.Contains(b, "yaml-status err") || strings.Contains(b, "data-line") {
+		t.Fatalf("type error marked a line: %d %s", w.Code, b)
+	}
 	if n, _ := store.ConfigItems(ce.st.DB); len(n) != 0 || ce.latest() != 0 {
 		t.Fatal("validate wrote")
 	}
