@@ -23,6 +23,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/olafkfreund/siphon/internal/config"
+	"github.com/olafkfreund/siphon/internal/source"
 )
 
 // clock is an injectable clock.
@@ -568,5 +569,18 @@ func TestIssuerPinRefusesOldLogin(t *testing.T) {
 	e.pin(e.as.URL)
 	if s, _ := e.m.Status("s"); s != "none" {
 		t.Fatalf("empty stored issuer accepted: %s", s)
+	}
+}
+
+func TestRedirectMeansLoginRequired(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/auth_redirect.do", http.StatusFound)
+	}))
+	defer srv.Close()
+	e := newEnv(t, config.OAuth{})
+	e.cfg.Sources["s"].URL = srv.URL + "/mcp"
+	_, err := (source.MCP{Options: source.MCPOptions{Name: "s", URL: srv.URL + "/mcp", Tool: "t", AllowPrivate: true, OAuth: e.m.Handler("s")}}).Poll(context.Background())
+	if !errors.Is(err, ErrLoginRequired) || !strings.Contains(err.Error(), "redirected") || strings.Contains(err.Error(), "Found") {
+		t.Fatalf("got %v", err)
 	}
 }

@@ -284,7 +284,11 @@ func (h handler) TokenSource(context.Context) (oauth2.TokenSource, error) {
 
 func (h handler) Authorize(_ context.Context, _ *http.Request, resp *http.Response) error {
 	resp.Body.Close()
-	return loginRequired(h.name)
+	err := loginRequired(h.name)
+	if resp.Header.Get("Siphon-Redirected") != "" {
+		err = fmt.Errorf("%w (the server redirected)", err)
+	}
+	return err
 }
 
 // Status is none, pending, ok or expired, and the access token's expiry.
