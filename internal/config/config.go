@@ -316,32 +316,33 @@ type Limits struct {
 }
 
 type Source struct {
-	Type         string            `yaml:"type"` // mcp|http|webhook|schedule
-	URL          string            `yaml:"url"`
-	Command      []string          `yaml:"command"`
-	Read         *Read             `yaml:"read"`
-	Poll         Duration          `yaml:"poll"`
-	Auth         *Auth             `yaml:"auth"`
-	AllowPrivate bool              `yaml:"allow_private"`
-	Method       string            `yaml:"method"`  // http: GET (default) or POST
-	Headers      map[string]Secret `yaml:"headers"` // values may be env:/file: refs or plain literals
-	Body         string            `yaml:"body"`
-	Secret       Secret            `yaml:"secret"`           // webhook HMAC key
-	Signature    string            `yaml:"signature"`        // github|sha256|token|body-token|standard-webhooks|slack|stripe|ed25519
-	SigHeader    string            `yaml:"signature_header"` // sha256 preset
-	TokenHeader  string            `yaml:"token_header"`     // token preset
-	TimestampHdr string            `yaml:"timestamp_header"`
-	TokenField   string            `yaml:"token_field"`         // body-token: the body field holding the token (default token)
-	ReplyText    string            `yaml:"reply_text"`          // body-token: answer 200 {"text": …} instead of 202
-	SigPrefix    string            `yaml:"signature_prefix"`    // sha256: e.g. "v1="; the header may list several
-	TimestampSep string            `yaml:"timestamp_separator"` // sha256 with timestamp_header: "." (default) or ":"
-	ID           string            `yaml:"id"`                  // delivery id, e.g. header.X-GitHub-Delivery
-	Format       string            `yaml:"format"`              // webhook: eventgrid (Azure Event Grid handshakes and batches) | notion
-	Env          map[string]Secret `yaml:"env"`                 // stdio MCP child env; values are env:/file: refs
-	Package      string            `yaml:"package"`             // name in server.mcp_packages; fills Command
-	AWS          string            `yaml:"aws"`                 // provider: aws credential; the daemon injects short-lived keys
-	Connection   string            `yaml:"connection"`          // metadata: the Services connection this item belongs to
-	Service      string            `yaml:"service"`             // metadata: the catalogue service that made it
+	Type            string            `yaml:"type"` // mcp|http|webhook|schedule
+	URL             string            `yaml:"url"`
+	Command         []string          `yaml:"command"`
+	Read            *Read             `yaml:"read"`
+	Poll            Duration          `yaml:"poll"`
+	Auth            *Auth             `yaml:"auth"`
+	AllowPrivate    bool              `yaml:"allow_private"`
+	Method          string            `yaml:"method"`  // http: GET (default) or POST
+	Headers         map[string]Secret `yaml:"headers"` // values may be env:/file: refs or plain literals
+	Body            string            `yaml:"body"`
+	Secret          Secret            `yaml:"secret"`           // webhook HMAC key
+	Signature       string            `yaml:"signature"`        // github|sha256|token|body-token|standard-webhooks|slack|stripe|ed25519
+	SigHeader       string            `yaml:"signature_header"` // sha256 preset
+	TokenHeader     string            `yaml:"token_header"`     // token preset
+	TimestampHdr    string            `yaml:"timestamp_header"`
+	TokenField      string            `yaml:"token_field"`         // body-token: the body field holding the token (default token)
+	ReplyText       string            `yaml:"reply_text"`          // body-token: answer 200 {"text": …} instead of 202
+	SigPrefix       string            `yaml:"signature_prefix"`    // sha256: e.g. "v1="; the header may list several
+	TimestampSep    string            `yaml:"timestamp_separator"` // sha256 with timestamp_header: "." (default) or ":"
+	ID              string            `yaml:"id"`                  // delivery id, e.g. header.X-GitHub-Delivery
+	Format          string            `yaml:"format"`              // webhook: eventgrid (Azure Event Grid handshakes and batches), discord, notion, matrix
+	AllowQueryToken bool              `yaml:"allow_query_token"`   // matrix: also accept ?access_token=
+	Env             map[string]Secret `yaml:"env"`                 // stdio MCP child env; values are env:/file: refs
+	Package         string            `yaml:"package"`             // name in server.mcp_packages; fills Command
+	AWS             string            `yaml:"aws"`                 // provider: aws credential; the daemon injects short-lived keys
+	Connection      string            `yaml:"connection"`          // metadata: the Services connection this item belongs to
+	Service         string            `yaml:"service"`             // metadata: the catalogue service that made it
 
 	// schedule: fires at moments, no polling.
 	At       string         `yaml:"at"`       // 5-field cron, @hourly|@daily|@weekly|@monthly, or "every <d>" (d >= 1m)
@@ -1575,12 +1576,22 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 			if s.Signature != "sha256" || !strings.EqualFold(s.SigHeader, "X-Notion-Signature") || s.SigPrefix != "sha256=" {
 				add("%s: format notion needs signature sha256, signature_header X-Notion-Signature and signature_prefix sha256=", p)
 			}
+		case s.Format == "matrix":
+			if s.Signature != "token" || !strings.EqualFold(s.TokenHeader, "Authorization") {
+				add("%s: format matrix needs signature token and token_header Authorization", p)
+			}
+			if s.ID != "" {
+				add("%s: id is not allowed with format matrix (each event carries its own id)", p)
+			}
 		case s.Format != "eventgrid":
-			add("%s: format must be eventgrid, discord or notion, got %q", p, s.Format)
+			add("%s: format must be eventgrid, discord, notion or matrix, got %q", p, s.Format)
 		case s.Signature != "token":
 			add("%s: format eventgrid needs signature token", p)
 		case s.ID != "":
 			add("%s: id is not allowed with format eventgrid (each event carries its own id)", p)
+		}
+		if s.AllowQueryToken && s.Format != "matrix" {
+			add("%s: allow_query_token is only for format matrix", p)
 		}
 		if s.SigPrefix != "" && s.Signature != "sha256" {
 			add("%s: signature_prefix is only for signature sha256", p)
