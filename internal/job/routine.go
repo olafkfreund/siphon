@@ -93,7 +93,7 @@ func (p *Pipeline) runRoutine(ctx context.Context, cfg *config.Config, j store.Q
 		if st.If != "" {
 			run, err := evalIf(ctx, st.If, env)
 			if err != nil {
-				prog.Steps[st.ID] = stepResult{Exit: -1, Output: "if: " + err.Error()}
+				prog.Steps[st.ID] = stepResult{Exit: -1, Output: "if: " + pollErrText(cfg, err)}
 				if err := store.SaveProgress(p.Store.DB, j.ID, i+1, marshalProgress(prog)); err != nil {
 					return "failed", -1, err.Error()
 				}
