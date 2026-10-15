@@ -266,7 +266,7 @@ func TestMCPParityTools(t *testing.T) {
 	if out := m.cliEnv.ok("status"); strings.Contains(out, "disabled:") {
 		t.Fatalf("rule changed without --allow-write: %s", out)
 	}
-	if out, isErr := m.call(t, "reset", map[string]any{"kind": "rules", "name": "r1"}); !strings.Contains(out, "writes are disabled") && !isErr {
+	if out, isErr := m.call(t, "reset", map[string]any{"kind": "rules", "name": "r1"}); isErr || !strings.Contains(out, `"dry_run": true`) {
 		t.Fatalf("reset: %s", out)
 	}
 	if out, isErr := m.call(t, "restore", map[string]any{"rev": 1}); !isErr || !strings.Contains(out, "writes are disabled") {

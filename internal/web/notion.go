@@ -68,8 +68,7 @@ func (s *server) notionRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sources/{name}/notion-verification", s.api(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		s.reply(w, r, func(r *http.Request) (any, int, error) {
-			src := s.Config().Sources[r.PathValue("name")]
-			if src == nil || src.Type != "webhook" || src.Format != "notion" || s.NotionPending == nil {
+			if !s.notionAwaiting(r.PathValue("name")) || s.NotionPending == nil {
 				return nil, 404, errMsg("no such Notion source")
 			}
 			tok, at, ok := s.NotionPending(r.PathValue("name"))

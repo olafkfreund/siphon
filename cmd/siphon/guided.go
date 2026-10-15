@@ -867,6 +867,9 @@ func (c *cli) logoutLogin(o *connectOpts) error {
 // connectNotion shows the verification token Notion sent to a webhook source,
 // and after confirmation stores it as the source's secret.
 func (c *cli) connectNotion(source string, o *connectOpts) error {
+	if c.json() && !o.yes {
+		return usageErr("-o json needs --yes", "the confirmation prompt would break the JSON output")
+	}
 	path := "/api/sources/" + url.PathEscape(source) + "/notion-verification"
 	var pend struct {
 		Token string `json:"token"`

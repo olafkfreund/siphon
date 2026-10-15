@@ -21,7 +21,6 @@ func (s *server) diagAPI(mux *http.ServeMux) {
 	route("POST /api/rules/{name}/test", func(r *http.Request) (any, int, error) {
 		var body struct {
 			Rule    string            `json:"rule"` // unsaved rule YAML: test this instead of the saved rule
-
 			Event   json.RawMessage   `json:"event"`
 			Headers map[string]string `json:"headers"`
 			UseLast bool              `json:"use_last"`

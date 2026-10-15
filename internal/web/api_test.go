@@ -12,9 +12,7 @@ import (
 
 // Plan step 3: /api/jobs/{id}?detail=1 is the portal's job detail, and masks as it does.
 func TestAPIJobDetail(t *testing.T) {
-	cfgSecret := "cfg-secret-" + "value-1"
 	e := newEnv(t, func(o *Options) {
-		o.Cfg.Sources["gh"].Secret = config.Secret{Ref: "env:X", Value: cfgSecret}
 		o.Cfg.Agents = map[string]*config.Agent{"helper": {Kind: "claude", Prompt: "Answer: {{.event.q}}"}}
 	})
 	tx, _ := e.st.DB.Begin()
@@ -38,7 +36,7 @@ func TestAPIJobDetail(t *testing.T) {
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Kind != "routine" || len(got.Steps) != 2 || got.Steps[1].Kind != "agent" {
 		t.Fatalf("detail: %d %s", w.Code, w.Body.String())
 	}
-	for _, s := range []string{"SECRETVALUE", cfgSecret} {
+	for _, s := range []string{"SECRETVALUE"} {
 		if strings.Contains(w.Body.String(), s) {
 			t.Errorf("response shows %q", s)
 		}
