@@ -73,6 +73,17 @@ spec: spec/2026-10-15-133-ponytail-cleanup.md
    Traps: link-local addresses (169.254/16, metadata) must stay blocked
    wherever they are blocked today.
 
+5. **Duplicates added by #132** (deferred from its review):
+   - build the notification JSON in one place (`notificationRow` in
+     `internal/web/notifyapi.go`). Job detail uses it, and the `json` tags
+     on `store.Notification` go;
+   - one `history` prefix filter, shared by `cmd/siphon/mcp.go` and
+     `buildHistory` in `verbs.go`;
+   - `siphon test -f` reuses the `apply -f` file reader and `parseApply`.
+
+   Verify: `go test -race ./cmd/siphon ./internal/web`. The JSON shape of
+   `/api/notifications` stays the same.
+
 ## Tests
 
 ```sh
@@ -87,7 +98,9 @@ Revert the PR; there is no behaviour or data change.
 
 ## Deviations
 
-None yet.
+- **Step 5 added before implementation:** three duplicates that #132's
+  review deferred to this issue. The spec's "one copy of each" design
+  covers them.
 
 ## Audit findings (verbatim, ponytail-audit of main at 675db3a)
 
