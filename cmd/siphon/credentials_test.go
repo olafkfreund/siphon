@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/olafkfreund/siphon/internal/store"
 )
 
 // run captures stdout of credentials(args) with stdin fed from in.
@@ -99,5 +102,26 @@ func TestValidateVerboseEgress(t *testing.T) {
 	b, _ := io.ReadAll(or)
 	if err != nil || !strings.Contains(string(b), "agent a egress: chatgpt.com:443, auth.openai.com:443") || !strings.Contains(string(b), "agent b egress: off") {
 		t.Fatalf("%q %v", b, err)
+	}
+}
+
+// #135 A9: credentials ls sees a connection that exists only as a portal item.
+func TestCredentialsLsSeesPortalOverlay(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "siphon.yaml")
+	os.WriteFile(cfg, []byte("server: { sandbox: none, db: "+dir+"/s.db }\n"), 0o600)
+	st, err := store.Open(dir + "/s.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, _ := st.DB.Begin()
+	if err := store.PutConfigItem(tx, "credentials", "portal-only", "provider: claude", false, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	tx.Commit()
+	st.Close()
+	ls, err := runCreds(t, "", "ls", "-config", cfg)
+	if err != nil || !strings.Contains(ls, "portal-only") {
+		t.Fatalf("ls: %q %v", ls, err)
 	}
 }

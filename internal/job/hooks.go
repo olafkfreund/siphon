@@ -128,14 +128,17 @@ func (p *Pipeline) hookLimiters(name string) *hookLimit {
 // deliver records the replay key and enqueues in one transaction, so a
 // crash can neither lose an accepted webhook nor accept it twice.
 func (p *Pipeline) deliver(ctx context.Context, ev source.Event, key string) (bool, error) {
-	if serr := store.SetSourceEvent(p.Store.DB, ev.Source, ev.Data, ev.Headers); serr != nil {
-		slog.Warn("store last event", "source", ev.Source, "err", serr)
-	}
-	_, ids, dup, ruleErr, err := p.handleEvent(ctx, p.Config(), rule.Event{Source: ev.Source, Headers: ev.Headers, Data: ev.Data},
+	cfg := p.Config()
+	_, ids, dup, ruleErr, err := p.handleEvent(ctx, cfg, rule.Event{Source: ev.Source, Headers: ev.Headers, Data: ev.Data},
 		false, "hook:"+ev.Source, key)
+	if !dup { // a replay must not overwrite the newer last event
+		if serr := store.SetSourceEvent(p.Store.DB, ev.Source, ev.Data, ev.Headers); serr != nil {
+			slog.Warn("store last event", "source", ev.Source, "err", serr)
+		}
+	}
 	if ruleErr != nil {
 		// Committed anyway: accept (202) so the sender doesn't retry into a 409.
-		slog.Warn("webhook rules", "source", ev.Source, "err", ruleErr)
+		slog.Warn("webhook rules", "source", ev.Source, "err", pollErrText(cfg, ruleErr))
 	}
 	if err != nil {
 		slog.Warn("webhook", "source", ev.Source, "err", err)

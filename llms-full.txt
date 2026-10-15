@@ -3897,7 +3897,7 @@ working for the CLI, the API and scripts.
 | Role | Can |
 |---|---|
 | **viewer** | read every page. Secrets in `env:` or `file:` refs are never shown, but plain values in the config are, including header values, and so is the config export |
-| **operator** | a viewer who can also approve and deny jobs, turn rules on and off, run rule tests and the egress preview, test connections, services and notifications, and start an MCP OAuth login |
+| **operator** | a viewer who can also approve and deny jobs, accept a Notion verification token, turn rules on and off, run rule tests and the egress preview, test connections, services and notifications, and start an MCP OAuth login |
 | **admin** | everything, including config edits, logins, notifications and services |
 
 The server checks the role on every request. Controls a role can't use are

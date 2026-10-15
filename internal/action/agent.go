@@ -119,10 +119,8 @@ func RunAgent(ctx context.Context, o AgentOptions) (AgentResult, error) {
 	}
 	exit, output, stdout, wb, err := runCommand(ctx, argv, sb, secrets, stdin, true)
 	result, raw := parseResult(o.Kind, stdout)
-	if o.Kind == "agy" {
-		if m, ok := raw.(map[string]any); ok && m["status"] == "ERROR" && exit == 0 {
-			exit = 1
-		}
+	if m, ok := raw.(map[string]any); ok && exit == 0 && ((o.Kind == "agy" && m["status"] == "ERROR") || m["is_error"] == true) {
+		exit = 1
 	}
 	out := AgentResult{Exit: exit, Output: output, Stdout: stdout, Result: result, Raw: raw}
 	if exit != 0 {

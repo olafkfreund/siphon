@@ -461,6 +461,9 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 	var bridged []string
 	for _, name := range a.MCP {
 		s := cfg.Sources[name]
+		if s == nil {
+			return "failed", -1, "mcp source " + name + " no longer exists", nil
+		}
 		if len(s.Env) > 0 || s.AWS != "" {
 			bridged = append(bridged, name) // built after the login is acquired, see below
 			continue
@@ -583,7 +586,7 @@ func (p *Pipeline) agentExec(ctx context.Context, cfg *config.Config, j store.Qu
 		return "failed", 1, "agent result not recorded: " + err.Error() + "\n" + out, res.Stdout
 	}
 	if ruleErr != nil {
-		slog.Warn("agent-result rules", "job", j.ID, "err", ruleErr)
+		slog.Warn("agent-result rules", "job", j.ID, "err", pollErrText(cfg, ruleErr))
 	}
 	return "done", 0, out, res.Stdout
 }

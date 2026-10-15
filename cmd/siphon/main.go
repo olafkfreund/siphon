@@ -570,7 +570,11 @@ func credentials(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := cfg.Validate(); err != nil {
+	items, err := dbOverlay(cfg.Server.DB) // portal-made connections count too
+	if err != nil {
+		return err
+	}
+	if cfg, err = tryLoad(*path, items); err != nil {
 		return err
 	}
 	st := cred.StoreFor(cfg)
