@@ -38,6 +38,7 @@ func guardedClient(allowPrivate bool, timeout time.Duration, maxBody int64, stre
 	}
 	dialer := &net.Dialer{Timeout: timeout}
 	transport := &http.Transport{
+		IdleConnTimeout: 90 * time.Second,
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(address)
 			if err != nil {
@@ -172,6 +173,12 @@ func blockedIP(addr netip.Addr, allowPrivate bool) bool {
 type limitedTransport struct {
 	base  http.RoundTripper
 	limit int64
+}
+
+func (t limitedTransport) CloseIdleConnections() {
+	if c, ok := t.base.(interface{ CloseIdleConnections() }); ok {
+		c.CloseIdleConnections()
+	}
 }
 
 func (t limitedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
