@@ -277,7 +277,7 @@ rules:
   for a person. The job output is `servicenow <op> <table> <number>`, and
   a later step reads `{{.steps.<id>.json.number}}`.
 - **The portal** shows these rules, but its form cannot edit them: use the
-  YAML tab.
+  **Edit as YAML** section.
 
 Ready-made: `siphon template alert-to-servicenow-incident` and
 `siphon template servicenow-change-on-deploy`.
