@@ -464,7 +464,7 @@ func TestClientModeRule(t *testing.T) {
 		want bool
 	}{
 		{"serve", nil, false}, {"validate", nil, false}, {"run-once", nil, false}, {"schema", nil, false}, {"exec-job", nil, false},
-		{"config", []string{"export"}, false}, {"credentials", []string{"ls"}, false}, {"rules", []string{"test"}, false},
+		{"config", []string{"export"}, true}, {"config", []string{"export", "-config", "x"}, false}, {"credentials", []string{"ls"}, false}, {"rules", []string{"test"}, false},
 		{"jobs", []string{"ls", "-config", "x.yaml"}, false}, {"approve", []string{"-config=x.yaml", "3"}, false}, {"jobs", []string{"ls"}, true},
 		{"approve", []string{"3"}, true}, {"get", []string{"rules"}, true}, {"status", nil, true}, {"apply", []string{"-config", "x"}, true},
 	} {
@@ -491,5 +491,63 @@ func TestJSONOutputIsNotConsent(t *testing.T) {
 	}
 	if code, _, er := e.do("apply", "-f", f, "-o", "json", "--yes"); code != 0 {
 		t.Fatalf("with --yes: %d %s", code, er)
+	}
+}
+
+func TestConfigExportRemote(t *testing.T) {
+	e := newCLIEnv(t)
+	if out := e.ok("config", "export"); !strings.Contains(out, "rules:") || !strings.Contains(out, "r1") {
+		t.Fatalf("export: %s", out)
+	}
+	if out := e.ok("config", "export", "-o", "json"); !strings.Contains(out, `"yaml"`) {
+		t.Fatalf("json: %s", out)
+	}
+	if code, _, _ := e.do("config"); code != 2 {
+		t.Fatalf("usage: %d", code)
+	}
+	if code, _, _ := e.do("config", "nope"); code != 2 {
+		t.Fatalf("usage: %d", code)
+	}
+}
+
+func TestCLIJobsShowDetail(t *testing.T) {
+	e := newCLIEnv(t)
+	tx, _ := e.st.DB.Begin()
+	now := time.Now()
+	id, _ := store.InsertJob(tx, store.Job{Rule: "r1", State: "pending_approval", RunAfter: now,
+		ActionJSON: `{"action":{"Cmd":["echo","hi"]},"steps":[{"id":"s1","cmd":["echo","one"]}]}`}, now)
+	store.CreateApproval(tx, id, []byte("h"), now.Add(time.Hour))
+	tx.Commit()
+	out := e.ok("jobs", "show", "1", "--detail")
+	if !strings.Contains(out, "steps:") || !strings.Contains(out, "s1") || !strings.Contains(out, "cmd echo") {
+		t.Fatalf("detail: %s", out)
+	}
+	if out = e.ok("jobs", "show", "1", "--detail", "-o", "json"); !strings.Contains(out, `"steps"`) {
+		t.Fatalf("json: %s", out)
+	}
+	if out = e.ok("get", "approvals"); !strings.Contains(out, "WHAT") || !strings.Contains(out, "cmd echo") {
+		t.Fatalf("approvals: %s", out)
+	}
+}
+
+func TestCLIGetEgress(t *testing.T) {
+	e := newCLIEnvFile(t, "server: { sandbox: none, db: DIR/s.db }\nagents:\n  helper: { kind: claude, prompt: hi }\nsources:\n  gh: { type: webhook, secret: env:AGW_HOOK, signature: github }\nrules:\n  - { name: r1, source: gh, when: \"true\", action: { cmd: [echo, one] } }\n")
+	out := e.ok("get", "egress")
+	if !strings.Contains(out, "OWNER") || !strings.Contains(out, "helper") || !strings.Contains(out, "blocked recently") {
+		t.Fatalf("text: %s", out)
+	}
+	if out = e.ok("get", "egress", "-o", "json"); !strings.Contains(out, `"lists"`) {
+		t.Fatalf("json: %s", out)
+	}
+}
+
+func TestCLIStatusLast24h(t *testing.T) {
+	e := newCLIEnv(t)
+	if out := e.ok("status"); !strings.Contains(out, "last 24h: 0 jobs") {
+		t.Fatalf("text: %s", out)
+	}
+	var st map[string]any
+	if err := json.Unmarshal([]byte(e.ok("status", "-o", "json")), &st); err != nil || st["last_24h"] == nil {
+		t.Fatalf("json: %v %v", err, st)
 	}
 }

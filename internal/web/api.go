@@ -41,18 +41,43 @@ func (s *server) apiRoutes(mux *http.ServeMux) {
 		if err != nil {
 			return nil, 400, errMsg("bad job id")
 		}
+		if r.URL.Query().Get("detail") != "" {
+			v, ok, err := s.jobDetail(id)
+			if err == nil && !ok {
+				return nil, 404, errMsg("no such job")
+			}
+			return v, 200, err
+		}
 		j, ok, err := s.job(id)
 		if err == nil && !ok {
 			return nil, 404, errMsg("no such job")
 		}
 		return j, 200, err
 	})
+	get("/api/dashboard", func(*http.Request) (any, int, error) {
+		v, err := s.last24h()
+		return v, 200, err
+	})
+	get("/api/egress", func(*http.Request) (any, int, error) {
+		v, err := s.egress()
+		return v, 200, err
+	})
 	get("/api/approvals", func(*http.Request) (any, int, error) {
 		v, err := store.PendingApprovals(s.Store.DB)
-		if v == nil {
-			v = []store.PendingApproval{}
+		if err != nil {
+			return nil, 200, err
 		}
-		return v, 200, err
+		waiting, err := s.runs("pending_approval", 1000)
+		if err != nil {
+			return nil, 200, err
+		}
+		acts := s.approvalActions(waiting, v)
+		out := []approvalRow{}
+		for _, a := range v {
+			x := acts[a.JobID]
+			out = append(out, approvalRow{a, x.Kind, x.Target, x.Source, x.SourceType})
+		}
+		return out, 200, nil
 	})
 	get("/api/audit", func(r *http.Request) (any, int, error) {
 		q := r.URL.Query()
@@ -190,4 +215,13 @@ func (s *server) reply(w http.ResponseWriter, r *http.Request, f func(*http.Requ
 	}
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(v)
+}
+
+// approvalRow is a pending approval plus what it will run, as the portal shows it.
+type approvalRow struct {
+	store.PendingApproval
+	Kind       string `json:"kind"`
+	Target     string `json:"target"`
+	Source     string `json:"source"`
+	SourceType string `json:"source_type"`
 }

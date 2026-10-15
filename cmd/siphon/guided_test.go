@@ -538,3 +538,62 @@ func TestNewTaskWizardSchedule(t *testing.T) {
 		t.Fatalf("wizard and flags differ:\n%s\n---\n%s", wiz, flag)
 	}
 }
+
+func TestConnectLoginLogout(t *testing.T) {
+	e := newCLIEnv(t)
+	e.write("k", "sk-x")
+	e.ok("connect", "login", "claude", "--name", "cl", "--api-key", "@"+filepath.Join(e.dir, "k"))
+	// no terminal and no --yes: usage error, and the login stays
+	if code, _, _ := e.do("connect", "login", "--name", "cl", "--logout"); code != 2 {
+		t.Fatalf("no yes: %d", code)
+	}
+	if code, _, _ := e.do("connect", "login", "--logout"); code != 2 {
+		t.Fatalf("no name: %d", code)
+	}
+	if out := e.ok("get", "connections"); !strings.Contains(out, "cl") {
+		t.Fatalf("login gone: %s", out)
+	}
+	// the credentials delete points at the right command
+	e.ok("connect", "login", "claude", "--name", "c2", "--api-key", "@"+filepath.Join(e.dir, "k"))
+	_, _, er := e.do("delete", "credentials", "c2")
+	if !strings.Contains(er, "connect login --name c2 --logout") {
+		t.Fatalf("hint: %s", er)
+	}
+	if out := e.ok("connect", "login", "--name", "cl", "--logout", "--yes"); !strings.Contains(out, "deleted login cl") {
+		t.Fatalf("logout: %s", out)
+	}
+	if code, _, _ := e.do("connect", "login", "--name", "cl", "--logout", "--yes"); code != 4 {
+		t.Fatalf("404: %d", code)
+	}
+}
+
+func TestTestUnsavedRule(t *testing.T) {
+	e := newCLIEnv(t)
+	before, _ := store.ConfigItems(e.st.DB)
+	rule := e.write("rule.yaml", "rules:\n  - { name: draft, source: gh, when: 'event.sev == \"high\"', action: { cmd: [echo, hi] } }\n")
+	ev := e.write("ev.json", `{"sev":"high"}`)
+	if out := e.ok("test", "-f", rule, ev); !strings.Contains(out, "echo hi") {
+		t.Fatalf("fires: %s", out)
+	}
+	if out := e.ok("test", "-f", rule, e.write("ev2.json", `{"sev":"low"}`)); !strings.Contains(out, "no fire") {
+		t.Fatalf("no fire: %s", out)
+	}
+	bad := e.write("bad.yaml", "rules:\n  - { name: draft, source: nope, when: 'true', action: { cmd: [echo] } }\n")
+	if code, _, _ := e.do("test", "-f", bad, ev); code != 3 {
+		t.Fatalf("invalid rule: %d", code)
+	}
+	invalid := e.write("inv.yaml", "rules:\n  - { name: draft, source: gh, when: 'event.(', action: { cmd: [echo] } }\n")
+	if code, _, _ := e.do("test", "-f", invalid, ev); code != 3 {
+		t.Fatalf("bad expression: %d", code)
+	}
+	if code, _, _ := e.do("test", "-f", rule); code != 2 {
+		t.Fatalf("no event: %d", code)
+	}
+	after, _ := store.ConfigItems(e.st.DB)
+	if len(after) != len(before) {
+		t.Fatalf("the store changed: %d -> %d items", len(before), len(after))
+	}
+	if code, _, _ := e.do("get", "rules", "draft"); code == 0 {
+		t.Fatal("the rule was saved")
+	}
+}

@@ -69,8 +69,30 @@ func fail(err error) *mcp.CallToolResult {
 type none struct{}
 
 type getIn struct {
-	Kind string `json:"kind" jsonschema:"sources, rules, agents, routines, credentials, notify, jobs, approvals, audit or connections"`
-	Name string `json:"name,omitempty" jsonschema:"one item's name (for jobs: its id); omit to list"`
+	Kind  string `json:"kind" jsonschema:"sources, rules, agents, routines, credentials, notify, jobs, approvals, audit, connections, egress or notifications"`
+	Name  string `json:"name,omitempty" jsonschema:"one item's name (for jobs: its id); omit to list"`
+	Rule  string `json:"rule,omitempty" jsonschema:"audit: only this rule's rows"`
+	Event string `json:"event,omitempty" jsonschema:"audit: only this event"`
+	Since string `json:"since,omitempty" jsonschema:"audit: since a time (RFC 3339) or how long ago (1h)"`
+	Limit int    `json:"limit,omitempty" jsonschema:"jobs, audit, notifications: at most this many rows"`
+}
+type ruleIn struct {
+	Rule string `json:"rule"`
+}
+type resetIn struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+}
+type historyIn struct {
+	Kind string `json:"kind,omitempty" jsonschema:"with name: only this item's revisions"`
+	Name string `json:"name,omitempty"`
+	Rev  int64  `json:"rev,omitempty" jsonschema:"one revision, with its diff"`
+}
+type restoreIn struct {
+	Rev int64 `json:"rev"`
+}
+type catalogIn struct {
+	Category string `json:"category,omitempty" jsonschema:"only this category (code, issues, chat, monitoring, cloud, payments, home, generic)"`
 }
 type explainIn struct {
 	Kind string `json:"kind" jsonschema:"source, rule, agent, routine, credential or notify"`
@@ -96,7 +118,8 @@ type notifyTestIn struct {
 	Name string `json:"name" jsonschema:"the notification channel to send a test message to"`
 }
 type jobIn struct {
-	ID int64 `json:"id"`
+	ID     int64 `json:"id"`
+	Detail bool  `json:"detail,omitempty" jsonschema:"also the steps, prompt, hosts, failure summary and notifications"`
 }
 type applyIn struct {
 	YAML    string            `json:"yaml" jsonschema:"items in siphon.yaml shape: sections sources, agents, routines, credentials, notify, rules"`
@@ -127,7 +150,7 @@ func newMCPServer(c *cli, allowWrite, allowSecrets, allowUnapproved bool) *mcp.S
 		func(_ context.Context, _ *mcp.CallToolRequest, _ none) (*mcp.CallToolResult, any, error) {
 			return get("/api/inventory")
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "get", Description: "List config items of a kind, or show one item's YAML. Kinds: sources, rules, agents, routines, credentials, notify; also jobs, approvals, audit, connections."},
+	mcp.AddTool(s, &mcp.Tool{Name: "get", Description: "List config items of a kind, or show one item's YAML. Kinds: sources, rules, agents, routines, credentials, notify; also jobs, approvals, audit (filters rule, event, since, limit), connections, egress, notifications."},
 		func(_ context.Context, _ *mcp.CallToolRequest, in getIn) (*mcp.CallToolResult, any, error) {
 			n := url.PathEscape(in.Name)
 			switch {
@@ -140,10 +163,98 @@ func newMCPServer(c *cli, allowWrite, allowSecrets, allowUnapproved bool) *mcp.S
 					return fail(usageErr("a job name is its numeric id", "")), nil, nil
 				}
 				return get("/api/jobs/" + in.Name)
-			case slices.Contains(listKinds, in.Kind):
-				return get("/api/" + in.Kind)
+			case slices.Contains(listKinds, in.Kind) || in.Kind == "notifications":
+				q := url.Values{}
+				for k, v := range map[string]string{"rule": in.Rule, "event": in.Event, "since": in.Since} {
+					if v != "" {
+						q.Set(k, v)
+					}
+				}
+				if in.Limit > 0 {
+					q.Set("limit", strconv.Itoa(in.Limit))
+				}
+				p := "/api/" + in.Kind
+				if len(q) > 0 {
+					p += "?" + q.Encode()
+				}
+				return get(p)
 			}
 			return fail(usageErr("unknown kind "+strconv.Quote(in.Kind), "kinds: "+strings.Join(append(slices.Clone(configKinds), listKinds...), ", "))), nil, nil
+		})
+	toggle := func(verb string) func(context.Context, *mcp.CallToolRequest, ruleIn) (*mcp.CallToolResult, any, error) {
+		return func(_ context.Context, _ *mcp.CallToolRequest, in ruleIn) (*mcp.CallToolResult, any, error) {
+			if !allowWrite {
+				return result(map[string]any{"would": verb + " rule " + in.Rule, "changed": false, "note": writesOff}, false), nil, nil
+			}
+			if err := c.call("POST", "/api/rules/"+url.PathEscape(in.Rule)+"/"+verb, nil, nil); err != nil {
+				return fail(err), nil, nil
+			}
+			return result(map[string]any{"ok": true, "rule": in.Rule, "enabled": verb == "enable"}, false), nil, nil
+		}
+	}
+	mcp.AddTool(s, &mcp.Tool{Name: "enable", Description: "Turn a rule on (runtime override). Without --allow-write on the server this does nothing; the result says so."}, toggle("enable"))
+	mcp.AddTool(s, &mcp.Tool{Name: "disable", Description: "Turn a rule off (runtime override). Without --allow-write on the server this does nothing; the result says so."}, toggle("disable"))
+	mcp.AddTool(s, &mcp.Tool{Name: "reset", Description: "Drop the portal's change to a config item, back to siphon.yaml. Without --allow-write on the server this only shows the diff; the result says so."},
+		func(_ context.Context, _ *mcp.CallToolRequest, in resetIn) (*mcp.CallToolResult, any, error) {
+			if !slices.Contains(configKinds, in.Kind) {
+				return fail(usageErr("unknown kind "+strconv.Quote(in.Kind), "kinds: "+strings.Join(configKinds, ", "))), nil, nil
+			}
+			path := "/api/config/" + in.Kind + "/" + url.PathEscape(in.Name) + "/reset"
+			var v map[string]any
+			if !allowWrite {
+				if err := c.call("POST", path+"?dry_run=1", nil, &v); err != nil {
+					return fail(err), nil, nil
+				}
+				v["dry_run"], v["note"] = true, writesOff
+				return result(v, false), nil, nil
+			}
+			if err := c.call("POST", path, nil, &v); err != nil {
+				return fail(err), nil, nil
+			}
+			v["dry_run"] = false
+			return result(v, false), nil, nil
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "history", Description: "Config revisions, newest first. With rev: that revision and its diff. With kind and name: only that item's revisions."},
+		func(_ context.Context, _ *mcp.CallToolRequest, in historyIn) (*mcp.CallToolResult, any, error) {
+			if in.Rev > 0 {
+				return get("/api/config/history/" + strconv.FormatInt(in.Rev, 10))
+			}
+			var rows []map[string]any
+			if err := c.call("GET", "/api/config/history", nil, &rows); err != nil {
+				return fail(err), nil, nil
+			}
+			if in.Kind != "" || in.Name != "" {
+				if !slices.Contains(configKinds, in.Kind) || in.Name == "" {
+					return fail(usageErr("give both kind and name", "kinds: "+strings.Join(configKinds, ", "))), nil, nil
+				}
+				prefix := in.Kind + "/" + in.Name + " "
+				rows = slices.DeleteFunc(rows, func(r map[string]any) bool { return !strings.Contains(str(r, "summary"), prefix) })
+			}
+			return result(nonNilRows(rows), false), nil, nil
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "restore", Description: "Put the config overlay back as it was at a revision (a new revision). Refused without --allow-write on the server."},
+		func(_ context.Context, _ *mcp.CallToolRequest, in restoreIn) (*mcp.CallToolResult, any, error) {
+			if !allowWrite {
+				return fail(usageErr(writesOff, "ask the user to run `siphon restore "+strconv.FormatInt(in.Rev, 10)+"`")), nil, nil
+			}
+			if err := c.call("POST", "/api/config/history/"+strconv.FormatInt(in.Rev, 10)+"/restore", nil, nil); err != nil {
+				return fail(err), nil, nil
+			}
+			return result(map[string]any{"ok": true, "restored": in.Rev}, false), nil, nil
+		})
+	mcp.AddTool(s, &mcp.Tool{Name: "catalog", Description: "The services you can connect, by category, with what each needs on this install."},
+		func(_ context.Context, _ *mcp.CallToolRequest, in catalogIn) (*mcp.CallToolResult, any, error) {
+			all, err := c.catalog()
+			if err != nil {
+				return fail(err), nil, nil
+			}
+			var shown []catalogEntry
+			for _, e := range all {
+				if in.Category == "" || e.Category == in.Category {
+					shown = append(shown, e)
+				}
+			}
+			return result(map[string]any{"services": nonNilEntries(shown)}, false), nil, nil
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "explain", Description: "Every field of a config kind with its type, whether it is required, its default and allowed values."},
 		func(_ context.Context, _ *mcp.CallToolRequest, in explainIn) (*mcp.CallToolResult, any, error) {
@@ -205,9 +316,13 @@ func newMCPServer(c *cli, allowWrite, allowSecrets, allowUnapproved bool) *mcp.S
 			}
 			return get(p)
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "job", Description: "One job: state, exit code and output."},
+	mcp.AddTool(s, &mcp.Tool{Name: "job", Description: "One job: state, exit code and output; detail also gives the steps, prompt, hosts, failure summary and notifications."},
 		func(_ context.Context, _ *mcp.CallToolRequest, in jobIn) (*mcp.CallToolResult, any, error) {
-			return get("/api/jobs/" + strconv.FormatInt(in.ID, 10))
+			p := "/api/jobs/" + strconv.FormatInt(in.ID, 10)
+			if in.Detail {
+				p += "?detail=1"
+			}
+			return get(p)
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "status", Description: "Sources and their health, rule counts, pending approvals and recent job states."},
 		func(_ context.Context, _ *mcp.CallToolRequest, _ none) (*mcp.CallToolResult, any, error) {

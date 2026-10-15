@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/olafkfreund/siphon/internal/applyfile"
 	"github.com/olafkfreund/siphon/internal/catalog"
 	"github.com/olafkfreund/siphon/internal/client"
 )
@@ -126,7 +127,7 @@ func (c *cli) secretValue(f secField) (string, error) {
 
 type connectOpts struct {
 	name, url, apiKey, file, setupToken string
-	noTest, noWait, logout              bool
+	noTest, noWait, logout, yes         bool
 }
 
 // flagName is a catalogue field key as a flag: role_arn becomes --role-arn.
@@ -141,7 +142,8 @@ func buildConnect(fs *flag.FlagSet) func(*cli, []string) error {
 	fs.StringVar(&o.setupToken, "setup-token", "", "login claude: a setup token as - (stdin) or @file (kind token)")
 	fs.BoolVar(&o.noTest, "no-test", false, "skip the connection test")
 	fs.BoolVar(&o.noWait, "no-wait", false, "oauth: print the login URL and return")
-	fs.BoolVar(&o.logout, "logout", false, "oauth: delete the source's login")
+	fs.BoolVar(&o.yes, "yes", false, "login --logout, notion: do not ask")
+	fs.BoolVar(&o.logout, "logout", false, "oauth: delete the source's login; login: delete the stored login --name (asks, or --yes)")
 	// One flag per catalogue field (the first service to use a key describes it).
 	for _, e := range catalog.All() {
 		for _, f := range e.Fields {
@@ -171,6 +173,9 @@ func buildConnect(fs *flag.FlagSet) func(*cli, []string) error {
 			return c.connectLogin(args[1:], o)
 		case "oauth":
 			return c.connectOAuth(args[1:], o)
+		}
+		if args[0] == "notion" && len(args) == 2 { // `connect notion` alone is the service
+			return c.connectNotion(args[1], o)
 		}
 		if len(args) != 1 {
 			return usageErr("usage: siphon connect "+args[0]+" [--<field> value ...]", "")
@@ -431,6 +436,9 @@ func (c *cli) connectModel(args []string, o *connectOpts) error {
 }
 
 func (c *cli) connectLogin(args []string, o *connectOpts) error {
+	if o.logout {
+		return c.logoutLogin(o)
+	}
 	if len(args) != 1 || !slices.Contains(loginProviders, args[0]) {
 		return usageErr("usage: siphon connect login claude|codex|agy (--file f | --setup-token - | --api-key -)", "")
 	}
@@ -500,11 +508,37 @@ func (c *cli) connectLogin(args []string, o *connectOpts) error {
 func buildTest(fs *flag.FlagSet) func(*cli, []string) error {
 	last := fs.Bool("last", false, "use the last event the source produced")
 	at := fs.String("at", "", `schedule rules: test the event for this moment, like "2026-03-02 06:00" (in the source's zone)`)
+	file := fs.String("f", "", "test a rule from this apply file (not saved) instead of a saved rule: test -f rule.yaml [event.json|-] [--last]")
 	var headers multi
 	fs.Var(&headers, "header", "an event header as name=value (repeatable)")
 	return func(c *cli, args []string) error {
 		if len(args) == 2 && (args[0] == "service" || args[0] == "model") {
 			return c.testConnection(args[0], args[1])
+		}
+		ruleYAML := ""
+		if *file != "" { // an unsaved rule: its name comes from the file, so the args are the event only
+			var b []byte
+			var err error
+			if *file == "-" {
+				b, err = readAll(c)
+			} else {
+				b, err = os.ReadFile(*file)
+			}
+			if err != nil {
+				return usageErr("cannot read the rule file "+*file, "")
+			}
+			items, err := applyfile.Parse(b)
+			if err != nil {
+				return err
+			}
+			if len(items) != 1 || items[0].Kind != "rules" {
+				return usageErr("the file must hold exactly one rule", "write `rules:` with one `- name: ...` entry")
+			}
+			if *file == "-" && len(args) == 1 && args[0] == "-" {
+				return usageErr("both the rule and the event cannot come from stdin", "")
+			}
+			ruleYAML = items[0].YAML
+			args = append([]string{items[0].Name}, args...)
 		}
 		if len(args) < 1 || len(args) > 2 || (*last && len(args) == 2) || (*at != "" && (*last || len(args) == 2)) || (!*last && *at == "" && len(args) == 1) {
 			return usageErr("usage: siphon test <rule> <event.json|-> | siphon test <rule> --last | siphon test <rule> --at <time> | siphon test service|model <name>", "an event is a JSON file, or - for stdin; --last uses the stored one; --at builds a schedule event")
@@ -529,6 +563,9 @@ func buildTest(fs *flag.FlagSet) func(*cli, []string) error {
 				return usageErr("the event is not valid JSON", "")
 			}
 			body["event"] = json.RawMessage(b)
+		}
+		if ruleYAML != "" {
+			body["rule"] = ruleYAML
 		}
 		if len(headers) > 0 {
 			h := map[string]string{}
@@ -801,4 +838,68 @@ func (c *cli) connectOAuth(args []string, o *connectOpts) error {
 		}
 	}
 	return fmt.Errorf("timed out waiting for the login of %s", args[0])
+}
+
+// logoutLogin deletes a stored login: `connect login --logout --name <n> [--yes]`.
+func (c *cli) logoutLogin(o *connectOpts) error {
+	if o.name == "" {
+		return usageErr("usage: siphon connect login --logout --name <name> [--yes]", "list the stored logins with `siphon get connections`")
+	}
+	if !o.yes {
+		ok, err := c.confirm("Delete the stored login " + o.name + "?")
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return usageErr("not deleted", "")
+		}
+	}
+	if err := c.call("DELETE", "/api/connections/logins/"+url.PathEscape(o.name), nil, nil); err != nil {
+		return err
+	}
+	if c.json() {
+		return c.jsonOut(map[string]string{"login": o.name, "status": "deleted"})
+	}
+	c.say("deleted login %s\n", o.name)
+	return nil
+}
+
+// connectNotion shows the verification token Notion sent to a webhook source,
+// and after confirmation stores it as the source's secret.
+func (c *cli) connectNotion(source string, o *connectOpts) error {
+	if c.json() && !o.yes {
+		return usageErr("-o json needs --yes", "the confirmation prompt would break the JSON output")
+	}
+	path := "/api/sources/" + url.PathEscape(source) + "/notion-verification"
+	var pend struct {
+		Token string `json:"token"`
+	}
+	if err := c.call("GET", path, nil, &pend); err != nil {
+		return err
+	}
+	w := c.out
+	if c.json() {
+		w = c.errw // stdout stays one JSON document
+	}
+	fmt.Fprintf(w, "Notion sent this verification token to %s:\n%s\nPaste it into Notion's \"Verify subscription\" box, then confirm here to store it as the source's secret.\n", source, pend.Token)
+	if !o.yes {
+		ok, err := c.confirm("Store it?")
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return usageErr("not stored", "run the command again when you have pasted the token into Notion")
+		}
+	}
+	var res struct {
+		Applied bool `json:"applied"`
+	}
+	if err := c.call("POST", path, map[string]string{"token": pend.Token}, &res); err != nil {
+		return err
+	}
+	if c.json() {
+		return c.jsonOut(map[string]any{"source": source, "stored": true, "applied": res.Applied})
+	}
+	c.say("stored the verification token as the secret of %s\n", source)
+	return nil
 }

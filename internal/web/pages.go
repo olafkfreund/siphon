@@ -18,32 +18,41 @@ import (
 // what the sandbox refused.
 type jobView struct {
 	store.JobDetail
-	Kind, Target string   // agent | cmd | unit | routine, and its name
-	Argv         []string // cmd
-	Agent        *config.Agent
-	Prompt       string // rendered agent prompt (or the render error)
-	CanReach     []config.HostPort
-	Event        string // triggering event, redacted, indented JSON
-	Blocked      []blockedHost
-	Steps        []stepView
-	Duration     string
-	Summary      string               // failed jobs: the last meaningful output line
-	Connect      string               // a login the job needed but which isn't connected
-	Notes        []store.Notification // notifications about this job
+	Kind      string               `json:"kind"`   // agent | cmd | unit | routine
+	Target    string               `json:"target"` // and its name
+	Argv      []string             `json:"argv"`   // cmd
+	Agent     *config.Agent        `json:"-"`
+	AgentName string               `json:"agent,omitempty"`
+	Prompt    string               `json:"prompt"` // rendered agent prompt (or the render error)
+	CanReach  []config.HostPort    `json:"can_reach"`
+	Event     string               `json:"event"` // triggering event, redacted, indented JSON
+	Blocked   []blockedHost        `json:"blocked"`
+	Steps     []stepView           `json:"steps"`
+	Duration  string               `json:"duration"`
+	Summary   string               `json:"summary"`       // failed jobs: the last meaningful output line
+	Connect   string               `json:"connect"`       // a login the job needed but which isn't connected
+	Notes     []store.Notification `json:"notifications"` // notifications about this job
 
 	// the rule's lineage, from the live config
-	Source, SourceType, When, On, Provider string
+	Source     string `json:"source"`
+	SourceType string `json:"source_type"`
+	When       string `json:"when"`
+	On         string `json:"on"`
+	Provider   string `json:"provider"`
 }
 
 var notImported = regexp.MustCompile(`credential (\S+) is not imported`)
 
 type blockedHost struct {
-	Host  string
-	Count int
+	Host  string `json:"host"`
+	Count int    `json:"count"`
 }
 
 type stepView struct {
-	ID, Kind, Target, State string
+	ID     string `json:"id"`
+	Kind   string `json:"kind"`
+	Target string `json:"target"`
+	State  string `json:"state"`
 }
 
 var blockedLine = regexp.MustCompile(`(?m)^egress: blocked (\S+) \((\d+)\)$`)
@@ -77,6 +86,7 @@ func (s *server) jobDetail(id int64) (*jobView, bool, error) {
 		} else {
 			v.Agent = s.Config().Agents[a.Agent]
 		}
+		v.AgentName = a.Agent
 		if v.Agent != nil {
 			if pr, err := action.RenderPrompt(v.Agent.Prompt, p.Env); err == nil {
 				v.Prompt = pr
@@ -237,21 +247,22 @@ var providerName = map[string]string{"claude": "Claude", "codex": "Codex", "agy"
 
 // egressView lists each effective allowlist and the hosts refused recently.
 type egressView struct {
-	Lists   []egressList
-	Blocked []egressBlocked
+	Lists   []egressList    `json:"lists"`
+	Blocked []egressBlocked `json:"blocked"`
 }
 
 type egressList struct {
-	Owner, Name string // agent | rule
-	On          bool
-	Hosts       []config.HostPort
+	Owner string            `json:"owner"` // agent | rule
+	Name  string            `json:"name"`
+	On    bool              `json:"on"`
+	Hosts []config.HostPort `json:"hosts"`
 }
 
 type egressBlocked struct {
-	Host  string
-	Count int
-	Last  time.Time
-	JobID int64
+	Host  string    `json:"host"`
+	Count int       `json:"count"`
+	Last  time.Time `json:"last"`
+	JobID int64     `json:"job_id"`
 }
 
 func (s *server) egress() (*egressView, error) {
