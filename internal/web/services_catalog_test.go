@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"encoding/base64"
 	"io"
 	"time"
@@ -383,7 +384,7 @@ func TestCatalogEntryTestsAgainstFakeServer(t *testing.T) {
 			t.Errorf("%s: test %d %s", e.ID, w.Code, w.Body.String())
 			continue
 		}
-		if got.method != catalog.OrGET(e.Test.Method) {
+		if got.method != cmp.Or(e.Test.Method, "GET") {
 			t.Errorf("%s: method %q", e.ID, got.method)
 		}
 		name, _, _ := strings.Cut(e.Test.Header, ":")

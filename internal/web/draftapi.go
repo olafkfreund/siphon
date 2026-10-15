@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"io"
@@ -83,7 +84,7 @@ func (s *server) draft(r *http.Request) (any, int, error) {
 	if model == "" {
 		t := s.listModels(r.Context(), name, false)
 		if t.Err != "" || len(t.Models) == 0 {
-			return nil, 0, errInvalid{"could not pick a model for " + name + ": pass one with model (" + firstNonEmpty(t.Err, "the endpoint lists none") + ")"}
+			return nil, 0, errInvalid{"could not pick a model for " + name + ": pass one with model (" + cmp.Or(t.Err, "the endpoint lists none") + ")"}
 		}
 		model = t.Models[0]
 	}
@@ -108,13 +109,6 @@ func (s *server) draft(r *http.Request) (any, int, error) {
 	}
 	s.audit(actor, "draft", name+" "+clip(model, 100)+": "+req)
 	return res, 200, nil
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }
 
 // draftCheck is apply's dry-run over a drafted file. Webhook sources get a
@@ -155,7 +149,7 @@ func (s *server) draftCheck(_ context.Context, y string) draft.Checked {
 	var pending []pendingSecret
 	var bad []string
 	for _, it := range items {
-		if !config.Kinds[it.Kind] || !itemName.MatchString(it.Name) {
+		if !slices.Contains(config.Kinds, it.Kind) || !itemName.MatchString(it.Name) {
 			bad = append(bad, it.Kind+"/"+it.Name+": bad kind or name")
 			continue
 		}
@@ -299,7 +293,7 @@ func servicePlaceholders(name string, cfg *config.Config) []placeholder {
 func toApplyItems(items []applyfile.Item) []applyItem {
 	out := make([]applyItem, len(items))
 	for i, it := range items {
-		out[i] = applyItem{Kind: it.Kind, Name: it.Name, YAML: it.YAML}
+		out[i].Item = it
 	}
 	return out
 }

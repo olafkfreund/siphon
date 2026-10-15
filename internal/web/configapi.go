@@ -13,6 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/olafkfreund/siphon/internal/applyfile"
 	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/store"
 )
@@ -49,7 +50,7 @@ func (s *server) configAPI(mux *http.ServeMux) {
 				if s.ConfigPath == "" {
 					return nil, 503, errMsg(errNoEditing.Error())
 				}
-				if k := r.PathValue("kind"); k != "" && !config.Kinds[k] {
+				if k := r.PathValue("kind"); k != "" && !slices.Contains(config.Kinds, k) {
 					return nil, 400, errMsg("kind is not editable")
 				}
 				if n := r.PathValue("name"); n != "" && !itemName.MatchString(n) {
@@ -288,10 +289,8 @@ func (s *server) bodyRev(r *http.Request) (*int64, error) {
 }
 
 type applyItem struct {
-	Kind string `json:"kind"`
-	Name string `json:"name"`
-	YAML string `json:"yaml"`
-	Rev  *int64 `json:"rev"`
+	applyfile.Item
+	Rev *int64 `json:"rev"`
 }
 
 // applyBatch is POST /api/config/apply: every item and delete in one prepare
@@ -317,7 +316,7 @@ func (s *server) applyBatch(r *http.Request) (any, int, error) {
 	for _, it := range append(slices.Clone(body.Items), body.Delete...) {
 		k := itemKey{Kind: it.Kind, Name: it.Name}
 		switch {
-		case !config.Kinds[it.Kind] || !itemName.MatchString(it.Name):
+		case !slices.Contains(config.Kinds, it.Kind) || !itemName.MatchString(it.Name):
 			bad = append(bad, fmt.Errorf("%s/%s: bad kind or name", it.Kind, it.Name))
 		case seen[k]:
 			bad = append(bad, fmt.Errorf("%s/%s: listed more than once", it.Kind, it.Name))
@@ -366,7 +365,7 @@ func (s *server) applyBatch(r *http.Request) (any, int, error) {
 		}
 	}
 	for _, d := range body.Delete {
-		if !config.Kinds[d.Kind] || !itemName.MatchString(d.Name) {
+		if !slices.Contains(config.Kinds, d.Kind) || !itemName.MatchString(d.Name) {
 			continue // reported above
 		}
 		m, err := s.deleteItem(d.Kind, d.Name)

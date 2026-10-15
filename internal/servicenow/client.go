@@ -10,13 +10,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/olafkfreund/siphon/internal/config"
 )
 
 // ErrUnavailable means a 2xx that wasn't JSON: a hibernating or SSO-intercepted instance.
@@ -58,7 +59,7 @@ func New(base string, auth Auth, hc *http.Client) (*Client, error) {
 	}
 	switch {
 	case u.Scheme == "https":
-	case u.Scheme == "http" && isLoopback(u.Hostname()):
+	case u.Scheme == "http" && config.Loopback(u.Hostname()):
 	default:
 		return nil, errors.New("servicenow: instance URL must be https")
 	}
@@ -82,11 +83,6 @@ func ClientFromEnv(getenv func(string) string, hc *http.Client) (*Client, error)
 		ClientSecret: getenv("SERVICENOW_CLIENT_SECRET"),
 		APIKey:       getenv("SERVICENOW_API_KEY"),
 	}, hc)
-}
-
-func isLoopback(host string) bool {
-	ip := net.ParseIP(host)
-	return host == "localhost" || (ip != nil && ip.IsLoopback())
 }
 
 func ctxSleep(ctx context.Context, d time.Duration) error {

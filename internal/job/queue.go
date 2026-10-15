@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -85,7 +87,7 @@ func (p *Pipeline) Serve(ctx context.Context) error {
 func (p *Pipeline) startPollers(ctx context.Context, cfg *config.Config) (stop func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
-	for _, name := range sortedSources(cfg) {
+	for _, name := range slices.Sorted(maps.Keys(cfg.Sources)) {
 		if s := cfg.Sources[name]; s.Type == "schedule" {
 			wg.Add(1)
 			go func() { defer wg.Done(); p.scheduleLoop(ctx, cfg, name) }()

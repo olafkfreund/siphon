@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -19,26 +20,22 @@ import (
 
 	"github.com/olafkfreund/siphon/internal/applyfile"
 	"github.com/olafkfreund/siphon/internal/client"
+	"github.com/olafkfreund/siphon/internal/config"
 )
 
-// Config kinds the API edits, and the read-only listings `get` also takes.
-var (
-	configKinds = []string{"sources", "rules", "agents", "routines", "credentials", "notify"}
-	listKinds   = []string{"jobs", "approvals", "audit", "connections", "egress"}
-)
-
-func usageErr(msg, hint string) error { return client.Usage(msg, hint) }
+// The read-only listings `get` takes besides config.Kinds.
+var listKinds = []string{"jobs", "approvals", "audit", "connections", "egress"}
 
 func needArgs(args []string, n int, usage string) error {
 	if len(args) != n {
-		return usageErr("usage: siphon "+usage, "run `siphon help` for the details")
+		return client.Usage("usage: siphon "+usage, "run `siphon help` for the details")
 	}
 	return nil
 }
 
 func checkKind(kind string) error {
-	if !slices.Contains(configKinds, kind) {
-		return usageErr("unknown kind "+strconv.Quote(kind), "kinds: "+strings.Join(configKinds, ", "))
+	if !slices.Contains(config.Kinds, kind) {
+		return client.Usage("unknown kind "+strconv.Quote(kind), "kinds: "+strings.Join(config.Kinds, ", "))
 	}
 	return nil
 }
@@ -54,7 +51,7 @@ func buildLogin(fs *flag.FlagSet) func(*cli, []string) error {
 	return func(c *cli, args []string) error {
 		raw := os.Getenv("SIPHON_URL") // the default URL, as set for every user by the NixOS module
 		if len(args) > 1 || len(args) == 0 && raw == "" {
-			return usageErr("usage: siphon login [url]", "give the URL, or set SIPHON_URL")
+			return client.Usage("usage: siphon login [url]", "give the URL, or set SIPHON_URL")
 		} else if len(args) == 1 {
 			raw = args[0]
 		}
@@ -76,7 +73,7 @@ func buildLogin(fs *flag.FlagSet) func(*cli, []string) error {
 			token, err = c.readLine()
 		}
 		if token = strings.TrimSpace(token); err != nil || token == "" {
-			return usageErr("no token given", "pipe it in (`siphon login <url> < token-file`) or type it at the prompt")
+			return client.Usage("no token given", "pipe it in (`siphon login <url> < token-file`) or type it at the prompt")
 		}
 		conn := client.Conn{URL: u, Token: token}
 		if err := client.New(conn).Do("GET", "/api/rules", nil, nil); err != nil {
@@ -139,7 +136,7 @@ func fetchStatus(call callFn) (*statusData, error) {
 
 // json is the -o json shape of `status`.
 func (d *statusData) json() map[string]any {
-	return map[string]any{"sources": d.sources, "rules": map[string]any{"total": len(d.rules), "disabled": nonNil(d.disabled)},
+	return map[string]any{"sources": d.sources, "rules": map[string]any{"total": len(d.rules), "disabled": config.NonNil(d.disabled)},
 		"approvals": len(d.approvals), "jobs": d.states, "last_24h": d.last24}
 }
 
@@ -181,13 +178,6 @@ func buildStatus(fs *flag.FlagSet) func(*cli, []string) error {
 	}
 }
 
-func nonNil(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
-}
-
 func buildGet(fs *flag.FlagSet) func(*cli, []string) error {
 	state := fs.String("state", "", "jobs: only this state")
 	limit := fs.Int("limit", 0, "jobs, audit: at most this many rows")
@@ -196,7 +186,7 @@ func buildGet(fs *flag.FlagSet) func(*cli, []string) error {
 	since := fs.String("since", "", "audit: since a time (RFC 3339) or how long ago (1h)")
 	return func(c *cli, args []string) error {
 		if len(args) < 1 || len(args) > 2 {
-			return usageErr("usage: siphon get <kind> [name]", "kinds: "+strings.Join(append(slices.Clone(configKinds), listKinds...), ", "))
+			return client.Usage("usage: siphon get <kind> [name]", "kinds: "+strings.Join(append(slices.Clone(config.Kinds), listKinds...), ", "))
 		}
 		kind, name := args[0], ""
 		if len(args) == 2 {
@@ -216,7 +206,7 @@ func buildGet(fs *flag.FlagSet) func(*cli, []string) error {
 			qs = "?" + q.Encode()
 		}
 		switch {
-		case slices.Contains(configKinds, kind):
+		case slices.Contains(config.Kinds, kind):
 			return c.getConfig(kind, name)
 		case kind == "jobs" && name != "":
 			return c.showJob(name, false)
@@ -280,7 +270,7 @@ func buildGet(fs *flag.FlagSet) func(*cli, []string) error {
 			fmt.Fprintln(c.out, "\nmodels:")
 			return c.table([]string{"NAME", "PROVIDER", "URL"}, anyRows(models, "name", "provider", "url"))
 		}
-		return usageErr("unknown kind "+strconv.Quote(kind), "kinds: "+strings.Join(append(slices.Clone(configKinds), listKinds...), ", "))
+		return client.Usage("unknown kind "+strconv.Quote(kind), "kinds: "+strings.Join(append(slices.Clone(config.Kinds), listKinds...), ", "))
 	}
 }
 
@@ -372,7 +362,7 @@ func (c *cli) listJobs(path string) error {
 
 func (c *cli) showJob(id string, detail bool) error {
 	if _, err := strconv.ParseInt(id, 10, 64); err != nil {
-		return usageErr("bad job id "+strconv.Quote(id), "ids come from `siphon jobs ls`")
+		return client.Usage("bad job id "+strconv.Quote(id), "ids come from `siphon jobs ls`")
 	}
 	var j map[string]any
 	path := "/api/jobs/" + id
@@ -466,7 +456,7 @@ func buildJobs(fs *flag.FlagSet) func(*cli, []string) error {
 			return c.showJob(args[1], *detail)
 		}
 		if len(args) > 0 && args[0] != "ls" {
-			return usageErr("usage: siphon jobs [ls|show <id>]", "")
+			return client.Usage("usage: siphon jobs [ls|show <id>]", "")
 		}
 		q := url.Values{}
 		if *state != "" {
@@ -490,7 +480,7 @@ func buildDecide(verb string) func(*flag.FlagSet) func(*cli, []string) error {
 				return err
 			}
 			if _, err := strconv.ParseInt(args[0], 10, 64); err != nil {
-				return usageErr("bad job id "+strconv.Quote(args[0]), "ids come from `siphon get approvals`")
+				return client.Usage("bad job id "+strconv.Quote(args[0]), "ids come from `siphon get approvals`")
 			}
 			if err := c.call("POST", "/api/jobs/"+args[0]+"/"+verb, nil, nil); err != nil {
 				return err
@@ -522,10 +512,23 @@ func buildToggle(verb string) func(*flag.FlagSet) func(*cli, []string) error {
 	}
 }
 
-type applyItem = applyfile.Item
-
 // parseApply reads an apply file; its errors are usage errors.
-func parseApply(b []byte) ([]applyItem, error) { return applyfile.Parse(b) }
+func parseApply(b []byte) ([]applyfile.Item, error) { return applyfile.Parse(b) }
+
+// readItems reads an apply file (- is stdin) into items; what names it in the error.
+func (c *cli) readItems(file, what string) ([]applyfile.Item, error) {
+	var b []byte
+	var err error
+	if file == "-" {
+		b, err = readAll(c)
+	} else {
+		b, err = os.ReadFile(file)
+	}
+	if err != nil {
+		return nil, client.Usage("cannot read "+what, "")
+	}
+	return parseApply(b)
+}
 
 // multi is a repeatable string flag.
 type multi []string
@@ -539,11 +542,11 @@ func checkSecretSpecs(specs []string, stdinUsed bool) error {
 		k, v, ok := strings.Cut(s, "=")
 		switch {
 		case !ok || k == "" || !strings.Contains(k, "/") || !strings.Contains(k, "."):
-			return usageErr("bad --secret "+strconv.Quote(k)+": want <kind>/<name>.<field>=@file or =-", "for example --secret sources/hook.secret=@hook.key")
+			return client.Usage("bad --secret "+strconv.Quote(k)+": want <kind>/<name>.<field>=@file or =-", "for example --secret sources/hook.secret=@hook.key")
 		case v == "-" && stdinUsed:
-			return usageErr("stdin is already used for the file", "give the secret as @file instead")
+			return client.Usage("stdin is already used for the file", "give the secret as @file instead")
 		case v != "-" && !strings.HasPrefix(v, "@"):
-			return usageErr("refusing a secret value on the command line: it would end up in your shell history and the process list",
+			return client.Usage("refusing a secret value on the command line: it would end up in your shell history and the process list",
 				"use --secret "+k+"=@file, or --secret "+k+"=- to read it from stdin")
 		}
 	}
@@ -556,25 +559,25 @@ func (c *cli) readSecrets(specs []string, stdinUsed bool) (map[string]string, er
 	for _, s := range specs {
 		k, v, ok := strings.Cut(s, "=")
 		if !ok || k == "" || !strings.Contains(k, "/") || !strings.Contains(k, ".") {
-			return nil, usageErr("bad --secret "+strconv.Quote(k)+": want <kind>/<name>.<field>=@file or =-", "for example --secret sources/hook.secret=@hook.key")
+			return nil, client.Usage("bad --secret "+strconv.Quote(k)+": want <kind>/<name>.<field>=@file or =-", "for example --secret sources/hook.secret=@hook.key")
 		}
 		var raw []byte
 		var err error
 		switch {
 		case v == "-":
 			if stdinUsed {
-				return nil, usageErr("stdin is already used for the file", "give the secret as @file instead")
+				return nil, client.Usage("stdin is already used for the file", "give the secret as @file instead")
 			}
 			stdinUsed = true
 			raw, err = readAll(c)
 		case strings.HasPrefix(v, "@"):
 			raw, err = os.ReadFile(v[1:])
 		default:
-			return nil, usageErr("refusing a secret value on the command line: it would end up in your shell history and the process list",
+			return nil, client.Usage("refusing a secret value on the command line: it would end up in your shell history and the process list",
 				"use --secret "+k+"=@file, or --secret "+k+"=- to read it from stdin")
 		}
 		if err != nil {
-			return nil, usageErr("cannot read the secret for "+k, "")
+			return nil, client.Usage("cannot read the secret for "+k, "")
 		}
 		out[k] = strings.TrimSuffix(strings.TrimSuffix(string(raw), "\n"), "\r")
 	}
@@ -596,22 +599,12 @@ func buildApply(fs *flag.FlagSet) func(*cli, []string) error {
 	fs.Var(&secrets, "secret", "a secret value as <kind>/<name>.<field>=@file or =- (stdin); never a plain value")
 	return func(c *cli, args []string) error {
 		if *file == "" || len(args) > 0 {
-			return usageErr("usage: siphon apply -f <file|-> [--dry-run] [--secret k=@file|k=-] [--yes]", "write items in siphon.yaml shape: `siphon help apply`")
+			return client.Usage("usage: siphon apply -f <file|-> [--dry-run] [--secret k=@file|k=-] [--yes]", "write items in siphon.yaml shape: `siphon help apply`")
 		}
 		if err := checkSecretSpecs(secrets, *file == "-"); err != nil { // before anything is read
 			return err
 		}
-		var b []byte
-		var err error
-		if *file == "-" {
-			b, err = readAll(c)
-		} else {
-			b, err = os.ReadFile(*file)
-		}
-		if err != nil {
-			return usageErr("cannot read "+*file, "")
-		}
-		items, err := parseApply(b)
+		items, err := c.readItems(*file, *file)
 		if err != nil {
 			return err
 		}
@@ -644,7 +637,7 @@ type applyOutcome struct {
 
 // runApply is dry-run, diff, confirmation, apply: the one path under
 // `apply` and `new task`. Text output is printed here; -o json is the caller's.
-func (c *cli) runApply(items []applyItem, sec map[string]string, dry, yes, stdinUsed bool) (*applyOutcome, error) {
+func (c *cli) runApply(items []applyfile.Item, sec map[string]string, dry, yes, stdinUsed bool) (*applyOutcome, error) {
 	body := map[string]any{"items": items}
 	if len(sec) > 0 {
 		body["secrets"] = sec
@@ -656,7 +649,7 @@ func (c *cli) runApply(items []applyItem, sec map[string]string, dry, yes, stdin
 	if err := c.call("POST", "/api/config/apply?dry_run=1", body, &check); err != nil {
 		return nil, err
 	}
-	out := &applyOutcome{DryRun: dry, Diff: check.Diff, Errors: []string{}, Warnings: nonNil(check.Warnings)}
+	out := &applyOutcome{DryRun: dry, Diff: check.Diff, Errors: []string{}, Warnings: config.NonNil(check.Warnings)}
 	out.Changed = check.Diff != "" && check.Diff != "(no change)"
 	if !c.json() {
 		for _, w := range check.Warnings {
@@ -678,7 +671,7 @@ func (c *cli) runApply(items []applyItem, sec map[string]string, dry, yes, stdin
 			return nil, errNeedYes
 		}
 		if stdinUsed && !c.isTTY {
-			return nil, usageErr("the file came from stdin, so there is nowhere to ask", "pass --yes, or --dry-run to only look")
+			return nil, client.Usage("the file came from stdin, so there is nowhere to ask", "pass --yes, or --dry-run to only look")
 		}
 		c.showDiff(check.Diff)
 		ok, err := c.confirm("Apply?")
@@ -731,7 +724,7 @@ func buildEdit(fs *flag.FlagSet) func(*cli, []string) error {
 			}
 			if err = c.call("GET", path, nil, &cur); err != nil {
 				var ce *client.Error
-				if asClientErr(err, &ce) && ce.Status == 404 { // a new item
+				if errors.As(err, &ce) && ce.Status == 404 { // a new item
 					return "", nil, nil
 				}
 				return "", nil, err
@@ -776,7 +769,7 @@ func buildEdit(fs *flag.FlagSet) func(*cli, []string) error {
 				return nil
 			}
 			var ce *client.Error
-			if !asClientErr(err, &ce) || (ce.Status != 409 && ce.Status != 422) {
+			if !errors.As(err, &ce) || (ce.Status != 409 && ce.Status != 422) {
 				return err
 			}
 			saved, serr := keepCopy(edited)
@@ -801,14 +794,6 @@ func buildEdit(fs *flag.FlagSet) func(*cli, []string) error {
 			text = edited // keep the user's text; rev is still current
 		}
 	}
-}
-
-func asClientErr(err error, target **client.Error) bool {
-	ce, ok := err.(*client.Error)
-	if ok {
-		*target = ce
-	}
-	return ok
 }
 
 func keepCopy(s string) (string, error) {
@@ -897,12 +882,18 @@ func buildChange(fs *flag.FlagSet, verb string) func(*cli, []string) error {
 	}
 }
 
+// itemHistory keeps the revisions whose summary names kind/name.
+func itemHistory(rows []map[string]any, kind, name string) []map[string]any {
+	prefix := kind + "/" + name + " "
+	return slices.DeleteFunc(rows, func(r map[string]any) bool { return !strings.Contains(str(r, "summary"), prefix) })
+}
+
 func buildHistory(fs *flag.FlagSet) func(*cli, []string) error {
 	return func(c *cli, args []string) error {
 		if len(args) == 1 {
 			id, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
-				return usageErr("usage: siphon history [kind name | <rev>]", "")
+				return client.Usage("usage: siphon history [kind name | <rev>]", "")
 			}
 			var rev map[string]any
 			if err := c.call("GET", "/api/config/history/"+strconv.FormatInt(id, 10), nil, &rev); err != nil {
@@ -915,7 +906,7 @@ func buildHistory(fs *flag.FlagSet) func(*cli, []string) error {
 			return nil
 		}
 		if len(args) != 0 && len(args) != 2 {
-			return usageErr("usage: siphon history [kind name | <rev>]", "")
+			return client.Usage("usage: siphon history [kind name | <rev>]", "")
 		}
 		var rows []map[string]any
 		if err := c.call("GET", "/api/config/history", nil, &rows); err != nil {
@@ -925,21 +916,13 @@ func buildHistory(fs *flag.FlagSet) func(*cli, []string) error {
 			if err := checkKind(args[0]); err != nil {
 				return err
 			}
-			prefix := args[0] + "/" + args[1] + " "
-			rows = slices.DeleteFunc(rows, func(r map[string]any) bool { return !strings.Contains(str(r, "summary"), prefix) })
+			rows = itemHistory(rows, args[0], args[1])
 		}
 		if c.json() {
-			return c.jsonOut(nonNilRows(rows))
+			return c.jsonOut(config.NonNil(rows))
 		}
 		return c.table([]string{"REV", "AT", "ACTOR", "SUMMARY"}, mapRows(rows, "id", "at", "actor", "summary"))
 	}
-}
-
-func nonNilRows(r []map[string]any) []map[string]any {
-	if r == nil {
-		return []map[string]any{}
-	}
-	return r
 }
 
 func buildRestore(fs *flag.FlagSet) func(*cli, []string) error {
@@ -950,7 +933,7 @@ func buildRestore(fs *flag.FlagSet) func(*cli, []string) error {
 		}
 		id, err := strconv.ParseInt(args[0], 10, 64)
 		if err != nil {
-			return usageErr("bad revision "+strconv.Quote(args[0]), "revisions come from `siphon history`")
+			return client.Usage("bad revision "+strconv.Quote(args[0]), "revisions come from `siphon history`")
 		}
 		p := "/api/config/history/" + strconv.FormatInt(id, 10)
 		var rev map[string]any
@@ -986,7 +969,7 @@ func buildRestore(fs *flag.FlagSet) func(*cli, []string) error {
 func buildConfig(fs *flag.FlagSet) func(*cli, []string) error {
 	return func(c *cli, args []string) error {
 		if err := needArgs(args, 1, "config export [-config f]"); err != nil || args[0] != "export" {
-			return usageErr("usage: siphon config export [-config f]", "")
+			return client.Usage("usage: siphon config export [-config f]", "")
 		}
 		var res struct {
 			YAML string `json:"yaml"`

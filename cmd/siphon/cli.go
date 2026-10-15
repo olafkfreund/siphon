@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/olafkfreund/siphon/internal/client"
+	"github.com/olafkfreund/siphon/internal/config"
 )
 
 // The CLI has two modes. Local mode is the original code that opens the config
@@ -199,7 +200,7 @@ func (c command) doc() cmdDoc {
 }
 
 func buildHelpDoc() helpDoc {
-	h := helpDoc{Version: version, GlobalFlags: globalFlagDocs(), Kinds: append(slices.Clone(configKinds), listKinds...),
+	h := helpDoc{Version: version, GlobalFlags: globalFlagDocs(), Kinds: append(slices.Clone(config.Kinds), listKinds...),
 		ExitCodes: map[string]string{"0": "ok", "1": "error", "2": "usage", "3": "validation failed", "4": "not found", "5": "conflict (stale edit)"}}
 	for _, c := range commands() {
 		h.Commands = append(h.Commands, c.doc())

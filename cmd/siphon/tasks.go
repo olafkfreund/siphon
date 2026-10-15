@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -12,6 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/olafkfreund/siphon/internal/catalog"
 	"github.com/olafkfreund/siphon/internal/client"
 )
 
@@ -132,11 +131,11 @@ func buildNew(fs *flag.FlagSet) func(*cli, []string) error {
 	yes := fs.Bool("yes", false, "apply without asking")
 	return func(c *cli, args []string) error {
 		if len(args) != 1 || args[0] != "task" {
-			return usageErr("usage: siphon new task [flags]", "run `siphon help new` for the flags")
+			return client.Usage("usage: siphon new task [flags]", "run `siphon help new` for the flags")
 		}
 		flagOnly := t.Name != "" || t.Source != "" || webhook != "" || poll != "" || schedule != "" || t.When != "" || cmdJSON != "" || t.Agent != "" || t.Routine != ""
 		if !flagOnly && !c.isTTY {
-			return usageErr("no terminal for the wizard, and no flags given", "needs --name, one of --source/--webhook/--poll, --when and one of --cmd/--agent/--routine; or run on a terminal")
+			return client.Usage("no terminal for the wizard, and no flags given", "needs --name, one of --source/--webhook/--poll, --when and one of --cmd/--agent/--routine; or run on a terminal")
 		}
 		if flagOnly {
 			if err := specFromFlags(&t, webhook, poll, srcURL, every, cmdJSON, schedule, timezone); err != nil {
@@ -165,9 +164,7 @@ func buildNew(fs *flag.FlagSet) func(*cli, []string) error {
 		}
 		sec, secret := map[string]string{}, ""
 		if s := t.NewSource; s != nil && s.Type == "webhook" {
-			b := make([]byte, 32)
-			rand.Read(b)
-			secret = hex.EncodeToString(b)
+			secret = catalog.NewSecret()
 			sec["sources/"+s.Name+".secret"] = secret
 		}
 		out, err := c.runApply(items, sec, *dry, *yes, false)
@@ -206,10 +203,10 @@ func specFromFlags(t *taskSpec, webhook, poll, srcURL, every, cmdJSON, schedule,
 	case n == 0:
 		missing = append(missing, "--source (or --webhook <name>, or --poll <name> --url <u>, or --schedule <at>)")
 	case n > 1:
-		return usageErr("give only one of --source, --webhook, --poll and --schedule", "")
+		return client.Usage("give only one of --source, --webhook, --poll and --schedule", "")
 	}
 	if timezone != "" && schedule == "" {
-		return usageErr("--timezone is for --schedule", "")
+		return client.Usage("--timezone is for --schedule", "")
 	}
 	if schedule != "" { // every moment is a new event: fire on each, with no condition
 		if t.When == "" {
@@ -229,33 +226,33 @@ func specFromFlags(t *taskSpec, webhook, poll, srcURL, every, cmdJSON, schedule,
 	case n == 0:
 		missing = append(missing, "--cmd (or --agent, or --routine)")
 	case n > 1:
-		return usageErr("give only one of --cmd, --agent and --routine", "")
+		return client.Usage("give only one of --cmd, --agent and --routine", "")
 	}
 	if t.Agent != "" && t.Cooldown == "" {
 		missing = append(missing, "--cooldown (required for agents)")
 	}
 	if len(missing) > 0 {
-		return usageErr("missing: "+strings.Join(missing, ", "), "run `siphon help new` for the flags, or run on a terminal for the wizard")
+		return client.Usage("missing: "+strings.Join(missing, ", "), "run `siphon help new` for the flags, or run on a terminal for the wizard")
 	}
 	switch t.On {
 	case "":
 		t.On = "edge"
 	case "each", "edge":
 	default:
-		return usageErr("--on must be each or edge", "")
+		return client.Usage("--on must be each or edge", "")
 	}
 	if t.On == "each" && t.ID == "" {
-		return usageErr("--on each needs --id", "the expression that identifies an event, like --id event.id")
+		return client.Usage("--on each needs --id", "the expression that identifies an event, like --id event.id")
 	}
 	if t.On == "edge" && t.ID != "" {
-		return usageErr("--id is for --on each", "")
+		return client.Usage("--id is for --on each", "")
 	}
 	if t.On == "each" && t.Repeat != "" {
-		return usageErr("--repeat is for --on edge", "")
+		return client.Usage("--repeat is for --on edge", "")
 	}
 	if cmdJSON != "" {
 		if err := json.Unmarshal([]byte(cmdJSON), &t.Cmd); err != nil || len(t.Cmd) == 0 {
-			return usageErr("--cmd must be a non-empty JSON array of strings", `for example --cmd '["notify","disk full"]'`)
+			return client.Usage("--cmd must be a non-empty JSON array of strings", `for example --cmd '["notify","disk full"]'`)
 		}
 	}
 	switch {
@@ -304,7 +301,7 @@ func (c *cli) taskFree(t taskSpec) error {
 			return err
 		}
 		if found {
-			return usageErr(p.kind+"/"+p.name+" already exists, and `new task` would replace it", "pick another name, or change it with `siphon edit "+p.kind+" "+p.name+"`")
+			return client.Usage(p.kind+"/"+p.name+" already exists, and `new task` would replace it", "pick another name, or change it with `siphon edit "+p.kind+" "+p.name+"`")
 		}
 	}
 	return nil
@@ -319,7 +316,7 @@ func (c *cli) need(label, def string) (string, error) {
 			return v, nil
 		}
 	}
-	return "", usageErr("no answer for: "+label, "")
+	return "", client.Usage("no answer for: "+label, "")
 }
 
 func names(rows []map[string]any) []string {
@@ -367,7 +364,7 @@ func (c *cli) wizard(t *taskSpec) error {
 			return err
 		}
 		if !slices.Contains([]string{"webhook", "http", "mcp", "schedule"}, s.Type) {
-			return usageErr("the source type must be webhook, http, mcp or schedule", "")
+			return client.Usage("the source type must be webhook, http, mcp or schedule", "")
 		}
 		if ans != "new" {
 			s.Name = ans
@@ -421,7 +418,7 @@ func (c *cli) wizard(t *taskSpec) error {
 		}
 		if strings.HasPrefix(line, "[") {
 			if err := json.Unmarshal([]byte(line), &t.Cmd); err != nil {
-				return usageErr("that is not a JSON array of strings", "")
+				return client.Usage("that is not a JSON array of strings", "")
 			}
 		} else {
 			t.Cmd = strings.Fields(line)
@@ -441,7 +438,7 @@ func (c *cli) wizard(t *taskSpec) error {
 			return err
 		}
 	default:
-		return usageErr("the action must be cmd, agent, new-agent or routine", "")
+		return client.Usage("the action must be cmd, agent, new-agent or routine", "")
 	}
 	def = ""
 	if t.Agent != "" || t.NewAgent != nil {
@@ -449,7 +446,7 @@ func (c *cli) wizard(t *taskSpec) error {
 	}
 	t.Cooldown, _ = c.ask("Cooldown between fires (required for agents)", def)
 	if (t.Agent != "" || t.NewAgent != nil) && t.Cooldown == "" {
-		return usageErr("agents need a cooldown", "")
+		return client.Usage("agents need a cooldown", "")
 	}
 	return nil
 }
@@ -480,7 +477,7 @@ func (c *cli) wizardAgent() (*agentSpec, error) {
 		return nil, err
 	}
 	if a.Kind = kindOf[a.Credential]; a.Kind == "" {
-		return nil, usageErr("no connection named "+a.Credential, "connect one first: `siphon connect login ...` or `siphon connect model ...`")
+		return nil, client.Usage("no connection named "+a.Credential, "connect one first: `siphon connect login ...` or `siphon connect model ...`")
 	}
 	if a.Kind == "model" {
 		if a.Model, err = c.need("Model id", ""); err != nil {

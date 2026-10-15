@@ -22,6 +22,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/olafkfreund/siphon/internal/mcpbridge"
+	"github.com/olafkfreund/siphon/internal/source"
 )
 
 // bridgeBasePort is the first loopback port an agent unit forwards to a bridge.
@@ -125,9 +126,7 @@ func startBridges(ctx context.Context, o *AgentOptions) (forwards map[int]string
 
 func randomHex(n int) (string, error) {
 	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
+	rand.Read(b)
 	return hex.EncodeToString(b), nil
 }
 
@@ -351,7 +350,7 @@ func listTools(ctx context.Context, sock, auth string) ([]string, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", sock)
 	}}
 	defer tr.CloseIdleConnections()
-	hc := &http.Client{Transport: bearerTransport{tr, auth}}
+	hc := &http.Client{Transport: source.HeaderTransport{Base: tr, Header: map[string]string{"Authorization": auth}}}
 	sess, err := mcp.NewClient(&mcp.Implementation{Name: "siphon-probe", Version: "1"}, nil).Connect(ctx,
 		&mcp.StreamableClientTransport{Endpoint: "http://bridge/mcp", HTTPClient: hc, MaxRetries: -1, DisableStandaloneSSE: true}, nil)
 	if err != nil {
@@ -366,17 +365,6 @@ func listTools(ctx context.Context, sock, auth string) ([]string, error) {
 		out = append(out, t.Name)
 	}
 	return out, nil
-}
-
-type bearerTransport struct {
-	rt   http.RoundTripper
-	auth string
-}
-
-func (t bearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	r = r.Clone(r.Context())
-	r.Header.Set("Authorization", t.auth)
-	return t.rt.RoundTrip(r)
 }
 
 // bridgeMask is what bridge errors must hide: the server's secrets and the run's.

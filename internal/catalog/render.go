@@ -7,8 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
-	"net"
 	"net/url"
 	"regexp"
 	"slices"
@@ -18,8 +16,6 @@ import (
 
 	"github.com/olafkfreund/siphon/internal/config"
 )
-
-func bytesReader(b []byte) io.Reader { return bytes.NewReader(b) }
 
 // UserError is a refusal to show the user (bad input, an unmet precondition).
 type UserError struct{ Msg, Field string } // Field names the form field at fault, if one is
@@ -95,19 +91,10 @@ func tools(src string, names ...string) string {
 	return "[" + strings.Join(out, ", ") + "]"
 }
 
-func loopback(h string) bool {
-	if ip := net.ParseIP(h); ip != nil {
-		return ip.IsLoopback()
-	}
-	return h == "localhost"
-}
-
 // NewSecret is a random webhook secret.
 func NewSecret() string {
 	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		panic(err)
-	}
+	rand.Read(b)
 	return hex.EncodeToString(b)
 }
 
@@ -351,7 +338,7 @@ func (e *Entry) clean(in map[string]string, cfg *config.Config) (map[string]stri
 			if f.PrivateListed && config.PrivateHost(u.Hostname()) && (cfg == nil || !cfg.ServiceEndpoint(v)) {
 				return nil, badf(f.Key, "%s is a private address: list %s in server.services.private_endpoints first", f.Label, u.Host)
 			}
-			if f.Secure && u.Scheme != "https" && !loopback(u.Hostname()) && (cfg == nil || !cfg.ServiceEndpoint(v)) {
+			if f.Secure && u.Scheme != "https" && !config.Loopback(u.Hostname()) && (cfg == nil || !cfg.ServiceEndpoint(v)) {
 				return nil, badf(f.Key, "the %s must be https (http only for localhost or a host listed in server.services.private_endpoints): the token would travel in clear", f.Label)
 			}
 		}

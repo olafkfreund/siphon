@@ -3,8 +3,10 @@ package action
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -34,11 +36,7 @@ func buildCodex(o AgentOptions, cmd, prompt, home string) ([]string, []byte, map
 	}
 	argv := []string{cmd, "exec", "--skip-git-repo-check", "--ephemeral", "--strict-config", "-s", "read-only", "-c", "forced_login_method=" + tomlString(method)}
 	var config strings.Builder
-	names := make([]string, 0, len(o.MCP))
-	for n := range o.MCP {
-		names = append(names, n)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(o.MCP))
 	for _, n := range names {
 		if !tomlName.MatchString(n) {
 			return nil, nil, nil, nil, nil, nil, fmt.Errorf("unsafe mcp server name %q", n)
@@ -49,11 +47,7 @@ func buildCodex(o AgentOptions, cmd, prompt, home string) ([]string, []byte, map
 		case s.URL != "" && len(s.Command) == 0:
 			fmt.Fprintln(&config, prefix+"url="+tomlString(s.URL))
 			if len(s.Headers) > 0 {
-				keys := make([]string, 0, len(s.Headers))
-				for k := range s.Headers {
-					keys = append(keys, k)
-				}
-				sort.Strings(keys)
+				keys := slices.Sorted(maps.Keys(s.Headers))
 				pairs := make([]string, 0, len(keys))
 				for _, k := range keys {
 					pairs = append(pairs, tomlString(k)+"="+tomlString(s.Headers[k]))

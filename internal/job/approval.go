@@ -20,9 +20,7 @@ const approvalTTL = store.ApprovalTTL // one value: the notifier derives when an
 // audit row the masked path.
 func (p *Pipeline) newApproval(tx *sql.Tx, jobID int64, now time.Time) (link string, err error) {
 	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return "", err
-	}
+	rand.Read(raw)
 	token := hex.EncodeToString(raw)
 	sum := sha256.Sum256([]byte(token))
 	if err := store.CreateApproval(tx, jobID, sum[:], now.Add(approvalTTL)); err != nil {

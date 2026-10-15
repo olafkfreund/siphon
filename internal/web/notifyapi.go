@@ -48,15 +48,7 @@ func (s *server) notifyAPI(mux *http.ServeMux) {
 			f.Job = id
 		}
 		rows, err := store.ListNotifications(s.Store.DB, f)
-		out := []notificationRow{}
-		for _, n := range rows {
-			o := notificationRow{ID: n.ID, Channel: n.Channel, Event: n.Event, Job: n.JobID, Source: n.Source, Title: n.Title,
-				Body: n.Body, State: n.State, Attempts: n.Attempts, Error: n.Error, CreatedAt: n.CreatedAt.UTC().Format(time.RFC3339)}
-			if n.SentAt != nil {
-				o.SentAt = n.SentAt.UTC().Format(time.RFC3339)
-			}
-			out = append(out, o)
-		}
+		out := notificationRows(rows)
 		return out, 200, err
 	})
 }
@@ -74,4 +66,17 @@ type notificationRow struct {
 	Error     string `json:"error,omitempty"`
 	CreatedAt string `json:"created_at"`
 	SentAt    string `json:"sent_at,omitempty"`
+}
+
+func notificationRows(rows []store.Notification) []notificationRow {
+	out := []notificationRow{}
+	for _, n := range rows {
+		o := notificationRow{ID: n.ID, Channel: n.Channel, Event: n.Event, Job: n.JobID, Source: n.Source, Title: n.Title,
+			Body: n.Body, State: n.State, Attempts: n.Attempts, Error: n.Error, CreatedAt: n.CreatedAt.UTC().Format(time.RFC3339)}
+		if n.SentAt != nil {
+			o.SentAt = n.SentAt.UTC().Format(time.RFC3339)
+		}
+		out = append(out, o)
+	}
+	return out
 }

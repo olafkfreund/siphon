@@ -4,12 +4,12 @@ package client
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/olafkfreund/siphon/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -164,7 +165,7 @@ func Resolve(flagURL, flagTokenFile string) (Conn, error) {
 			return Conn{}, &Error{Msg: "-url needs its own token: the saved login is for another URL", Hint: "pass -token-file <file> (or set SIPHON_TOKEN_FILE / SIPHON_TOKEN) with -url", Code: ExitUsage}
 		}
 	case saved:
-		c = Conn{f.URL, firstOf(tok, f.Token)}
+		c = Conn{f.URL, cmp.Or(tok, f.Token)}
 	default:
 		c = Conn{os.Getenv("SIPHON_URL"), tok}
 	}
@@ -175,15 +176,6 @@ func Resolve(flagURL, flagTokenFile string) (Conn, error) {
 		return Conn{}, err
 	}
 	return c, nil
-}
-
-func firstOf(s ...string) string {
-	for _, v := range s {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func readToken(path string) (string, error) {
@@ -201,7 +193,7 @@ func CleanURL(raw string) (string, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return "", &Error{Msg: "bad siphon URL: want http(s)://host[:port]", Hint: "for example `siphon login http://127.0.0.1:8080`", Code: ExitUsage}
 	}
-	if h := u.Hostname(); u.Scheme == "http" && !InsecureHTTP && os.Getenv("SIPHON_INSECURE_HTTP") != "1" && !isLoopback(h) {
+	if h := u.Hostname(); u.Scheme == "http" && !InsecureHTTP && os.Getenv("SIPHON_INSECURE_HTTP") != "1" && !config.Loopback(h) {
 		return "", &Error{Msg: "refusing http:// to " + h + ": the token would cross the network in clear text", Hint: "use https://, or pass --insecure-http (SIPHON_INSECURE_HTTP=1) if the network is trusted", Code: ExitUsage}
 	}
 	return strings.TrimRight(u.String(), "/"), nil
@@ -209,14 +201,6 @@ func CleanURL(raw string) (string, error) {
 
 // InsecureHTTP allows http:// to a non-loopback host (the --insecure-http flag).
 var InsecureHTTP bool
-
-func isLoopback(host string) bool {
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip, err := netip.ParseAddr(host)
-	return err == nil && ip.IsLoopback()
-}
 
 var actorBad = regexp.MustCompile(`[^\w.@:-]`)
 
@@ -259,7 +243,7 @@ func (c *Client) Do(method, path string, body, out any) error {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
-	req.Header.Set("X-Siphon-Actor", firstOf(c.Label, Actor()))
+	req.Header.Set("X-Siphon-Actor", cmp.Or(c.Label, Actor()))
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

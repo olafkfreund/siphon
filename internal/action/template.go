@@ -143,9 +143,7 @@ func newRunDir(dir string) (id, runDir string, gid int, err error) {
 		return "", "", 0, errors.New("sandbox: no action directory configured")
 	}
 	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		return "", "", 0, err
-	}
+	rand.Read(b)
 	id = hex.EncodeToString(b)
 	runDir = filepath.Join(dir, id)
 	if err := os.Mkdir(runDir, 0o700); err != nil { // Mkdir, not MkdirAll: an id is never shared

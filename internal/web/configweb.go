@@ -77,7 +77,7 @@ func (s *server) configRoutes(mux *http.ServeMux) {
 				http.Error(w, errNoEditing.Error(), http.StatusServiceUnavailable)
 				return
 			}
-			if k := r.PathValue("kind"); k != "" && !config.Kinds[k] {
+			if k := r.PathValue("kind"); k != "" && !slices.Contains(config.Kinds, k) {
 				http.NotFound(w, r)
 				return
 			}
@@ -143,7 +143,7 @@ func (s *server) cfgList(w http.ResponseWriter, r *http.Request, csrf string) {
 		s.fail(w, err)
 		return
 	}
-	v := &cfgView{Kinds: sortedKinds(), Kind: kind, Rev: rev, Notice: doneText[r.URL.Query().Get("done")]}
+	v := &cfgView{Kinds: slices.Sorted(slices.Values(config.Kinds)), Kind: kind, Rev: rev, Notice: doneText[r.URL.Query().Get("done")]}
 	for k, p := range prov {
 		if k.Kind == kind {
 			v.Rows = append(v.Rows, s.cfgDetail(kind, cfgRow{Name: k.Name, Prov: string(p)}))
@@ -190,7 +190,7 @@ func (s *server) cfgDetail(kind string, r cfgRow) cfgRow {
 				k = "servicenow"
 			}
 			r.Steps = append(r.Steps, k)
-			r.Approval = r.Approval || cfg.StepNeedsApproval(st)
+			r.Approval = r.Approval || config.StepNeedsApproval(st, cfg.Agents[st.Agent])
 		}
 		for _, ru := range cfg.Rules {
 			if ru.Action.Routine == r.Name {
@@ -201,15 +201,6 @@ func (s *server) cfgDetail(kind string, r cfgRow) cfgRow {
 	return r
 }
 
-func sortedKinds() []string {
-	k := make([]string, 0, len(config.Kinds))
-	for n := range config.Kinds {
-		k = append(k, n)
-	}
-	sort.Strings(k)
-	return k
-}
-
 // editView builds the editor for an item from its YAML.
 func (s *server) editView(kind, name string, isNew bool, y string) (*cfgView, error) {
 	_, prov, _, rev, err := s.state()
@@ -217,7 +208,7 @@ func (s *server) editView(kind, name string, isNew bool, y string) (*cfgView, er
 		return nil, err
 	}
 	p, exists := prov[itemKey{Kind: kind, Name: name}]
-	v := &cfgView{Kinds: sortedKinds(), Kind: kind, Name: name, New: isNew, Exists: exists && !isNew, Prov: string(p), YAML: y,
+	v := &cfgView{Kinds: slices.Sorted(slices.Values(config.Kinds)), Kind: kind, Name: name, New: isNew, Exists: exists && !isNew, Prov: string(p), YAML: y,
 		Rev: rev, Fields: formFields(kind, y)}
 	v.ServiceNow = hasServiceNow(kind, y)
 	v.HasForm = len(v.Fields) > 0 && !v.ServiceNow

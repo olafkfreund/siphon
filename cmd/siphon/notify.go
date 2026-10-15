@@ -9,6 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/olafkfreund/siphon/internal/applyfile"
 	"github.com/olafkfreund/siphon/internal/client"
 	"github.com/olafkfreund/siphon/internal/config"
 )
@@ -29,32 +30,32 @@ func buildNotify(fs *flag.FlagSet) func(*cli, []string) error {
 	const usage = "usage: siphon notify add <name> --type ntfy|slack|webhook --url -|@file [--token -|@file] [--events a,b] | test <name> | log"
 	return func(c *cli, args []string) error {
 		if len(args) == 0 {
-			return usageErr(usage, "run `siphon help notify` for the flags")
+			return client.Usage(usage, "run `siphon help notify` for the flags")
 		}
 		switch args[0] {
 		case "add":
 			if len(args) != 2 || *typ == "" || *urlFlag == "" {
-				return usageErr(usage, "")
+				return client.Usage(usage, "")
 			}
 			return c.notifyAdd(args[1], *typ, *urlFlag, *token, *events, *dry, *yes)
 		case "test":
 			if len(args) != 2 {
-				return usageErr(usage, "")
+				return client.Usage(usage, "")
 			}
 			return c.notifyTest(args[1])
 		case "log":
 			if len(args) != 1 {
-				return usageErr(usage, "")
+				return client.Usage(usage, "")
 			}
 			return c.notifyLog(*channel, *job, *limit)
 		}
-		return usageErr("unknown notify command "+strconv.Quote(args[0]), usage)
+		return client.Usage("unknown notify command "+strconv.Quote(args[0]), usage)
 	}
 }
 
 func (c *cli) notifyAdd(name, typ, urlArg, tokenArg, events string, dry, yes bool) error {
 	if !slices.Contains(config.NotifyTypes, typ) {
-		return usageErr("bad --type "+strconv.Quote(typ), "types: "+strings.Join(config.NotifyTypes, ", "))
+		return client.Usage("bad --type "+strconv.Quote(typ), "types: "+strings.Join(config.NotifyTypes, ", "))
 	}
 	item := map[string]any{"type": typ}
 	if events != "" {
@@ -67,13 +68,13 @@ func (c *cli) notifyAdd(name, typ, urlArg, tokenArg, events string, dry, yes boo
 		case f.v == "-" || strings.HasPrefix(f.v, "@"):
 			specs = append(specs, "notify/"+name+"."+f.field+"="+f.v)
 		default:
-			return usageErr("refusing a secret value on the command line: it would end up in your shell history and the process list",
+			return client.Usage("refusing a secret value on the command line: it would end up in your shell history and the process list",
 				"use "+f.flag+" @file, or "+f.flag+" - to read it from stdin")
 		}
 	}
 	stdin := urlArg == "-" || tokenArg == "-"
 	if urlArg == "-" && tokenArg == "-" {
-		return usageErr("stdin can hold only one secret", "give one of them as @file")
+		return client.Usage("stdin can hold only one secret", "give one of them as @file")
 	}
 	if err := checkSecretSpecs(specs, false); err != nil {
 		return err
@@ -86,7 +87,7 @@ func (c *cli) notifyAdd(name, typ, urlArg, tokenArg, events string, dry, yes boo
 	if err != nil {
 		return err
 	}
-	out, err := c.runApply([]applyItem{{Kind: "notify", Name: name, YAML: string(y)}}, sec, dry, yes, stdin)
+	out, err := c.runApply([]applyfile.Item{{Kind: "notify", Name: name, YAML: string(y)}}, sec, dry, yes, stdin)
 	if err != nil {
 		return err
 	}
@@ -137,7 +138,7 @@ func (c *cli) notifyLog(channel string, job int64, limit int) error {
 		return err
 	}
 	if c.json() {
-		return c.jsonOut(nonNilRows(rows))
+		return c.jsonOut(config.NonNil(rows))
 	}
 	for _, r := range rows {
 		if str(r, "sent_at") != "" {

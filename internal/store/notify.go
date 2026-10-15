@@ -11,20 +11,20 @@ const ApprovalTTL = 24 * time.Hour
 
 // Notification is one outbox row.
 type Notification struct {
-	ID        int64      `json:"id"`
-	Channel   string     `json:"channel"`
-	Event     string     `json:"event"`
-	Key       string     `json:"key"`
-	JobID     int64      `json:"job_id"` // 0 when none
-	Source    string     `json:"source"`
-	Title     string     `json:"title"`
-	Body      string     `json:"body"`
-	CreatedAt time.Time  `json:"created_at"`
-	Attempts  int        `json:"attempts"`
-	NextAt    time.Time  `json:"next_at"`
-	SentAt    *time.Time `json:"sent_at"`
-	State     string     `json:"state"` // pending | sent | failed | suppressed
-	Error     string     `json:"error"`
+	ID        int64
+	Channel   string
+	Event     string
+	Key       string
+	JobID     int64 // 0 when none
+	Source    string
+	Title     string
+	Body      string
+	CreatedAt time.Time
+	Attempts  int
+	NextAt    time.Time
+	SentAt    *time.Time
+	State     string // pending | sent | failed | suppressed
+	Error     string
 }
 
 // ChannelSince returns the channel's baseline, creating it as now on first use.

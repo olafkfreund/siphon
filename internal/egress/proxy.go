@@ -145,12 +145,8 @@ func (p *Proxy) serve(ctx context.Context, listener net.Listener) error {
 func (p *Proxy) Register(allow []Entry) (string, func() map[string]int, func()) {
 	var id [8]byte
 	var token [32]byte
-	if _, err := rand.Read(id[:]); err != nil {
-		panic(err)
-	}
-	if _, err := rand.Read(token[:]); err != nil {
-		panic(err)
-	}
+	rand.Read(id[:])
+	rand.Read(token[:])
 	name := "run-" + hex.EncodeToString(id[:])
 	r := &run{token: hex.EncodeToString(token[:]), allow: append([]Entry(nil), allow...), blocked: make(map[string]int)}
 	p.mu.Lock()

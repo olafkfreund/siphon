@@ -3,7 +3,8 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -207,16 +208,12 @@ func Explain(kind string) (string, []ExplainField, error) {
 
 func walk(node map[string]any, prefix string, hints map[string]hint, out *[]ExplainField) {
 	props := sub(node, "properties")
-	keys := make([]string, 0, len(props))
-	for k := range props {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(props))
 	for _, k := range keys {
 		p := sub(props, k)
 		path := prefix + k
 		h := hints[path]
-		f := ExplainField{Path: path, Type: schemaType(p), Required: h.req, Default: h.def, Enum: nonNilStrings(h.enum), Description: h.desc}
+		f := ExplainField{Path: path, Type: schemaType(p), Required: h.req, Default: h.def, Enum: NonNil(h.enum), Description: h.desc}
 		if f.Description == "" {
 			f.Description = strOf(p, "description")
 		}
@@ -256,9 +253,10 @@ func schemaType(p map[string]any) string {
 	return fmt.Sprint(p["type"])
 }
 
-func nonNilStrings(s []string) []string {
+// NonNil is s, or an empty slice when s is nil, so JSON shows [] and not null.
+func NonNil[T any](s []T) []T {
 	if s == nil {
-		return []string{}
+		return []T{}
 	}
 	return s
 }

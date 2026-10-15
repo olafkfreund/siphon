@@ -8,13 +8,13 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -312,11 +312,7 @@ func printEgress(cfg *config.Config) {
 		}
 		return strings.Join(s, ", ")
 	}
-	names := make([]string, 0, len(cfg.Agents))
-	for n := range cfg.Agents {
-		names = append(names, n)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(cfg.Agents))
 	for _, n := range names {
 		if a, on := cfg.AgentEgress(cfg.Agents[n]); on {
 			fmt.Printf("agent %s egress: %s\n", n, list(a))
@@ -581,11 +577,7 @@ func credentials(args []string) error {
 	if args[0] == "ls" {
 		tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 		fmt.Fprintln(tw, "NAME\tPROVIDER\tEXPIRES\tLAST-WRITE")
-		names := make([]string, 0, len(cfg.Credentials))
-		for n := range cfg.Credentials {
-			names = append(names, n)
-		}
-		sort.Strings(names)
+		names := slices.Sorted(maps.Keys(cfg.Credentials))
 		for _, name := range names {
 			c := cfg.Credentials[name]
 			exp, wrote := "-", "-"

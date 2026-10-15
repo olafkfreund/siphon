@@ -6,12 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"regexp"
 	"strings"
 	"text/template"
 	"time"
+
+	"github.com/olafkfreund/siphon/internal/source"
 )
 
 var authError = regexp.MustCompile(`(?i)\b(?:401|invalid_grant|not logged in|authentication_error|unauthori[sz]ed)\b`)
@@ -197,7 +198,7 @@ func parseResult(kind string, stdout []byte) (string, any) {
 		return strings.TrimSpace(string(stdout)), nil
 	}
 	var raw map[string]any
-	value, err := decodeJSON(stdout)
+	value, err := source.DecodeJSON(stdout)
 	if err != nil {
 		return "", nil
 	}
@@ -211,50 +212,6 @@ func parseResult(kind string, stdout []byte) (string, any) {
 	}
 	result, _ := raw[field].(string)
 	return result, raw
-}
-
-func decodeJSON(b []byte) (any, error) {
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.UseNumber()
-	var value any
-	if err := dec.Decode(&value); err != nil {
-		return nil, err
-	}
-	var extra any
-	if err := dec.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return nil, errors.New("multiple JSON values")
-		}
-		return nil, err
-	}
-	return convertNumbers(value)
-}
-
-func convertNumbers(value any) (any, error) {
-	switch v := value.(type) {
-	case json.Number:
-		if n, err := v.Int64(); err == nil {
-			return n, nil
-		}
-		return v.Float64()
-	case map[string]any:
-		for key, item := range v {
-			converted, err := convertNumbers(item)
-			if err != nil {
-				return nil, err
-			}
-			v[key] = converted
-		}
-	case []any:
-		for i, item := range v {
-			converted, err := convertNumbers(item)
-			if err != nil {
-				return nil, err
-			}
-			v[i] = converted
-		}
-	}
-	return value, nil
 }
 
 func classify(kind string, raw any, stderr []byte) string {

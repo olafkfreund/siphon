@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -321,7 +320,7 @@ func (p *Pipeline) enqueue(tx *sql.Tx, cfg *config.Config, r config.Rule, f rule
 		return 0, "", err
 	}
 	state := "queued"
-	if needsApproval(cfg, r) {
+	if cfg.NeedsApproval(r) {
 		state = "pending_approval"
 	}
 	id, err = store.InsertJob(tx, store.Job{Rule: r.Name, ActionJSON: string(b), State: state, RunAfter: now, Depth: depth, ParentID: ev.ParentID}, now)
@@ -336,8 +335,6 @@ func (p *Pipeline) enqueue(tx *sql.Tx, cfg *config.Config, r config.Rule, f rule
 	}
 	return id, link, err
 }
-
-func needsApproval(cfg *config.Config, r config.Rule) bool { return cfg.NeedsApproval(r) }
 
 // RunQueued runs runnable jobs one by one until none are left; returns how many ran.
 func (p *Pipeline) RunQueued(ctx context.Context) (int, error) {
@@ -655,7 +652,7 @@ func (p *Pipeline) RunOnce(ctx context.Context) error {
 	}
 	var errs []error
 	cfg := p.Config()
-	for _, name := range sortedSources(cfg) {
+	for _, name := range slices.Sorted(maps.Keys(cfg.Sources)) {
 		if !cfg.Sources[name].Polled() {
 			continue
 		}
@@ -667,15 +664,6 @@ func (p *Pipeline) RunOnce(ctx context.Context) error {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
-}
-
-func sortedSources(c *config.Config) []string {
-	names := make([]string, 0, len(c.Sources))
-	for n := range c.Sources {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names
 }
 
 // headerValues resolves secret-capable header values: refs use the resolved

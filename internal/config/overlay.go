@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/netip"
 	"net/url"
@@ -39,7 +40,7 @@ const (
 
 // Kinds are the editable top-level sections; server, limits and units never are.
 // "rules" is a list keyed by name, the rest are maps.
-var Kinds = map[string]bool{"sources": true, "agents": true, "routines": true, "credentials": true, "rules": true, "notify": true}
+var Kinds = []string{"sources", "rules", "agents", "routines", "credentials", "notify"}
 
 // Effective applies items to the file's YAML node tree (keeping key order and
 // comments) and returns the merged YAML plus the provenance of every item.
@@ -61,7 +62,7 @@ func Effective(file []byte, items []Item) ([]byte, map[Key]Provenance, error) {
 	}
 
 	prov := map[Key]Provenance{}
-	for kind := range Kinds {
+	for _, kind := range Kinds {
 		if sec := mapGet(root, kind); sec != nil {
 			for _, n := range itemNames(kind, sec) {
 				prov[Key{kind, n}] = FromFile
@@ -69,7 +70,7 @@ func Effective(file []byte, items []Item) ([]byte, map[Key]Provenance, error) {
 		}
 	}
 	for _, it := range items {
-		if !Kinds[it.Kind] {
+		if !slices.Contains(Kinds, it.Kind) {
 			return nil, nil, fmt.Errorf("overlay: kind %q is not editable", it.Kind)
 		}
 		k := Key{it.Kind, it.Name}
@@ -222,12 +223,12 @@ func checkOverlay(file *Config, items, prior []Item, secretsDir string) error {
 				add(errors.New("package must be one listed in server.mcp_packages in siphon.yaml"))
 			}
 			// A package source's keys are bounded by the package; others must match the file's.
-			for _, k := range sortedKeys(s.Env) {
+			for _, k := range slices.Sorted(maps.Keys(s.Env)) {
 				if s.Package != "" && !slices.Contains(file.Server.MCPPackages[s.Package].Env, k) {
 					add(fmt.Errorf("env name %q is not one of package %q's env", k, s.Package))
 				}
 			}
-			if s.Package == "" && !slices.Equal(sortedKeys(s.Env), sortedKeys(fs.Env)) {
+			if s.Package == "" && !slices.Equal(slices.Sorted(maps.Keys(s.Env)), slices.Sorted(maps.Keys(fs.Env))) {
 				add(errors.New("env names (stdio MCP) can only be set in siphon.yaml; the portal may change their values"))
 			}
 			if s.AllowPrivate && !fs.AllowPrivate && !file.ServiceEndpoint(s.URL) {
@@ -288,7 +289,7 @@ func checkOverlay(file *Config, items, prior []Item, secretsDir string) error {
 		default:
 			continue
 		}
-		for _, path := range sortedKeys(refs) {
+		for _, path := range slices.Sorted(maps.Keys(refs)) {
 			ref := refs[path]
 			if moved && ref != "" && ref == fileRefs[path] {
 				// Keeping the file's secret is fine, sending it somewhere new is not.

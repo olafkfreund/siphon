@@ -17,9 +17,7 @@ const sessionKeyFile = "portal-session.key"
 func LoadSessionKey(dir string) ([]byte, error) {
 	path := filepath.Join(dir, sessionKeyFile)
 	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		return nil, err
-	}
+	rand.Read(key)
 	// One serve per state dir (store.Lock runs first), so the create race below is for safety only.
 	if b, err := os.ReadFile(path); err == nil && len(b) == 32 {
 		if fi, err := os.Stat(path); err == nil && fi.Mode().Perm()&0o077 != 0 {

@@ -5,13 +5,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/olafkfreund/siphon/internal/config"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/olafkfreund/siphon/internal/config"
 
 	"gopkg.in/yaml.v3"
 )
@@ -178,17 +179,6 @@ func (p pendingSecret) path(dir string) string {
 	return filepath.Join(dir, config.SecretFileName(p.Kind, p.Name, p.Key))
 }
 
-// writeSecret stores the value at p.path(dir), mode 0600, in a dir that is 0700
-// and not a symlink: a temp file created exclusively (no following links),
-// synced, then renamed over the target.
-func writeSecret(dir string, p pendingSecret) error {
-	tmp, err := stageSecret(dir, p)
-	if err != nil {
-		return err
-	}
-	return publishSecret(tmp, p.path(dir))
-}
-
 // publishSecret renames a staged secret over its final name.
 func publishSecret(tmp, final string) error {
 	if err := os.Rename(tmp, final); err != nil {
@@ -219,9 +209,7 @@ func stageSecret(dir string, p pendingSecret) (string, error) {
 		return "", err
 	}
 	var rnd [8]byte
-	if _, err := rand.Read(rnd[:]); err != nil {
-		return "", err
-	}
+	rand.Read(rnd[:])
 	tmp := filepath.Join(dir, "."+filepath.Base(p.path(dir))+"."+hex.EncodeToString(rnd[:]))
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {

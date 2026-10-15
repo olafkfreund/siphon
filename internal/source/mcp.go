@@ -199,7 +199,7 @@ func (s MCP) transport(ctx context.Context, stream bool) mcp.Transport {
 		var client *http.Client
 		client = guardedClient(o.AllowPrivate, o.Timeout, o.MaxBody, stream)
 		if o.Bearer != "" && o.OAuth == nil {
-			client.Transport = bearerTransport{base: client.Transport, token: o.Bearer}
+			client.Transport = HeaderTransport{client.Transport, map[string]string{"Authorization": "Bearer " + o.Bearer}}
 		}
 		if o.OAuth != nil {
 			client.Transport = RedirectChallenge(client.Transport, o.URL)
@@ -227,15 +227,21 @@ func oneOrMany(values []any) any {
 	return values
 }
 
-type bearerTransport struct {
-	base  http.RoundTripper
-	token string
+// HeaderTransport sets Header on every request (a nil Base is the default transport).
+type HeaderTransport struct {
+	Base   http.RoundTripper
+	Header map[string]string
 }
 
-func (t bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	copy := req.Clone(req.Context())
-	copy.Header.Set("Authorization", "Bearer "+t.token)
-	return t.base.RoundTrip(copy)
+func (t HeaderTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	for k, v := range t.Header {
+		r.Header.Set(k, v)
+	}
+	if t.Base == nil {
+		return http.DefaultTransport.RoundTrip(r)
+	}
+	return t.Base.RoundTrip(r)
 }
 
 type redirectChallenge struct {
@@ -311,11 +317,11 @@ func toolErrText(content []mcp.Content) string {
 	if text == "" {
 		return "(no message)"
 	}
-	return clipRunes(text, 4096)
+	return ClipRunes(text, 4096)
 }
 
-// clipRunes cuts s to at most n bytes on a rune boundary, adding "…" if it cut.
-func clipRunes(s string, n int) string {
+// ClipRunes cuts s to at most n bytes on a rune boundary, adding "…" if it cut.
+func ClipRunes(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
@@ -327,4 +333,4 @@ func clipRunes(s string, n int) string {
 
 // OneLine collapses whitespace and clips to n bytes: for a masked error shown
 // in one line (a source status or a log line).
-func OneLine(s string, n int) string { return clipRunes(strings.Join(strings.Fields(s), " "), n) }
+func OneLine(s string, n int) string { return ClipRunes(strings.Join(strings.Fields(s), " "), n) }

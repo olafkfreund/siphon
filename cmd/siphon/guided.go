@@ -13,9 +13,9 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/olafkfreund/siphon/internal/applyfile"
 	"github.com/olafkfreund/siphon/internal/catalog"
 	"github.com/olafkfreund/siphon/internal/client"
+	"github.com/olafkfreund/siphon/internal/config"
 )
 
 // ask reads one answer on a terminal (prompts go to stderr, so -o json stays
@@ -92,7 +92,7 @@ func (c *cli) gather(strs []strField, secs []secField) error {
 		*f.p = v
 	}
 	if len(missing) > 0 {
-		return usageErr("missing: "+strings.Join(missing, ", "), "pass them as flags, or run on a terminal to be prompted (secrets: `-` reads stdin, `@file` reads a file)")
+		return client.Usage("missing: "+strings.Join(missing, ", "), "pass them as flags, or run on a terminal to be prompted (secrets: `-` reads stdin, `@file` reads a file)")
 	}
 	return nil
 }
@@ -102,7 +102,7 @@ func (c *cli) secretValue(f secField) (string, error) {
 	switch {
 	case v == "-":
 		if c.stdinUsed {
-			return "", usageErr("stdin can only supply one value", "give the others as @file")
+			return "", client.Usage("stdin can only supply one value", "give the others as @file")
 		}
 		c.stdinUsed = true
 		b, err := readAll(c)
@@ -110,11 +110,11 @@ func (c *cli) secretValue(f secField) (string, error) {
 	case strings.HasPrefix(v, "@"):
 		b, err := os.ReadFile(v[1:])
 		if err != nil {
-			return "", usageErr("cannot read the file for --"+f.flag, "")
+			return "", client.Usage("cannot read the file for --"+f.flag, "")
 		}
 		return strings.TrimSpace(string(b)), nil
 	case v != "":
-		return "", usageErr("refusing a secret on the command line (--"+f.flag+"): it would end up in your shell history and the process list",
+		return "", client.Usage("refusing a secret on the command line (--"+f.flag+"): it would end up in your shell history and the process list",
 			"use --"+f.flag+" - to read it from stdin, --"+f.flag+" @file, or leave the flag out to be prompted")
 	case !f.req || !c.isTTY:
 		return "", nil
@@ -164,7 +164,7 @@ func buildConnect(fs *flag.FlagSet) func(*cli, []string) error {
 	}
 	return func(c *cli, args []string) error {
 		if len(args) < 1 {
-			return usageErr("usage: siphon connect <service>|model|login|oauth [--<field> value ...]", "list the services with `siphon catalog`; for a model: `siphon connect model ollama --url http://host:11434`")
+			return client.Usage("usage: siphon connect <service>|model|login|oauth [--<field> value ...]", "list the services with `siphon catalog`; for a model: `siphon connect model ollama --url http://host:11434`")
 		}
 		switch args[0] {
 		case "model":
@@ -178,7 +178,7 @@ func buildConnect(fs *flag.FlagSet) func(*cli, []string) error {
 			return c.connectNotion(args[1], o)
 		}
 		if len(args) != 1 {
-			return usageErr("usage: siphon connect "+args[0]+" [--<field> value ...]", "")
+			return client.Usage("usage: siphon connect "+args[0]+" [--<field> value ...]", "")
 		}
 		return c.connectService(args[0], fs, o)
 	}
@@ -225,7 +225,7 @@ func (c *cli) connectService(id string, fs *flag.FlagSet, o *connectOpts) error 
 		}
 	}
 	if e == nil {
-		return usageErr("unknown thing to connect: "+id, "list the services with `siphon catalog`; or connect model or login")
+		return client.Usage("unknown thing to connect: "+id, "list the services with `siphon catalog`; or connect model or login")
 	}
 	if e.Availability != "available" {
 		return &client.Error{Status: 422, Msg: e.Name + " can't be connected here: " + strings.ReplaceAll(e.Reason, "`", ""), Hint: "see `siphon catalog`"}
@@ -316,7 +316,7 @@ func buildCatalog(fs *flag.FlagSet) func(*cli, []string) error {
 	cat := fs.String("category", "", "only this category (code, issues, chat, monitoring, cloud, payments, home, generic)")
 	return func(c *cli, args []string) error {
 		if len(args) != 0 {
-			return usageErr("usage: siphon catalog [--category c]", "")
+			return client.Usage("usage: siphon catalog [--category c]", "")
 		}
 		all, err := c.catalog()
 		if err != nil {
@@ -336,7 +336,7 @@ func buildCatalog(fs *flag.FlagSet) func(*cli, []string) error {
 			}
 		}
 		if c.json() {
-			return c.jsonOut(map[string]any{"services": nonNilEntries(shown)})
+			return c.jsonOut(map[string]any{"services": config.NonNil(shown)})
 		}
 		if err := c.table([]string{"ID", "NAME", "CATEGORY", "STATUS", "CAPABILITIES"}, rows); err != nil {
 			return err
@@ -346,13 +346,6 @@ func buildCatalog(fs *flag.FlagSet) func(*cli, []string) error {
 		}
 		return nil
 	}
-}
-
-func nonNilEntries(e []catalogEntry) []catalogEntry {
-	if e == nil {
-		return []catalogEntry{}
-	}
-	return e
 }
 
 // finishConnect prints the test result (JSON: with the setup reply) and fails
@@ -406,7 +399,7 @@ var presetNeedsKey = []string{"openrouter", "groq", "mistral"}
 
 func (c *cli) connectModel(args []string, o *connectOpts) error {
 	if len(args) != 1 {
-		return usageErr("usage: siphon connect model <preset> [--name n] [--url u] [--api-key -]", "presets: ollama, lmstudio, openrouter, groq, mistral, openai")
+		return client.Usage("usage: siphon connect model <preset> [--name n] [--url u] [--api-key -]", "presets: ollama, lmstudio, openrouter, groq, mistral, openai")
 	}
 	preset := args[0]
 	if err := c.gather([]strField{{"name", "Name", &o.name, preset, true}}, []secField{{"api-key", "API key", &o.apiKey, slices.Contains(presetNeedsKey, preset) && c.isTTY}}); err != nil {
@@ -440,7 +433,7 @@ func (c *cli) connectLogin(args []string, o *connectOpts) error {
 		return c.logoutLogin(o)
 	}
 	if len(args) != 1 || !slices.Contains(loginProviders, args[0]) {
-		return usageErr("usage: siphon connect login claude|codex|agy (--file f | --setup-token - | --api-key -)", "")
+		return client.Usage("usage: siphon connect login claude|codex|agy (--file f | --setup-token - | --api-key -)", "")
 	}
 	provider := args[0]
 	given := 0
@@ -450,7 +443,7 @@ func (c *cli) connectLogin(args []string, o *connectOpts) error {
 		}
 	}
 	if given != 1 {
-		return usageErr("give exactly one of --file <login.json>, --setup-token - or --api-key -", "a subscription login file, a Claude setup token, or an API key")
+		return client.Usage("give exactly one of --file <login.json>, --setup-token - or --api-key -", "a subscription login file, a Claude setup token, or an API key")
 	}
 	if err := c.gather([]strField{{"name", "Name", &o.name, provider, true}}, nil); err != nil {
 		return err
@@ -466,7 +459,7 @@ func (c *cli) connectLogin(args []string, o *connectOpts) error {
 			b, err = os.ReadFile(o.file)
 		}
 		if err != nil {
-			return usageErr("cannot read the login file", "")
+			return client.Usage("cannot read the login file", "")
 		}
 		value = string(b)
 	case o.setupToken != "":
@@ -517,31 +510,21 @@ func buildTest(fs *flag.FlagSet) func(*cli, []string) error {
 		}
 		ruleYAML := ""
 		if *file != "" { // an unsaved rule: its name comes from the file, so the args are the event only
-			var b []byte
-			var err error
-			if *file == "-" {
-				b, err = readAll(c)
-			} else {
-				b, err = os.ReadFile(*file)
-			}
-			if err != nil {
-				return usageErr("cannot read the rule file "+*file, "")
-			}
-			items, err := applyfile.Parse(b)
+			items, err := c.readItems(*file, "the rule file "+*file)
 			if err != nil {
 				return err
 			}
 			if len(items) != 1 || items[0].Kind != "rules" {
-				return usageErr("the file must hold exactly one rule", "write `rules:` with one `- name: ...` entry")
+				return client.Usage("the file must hold exactly one rule", "write `rules:` with one `- name: ...` entry")
 			}
 			if *file == "-" && len(args) == 1 && args[0] == "-" {
-				return usageErr("both the rule and the event cannot come from stdin", "")
+				return client.Usage("both the rule and the event cannot come from stdin", "")
 			}
 			ruleYAML = items[0].YAML
 			args = append([]string{items[0].Name}, args...)
 		}
 		if len(args) < 1 || len(args) > 2 || (*last && len(args) == 2) || (*at != "" && (*last || len(args) == 2)) || (!*last && *at == "" && len(args) == 1) {
-			return usageErr("usage: siphon test <rule> <event.json|-> | siphon test <rule> --last | siphon test <rule> --at <time> | siphon test service|model <name>", "an event is a JSON file, or - for stdin; --last uses the stored one; --at builds a schedule event")
+			return client.Usage("usage: siphon test <rule> <event.json|-> | siphon test <rule> --last | siphon test <rule> --at <time> | siphon test service|model <name>", "an event is a JSON file, or - for stdin; --last uses the stored one; --at builds a schedule event")
 		}
 		body := map[string]any{}
 		if *at != "" {
@@ -557,10 +540,10 @@ func buildTest(fs *flag.FlagSet) func(*cli, []string) error {
 				b, err = os.ReadFile(args[1])
 			}
 			if err != nil {
-				return usageErr("cannot read the event "+args[1], "")
+				return client.Usage("cannot read the event "+args[1], "")
 			}
 			if !json.Valid(b) {
-				return usageErr("the event is not valid JSON", "")
+				return client.Usage("the event is not valid JSON", "")
 			}
 			body["event"] = json.RawMessage(b)
 		}
@@ -572,7 +555,7 @@ func buildTest(fs *flag.FlagSet) func(*cli, []string) error {
 			for _, kv := range headers {
 				k, v, ok := strings.Cut(kv, "=")
 				if !ok || k == "" {
-					return usageErr("bad --header "+kv, "want name=value")
+					return client.Usage("bad --header "+kv, "want name=value")
 				}
 				h[k] = v
 			}
@@ -786,7 +769,7 @@ var (
 // then polls the source's status until the browser login finishes.
 func (c *cli) connectOAuth(args []string, o *connectOpts) error {
 	if len(args) != 1 {
-		return usageErr("usage: siphon connect oauth <source> [--no-wait | --logout]", "the source needs auth.oauth in its config")
+		return client.Usage("usage: siphon connect oauth <source> [--no-wait | --logout]", "the source needs auth.oauth in its config")
 	}
 	path := "/api/sources/" + url.PathEscape(args[0]) + "/oauth"
 	if o.logout {
@@ -843,7 +826,7 @@ func (c *cli) connectOAuth(args []string, o *connectOpts) error {
 // logoutLogin deletes a stored login: `connect login --logout --name <n> [--yes]`.
 func (c *cli) logoutLogin(o *connectOpts) error {
 	if o.name == "" {
-		return usageErr("usage: siphon connect login --logout --name <name> [--yes]", "list the stored logins with `siphon get connections`")
+		return client.Usage("usage: siphon connect login --logout --name <name> [--yes]", "list the stored logins with `siphon get connections`")
 	}
 	if !o.yes {
 		ok, err := c.confirm("Delete the stored login " + o.name + "?")
@@ -851,7 +834,7 @@ func (c *cli) logoutLogin(o *connectOpts) error {
 			return err
 		}
 		if !ok {
-			return usageErr("not deleted", "")
+			return client.Usage("not deleted", "")
 		}
 	}
 	if err := c.call("DELETE", "/api/connections/logins/"+url.PathEscape(o.name), nil, nil); err != nil {
@@ -868,7 +851,7 @@ func (c *cli) logoutLogin(o *connectOpts) error {
 // and after confirmation stores it as the source's secret.
 func (c *cli) connectNotion(source string, o *connectOpts) error {
 	if c.json() && !o.yes {
-		return usageErr("-o json needs --yes", "the confirmation prompt would break the JSON output")
+		return client.Usage("-o json needs --yes", "the confirmation prompt would break the JSON output")
 	}
 	path := "/api/sources/" + url.PathEscape(source) + "/notion-verification"
 	var pend struct {
@@ -888,7 +871,7 @@ func (c *cli) connectNotion(source string, o *connectOpts) error {
 			return err
 		}
 		if !ok {
-			return usageErr("not stored", "run the command again when you have pasted the token into Notion")
+			return client.Usage("not stored", "run the command again when you have pasted the token into Notion")
 		}
 	}
 	var res struct {

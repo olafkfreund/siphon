@@ -2,7 +2,9 @@ package web
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 
@@ -50,11 +52,7 @@ func (s *server) metrics(w http.ResponseWriter, _ *http.Request) {
 	line("siphon_build_info", 1, "version", s.Version)
 
 	fam("siphon_jobs", "Jobs by state.")
-	states := make([]string, 0, len(m.Jobs))
-	for st := range m.Jobs {
-		states = append(states, st)
-	}
-	sort.Strings(states)
+	states := slices.Sorted(maps.Keys(m.Jobs))
 	for _, st := range states {
 		line("siphon_jobs", m.Jobs[st], "state", st)
 	}
