@@ -27,9 +27,9 @@ the same as data.
 | `webhook_rejected` | deliveries were refused (signature, timestamp, rate limit); under a flood the stored reason updates at most every 10 s | check the secret and the header name the sender uses |
 | `eval_error` | `when:` or `id:` failed on a real event (a missing field, a wrong type) | `siphon test <rule> --last` shows the error; guard with `event.x != nil` |
 | `condition_false` | the last event didn't match | `siphon test <rule> --last`; compare with `siphon get sources` / the event |
-| `edge_already_true` | `on: edge` already fired and the condition is still true | expected; add `repeat:` to re-fire while true |
+| `edge_already_true` | `on: edge` already fired and the condition is still true | expected; add `repeat:` to re-fire while true; or, for `on: each`, this event id already fired |
 | `cooldown` | the event came inside the rule's cooldown | expected; shorten `cooldown:` if needed |
-| `fired` | it did fire, maybe as a duplicate (`on: each` fires once per `id` for 7 days) | `siphon get audit --rule <rule>`; make `id:` unique per event |
+| `fired` | it did fire, maybe as a duplicate (`on: each` fires once per `id`; an id that keeps coming back never fires again) | `siphon get audit --rule <rule>`; make `id:` unique per event |
 | `awaiting_approval` | it fired and is waiting for you | `siphon get approvals` |
 
 ## Test without waiting for an event
@@ -49,7 +49,7 @@ siphon test <rule> - --header X-GitHub-Event=pull_request < event.json
   - stdio commands;
   - new private hosts;
   - `egress.enabled: false`;
-  - `server.*`;
+  - `server.*`, `limits`, `units`;
   - AWS roles that aren't allowlisted.
 
   Ask the operator.
@@ -79,8 +79,7 @@ siphon test <rule> - --header X-GitHub-Event=pull_request < event.json
 
 - **The daemon:** `journalctl -u siphon -f` (NixOS), or the container's
   logs.
-- **A run's units:** `journalctl -u 'siphon-action@*'` and
-  `journalctl -u 'siphon-mcp@*'` (MCP bridges).
+- **A run's units:** `journalctl -u 'siphon-action@*' -u 'siphon-action-open@*'` (runs with egress off, which includes cmd actions by default) and `journalctl -u 'siphon-mcp@*'` (MCP bridges).
 - **Audit:** `siphon get audit --rule <rule> --since 1h` shows every fire,
   skip, approval and config change.
 - **History:** `siphon history` shows every portal or CLI change, with

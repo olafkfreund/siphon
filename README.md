@@ -10,20 +10,23 @@ in from MCP servers, APIs and webhooks and jets out agents, commands and routine
 A self-hosted gateway that watches MCP servers, REST APIs and webhooks, decides
 with rules whether something needs attention, and then runs a command, starts a
 systemd unit, runs a routine, or hands the problem to an AI agent. One Go
-binary is the daemon, the CLI and the web portal. One YAML file is the only
-source of truth, and one SQLite file holds the state.
+binary is the daemon, the CLI and the web portal. `siphon.yaml` is the
+operator's baseline; portal and CLI edits are stored as revisions on top of it,
+and one SQLite file holds the state.
 
 ```
 sources            rules                        actions
 mcp      ─┐        when: <expr>                 cmd      argv, sandboxed
-http     ─┼──────▶ on: edge | each      ──────▶ unit     starts an allowlisted systemd unit and waits for it
-webhook  ─┘        cooldown, repeat             agent    claude, codex or agy on a subscription login
+http     ─┤        on: edge | each      ──────▶ unit     starts an allowlisted systemd unit and waits for it
+webhook  ─┼──────▶ cooldown, repeat             agent    claude, codex, agy or a model endpoint
+schedule ─┘                                     servicenow  one ServiceNow call by the daemon, no LLM
                                                 routine  ordered steps: if, retry, approve, continue_on_error
 ```
 
 - **Sources** produce events `{source, headers, event}`. `mcp` polls exactly one
   declared read (a resource, or one read-only tool with fixed arguments), `http`
-  polls a GET or POST, `webhook` receives `POST /hook/<source>` with an HMAC check.
+  polls a GET or POST, `webhook` receives `POST /hook/<source>` with an HMAC check,
+  `schedule` fires at set times (cron, `@daily`, `every 15m`).
 - **Rules** are [expr](https://expr-lang.org) expressions over `event`, `item`,
   `headers` and `source`. `on: edge` fires on false→true, `on: each` fires once
   per id; `repeat` and `cooldown` limit how often.
@@ -38,7 +41,7 @@ portal, then the YAML.
 | | |
 |---|---|
 | [Getting started](docs/getting-started.md) | 10 minutes: login, connect a model, a webhook task, an agent task |
-| [Templates](docs/templates/README.md) | ~30 ready-made tasks: PR review, CI failures, alerts, uptime, AWS, Home Assistant, … |
+| [Templates](docs/templates/README.md) | about 50 ready-made tasks: PR review, CI failures, alerts, uptime, AWS, Home Assistant, … |
 | [Concepts](docs/concepts.md) | source → rule → action, agents, connections, approvals, sandboxing |
 | [Connections](docs/README.md#connections) | models (Ollama, OpenAI-compatible), logins (Claude, Codex, agy), GitHub, GitLab, AWS |
 | [Troubleshooting](docs/troubleshooting.md) | `siphon why`, testing against the last event, common errors |
@@ -254,7 +257,7 @@ of source, see [`docs/developing/adding-a-source.md`](docs/developing/adding-a-s
 
 An agent runs a coding-agent CLI inside the same systemd sandbox as `cmd`
 actions. **Subscription logins are the default**; API keys stay supported.
-Three kinds exist: `claude` (default), `codex` and `agy` (Antigravity).
+Four kinds exist: `claude` (default), `codex`, `agy` (Antigravity) and `model` (see [Model connections](#model-connections-ollama-and-openai-compatible-apis)).
 
 ```yaml
 credentials:
@@ -265,7 +268,7 @@ credentials:
 
 agents:
   triage:
-    kind: codex                  # claude (default) | codex | agy
+    kind: codex                  # claude (default) | codex | agy | model
     credential: chatgpt          # optional if exactly one subscription credential of that kind exists
     command: /run/current-system/sw/bin/codex   # optional binary override
     prompt: "..."
@@ -396,9 +399,9 @@ as Claude, Codex and agy. `siphon connect model ollama`, presets for LM
 Studio, OpenRouter, Groq and Mistral, private-endpoint rules: see
 [docs/connections/models.md](docs/connections/models.md).
 
-## Services: GitHub, GitLab and AWS
+## Services
 
-The **Services** page connects GitHub, GitLab and AWS in a few fields. It creates
+**Services** (GitHub, GitLab, AWS, ServiceNow, Azure DevOps, Slack, … see `siphon catalog`) are presets. The **Services** page connects them in a few fields. It creates
 ordinary sources (editable afterwards), stores tokens write-only, and shows
 a generated webhook secret **once**, with the exact payload URL and the
 provider's setup steps. Set `server.public_url` so it can show the full URL.
@@ -517,12 +520,7 @@ targets it. The Services page's AWS tile generates the key and shows the URL.
 
 ## Webhook authentication
 
-| `signature:` | Checks | Use for |
-|---|---|---|
-| `github` | HMAC-SHA256 in `X-Hub-Signature-256` | GitHub |
-| `sha256` | hex HMAC-SHA256 in `signature_header`, optional `timestamp_header` | generic providers |
-| `standard-webhooks` | HMAC over `webhook-id.webhook-timestamp.body` (`whsec_` secrets), ±5 min, `webhook-id` as the replay key | GitLab signing tokens, Svix, other modern providers |
-| `token` | a shared secret in `token_header`, compared in constant time | GitLab `X-Gitlab-Token`, AWS EventBridge API keys |
+All ten modes and when to use each: [Run a command on a webhook](docs/tasks/webhook-command.md).
 
 `token` doesn't protect the body's integrity, so `validate` warns about it.
 Prefer an HMAC mode where the provider offers one, and always put TLS in
@@ -623,7 +621,7 @@ Read these before running it anywhere that matters.
 - **Upstream data is untrusted.** Anything from a source (MCP results, API
   responses, webhook bodies) can be attacker-influenced. Rules and templates
   see it; treat prompts built from it as prompt-injection surface.
-- **Agents are fenced in.** The prompt goes to the runner on stdin, never argv.
+- **Agents are fenced in.** The prompt goes to the runner on stdin, never argv (except agy, see below).
   The runner gets an exact tool allowlist (`allowed_tools`), `--tools ""` to
   disable built-in tools, turn and budget limits, and only the MCP sources named
   in the agent's `mcp:` list. `approve` defaults to **true** for agents, and a
@@ -634,7 +632,7 @@ Read these before running it anywhere that matters.
   `argv[0]` can never be templated, and a templated element may not start with
   `-`. Unit names in `units:` cannot be templated either.
 - **Every `cmd` and agent runs in a fixed systemd sandbox.** The NixOS module
-  defines a template unit, `siphon-action@.service`: DynamicUser,
+  defines three template units, `siphon-action@.service` (egress restricted), `siphon-action-open@.service` (egress off) and `siphon-mcp@.service` (MCP bridges), each with: DynamicUser,
   ProtectSystem=strict, ProtectHome, PrivateTmp, NoNewPrivileges, an empty
   capability set, a syscall filter, hidden `/proc`, the metadata addresses
   blocked, `LimitFSIZE=16M`, `TasksMax` and a `maxActionRuntime` ceiling. An
@@ -649,7 +647,7 @@ Read these before running it anywhere that matters.
   hosts (see "Egress restriction"); use a dedicated or low-value account per
   credential. agy also takes its prompt as an argv element.
 - **siphon cannot raise its own privileges.** The module's polkit rule lets the
-  `siphon` user only start/stop/reset `siphon-action@<16 hex>` instances and
+  `siphon` user only start/stop/reset its `siphon-action@`, `siphon-action-open@` and `siphon-mcp@` instances (16-hex ids) and
   start the units in your `units:` allowlist; every other polkit action
   (transient units, enable, daemon-reload, set-property, …) is refused. systemd
   itself never opens a file in a directory siphon can write (the unit creates
@@ -682,8 +680,10 @@ Read these before running it anywhere that matters.
   timestamp or a unique field in the body). Webhook endpoints are rate limited.
 - **Portal and API.** One token (`server.token`, 32+ characters, `env:` or
   `file:` only). Sessions are HMAC-signed cookies (HttpOnly, SameSite=Strict)
-  that last 24 hours and survive logout until they expire or the daemon
-  restarts; POSTs need a CSRF token. The portal is plain HTTP: terminate TLS in
+  that last 24 hours (12 for SSO). They survive logout and restarts until they
+  expire. To end every session, stop Siphon, delete `portal-session.key` next to
+  `state.db`, and start it again (see [SSO](docs/tasks/sso.md#taking-access-away)).
+  POSTs need a CSRF token. The portal is plain HTTP: terminate TLS in
   front of it.
 - **Auth rate limit.** Failed logins and API auth failures are limited per
   connecting IP (per /64 for IPv6). Behind a reverse proxy every client shares

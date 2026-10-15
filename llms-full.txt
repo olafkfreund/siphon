@@ -20,7 +20,7 @@ baseline in **`siphon.yaml`**.
    working agent task.
 2. **[Concepts](concepts.md):** source → rule → action, agents,
    connections, approvals, and what's sandboxed.
-3. **[Templates](templates/README.md):** about 30 ready-made tasks you can
+3. **[Templates](templates/README.md):** about 50 ready-made tasks you can
    apply as-is.
 4. **[Demo](demo.md):** a five-minute story in a VM: a bad deploy, an agent
    diagnosis you approve, a digest.
@@ -51,7 +51,8 @@ Home Assistant, Cloudflare, AWS, ServiceNow, …) ·
 [Models (Ollama and OpenAI-compatible)](connections/models.md) ·
 [Logins (Claude, Codex, agy)](connections/logins.md) ·
 [GitHub](connections/github.md) · [GitLab](connections/gitlab.md) ·
-[AWS](connections/aws.md) · [ServiceNow](connections/servicenow.md)
+[AWS](connections/aws.md) · [ServiceNow](connections/servicenow.md) ·
+[Azure DevOps](connections/azure-devops.md)
 
 ## When things go wrong
 
@@ -252,7 +253,7 @@ siphon why digest
 ```text
 rule digest
  ✓ enabled
- ✓ source digest (webhook) is idle
+ ✓ source digest (webhook) is ok
  ✓ last event at 2026-10-07 15:41:03
  ✓ the last event satisfies the condition
  ✗ the last event was held back by the cooldown
@@ -304,7 +305,7 @@ names every moving part once. The how-tos use these words.
 
 What you think of as one **task** ("when a PR is opened, have an agent
 review it") is these three linked parts. The portal's **Rules** page shows
-each rule as that flow, and `siphon new task` creates all three at once.
+each rule as that flow, and `siphon new task` creates the source and the rule in one go.
 
 ### Sources: where events come from
 
@@ -333,7 +334,7 @@ A rule has:
 
 `for_each:` splits one event into items (for example every failed task in a
 list), and the rule then sees each as `item`. `cooldown:` stops a rule
-firing again too soon. It's required when the action is an agent.
+firing again too soon. It's required when the action is an agent, a ServiceNow write, or a routine containing either.
 
 ### Actions: what to do
 
@@ -341,8 +342,9 @@ firing again too soon. It's required when the action is an agent.
 |---|---|---|
 | `cmd: [argv…]` | a command in a sandbox | an argv list, never a shell; `{{.event.x}}` filled in per element |
 | `agent: <name>` | an AI agent | approval required by default |
-| `routine: <name>` | ordered steps (`cmd` and `agent` steps, retries, `if:`) | one rule, several things |
+| `routine: <name>` | ordered steps (`cmd`, `agent`, `unit` and `servicenow` steps, retries, `if:`, `approve:`) | one rule, several things |
 | `unit: <name>` | an allowlisted systemd unit | privileged work you approved in `siphon.yaml` |
+| `servicenow: {connection, op, …}` | one ServiceNow API call made by the daemon, no LLM | writes need a `cooldown`; see [ServiceNow](connections/servicenow.md#writes-without-an-agent) |
 
 ## Agents and connections
 
@@ -356,10 +358,10 @@ It runs on a **connection**:
 | Connection | Agent `kind` | What it is |
 |---|---|---|
 | Subscription login | `claude`, `codex`, `agy` | your Claude, ChatGPT or Google subscription, used through its CLI |
-| API key | `claude`, `codex` | a pay-as-you-go key |
+| API key | `claude`, `codex`, `agy` | a pay-as-you-go key |
 | Model endpoint | `model` | Ollama or any OpenAI-compatible API, run by Siphon's own agent loop |
 
-**Services** (GitHub, GitLab, AWS) are presets. They create the right
+**Services** (GitHub, GitLab, AWS, ServiceNow, Azure DevOps, Slack, … see `siphon catalog`) are presets. They create the right
 sources, connections and webhooks in one go, with safe defaults.
 
 ## Approvals
@@ -391,8 +393,10 @@ ask for approval with `approve: true`.
 | | Best for |
 |---|---|
 | **CLI** (`siphon …`) | adding and changing things, scripting, AI assistants |
-| **Portal** (web) | seeing what's happening, verifying, approving, quick edits |
+| **Portal** (web) | seeing what's happening, verifying, approving, quick edits; every list page has search and filters |
 | **`siphon.yaml`** | the operator's baseline, kept in git |
+
+**Portal edits:** every item has **Edit as YAML**. It checks the YAML as you type (admins only) and marks the line of an error. **Review changes** shows the diff, and **Save & apply** applies it. Tab indents; press Esc, then Tab, to leave the editor.
 
 All three change the same items, and every change made through the portal
 or CLI shows in `siphon history` and on the portal's **History** page.
@@ -444,7 +448,7 @@ For agents on ServiceNow, use the built-in tools (`package: servicenow`). Siphon
 - a model endpoint (`kind: model`, with an `ollama`/`openai` credential and
   a `model:`).
 
-**Services** (GitHub, GitLab, AWS) are presets that create sources and
+**Services** (GitHub, GitLab, AWS, ServiceNow, Azure DevOps, Slack, … see `siphon catalog`) are presets that create sources and
 connections for you.
 
 ## The workflow
@@ -458,7 +462,7 @@ Always follow this order. Every step has `-o json`.
 2. `siphon inventory -o json`: the names that exist (sources, agents,
    routines, connections, MCP packages, allowlists). Reuse them; never
    invent a connection or a secret.
-3. `siphon template`: list the ready-made templates (about 30, by
+3. `siphon template`: list the ready-made templates (about 50, by
    category), then `siphon template <name>` to start from the closest one,
    for example:
    - `github-pr-review`, `github-ci-failure`;
@@ -478,7 +482,7 @@ Always follow this order. Every step has `-o json`.
    `--secret` flags to pass.
 
    `siphon explain <kind>` lists every field of a source, rule, agent,
-   routine or credential.
+   routine, credential or notify.
 4. **Write one apply file** (YAML shaped like `siphon.yaml`: `sources:`,
    `rules:`, `agents:`, `routines:`, `credentials:`).
 5. `siphon apply -f task.yaml --dry-run -o json` returns the diff, `errors`
@@ -505,7 +509,8 @@ claude mcp add siphon -- siphon mcp --allow-write       # also let it apply and 
 offers these tools:
 - `inventory`, `get`, `explain`, `template`, `guide`;
 - `test`, `why`, `status`, `jobs`, `job`;
-- `apply`, `delete`.
+- `draft` (never applies, even with `--allow-write`);
+- `apply`, `delete`, `notify_test` (dry only without `--allow-write`).
 
 Without `--allow-write`, `apply` and `delete` **only dry-run**, even when
 asked not to: the result says `"dry_run": true` with a note.
@@ -563,8 +568,10 @@ approval: otherwise nobody is told that a job is waiting.
   - AWS profiles or roles not in `server.aws`.
 - **Names:** `[A-Za-z0-9][A-Za-z0-9_.-]{0,63}`. A rule's `name:` must match
   its item name.
-- **`on: each` needs a stable `id:`** (a delivery id, an item id).
-  Otherwise identical events are deduplicated for 7 days.
+- **`on: each` requires `id:`** (validation fails without it; schedule rules
+  default it to `event.scheduled_at`). Each id fires once. It can fire again
+  only after it has gone unseen for `server.retention.seen_events` (default
+  7 days), counted against the rule's own activity.
 
 ## Exit codes
 
@@ -850,8 +857,9 @@ routines:
   - **Cooldown:** a rule whose routine contains an agent step needs a
     `cooldown`.
 
-**Schedules:** Siphon has no clock source. A systemd timer (or cron)
-POSTs the webhook; `nightly-report`'s header has the NixOS snippet.
+**Schedules:** use a `type: schedule` source (`at: "0 6 * * *"`, `timezone:`), as `nightly-report` does. See [Run a task on a schedule](schedule.md).
+
+**In the portal:** **Routines → New** starts from a starter, or from a recipe (any template with a routine, `/config/routines/new?recipe=nightly-report`). A recipe fills in only the routine; the banner lists the agents and sources it also needs. The **Reference** panel beside the editor lists every step field, and its tokens (`{{.steps.<id>.output}}` …) insert at the cursor.
 
 
 ---
@@ -1531,7 +1539,7 @@ rules:
   for a person. The job output is `servicenow <op> <table> <number>`, and
   a later step reads `{{.steps.<id>.json.number}}`.
 - **The portal** shows these rules, but its form cannot edit them: use the
-  YAML tab.
+  **Edit as YAML** section.
 
 Ready-made: `siphon template alert-to-servicenow-incident` and
 `siphon template servicenow-change-on-deploy`.
@@ -1822,9 +1830,9 @@ the same as data.
 | `webhook_rejected` | deliveries were refused (signature, timestamp, rate limit); under a flood the stored reason updates at most every 10 s | check the secret and the header name the sender uses |
 | `eval_error` | `when:` or `id:` failed on a real event (a missing field, a wrong type) | `siphon test <rule> --last` shows the error; guard with `event.x != nil` |
 | `condition_false` | the last event didn't match | `siphon test <rule> --last`; compare with `siphon get sources` / the event |
-| `edge_already_true` | `on: edge` already fired and the condition is still true | expected; add `repeat:` to re-fire while true |
+| `edge_already_true` | `on: edge` already fired and the condition is still true | expected; add `repeat:` to re-fire while true; or, for `on: each`, this event id already fired |
 | `cooldown` | the event came inside the rule's cooldown | expected; shorten `cooldown:` if needed |
-| `fired` | it did fire, maybe as a duplicate (`on: each` fires once per `id` for 7 days) | `siphon get audit --rule <rule>`; make `id:` unique per event |
+| `fired` | it did fire, maybe as a duplicate (`on: each` fires once per `id`; an id that keeps coming back never fires again) | `siphon get audit --rule <rule>`; make `id:` unique per event |
 | `awaiting_approval` | it fired and is waiting for you | `siphon get approvals` |
 
 ## Test without waiting for an event
@@ -1844,7 +1852,7 @@ siphon test <rule> - --header X-GitHub-Event=pull_request < event.json
   - stdio commands;
   - new private hosts;
   - `egress.enabled: false`;
-  - `server.*`;
+  - `server.*`, `limits`, `units`;
   - AWS roles that aren't allowlisted.
 
   Ask the operator.
@@ -1874,8 +1882,7 @@ siphon test <rule> - --header X-GitHub-Event=pull_request < event.json
 
 - **The daemon:** `journalctl -u siphon -f` (NixOS), or the container's
   logs.
-- **A run's units:** `journalctl -u 'siphon-action@*'` and
-  `journalctl -u 'siphon-mcp@*'` (MCP bridges).
+- **A run's units:** `journalctl -u 'siphon-action@*' -u 'siphon-action-open@*'` (runs with egress off, which includes cmd actions by default) and `journalctl -u 'siphon-mcp@*'` (MCP bridges).
 - **Audit:** `siphon get audit --rule <rule> --since 1h` shows every fire,
   skip, approval and config change.
 - **History:** `siphon history` shows every portal or CLI change, with
@@ -2315,7 +2322,7 @@ siphon deny 42
 Connect a service (see `siphon catalog`) or model: a flag per field, prompts for the rest, secrets only via - or @file.
 
 ```sh
-siphon connect <service>|model|login [--<field> value ...]
+siphon connect <service>|model|login|oauth <source> [--<field> value ...]
 ```
 
 | Flag | Default | Meaning |
@@ -2839,11 +2846,12 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 | [`alert-to-servicenow-incident`](alert-to-servicenow-incident.yaml) | Open a ServiceNow incident for each alert, with no agent | a webhook source `alerts`, `siphon connect servicenow --instance …` |
 | [`alertmanager-summary`](alertmanager-summary.yaml) | Summarise Prometheus alerts with a local model, then notify | `siphon connect model ollama` · webhook secret |
 | [`azure-devops-build-failed`](azure-devops-build-failed.yaml) | Push a phone notification when an Azure DevOps build fails | `siphon connect azure-devops` |
+| [`azure-devops-build-triage`](azure-devops-build-triage.yaml) | Triage each failed Azure DevOps build with an agent that reads the log | `siphon connect azure-devops --organization <org> --pat -`, `siphon connect login claude` |
 | [`azure-keyvault-secret-expiry`](azure-keyvault-secret-expiry.yaml) | Push a notification when an Azure Key Vault secret is near expiry | `siphon connect azure-eventgrid` |
-| [`gcp-cloud-build-failed`](gcp-cloud-build-failed.yaml) | Push a notification when a Google Cloud Build fails | `siphon connect google-pubsub` |
 | [`cloudflare-notification`](cloudflare-notification.yaml) | Explain Cloudflare notifications with an agent, then notify | `siphon connect cloudflare --webhook`, `siphon connect login claude` |
 | [`datadog-monitor-alert`](datadog-monitor-alert.yaml) | Summarise Datadog monitor alerts with a local model, then notify | `siphon connect datadog`, `siphon connect model ollama` |
 | [`disk-full`](disk-full.yaml) | Warn when a disk is nearly full (and again every 6 hours) | — |
+| [`gcp-cloud-build-failed`](gcp-cloud-build-failed.yaml) | Push a notification when a Google Cloud Build fails | `siphon connect google-pubsub` |
 | [`grafana-alert-explain`](grafana-alert-explain.yaml) | Explain a firing Grafana alert using Grafana's own tools (read-only) | `siphon connect grafana --webhook`, `siphon connect login claude` |
 | [`linear-issue-from-alert`](linear-issue-from-alert.yaml) | Open a Linear issue for each firing alert | `siphon connect alertmanager`, `siphon connect linear`, `siphon connect login claude` |
 | [`pagerduty-incident-summary`](pagerduty-incident-summary.yaml) | Summarise each triggered PagerDuty incident, then notify | `siphon connect model ollama`, `siphon connect pagerduty` |
@@ -2868,16 +2876,17 @@ The portal shows the same gallery under **Help & Docs → Templates**.
 | Template | What it does | Connect first |
 |---|---|---|
 | [`azure-devops-new-bug`](azure-devops-new-bug.yaml) | Push a phone notification for each new Azure DevOps bug | `siphon connect azure-devops` |
-| [`matrix-deploy-command`](matrix-deploy-command.yaml) | A Matrix "!deploy" message runs a routine (unencrypted rooms only) | `siphon connect matrix` |
-| [`teams-ask-agent`](teams-ask-agent.yaml) | A Teams @mention answered by a local model, posted back through a Workflows webhook | `siphon connect teams`, `siphon connect model ollama` |
 | [`discord-ask-agent`](discord-ask-agent.yaml) | A Discord /ask command answered by a local model, posted back to the interaction | `siphon connect discord`, `siphon connect model ollama` |
+| [`matrix-deploy-command`](matrix-deploy-command.yaml) | A Matrix "!deploy" message runs a routine (unencrypted rooms only) | `siphon connect matrix` |
 | [`mattermost-command-agent`](mattermost-command-agent.yaml) | A Mattermost /ask command answered by a local model, posted back to the channel | `siphon connect mattermost`, `siphon connect model ollama` |
 | [`notion-page-summary`](notion-page-summary.yaml) | Summarise Notion pages when they are created or edited | `siphon connect notion --webhook`, `siphon connect login claude` |
 | [`servicenow-change-on-deploy`](servicenow-change-on-deploy.yaml) | Note a deploy on its ServiceNow change request | a webhook source `deploys`, `siphon connect servicenow --instance …` |
 | [`servicenow-incident-notify`](servicenow-incident-notify.yaml) | Get notified when a P1 or P2 ServiceNow incident is created | `siphon connect servicenow` |
+| [`servicenow-incident-poll`](servicenow-incident-poll.yaml) | Get notified of ServiceNow incident changes by polling, without a webhook | `siphon connect servicenow --instance … --poll-incidents` |
 | [`slack-mention-agent`](slack-mention-agent.yaml) | An agent that answers when someone @mentions your Slack app | `siphon connect model ollama`, `siphon connect slack` |
 | [`standard-webhooks`](standard-webhooks.yaml) | Receive Standard Webhooks (Svix, Clerk, Resend, …) | — · webhook secret |
 | [`stripe-dispute-notice`](stripe-dispute-notice.yaml) | Get notified when a Stripe dispute is opened | `siphon connect stripe --webhook` |
+| [`teams-ask-agent`](teams-ask-agent.yaml) | A Teams @mention answered by a local model, posted back through a Workflows webhook | `siphon connect teams`, `siphon connect model ollama` |
 | [`webhook-command`](webhook-command.yaml) | Run a command when a signed webhook arrives | — · webhook secret |
 | [`webhook-to-ntfy`](webhook-to-ntfy.yaml) | Forward any webhook to your phone | — · webhook secret |
 
@@ -3537,7 +3546,7 @@ or `test`. `job` is `0`, and `rule` is empty, for source messages.
 | `approval` | a job starts waiting for approval (including each routine step that asks) | once per wait |
 | `reminder` | an approval has 4 h or less left (of 24 h) | once per wait |
 | `failed` | a job ends `failed`: it errored, was interrupted too often, or its approval expired | once per job |
-| `source` | a polled source has failed for 15 minutes; then once more when it recovers | once per outage |
+| `source` | a polled source has failed for 15 minutes; then once more when it recovers, stops polling, or is removed (`source_ok`) | once per outage |
 
 Leave out `--events` to get all four.
 

@@ -59,7 +59,7 @@ or `test`. `job` is `0`, and `rule` is empty, for source messages.
 | `approval` | a job starts waiting for approval (including each routine step that asks) | once per wait |
 | `reminder` | an approval has 4 h or less left (of 24 h) | once per wait |
 | `failed` | a job ends `failed`: it errored, was interrupted too often, or its approval expired | once per job |
-| `source` | a polled source has failed for 15 minutes; then once more when it recovers | once per outage |
+| `source` | a polled source has failed for 15 minutes; then once more when it recovers, stops polling, or is removed (`source_ok`) | once per outage |
 
 Leave out `--events` to get all four.
 
