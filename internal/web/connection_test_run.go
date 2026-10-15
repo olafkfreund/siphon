@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"net/url"
@@ -110,7 +111,7 @@ func (s *server) runConnectionTest(ctx context.Context, conn string) (*connTestR
 		if token == "" {
 			t.Err = "no token is stored for this connection"
 		} else {
-			t = s.runHTTPTest(ctx, t, orDefault(e.Test.Method, "GET"), testTarget(rp.Replace(e.Test.URL)), strings.TrimSpace(hdr), strings.TrimSpace(val), rp.Replace(e.Test.Body), e.Test.Identity)
+			t = s.runHTTPTest(ctx, t, cmp.Or(e.Test.Method, "GET"), testTarget(rp.Replace(e.Test.URL)), strings.TrimSpace(hdr), strings.TrimSpace(val), rp.Replace(e.Test.Body), e.Test.Identity)
 		}
 	case serviceNowSource(cfg, names) != nil:
 		src := serviceNowSource(cfg, names)
@@ -157,7 +158,7 @@ func (s *server) runConnectionTest(ctx context.Context, conn string) (*connTestR
 	ok := t.Err == ""
 	detail := t.Err
 	if ok {
-		if detail = firstNonEmpty(t.User, t.ARN); detail == "" {
+		if detail = cmp.Or(t.User, t.ARN); detail == "" {
 			detail = "(token accepted)"
 		}
 	}
@@ -229,13 +230,6 @@ func connInputs(cfg *config.Config, names []string, t *catalog.Test) (token, bas
 		}
 	}
 	return
-}
-
-func orDefault(s, d string) string {
-	if s == "" {
-		return d
-	}
-	return s
 }
 
 // testTarget lets a test point a catalogue test at a fake server.

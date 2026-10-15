@@ -73,9 +73,7 @@ func (s *server) oauthConfig(p *oidc.Provider, o *config.OIDC) *oauth2.Config {
 
 func randString() string {
 	b := make([]byte, 24)
-	if _, err := rand.Read(b); err != nil {
-		panic(err)
-	}
+	rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 

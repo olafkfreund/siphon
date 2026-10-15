@@ -2,10 +2,10 @@ package web
 
 import (
 	"errors"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -82,7 +82,7 @@ func (s *server) connectedRows() []connRow {
 		}
 		return groups[k]
 	}
-	for _, name := range sortedKeysOf(cfg.Sources) {
+	for _, name := range slices.Sorted(maps.Keys(cfg.Sources)) {
 		src := cfg.Sources[name]
 		svc := serviceFor(src)
 		key := src.Connection
@@ -98,7 +98,7 @@ func (s *server) connectedRows() []connRow {
 		}
 		g.srcs = append(g.srcs, name)
 	}
-	for _, name := range sortedKeysOf(cfg.Credentials) {
+	for _, name := range slices.Sorted(maps.Keys(cfg.Credentials)) {
 		cr := cfg.Credentials[name]
 		key := cr.Connection
 		if key == "" && cr.Provider == "aws" && groups[name] != nil {
@@ -116,7 +116,7 @@ func (s *server) connectedRows() []connRow {
 		}
 		g.cred = append(g.cred, name)
 	}
-	keys := sortedKeysOf(groups)
+	keys := slices.Sorted(maps.Keys(groups))
 	out := make([]connRow, 0, len(keys))
 	for _, key := range keys {
 		g := groups[key]
@@ -180,15 +180,6 @@ func (s *server) connectedRows() []connRow {
 		out = append(out, r)
 	}
 	return out
-}
-
-func sortedKeysOf[V any](m map[string]V) []string {
-	ks := make([]string, 0, len(m))
-	for k := range m {
-		ks = append(ks, k)
-	}
-	sort.Strings(ks)
-	return ks
 }
 
 func (s *server) servicesView(q, cat string) *servicesView {

@@ -47,14 +47,7 @@ type progress struct {
 // stepNeedsApproval: a step gates on its own approve flag, and an agent step
 // also on the agent's approve (default true), like an agent rule action does.
 func stepNeedsApproval(cfg *config.Config, st config.Step, agents map[string]config.Agent) bool {
-	if st.Approve {
-		return true
-	}
-	if st.Agent == "" {
-		return false
-	}
-	a := agentDef(cfg, st.Agent, agents)
-	return a == nil || a.Approve == nil || *a.Approve
+	return config.StepNeedsApproval(st, agentDef(cfg, st.Agent, agents))
 }
 
 // runRoutine runs the job's snapshot of the routine's steps from j.ResumeStep

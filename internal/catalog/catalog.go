@@ -6,6 +6,7 @@
 package catalog
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -140,7 +141,7 @@ func Load(data []byte) ([]*Entry, error) {
 		Defs     map[string]any `yaml:"defs"` // YAML anchors shared by the entries
 		Services []*Entry       `yaml:"services"`
 	}
-	dec := yaml.NewDecoder(bytesReader(data))
+	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&doc); err != nil {
 		return nil, err
@@ -227,19 +228,12 @@ func NixPackagesJSON() ([]byte, error) {
 	for _, e := range All() {
 		if e.Nix != nil {
 			p := *e.Nix
-			p.Args, p.Env, p.Hosts, p.URLEnv = nonNil(p.Args), nonNil(p.Env), nonNil(p.Hosts), nonNil(p.URLEnv)
+			p.Args, p.Env, p.Hosts, p.URLEnv = config.NonNil(p.Args), config.NonNil(p.Env), config.NonNil(p.Hosts), config.NonNil(p.URLEnv)
 			m[e.ID] = &p
 		}
 	}
 	b, err := json.MarshalIndent(m, "", "  ")
 	return append(b, '\n'), err
-}
-
-func nonNil(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
 }
 
 // Availability is the entry's status on this install: not-yet stays, and an
@@ -272,12 +266,4 @@ func (e *Entry) CreatedNames() []string {
 		out = append(out, n)
 	}
 	return out
-}
-
-// OrGET is a test method, GET if unset.
-func OrGET(m string) string {
-	if m == "" {
-		return "GET"
-	}
-	return m
 }

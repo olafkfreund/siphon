@@ -17,6 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/olafkfreund/siphon/docs"
+	"github.com/olafkfreund/siphon/internal/applyfile"
 	"github.com/olafkfreund/siphon/internal/client"
 	"github.com/olafkfreund/siphon/internal/config"
 )
@@ -33,10 +34,10 @@ func buildMCP(fs *flag.FlagSet) func(*cli, []string) error {
 	allowUnapproved := fs.Bool("allow-unapproved", false, "let apply turn an agent's approval off (default: refused)")
 	return func(c *cli, args []string) error {
 		if len(args) > 0 {
-			return usageErr("usage: siphon mcp [--allow-write] [--allow-secrets] [--allow-unapproved]", "")
+			return client.Usage("usage: siphon mcp [--allow-write] [--allow-secrets] [--allow-unapproved]", "")
 		}
 		if *allowSecrets && !*allowWrite {
-			return usageErr("--allow-secrets needs --allow-write", "")
+			return client.Usage("--allow-secrets needs --allow-write", "")
 		}
 		c.actor = client.ActorLabel(":mcp")
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -154,13 +155,13 @@ func newMCPServer(c *cli, allowWrite, allowSecrets, allowUnapproved bool) *mcp.S
 		func(_ context.Context, _ *mcp.CallToolRequest, in getIn) (*mcp.CallToolResult, any, error) {
 			n := url.PathEscape(in.Name)
 			switch {
-			case slices.Contains(configKinds, in.Kind) && in.Name == "":
+			case slices.Contains(config.Kinds, in.Kind) && in.Name == "":
 				return get("/api/config/" + in.Kind)
-			case slices.Contains(configKinds, in.Kind):
+			case slices.Contains(config.Kinds, in.Kind):
 				return get("/api/config/" + in.Kind + "/" + n)
 			case in.Kind == "jobs" && in.Name != "":
 				if _, err := strconv.ParseInt(in.Name, 10, 64); err != nil {
-					return fail(usageErr("a job name is its numeric id", "")), nil, nil
+					return fail(client.Usage("a job name is its numeric id", "")), nil, nil
 				}
 				return get("/api/jobs/" + in.Name)
 			case slices.Contains(listKinds, in.Kind) || in.Kind == "notifications":
@@ -179,7 +180,7 @@ func newMCPServer(c *cli, allowWrite, allowSecrets, allowUnapproved bool) *mcp.S
 				}
 				return get(p)
 			}
-			return fail(usageErr("unknown kind "+strconv.Quote(in.Kind), "kinds: "+strings.Join(append(slices.Clone(configKinds), listKinds...), ", "))), nil, nil
+			return fail(client.Usage("unknown kind "+strconv.Quote(in.Kind), "kinds: "+strings.Join(append(slices.Clone(config.Kinds), listKinds...), ", "))), nil, nil
 		})
 	toggle := func(verb string) func(context.Context, *mcp.CallToolRequest, ruleIn) (*mcp.CallToolResult, any, error) {
 		return func(_ context.Context, _ *mcp.CallToolRequest, in ruleIn) (*mcp.CallToolResult, any, error) {
@@ -196,8 +197,8 @@ func newMCPServer(c *cli, allowWrite, allowSecrets, allowUnapproved bool) *mcp.S
 	mcp.AddTool(s, &mcp.Tool{Name: "disable", Description: "Turn a rule off (runtime override). Without --allow-write on the server this does nothing; the result says so."}, toggle("disable"))
 	mcp.AddTool(s, &mcp.Tool{Name: "reset", Description: "Drop the portal's change to a config item, back to siphon.yaml. Without --allow-write on the server this only shows the diff; the result says so."},
 		func(_ context.Context, _ *mcp.CallToolRequest, in resetIn) (*mcp.CallToolResult, any, error) {
-			if !slices.Contains(configKinds, in.Kind) {
-				return fail(usageErr("unknown kind "+strconv.Quote(in.Kind), "kinds: "+strings.Join(configKinds, ", "))), nil, nil
+			if !slices.Contains(config.Kinds, in.Kind) {
+				return fail(client.Usage("unknown kind "+strconv.Quote(in.Kind), "kinds: "+strings.Join(config.Kinds, ", "))), nil, nil
 			}
 			path := "/api/config/" + in.Kind + "/" + url.PathEscape(in.Name) + "/reset"
 			var v map[string]any
@@ -224,18 +225,17 @@ func newMCPServer(c *cli, allowWrite, allowSecrets, allowUnapproved bool) *mcp.S
 				return fail(err), nil, nil
 			}
 			if in.Kind != "" || in.Name != "" {
-				if !slices.Contains(configKinds, in.Kind) || in.Name == "" {
-					return fail(usageErr("give both kind and name", "kinds: "+strings.Join(configKinds, ", "))), nil, nil
+				if !slices.Contains(config.Kinds, in.Kind) || in.Name == "" {
+					return fail(client.Usage("give both kind and name", "kinds: "+strings.Join(config.Kinds, ", "))), nil, nil
 				}
-				prefix := in.Kind + "/" + in.Name + " "
-				rows = slices.DeleteFunc(rows, func(r map[string]any) bool { return !strings.Contains(str(r, "summary"), prefix) })
+				rows = itemHistory(rows, in.Kind, in.Name)
 			}
-			return result(nonNilRows(rows), false), nil, nil
+			return result(config.NonNil(rows), false), nil, nil
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "restore", Description: "Put the config overlay back as it was at a revision (a new revision). Refused without --allow-write on the server."},
 		func(_ context.Context, _ *mcp.CallToolRequest, in restoreIn) (*mcp.CallToolResult, any, error) {
 			if !allowWrite {
-				return fail(usageErr(writesOff, "ask the user to run `siphon restore "+strconv.FormatInt(in.Rev, 10)+"`")), nil, nil
+				return fail(client.Usage(writesOff, "ask the user to run `siphon restore "+strconv.FormatInt(in.Rev, 10)+"`")), nil, nil
 			}
 			if err := c.call("POST", "/api/config/history/"+strconv.FormatInt(in.Rev, 10)+"/restore", nil, nil); err != nil {
 				return fail(err), nil, nil
@@ -254,13 +254,13 @@ func newMCPServer(c *cli, allowWrite, allowSecrets, allowUnapproved bool) *mcp.S
 					shown = append(shown, e)
 				}
 			}
-			return result(map[string]any{"services": nonNilEntries(shown)}, false), nil, nil
+			return result(map[string]any{"services": config.NonNil(shown)}, false), nil, nil
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "explain", Description: "Every field of a config kind with its type, whether it is required, its default and allowed values."},
 		func(_ context.Context, _ *mcp.CallToolRequest, in explainIn) (*mcp.CallToolResult, any, error) {
 			kind, fields, err := config.Explain(in.Kind)
 			if err != nil {
-				return fail(usageErr(err.Error(), "")), nil, nil
+				return fail(client.Usage(err.Error(), "")), nil, nil
 			}
 			return result(map[string]any{"kind": kind, "fields": fields}, false), nil, nil
 		})
@@ -343,7 +343,7 @@ func newMCPServer(c *cli, allowWrite, allowSecrets, allowUnapproved bool) *mcp.S
 	mcp.AddTool(s, &mcp.Tool{Name: "apply", Description: "Create or update items from YAML (all or nothing). Without --allow-write on the server this only dry-runs and shows the diff; the result says so."},
 		func(_ context.Context, _ *mcp.CallToolRequest, in applyIn) (*mcp.CallToolResult, any, error) {
 			if len(in.Secrets) > 0 && !(allowWrite && allowSecrets) {
-				return fail(usageErr("secret values are not accepted through MCP: they would pass through the assistant's context",
+				return fail(client.Usage("secret values are not accepted through MCP: they would pass through the assistant's context",
 					"ask the user to run `siphon apply -f file.yaml --secret <kind>/<name>.<field>=-` in a terminal, or restart siphon mcp with --allow-write --allow-secrets")), nil, nil
 			}
 			items, err := parseApply([]byte(in.YAML))
@@ -364,7 +364,7 @@ func newMCPServer(c *cli, allowWrite, allowSecrets, allowUnapproved bool) *mcp.S
 			if err := c.call("POST", "/api/config/apply?dry_run=1", body, &check); err != nil {
 				return fail(err), nil, nil
 			}
-			out := map[string]any{"diff": check.Diff, "errors": []string{}, "warnings": nonNil(check.Warnings)}
+			out := map[string]any{"diff": check.Diff, "errors": []string{}, "warnings": config.NonNil(check.Warnings)}
 			if in.DryRun || !allowWrite {
 				out["dry_run"] = true
 				if !in.DryRun {
@@ -400,8 +400,8 @@ func newMCPServer(c *cli, allowWrite, allowSecrets, allowUnapproved bool) *mcp.S
 		})
 	mcp.AddTool(s, &mcp.Tool{Name: "delete", Description: "Delete a config item (a file item is hidden, a portal item removed). Without --allow-write on the server this only dry-runs; the result says so."},
 		func(_ context.Context, _ *mcp.CallToolRequest, in deleteIn) (*mcp.CallToolResult, any, error) {
-			if !slices.Contains(configKinds, in.Kind) {
-				return fail(usageErr("unknown kind "+strconv.Quote(in.Kind), "kinds: "+strings.Join(configKinds, ", "))), nil, nil
+			if !slices.Contains(config.Kinds, in.Kind) {
+				return fail(client.Usage("unknown kind "+strconv.Quote(in.Kind), "kinds: "+strings.Join(config.Kinds, ", "))), nil, nil
 			}
 			path := "/api/config/" + in.Kind + "/" + url.PathEscape(in.Name)
 			var v map[string]any
@@ -426,7 +426,7 @@ func newMCPServer(c *cli, allowWrite, allowSecrets, allowUnapproved bool) *mcp.S
 
 // mcpGuard refuses what an assistant should not do unasked: turn an agent's
 // approval off, or put a plain value (maybe a token) in a source's headers.
-func mcpGuard(c *cli, items []applyItem, allowSecrets, allowUnapproved bool) error {
+func mcpGuard(c *cli, items []applyfile.Item, allowSecrets, allowUnapproved bool) error {
 	for _, it := range items {
 		switch it.Kind {
 		case "sources":
@@ -438,7 +438,7 @@ func mcpGuard(c *cli, items []applyItem, allowSecrets, allowUnapproved bool) err
 			}
 			for _, k := range slices.Sorted(maps.Keys(s.Headers)) {
 				if v := s.Headers[k]; !strings.HasPrefix(v, "env:") && !strings.HasPrefix(v, "file:") {
-					return usageErr("sources/"+it.Name+": header "+k+" holds a plain value, which may be a token",
+					return client.Usage("sources/"+it.Name+": header "+k+" holds a plain value, which may be a token",
 						"use an env: or file: ref and have the user supply the secret, or restart siphon mcp with --allow-write --allow-secrets")
 				}
 			}
@@ -462,7 +462,7 @@ func mcpGuard(c *cli, items []applyItem, allowSecrets, allowUnapproved bool) err
 				return cerr
 			}
 			if old.Approve == nil || *old.Approve { // true, or the default (true)
-				return usageErr("agents/"+it.Name+": approve: false would let it run without a person's approval",
+				return client.Usage("agents/"+it.Name+": approve: false would let it run without a person's approval",
 					"ask the user to make this change themselves, or restart siphon mcp with --allow-unapproved")
 			}
 		}

@@ -78,7 +78,7 @@ func (s *server) diagAPI(mux *http.ServeMux) {
 			return nil, 400, errMsg("event: " + err.Error())
 		}
 		for k, v := range body.Headers {
-			headers[lower(k)] = v
+			headers[strings.ToLower(k)] = v
 		}
 		return ruleTest(r.Context(), s.Config(), rl, data, headers), 200, nil
 	})
@@ -371,5 +371,3 @@ func alreadyTrue(rl config.Rule, fires []testFire, states []store.RuleStateRow) 
 	}
 	return true
 }
-
-func lower(s string) string { return strings.ToLower(s) }

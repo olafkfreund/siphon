@@ -16,8 +16,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 type WebhookOptions struct {
@@ -53,34 +54,13 @@ type WebhookOptions struct {
 
 // Limiter is a token bucket. A webhook's limiters must outlive the handler
 // (which is rebuilt per request), so callers keep them and pass them in.
-type Limiter struct {
-	mu          sync.Mutex
-	tokens      float64
-	burst, rate float64
-	last        time.Time
-}
+type Limiter struct{ l *rate.Limiter }
 
 func NewLimiter(burst, perSecond float64) *Limiter {
-	return &Limiter{tokens: burst, burst: burst, rate: perSecond}
+	return &Limiter{rate.NewLimiter(rate.Limit(perSecond), int(burst))}
 }
 
-func (l *Limiter) Allow(now time.Time) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if !l.last.IsZero() {
-		if elapsed := now.Sub(l.last).Seconds(); elapsed > 0 {
-			l.tokens = min(l.burst, l.tokens+elapsed*l.rate)
-			l.last = now
-		}
-	} else {
-		l.last = now
-	}
-	if l.tokens < 1 {
-		return false
-	}
-	l.tokens--
-	return true
-}
+func (l *Limiter) Allow(now time.Time) bool { return l.l.AllowN(now, 1) }
 
 type Deliver func(ctx context.Context, ev Event, deliveryID string) (dup bool, err error)
 

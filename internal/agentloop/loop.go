@@ -10,13 +10,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/olafkfreund/siphon/internal/source"
 )
 
 const (
@@ -129,11 +131,7 @@ func (l *loop) do(ctx context.Context) (string, int, error) {
 		return "", 0, err
 	}
 	var defs []map[string]any
-	names := make([]string, 0, len(tools))
-	for n := range tools {
-		names = append(names, n)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(tools))
 	for _, n := range names {
 		defs = append(defs, map[string]any{"type": "function", "function": tools[n].def})
 	}
@@ -354,17 +352,13 @@ func (l *loop) connect(ctx context.Context) (map[string]*tool, func(), error) {
 			s.Close()
 		}
 	}
-	servers := make([]string, 0, len(l.spec.MCP))
-	for n := range l.spec.MCP {
-		servers = append(servers, n)
-	}
-	sort.Strings(servers)
+	servers := slices.Sorted(maps.Keys(l.spec.MCP))
 	for _, n := range servers {
 		s := l.spec.MCP[n]
 		var tr mcp.Transport
 		switch {
 		case s.URL != "" && len(s.Command) == 0:
-			hc := &http.Client{Transport: headerTransport{l.hc.Transport, s.Headers}}
+			hc := &http.Client{Transport: source.HeaderTransport{Base: l.hc.Transport, Header: s.Headers}}
 			tr = &mcp.StreamableClientTransport{Endpoint: s.URL, HTTPClient: hc, MaxRetries: -1, DisableStandaloneSSE: true}
 		case s.URL == "" && len(s.Command) > 0:
 			cmd := exec.CommandContext(ctx, s.Command[0], s.Command[1:]...)
@@ -402,20 +396,4 @@ func (l *loop) connect(ctx context.Context) (map[string]*tool, func(), error) {
 		}
 	}
 	return tools, closeAll, nil
-}
-
-type headerTransport struct {
-	base http.RoundTripper
-	h    map[string]string
-}
-
-func (t headerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	r = r.Clone(r.Context())
-	for k, v := range t.h {
-		r.Header.Set(k, v)
-	}
-	if t.base == nil {
-		return http.DefaultTransport.RoundTrip(r)
-	}
-	return t.base.RoundTrip(r)
 }

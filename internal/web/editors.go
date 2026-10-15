@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -82,7 +83,7 @@ func recipeFor(name string) (rv *recipeView, routine, body string, ok bool) {
 		if yaml.Unmarshal([]byte(t.YAML), &all) != nil {
 			return rv, routine, body, true
 		}
-		for _, kind := range sortedKeys(all) {
+		for _, kind := range slices.Sorted(maps.Keys(all)) {
 			n := all[kind]
 			switch n.Kind {
 			case yaml.MappingNode:
@@ -126,10 +127,10 @@ func (s *server) editExtras(v *cfgView) error {
 				v.ActionKind = k
 			}
 		}
-		for _, n := range sortedKeys(cfg.Sources) {
+		for _, n := range slices.Sorted(maps.Keys(cfg.Sources)) {
 			v.SourceOpts = append(v.SourceOpts, optPair{n, cfg.Sources[n].Type})
 		}
-		v.AgentOpts, v.UnitOpts, v.RoutineOpt = sortedKeys(cfg.Agents), append([]string(nil), cfg.Units...), sortedKeys(cfg.Routines)
+		v.AgentOpts, v.UnitOpts, v.RoutineOpt = slices.Sorted(maps.Keys(cfg.Agents)), append([]string(nil), cfg.Units...), slices.Sorted(maps.Keys(cfg.Routines))
 	case "sources":
 		v.Side = "sources"
 		if !v.New {
@@ -214,7 +215,7 @@ func snArgv(a *config.ServiceNowAction, env map[string]any) ([]string, error) {
 		}
 		out = append(out, id)
 	}
-	for _, k := range sortedKeys(a.Fields) {
+	for _, k := range slices.Sorted(maps.Keys(a.Fields)) {
 		v, err := action.RenderPrompt(a.Fields[k], env)
 		if err != nil {
 			return nil, err
@@ -242,15 +243,6 @@ func hasServiceNow(kind, y string) bool {
 		}
 	}
 	return false
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 func prettyJSON(raw string) string {

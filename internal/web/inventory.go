@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sort"
 
+	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/store"
 )
 
@@ -81,29 +82,15 @@ func (s *server) inventory() map[string]any {
 			add(n)
 		}
 	}) {
-		pkgs = append(pkgs, m{"name": n, "env": nonNilStrings(cfg.Server.MCPPackages[n].Env)})
+		pkgs = append(pkgs, m{"name": n, "env": config.NonNil(cfg.Server.MCPPackages[n].Env)})
 	}
-	return m{"sources": nonNilList(sources), "rules": nonNilList(rules), "agents": nonNilList(agents), "routines": nonNilList(routines),
-		"connections": nonNilList(conns), "mcp_packages": nonNilList(pkgs),
+	return m{"sources": config.NonNil(sources), "rules": config.NonNil(rules), "agents": config.NonNil(agents), "routines": config.NonNil(routines),
+		"connections": config.NonNil(conns), "mcp_packages": config.NonNil(pkgs),
 		"server": m{
-			"aws":      m{"profiles": nonNilStrings(cfg.Server.AWS.Profiles), "role_arns": nonNilStrings(cfg.Server.AWS.RoleARNs)},
-			"models":   m{"private_endpoints": nonNilStrings(cfg.Server.Models.PrivateEndpoints)},
-			"services": m{"private_endpoints": nonNilStrings(cfg.Server.Services.PrivateEndpoints)},
+			"aws":      m{"profiles": config.NonNil(cfg.Server.AWS.Profiles), "role_arns": config.NonNil(cfg.Server.AWS.RoleARNs)},
+			"models":   m{"private_endpoints": config.NonNil(cfg.Server.Models.PrivateEndpoints)},
+			"services": m{"private_endpoints": config.NonNil(cfg.Server.Services.PrivateEndpoints)},
 		}}
-}
-
-func nonNilList(l []map[string]any) []map[string]any {
-	if l == nil {
-		return []map[string]any{}
-	}
-	return l
-}
-
-func nonNilStrings(l []string) []string {
-	if l == nil {
-		return []string{}
-	}
-	return l
 }
 
 func (s *server) inventoryAPI(mux *http.ServeMux) {

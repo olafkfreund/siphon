@@ -1,14 +1,14 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"flag"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/olafkfreund/siphon/internal/catalog"
 	"github.com/olafkfreund/siphon/internal/client"
+	"github.com/olafkfreund/siphon/internal/config"
 	"github.com/olafkfreund/siphon/internal/draft"
 )
 
@@ -40,7 +40,7 @@ func buildDraft(fs *flag.FlagSet) func(*cli, []string) error {
 	yes := fs.Bool("yes", false, "with --apply: don't ask")
 	return func(c *cli, args []string) error {
 		if len(args) != 1 || strings.TrimSpace(args[0]) == "" {
-			return usageErr(`usage: siphon draft "<what you want>" [--connection c] [--model m] [--apply] [--yes]`, `describe the task in words, for example: siphon draft "tell me on ntfy when a deploy webhook says failed"`)
+			return client.Usage(`usage: siphon draft "<what you want>" [--connection c] [--model m] [--apply] [--yes]`, `describe the task in words, for example: siphon draft "tell me on ntfy when a deploy webhook says failed"`)
 		}
 		res, err := c.draftCall(args[0], *connection, *model)
 		if err != nil {
@@ -55,9 +55,7 @@ func buildDraft(fs *flag.FlagSet) func(*cli, []string) error {
 		if *apply && len(errs) == 0 && perr == nil {
 			sec = map[string]string{}
 			for _, s := range draft.WebhookNeedsSecret(items) {
-				b := make([]byte, 32)
-				rand.Read(b)
-				sec[s+".secret"] = hex.EncodeToString(b)
+				sec[s+".secret"] = catalog.NewSecret()
 				generated[s+".secret"] = true
 			}
 		}
@@ -71,7 +69,7 @@ func buildDraft(fs *flag.FlagSet) func(*cli, []string) error {
 				todo = append(todo, t)
 			}
 		}
-		res["todo"] = nonNil(todo)
+		res["todo"] = config.NonNil(todo)
 		if !c.json() {
 			fmt.Fprint(c.out, yamlText)
 			if len(errs) == 0 && !*apply {

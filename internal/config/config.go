@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"text/template"
@@ -617,14 +616,13 @@ const MaxRetryAttempts = 10
 // StepNeedsApproval reports whether a routine step pauses for approval under
 // this config: its own approve, or an agent step whose agent approves (the
 // default). The job runner applies the same rule to the job's agent snapshot.
-func (c *Config) StepNeedsApproval(st Step) bool {
+func StepNeedsApproval(st Step, a *Agent) bool {
 	if st.Approve {
 		return true
 	}
 	if st.Agent == "" {
 		return false
 	}
-	a := c.Agents[st.Agent]
 	return a == nil || a.Approve == nil || *a.Approve
 }
 
@@ -753,7 +751,7 @@ func parse(b []byte, stub map[string]string) (*Config, error) {
 			cr.Concurrency = 1
 		}
 	}
-	for _, name := range sortedKeys(c.Agents) {
+	for _, name := range slices.Sorted(maps.Keys(c.Agents)) {
 		a := c.Agents[name]
 		if a == nil || a.Credential != "" {
 			continue
@@ -771,7 +769,7 @@ func parse(b []byte, stub map[string]string) (*Config, error) {
 			continue
 		}
 		var only []string
-		for _, cn := range sortedKeys(c.Credentials) {
+		for _, cn := range slices.Sorted(maps.Keys(c.Credentials)) {
 			if cr := c.Credentials[cn]; cr != nil && cr.Provider == a.Kind && !cr.APIKey.isSet() {
 				only = append(only, cn)
 			}
@@ -785,16 +783,16 @@ func parse(b []byte, stub map[string]string) (*Config, error) {
 			c.resolveErrs = append(c.resolveErrs, err)
 		}
 	}
-	for _, name := range sortedKeys(c.Sources) {
+	for _, name := range slices.Sorted(maps.Keys(c.Sources)) {
 		if src := c.Sources[name]; src != nil {
-			for _, h := range sortedKeys(src.Headers) {
+			for _, h := range slices.Sorted(maps.Keys(src.Headers)) {
 				v := src.Headers[h]
 				if err := v.resolve(stub); err != nil {
 					c.resolveErrs = append(c.resolveErrs, err)
 				}
 				src.Headers[h] = v
 			}
-			for _, k := range sortedKeys(src.Env) {
+			for _, k := range slices.Sorted(maps.Keys(src.Env)) {
 				v := src.Env[k]
 				if err := v.resolve(stub); err != nil {
 					c.resolveErrs = append(c.resolveErrs, err)
@@ -813,17 +811,17 @@ func (c *Config) secretPtrs() []*Secret {
 	if c.Server.OIDC != nil {
 		out = append(out, &c.Server.OIDC.ClientSecret)
 	}
-	for _, name := range sortedKeys(c.Credentials) {
+	for _, name := range slices.Sorted(maps.Keys(c.Credentials)) {
 		if cr := c.Credentials[name]; cr != nil {
 			out = append(out, &cr.APIKey, &cr.AccessKeyID, &cr.SecretAccessKey)
 		}
 	}
-	for _, name := range sortedKeys(c.Notify) {
+	for _, name := range slices.Sorted(maps.Keys(c.Notify)) {
 		if n := c.Notify[name]; n != nil {
 			out = append(out, &n.URL, &n.Token)
 		}
 	}
-	for _, name := range sortedKeys(c.Sources) {
+	for _, name := range slices.Sorted(maps.Keys(c.Sources)) {
 		if s := c.Sources[name]; s != nil {
 			out = append(out, &s.Secret)
 			if s.Auth != nil {
@@ -871,14 +869,14 @@ func (c *Config) Secrets() []string {
 			out = append(out, s.Value)
 		}
 	}
-	for _, name := range sortedKeys(c.Sources) { // inline literal headers have no Value
+	for _, name := range slices.Sorted(maps.Keys(c.Sources)) { // inline literal headers have no Value
 		if src := c.Sources[name]; src != nil {
-			for _, h := range sortedKeys(src.Headers) {
+			for _, h := range slices.Sorted(maps.Keys(src.Headers)) {
 				if v := src.Headers[h].Value; v != "" {
 					out = append(out, v)
 				}
 			}
-			for _, k := range sortedKeys(src.Env) {
+			for _, k := range slices.Sorted(maps.Keys(src.Env)) {
 				if v := src.Env[k].Value; v != "" {
 					out = append(out, v)
 				}
@@ -914,7 +912,7 @@ func (c *Config) Warnings() []string {
 	if !loopbackListen(c.Server.Listen) {
 		w = append(w, fmt.Sprintf("server.listen %q is not loopback: the portal is plain HTTP, put it behind TLS or a reverse proxy; see docs/tasks/reverse-proxy.md", c.Server.Listen))
 	}
-	for _, name := range sortedKeys(c.Sources) {
+	for _, name := range slices.Sorted(maps.Keys(c.Sources)) {
 		if s := c.Sources[name]; s != nil && s.AllowPrivate {
 			w = append(w, fmt.Sprintf("source %s: allow_private disables the private-address guard", name))
 		}
@@ -937,12 +935,12 @@ func (c *Config) Warnings() []string {
 			w = append(w, fmt.Sprintf("source %s: bearer token sent over plain http to a non-loopback host", name))
 		}
 		if s := c.Sources[name]; s != nil && cleartextRemote(s.URL) {
-			for _, k := range sortedKeys(s.Headers) {
+			for _, k := range slices.Sorted(maps.Keys(s.Headers)) {
 				if s.Headers[k].isSet() {
 					w = append(w, fmt.Sprintf("source %s: header %s (a secret) sent over plain http to a non-loopback host", name, k))
 				}
 			}
-			for _, k := range sortedKeys(s.Env) {
+			for _, k := range slices.Sorted(maps.Keys(s.Env)) {
 				if s.Env[k].isSet() {
 					w = append(w, fmt.Sprintf("source %s: env %s (a secret) goes to a server at a plain http URL on a non-loopback host", name, k))
 				}
@@ -965,7 +963,7 @@ func (c *Config) Warnings() []string {
 			w = append(w, m)
 		}
 	}
-	for _, name := range sortedKeys(c.Agents) {
+	for _, name := range slices.Sorted(maps.Keys(c.Agents)) {
 		a := c.Agents[name]
 		if a == nil {
 			continue
@@ -1063,10 +1061,13 @@ func loopbackListen(addr string) bool {
 	if err != nil || h == "" {
 		return false
 	}
-	if ip := net.ParseIP(h); ip != nil {
-		return ip.IsLoopback()
-	}
-	return h == "localhost"
+	return Loopback(h)
+}
+
+// Loopback reports whether host is localhost or a loopback IP.
+func Loopback(host string) bool {
+	ip := net.ParseIP(host)
+	return strings.EqualFold(host, "localhost") || ip != nil && ip.IsLoopback()
 }
 
 var unitName = regexp.MustCompile(`^[A-Za-z0-9@._:-]+\.(service|target|timer)$`)
@@ -1080,11 +1081,7 @@ func cleartextRemote(raw string) bool {
 	if err != nil || u.Scheme != "http" {
 		return false
 	}
-	h := u.Hostname()
-	if ip := net.ParseIP(h); ip != nil {
-		return !ip.IsLoopback()
-	}
-	return h != "localhost"
+	return !Loopback(u.Hostname())
 }
 
 // secretHeader reports whether a header name implies a secret value.
@@ -1129,7 +1126,7 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	for _, name := range sortedKeys(c.Credentials) {
+	for _, name := range slices.Sorted(maps.Keys(c.Credentials)) {
 		if cr := c.Credentials[name]; cr != nil && cr.Connection != "" && !connectionName.MatchString(cr.Connection) {
 			add("credentials.%s.connection: must match %s", name, connectionName)
 		}
@@ -1138,9 +1135,9 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	for _, name := range sortedKeys(c.Sources) {
+	for _, name := range slices.Sorted(maps.Keys(c.Sources)) {
 		if src := c.Sources[name]; src != nil {
-			for _, h := range sortedKeys(src.Headers) {
+			for _, h := range slices.Sorted(maps.Keys(src.Headers)) {
 				ref := src.Headers[h].Ref
 				if secretHeader(h) && !strings.HasPrefix(ref, "env:") && !strings.HasPrefix(ref, "file:") {
 					add("sources.%s.headers.%s: inline secret: values must be env:NAME or file:/path", name, h)
@@ -1149,9 +1146,9 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	for _, name := range sortedKeys(c.Sources) {
+	for _, name := range slices.Sorted(maps.Keys(c.Sources)) {
 		if src := c.Sources[name]; src != nil {
-			for _, k := range sortedKeys(src.Env) {
+			for _, k := range slices.Sorted(maps.Keys(src.Env)) {
 				if ref := src.Env[k].Ref; !strings.HasPrefix(ref, "env:") && !strings.HasPrefix(ref, "file:") {
 					add("sources.%s.env.%s: inline secret: values must be env:NAME or file:/path", name, k)
 				}
@@ -1178,7 +1175,7 @@ func (c *Config) Validate() error {
 			add("server.metrics.token: must differ from server.token")
 		}
 	}
-	for _, name := range sortedKeys(c.Server.MCPPackages) {
+	for _, name := range slices.Sorted(maps.Keys(c.Server.MCPPackages)) {
 		pkg := c.Server.MCPPackages[name]
 		if len(pkg.Command) == 0 {
 			add("server.mcp_packages.%s: command is required", name)
@@ -1257,7 +1254,7 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	for _, name := range sortedKeys(c.Sources) {
+	for _, name := range slices.Sorted(maps.Keys(c.Sources)) {
 		c.validateSource(name, c.Sources[name], add)
 	}
 
@@ -1301,7 +1298,7 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	for _, name := range sortedKeys(c.Credentials) {
+	for _, name := range slices.Sorted(maps.Keys(c.Credentials)) {
 		cr := c.Credentials[name]
 		p := "credentials." + name
 		if !credName.MatchString(name) && !strings.HasPrefix(name, implicitPrefix) {
@@ -1340,7 +1337,7 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	for _, name := range sortedKeys(c.Agents) {
+	for _, name := range slices.Sorted(maps.Keys(c.Agents)) {
 		a := c.Agents[name]
 		p := "agents." + name
 		if a == nil {
@@ -1404,7 +1401,7 @@ func (c *Config) Validate() error {
 		checkTemplate(p+" prompt", a.Prompt, add)
 	}
 
-	for _, name := range sortedKeys(c.Routines) {
+	for _, name := range slices.Sorted(maps.Keys(c.Routines)) {
 		rt := c.Routines[name]
 		p := "routines." + name
 		if rt == nil || len(rt.Steps) == 0 {
@@ -1446,7 +1443,7 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) validateNotify(add func(string, ...any)) {
-	for _, name := range sortedKeys(c.Notify) {
+	for _, name := range slices.Sorted(maps.Keys(c.Notify)) {
 		n, p := c.Notify[name], "notify."+name
 		if !credName.MatchString(name) {
 			add("%s: name must match [a-z0-9][a-z0-9_-]*", p)
@@ -1509,7 +1506,7 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 			case s.URL != "" || (len(s.Command) > 0 && !s.cmdFromPkg):
 				add("%s: package excludes url and command", p)
 			default:
-				for _, k := range sortedKeys(s.Env) {
+				for _, k := range slices.Sorted(maps.Keys(s.Env)) {
 					if !slices.Contains(pkg.Env, k) {
 						add("%s: env name %q is not one of package %q's env (%s)", p, k, s.Package, strings.Join(pkg.Env, ", "))
 					}
@@ -1666,7 +1663,7 @@ func (c *Config) validateSource(name string, s *Source, add func(string, ...any)
 	if len(s.Env) > 0 && (s.Type != "mcp" || len(s.Command) == 0) {
 		add("%s: env needs a stdio MCP source (type mcp with command)", p)
 	}
-	for _, k := range sortedKeys(s.Env) {
+	for _, k := range slices.Sorted(maps.Keys(s.Env)) {
 		if !envName.MatchString(k) {
 			add("%s: env name %q must match ^[A-Z_][A-Z0-9_]*$", p, k)
 		} else if envDenied.MatchString(k) {
@@ -1831,7 +1828,7 @@ func (c *Config) validateServiceNow(p string, a *ServiceNowAction, add func(stri
 			add("%s: sys_id is required for %s", p, a.Op)
 		}
 	}
-	for _, k := range sortedKeys(a.Fields) {
+	for _, k := range slices.Sorted(maps.Keys(a.Fields)) {
 		switch {
 		case !snField.MatchString(k):
 			add("%s: field name %q must match %s", p, k, snField)
@@ -1914,15 +1911,6 @@ func checkTemplate(where, src string, add func(string, ...any)) {
 	if _, err := template.New("").Parse(src); err != nil {
 		add("%s: bad template %q: %v", where, src, err)
 	}
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	k := make([]string, 0, len(m))
-	for n := range m {
-		k = append(k, n)
-	}
-	sort.Strings(k)
-	return k
 }
 
 // implicitFor reports whether name is the api_key_file credential of an existing agent.

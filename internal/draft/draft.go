@@ -10,11 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -96,7 +94,7 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 			}
 		}
 		errs = append(errs, approvalErrors(p.Request, y)...)
-		res.YAML, res.Diff, res.Errors, res.Warnings, res.Rounds, res.Placeholders = y, ck.Diff, nonNil(errs), warns, round, nonNil(ck.Placeholders)
+		res.YAML, res.Diff, res.Errors, res.Warnings, res.Rounds, res.Placeholders = y, ck.Diff, config.NonNil(errs), warns, round, config.NonNil(ck.Placeholders)
 		if len(errs) == 0 {
 			break
 		}
@@ -113,13 +111,6 @@ func Run(ctx context.Context, p Params) (*Result, error) {
 // that provider's webhook" warning.
 func mismatch(w string) bool {
 	return strings.HasPrefix(w, "rules/") && strings.Contains(w, " reads ") && strings.Contains(w, " but source ")
-}
-
-func nonNil(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
 }
 
 var fence = regexp.MustCompile("(?s)```[a-zA-Z]*[ \t]*\r?\n(.*?)```")
@@ -335,29 +326,14 @@ func GuardedClient(ctx context.Context, cfg *config.Config, rawURL string) (*htt
 	if err != nil {
 		return nil, nil, errors.New("bad model URL")
 	}
-	mode := source.Public
-	if cfg.PrivateEndpoint(host, port) {
-		mode = source.PrivateNoLinkLocal
-	}
+	private := cfg.PrivateEndpoint(host, port)
 	rctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	addrs, err := source.ResolveAllowedMode(rctx, host, mode)
-	if err != nil {
+	if _, err := source.ResolveAllowed(rctx, host, private); err != nil { // the dial checks again; this gives the reason up front
 		return nil, nil, errors.New("this endpoint isn't reachable from Siphon: public addresses only, unless listed in server.models.private_endpoints")
 	}
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	tr := &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		var last error
-		for _, a := range addrs {
-			conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(a.String(), strconv.Itoa(port)))
-			if err == nil {
-				return conn, nil
-			}
-			last = err
-		}
-		return nil, last
-	}}
-	return &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, tr.CloseIdleConnections, nil
+	c := source.StreamClient(private)
+	return c, c.CloseIdleConnections, nil
 }
 
 // ---------------------------------------------------------------- todo

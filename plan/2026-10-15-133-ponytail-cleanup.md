@@ -102,6 +102,53 @@ Revert the PR; there is no behaviour or data change.
   review deferred to this issue. The spec's "one copy of each" design
   covers them.
 
+### Implementation notes (coder)
+
+Step 4, policy before the change, and kept:
+
+| Caller | URL / scheme check | Host policy | Notes |
+|---|---|---|---|
+| `notify.GuardedClient` | parse; host set; `https`, or `http` only if `ServiceEndpoint(url)`; port numeric | listed in `services.private_endpoints` → PrivateNoLinkLocal, else Public | 10s timeout, no redirects, no proxy |
+| `draft.GuardedClient` | `config.ModelURL` | `PrivateEndpoint(host, port)` → PrivateNoLinkLocal, else Public | no timeout, no redirects |
+| `web.listModels` | `config.ModelURL` | same as draft | 8s ctx |
+| `web.runHTTPTest` | `url.Parse` only (no scheme check) | `ServiceEndpoint(target)` → PrivateNoLinkLocal, else Public | 8s ctx |
+
+All four now dial through `source.HTTPClient` (notify, 10s) or `source.StreamClient`
+(the other three: they had no client timeout and no body cap). `source.ResolveAllowed`
+stays as a pre-flight, so the "isn't reachable … private_endpoints" message and
+`TestDraftRefusals` are unchanged; the dial checks again.
+
+Differences from the plan text:
+
+- **Step 2, `clip`:** only `store.clip` moved to `source.ClipRunes`. `web.clip`
+  counts runes (a test expects 101 runes for 300 `é`, limit 100) and
+  `mcpoauth.clip` redacts tokens, so neither is a plain clip; both stay.
+- **Step 2, wrappers:** `parseApply` stays (`cmd/siphon/mcp_test.go` calls it) and
+  web `itoa` stays (`web_test.go` calls it). `providerOf` stays: it is not a pure
+  pass-through (empty agent name, map lookup).
+- **Step 2, kinds:** `config.Kinds` is now the ordered slice
+  `sources, rules, agents, routines, credentials, notify` (the CLI order); the
+  portal sorts a copy, so its order is unchanged.
+- **Step 2, `applyItem`:** embeds `applyfile.Item`, but `toApplyItems` stays as a
+  3-line loop, because `tagItem` takes `[]applyItem`.
+- **Step 2, HeaderTransport:** exported as `source.HeaderTransport`
+  (`action` and `agentloop` now import `source`; it has no internal deps).
+- **Step 3:** `job.stepNeedsApproval` stays as a one-line wrapper
+  (`routine_test.go` calls it); `config.StepNeedsApproval(st, a)` is the rule.
+  `rate.Limiter` passed every limiter test; the hand-written bucket is gone.
+  `nix build --rebuild .#siphon.goModules` passed; `vendorHash` is unchanged.
+- **Step 4, `config.Loopback`:** uses `strings.EqualFold` for `localhost` (as
+  `client.isLoopback` did); the other four were case-sensitive, so
+  `http://LOCALHOST` is now loopback everywhere.
+- **Step 5:** the job-detail API's `notifications` array now uses
+  `notificationRow` (keys `job`, `sent_at` as RFC3339 …); before it was
+  `store.Notification` (`job_id`, `key`, `next_at`). `/api/notifications` is
+  unchanged. The HTML page still reads `JobView.Notes`.
+
+- **Commits:** steps 1–5 are one commit, not one per group. Most files
+  hold hunks from several steps, and splitting them by hand would risk
+  mistakes.
+
 ## Audit findings (verbatim, ponytail-audit of main at 675db3a)
 
 Audit done. I changed no files. Most of what can be cut is duplicated code. Only three functions are actually dead (`deadcode` found 3, and `staticcheck -checks U1000` only flagged `emptyIfNil`). No dependency can be dropped.

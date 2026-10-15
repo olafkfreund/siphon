@@ -16,7 +16,7 @@ import (
 func buildTemplate(fs *flag.FlagSet) func(*cli, []string) error {
 	return func(c *cli, args []string) error {
 		if len(args) > 1 {
-			return usageErr("usage: siphon template [name]", "")
+			return client.Usage("usage: siphon template [name]", "")
 		}
 		if len(args) == 0 {
 			ts := docs.Templates()
@@ -75,7 +75,7 @@ func buildExplain(fs *flag.FlagSet) func(*cli, []string) error {
 		}
 		kind, fields, err := config.Explain(args[0])
 		if err != nil {
-			return usageErr(err.Error(), "")
+			return client.Usage(err.Error(), "")
 		}
 		if c.json() {
 			return c.jsonOut(map[string]any{"kind": kind, "fields": fields})
@@ -97,13 +97,6 @@ func buildExplain(fs *flag.FlagSet) func(*cli, []string) error {
 		}
 		return c.table([]string{"FIELD", "TYPE", "", "MEANING"}, rows)
 	}
-}
-
-func emptyIfNil[T any](s []T) []T {
-	if s == nil {
-		return []T{}
-	}
-	return s
 }
 
 // ---------------------------------------------------------------- inventory, guide

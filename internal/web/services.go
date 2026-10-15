@@ -5,10 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -195,37 +193,15 @@ func (s *server) runHTTPTest(ctx context.Context, t svcTest, method, target, hdr
 		t.Err = "bad URL"
 		return t
 	}
-	port := 443
-	if u.Scheme == "http" {
-		port = 80
-	}
-	if p := u.Port(); p != "" {
-		port, _ = strconv.Atoi(p)
-	}
-	mode := source.Public
-	if cfg.ServiceEndpoint(target) {
-		mode = source.PrivateNoLinkLocal
-	}
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	addrs, err := source.ResolveAllowedMode(ctx, u.Hostname(), mode)
-	if err != nil {
+	private := cfg.ServiceEndpoint(target)
+	if _, err := source.ResolveAllowed(ctx, u.Hostname(), private); err != nil {
 		t.Err = "this host isn't reachable from Siphon: public addresses only, unless listed in server.services.private_endpoints"
 		return t
 	}
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	tr := &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		var last error
-		for _, a := range addrs {
-			c, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(a.String(), strconv.Itoa(port)))
-			if err == nil {
-				return c, nil
-			}
-			last = err
-		}
-		return nil, last
-	}}
-	defer tr.CloseIdleConnections()
+	hc := source.StreamClient(private)
+	defer hc.CloseIdleConnections()
 	req, err := http.NewRequestWithContext(ctx, method, target, strings.NewReader(reqBody))
 	if err != nil {
 		t.Err = "bad request"
@@ -237,7 +213,7 @@ func (s *server) runHTTPTest(ctx context.Context, t svcTest, method, target, hdr
 	}
 	req.Header.Set("User-Agent", "siphon")
 	start := time.Now()
-	resp, err := (&http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		t.Err = "no response (" + errClass(err) + ")"
 		return t

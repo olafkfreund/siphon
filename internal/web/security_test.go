@@ -205,12 +205,12 @@ func TestSecuritySecretsDirSymlinkRefused(t *testing.T) {
 		t.Fatal("item stored although its secret could not be")
 	}
 	// The write helper refuses on its own, and refuses names that could leave the dir.
-	if err := writeSecret(filepath.Join(ce.dir, "secrets"), pendingSecret{Kind: "sources", Name: "x", Key: "secret", Value: "v"}); err == nil {
-		t.Fatal("writeSecret followed a symlinked dir")
+	if _, err := stageSecret(filepath.Join(ce.dir, "secrets"), pendingSecret{Kind: "sources", Name: "x", Key: "secret", Value: "v"}); err == nil {
+		t.Fatal("stageSecret followed a symlinked dir")
 	}
 	for _, n := range []string{"../x", "a/b", "", ".hidden"} {
-		if err := writeSecret(t.TempDir(), pendingSecret{Kind: "sources", Name: n, Key: "secret", Value: "v"}); err == nil {
-			t.Errorf("writeSecret accepted name %q", n)
+		if _, err := stageSecret(t.TempDir(), pendingSecret{Kind: "sources", Name: n, Key: "secret", Value: "v"}); err == nil {
+			t.Errorf("stageSecret accepted name %q", n)
 		}
 	}
 }

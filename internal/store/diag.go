@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/olafkfreund/siphon/internal/source"
 )
 
 // Diagnostics for `why`: the last rule evaluation error, the last webhook
@@ -13,17 +15,10 @@ import (
 
 const maxDiagText = 300
 
-func clip(s string) string {
-	if len(s) > maxDiagText {
-		return s[:maxDiagText] + "…"
-	}
-	return s
-}
-
 // PutRuleError records a rule's last evaluation error (one row per rule).
 func PutRuleError(tx *sql.Tx, rule string, now time.Time, msg string) error {
 	_, err := tx.Exec(`INSERT INTO rule_error(rule,at,error) VALUES (?,?,?)
-		ON CONFLICT(rule) DO UPDATE SET at=excluded.at, error=excluded.error`, rule, ms(now), clip(msg))
+		ON CONFLICT(rule) DO UPDATE SET at=excluded.at, error=excluded.error`, rule, ms(now), source.ClipRunes(msg, maxDiagText))
 	return err
 }
 
@@ -44,10 +39,10 @@ func RuleError(db *sql.DB, rule string) (msg string, at time.Time, err error) {
 }
 
 // SetSourceReject records a refused webhook delivery: status and reason only.
-func SetSourceReject(db *sql.DB, source string, now time.Time, status int, reason string) error {
+func SetSourceReject(db *sql.DB, src string, now time.Time, status int, reason string) error {
 	_, err := db.Exec(`INSERT INTO source_state(source,last_reject_at,last_reject) VALUES (?,?,?)
 		ON CONFLICT(source) DO UPDATE SET last_reject_at=excluded.last_reject_at, last_reject=excluded.last_reject`,
-		source, ms(now), clip(reason)+" ("+strconv.Itoa(status)+")")
+		src, ms(now), source.ClipRunes(reason, maxDiagText)+" ("+strconv.Itoa(status)+")")
 	return err
 }
 

@@ -2,7 +2,9 @@ package web
 
 import (
 	"encoding/json"
+	"maps"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,7 +33,8 @@ type jobView struct {
 	Duration  string               `json:"duration"`
 	Summary   string               `json:"summary"`       // failed jobs: the last meaningful output line
 	Connect   string               `json:"connect"`       // a login the job needed but which isn't connected
-	Notes     []store.Notification `json:"notifications"` // notifications about this job
+	Notes     []store.Notification `json:"-"`             // notifications about this job, for the page
+	NoteRows  []notificationRow    `json:"notifications"` // the same, for the API
 
 	// the rule's lineage, from the live config
 	Source     string `json:"source"`
@@ -184,6 +187,7 @@ func (s *server) jobDetail(id int64) (*jobView, bool, error) {
 	if v.Notes, err = store.ListNotifications(s.Store.DB, store.NotificationFilter{Job: id, Limit: 20}); err != nil {
 		return nil, false, err
 	}
+	v.NoteRows = notificationRows(v.Notes)
 	return v, true, nil
 }
 
@@ -235,7 +239,7 @@ func (s *server) logins() []loginView {
 func (s *server) credentialUsers() map[string][]string {
 	cfg := s.Config()
 	out := map[string][]string{}
-	for _, n := range sortedKeysOf(cfg.Agents) {
+	for _, n := range slices.Sorted(maps.Keys(cfg.Agents)) {
 		if c := cfg.Agents[n].Credential; c != "" {
 			out[c] = append(out[c], n)
 		}
@@ -267,11 +271,7 @@ type egressBlocked struct {
 
 func (s *server) egress() (*egressView, error) {
 	v := &egressView{}
-	names := make([]string, 0, len(s.Config().Agents))
-	for n := range s.Config().Agents {
-		names = append(names, n)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(s.Config().Agents))
 	for _, n := range names {
 		hosts, on := s.Config().AgentEgress(s.Config().Agents[n])
 		v.Lists = append(v.Lists, egressList{"agent", n, on, hosts})

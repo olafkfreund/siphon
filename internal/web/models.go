@@ -136,31 +136,15 @@ func (s *server) listModels(ctx context.Context, name string, fresh bool) connTe
 		t.Err = "bad URL"
 		return t
 	}
-	private := cfg.PrivateEndpoint(host, port)
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	mode := source.Public
-	if private {
-		mode = source.PrivateNoLinkLocal // listed endpoint: private yes, link-local/metadata never
-	}
-	addrs, err := source.ResolveAllowedMode(ctx, host, mode)
-	if err != nil {
+	private := cfg.PrivateEndpoint(host, port) // listed endpoint: private yes, link-local/metadata never
+	if _, err := source.ResolveAllowed(ctx, host, private); err != nil {
 		t.Err = "this endpoint isn't reachable from Siphon: public addresses only, unless listed in server.models.private_endpoints"
 		return t
 	}
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	tr := &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-		var last error
-		for _, a := range addrs { // the checked addresses only
-			conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(a.String(), strconv.Itoa(port)))
-			if err == nil {
-				return conn, nil
-			}
-			last = err
-		}
-		return nil, last
-	}}
-	defer tr.CloseIdleConnections()
+	hc := source.StreamClient(private)
+	defer hc.CloseIdleConnections()
 	list := strings.TrimRight(c.URL, "/") + "/models"
 	if c.Provider == "ollama" {
 		list = strings.TrimRight(c.URL, "/") + "/api/tags"
@@ -170,7 +154,7 @@ func (s *server) listModels(ctx context.Context, name string, fresh bool) connTe
 		req.Header.Set("Authorization", "Bearer "+c.APIKey.Value)
 	}
 	start := time.Now()
-	resp, err := (&http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		t.Err = "no response (" + errClass(err) + ")"
 		return t

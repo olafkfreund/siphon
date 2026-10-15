@@ -2,6 +2,7 @@
 package applyfile
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -10,8 +11,6 @@ import (
 	"github.com/olafkfreund/siphon/internal/client"
 	"github.com/olafkfreund/siphon/internal/config"
 )
-
-var configKinds = []string{"sources", "rules", "agents", "routines", "credentials", "notify"}
 
 // Item is one item of an apply request.
 type Item struct {
@@ -44,8 +43,8 @@ func Parse(b []byte) ([]Item, error) {
 	var items []Item
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		kind, val := root.Content[i].Value, root.Content[i+1]
-		if !config.Kinds[kind] {
-			return nil, client.Usage("section "+strconv.Quote(kind)+" can't be applied: only "+strings.Join(configKinds, ", ")+" are editable (server, limits and units live in siphon.yaml)", "")
+		if !slices.Contains(config.Kinds, kind) {
+			return nil, client.Usage("section "+strconv.Quote(kind)+" can't be applied: only "+strings.Join(config.Kinds, ", ")+" are editable (server, limits and units live in siphon.yaml)", "")
 		}
 		switch {
 		case kind == "rules" && val.Kind == yaml.SequenceNode:
