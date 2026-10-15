@@ -165,6 +165,8 @@ func (s *server) editExtras(v *cfgView) error {
 					r.Kind, r.Target = "agent", st.Agent
 				case st.Unit != "":
 					r.Kind, r.Target = "unit", st.Unit
+				case st.ServiceNow != nil:
+					r.Kind, r.Target = "servicenow", st.ServiceNow.Op+" "+snTable(st.ServiceNow)
 				default:
 					r.Kind, r.Target = "cmd", strings.Join(st.Cmd, " ")
 				}

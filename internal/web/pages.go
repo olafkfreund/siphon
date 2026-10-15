@@ -147,6 +147,8 @@ func (s *server) jobDetail(id int64) (*jobView, bool, error) {
 			sv.Kind, sv.Target = "agent", st.Agent
 		case st.Unit != "":
 			sv.Kind, sv.Target = "unit", st.Unit
+		case st.ServiceNow != nil:
+			sv.Kind, sv.Target = "servicenow", st.ServiceNow.Op+" "+snTable(st.ServiceNow)
 		case len(st.Cmd) > 0:
 			sv.Kind, sv.Target = "cmd", strings.Join(st.Cmd, " ")
 		}

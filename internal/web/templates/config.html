@@ -19,6 +19,7 @@
 {{define "cfgedit"}}{{with .Cfg}}{{$c := .}}<div class="top"><div><div class="muted small"><a href="/config/{{.Kind}}">{{kindtitle .Kind}}</a> / {{if .New}}new{{else}}{{.Name}}{{end}}</div><h1>{{if .New}}New {{kindone .Kind}}{{else}}Edit {{kindone .Kind}} <span class="muted">{{.Name}}</span>{{end}}</h1></div><span class="sp"></span>{{if .Prov}}<span class="badge{{if eq .Prov "portal"}} portal{{else if eq .Prov "override"}} ovr{{end}}">{{prov .Prov}}</span>{{end}}</div>
 {{if .Errors}}<div class="banner" role="alert"><pre>{{.Errors}}</pre></div>{{end}}
 {{if .Diff}}<section class="card mb"><h2>Changes</h2><div class="diff"><pre>{{diffhtml .Diff}}</pre></div>
+{{if .Pending}}<p class="small muted">Secrets are not kept by Review: enter them again and use Save &amp; apply.</p>{{end}}
 {{if .Done}}{{if can $.Role "admin"}}<form method="post" action="{{.Base}}/save"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="rev" value="{{.Rev}}"><input type="hidden" name="mode" value="yaml"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="yaml" value="{{.YAML}}"><div class="row-actions"><button class="btn primary">Confirm and save</button></div></form>{{end}}{{end}}</section>{{end}}
 {{if .ServiceNow}}<p class="banner">This {{.Side}} item has a servicenow action: edit it as YAML below. The form is hidden because it cannot show that action.</p>{{end}}
 {{if .HasForm}}<form method="post" action="{{.Base}}/save" class="mb">

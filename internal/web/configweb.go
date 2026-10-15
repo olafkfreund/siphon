@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -26,6 +27,7 @@ type cfgView struct {
 	Kinds                      []string
 	Kind, Name, Prov           string
 	New, Exists, HasForm, Done bool // Done: the change was reviewed and is valid
+	Pending                    bool // the review holds a pasted secret, so there is no Confirm
 	Rows                       []cfgRow
 	Fields                     []fieldView
 	YAML, Errors, Diff, Notice string
@@ -347,7 +349,7 @@ func (s *server) cfgPost(w http.ResponseWriter, r *http.Request, csrf, verb stri
 		mutate, summary = resetItem(kind, name), fmt.Sprintf("%s/%s reset to file", kind, name)
 	}
 	if verb == "check" || verb == "validate" {
-		e, err := s.checkEdit(rev, mutate, pending)
+		e, err := s.dryRun(&rev, mutate, pending)
 		var inv errInvalid
 		switch {
 		case errors.As(err, &inv):
@@ -364,7 +366,8 @@ func (s *server) cfgPost(w http.ResponseWriter, r *http.Request, csrf, verb stri
 				s.fail(w, verr)
 				return
 			}
-			v.Diff, v.Done = e.diff, true
+			v.Diff, v.Done = e.diff, len(pending) == 0 // Confirm re-posts the YAML, which no longer has the pasted value
+			v.Pending = len(pending) > 0
 			if e.diff == "" {
 				v.Diff = "(no change)"
 			}
@@ -389,19 +392,6 @@ func (s *server) cfgPost(w http.ResponseWriter, r *http.Request, csrf, verb stri
 		_ = applyErr // shown through the banner
 		http.Redirect(w, r, "/config/"+kind+"?done="+verb, http.StatusSeeOther)
 	}
-}
-
-// checkEdit is the dry run behind check and validate: the stale-revision
-// check, then prepare. Nothing is stored.
-func (s *server) checkEdit(rev int64, mutate func(map[itemKey]store.ConfigItem), pending []pendingSecret) (*edit, error) {
-	cur, latest, err := s.overlay()
-	if err != nil {
-		return nil, err
-	}
-	if latest != rev {
-		return nil, errStale
-	}
-	return s.prepare(cur, mutate, pending)
 }
 
 // changeCount is the added and removed lines of a unified diff.
@@ -607,7 +597,9 @@ func (s *server) removeLogin(actor, name string) error {
 	if err := cred.StoreFor(cfg).Delete(name); err != nil {
 		return err
 	}
-	_ = os.Remove(secretsDir(cfg.Server.DB) + "/credentials-" + name + "-api_key")
+	sd := secretsDir(cfg.Server.DB)
+	_ = os.Remove(filepath.Join(sd, config.SecretFileName("credentials", name, "api_key")))
+	_ = os.Remove(filepath.Join(sd, "credentials-"+name+"-api_key")) // legacy name
 	s.audit(actor, "login_deleted", name)
 	return nil
 }
