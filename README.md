@@ -16,11 +16,11 @@ and one SQLite file holds the state.
 
 ```
 sources            rules                        actions
-mcp      ─┐        when: <expr>                 cmd      argv, sandboxed
-http     ─┤        on: edge | each      ──────▶ unit     starts an allowlisted systemd unit and waits for it
-webhook  ─┼──────▶ cooldown, repeat             agent    claude, codex, agy or a model endpoint
+mcp      ─┐        when: <expr>                 cmd         argv, sandboxed
+http     ─┼──────▶ on: edge | each      ──────▶ unit        starts an allowlisted systemd unit and waits for it
+webhook  ─┤        cooldown, repeat             agent       claude, codex, agy or a model endpoint
 schedule ─┘                                     servicenow  one ServiceNow call by the daemon, no LLM
-                                                routine  ordered steps: if, retry, approve, continue_on_error
+                                                routine     ordered steps: if, retry, approve, continue_on_error
 ```
 
 - **Sources** produce events `{source, headers, event}`. `mcp` polls exactly one
@@ -632,7 +632,10 @@ Read these before running it anywhere that matters.
   `argv[0]` can never be templated, and a templated element may not start with
   `-`. Unit names in `units:` cannot be templated either.
 - **Every `cmd` and agent runs in a fixed systemd sandbox.** The NixOS module
-  defines three template units, `siphon-action@.service` (egress restricted), `siphon-action-open@.service` (egress off) and `siphon-mcp@.service` (MCP bridges), each with: DynamicUser,
+  defines three template units, `siphon-action@.service` (egress restricted),
+  `siphon-action-open@.service` (open network: egress restriction off, the
+  default for cmd actions) and `siphon-mcp@.service` (MCP bridges), each
+  with: DynamicUser,
   ProtectSystem=strict, ProtectHome, PrivateTmp, NoNewPrivileges, an empty
   capability set, a syscall filter, hidden `/proc`, the metadata addresses
   blocked, `LimitFSIZE=16M`, `TasksMax` and a `maxActionRuntime` ceiling. An

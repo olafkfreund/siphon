@@ -74,7 +74,7 @@ siphon notify add phone --type ntfy --url - --yes   # URL on stdin: get told abo
 | `internal/config` | config structs, `Validate`, the portal/API overlay rules (`overlay.go`), the JSON schema |
 | `internal/web` | portal and HTTP API (`api.go`, `configapi.go`, `connapi.go`, `diagapi.go`), portal editors, recipes and live validation (`configweb.go`, `editors.go`), templates in `templates/` |
 | `internal/job` | the pipeline: polling, webhooks, rules → jobs, routines, approvals |
-| `internal/action` | running actions: sandboxed units, agents |
+| `internal/action` | running actions: sandboxed units, agents, starting their MCP bridges |
 | `internal/mcpbridge` | the MCP bridge that agents reach their tools through |
 | `internal/agentloop` | the runner for `kind: model` agents |
 | `internal/catalog` | `services.yaml`, the `siphon connect` catalogue |

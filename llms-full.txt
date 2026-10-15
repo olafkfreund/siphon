@@ -510,7 +510,8 @@ offers these tools:
 - `inventory`, `get`, `explain`, `template`, `guide`;
 - `test`, `why`, `status`, `jobs`, `job`;
 - `draft` (never applies, even with `--allow-write`);
-- `apply`, `delete`, `notify_test` (dry only without `--allow-write`).
+- `apply`, `delete` (dry-run only without `--allow-write`);
+- `notify_test` (does nothing without `--allow-write`).
 
 Without `--allow-write`, `apply` and `delete` **only dry-run**, even when
 asked not to: the result says `"dry_run": true` with a note.
@@ -568,8 +569,8 @@ approval: otherwise nobody is told that a job is waiting.
   - AWS profiles or roles not in `server.aws`.
 - **Names:** `[A-Za-z0-9][A-Za-z0-9_.-]{0,63}`. A rule's `name:` must match
   its item name.
-- **`on: each` requires `id:`** (validation fails without it; schedule rules
-  default it to `event.scheduled_at`). Each id fires once. It can fire again
+- **`on: each` requires `id:`** (validation fails without it; a schedule rule
+  that leaves out `on:` gets `on: each` with `id: event.scheduled_at`). Each id fires once. It can fire again
   only after it has gone unseen for `server.retention.seen_events` (default
   7 days), counted against the rule's own activity.
 
@@ -859,7 +860,12 @@ routines:
 
 **Schedules:** use a `type: schedule` source (`at: "0 6 * * *"`, `timezone:`), as `nightly-report` does. See [Run a task on a schedule](schedule.md).
 
-**In the portal:** **Routines → New** starts from a starter, or from a recipe (any template with a routine, `/config/routines/new?recipe=nightly-report`). A recipe fills in only the routine; the banner lists the agents and sources it also needs. The **Reference** panel beside the editor lists every step field, and its tokens (`{{.steps.<id>.output}}` …) insert at the cursor.
+**In the portal:** **Routines → New** starts from a starter, or from a recipe
+(any template with a routine, `/config/routines/new?recipe=nightly-report`). A
+recipe fills in only the routine; the banner lists the template's other items
+(sources, agents, rules, …) to add separately. The **Reference** panel beside
+the editor lists every step field, and its tokens (`{{.steps.<id>.output}}` …)
+insert at the cursor.
 
 
 ---
@@ -1830,7 +1836,7 @@ the same as data.
 | `webhook_rejected` | deliveries were refused (signature, timestamp, rate limit); under a flood the stored reason updates at most every 10 s | check the secret and the header name the sender uses |
 | `eval_error` | `when:` or `id:` failed on a real event (a missing field, a wrong type) | `siphon test <rule> --last` shows the error; guard with `event.x != nil` |
 | `condition_false` | the last event didn't match | `siphon test <rule> --last`; compare with `siphon get sources` / the event |
-| `edge_already_true` | `on: edge` already fired and the condition is still true | expected; add `repeat:` to re-fire while true; or, for `on: each`, this event id already fired |
+| `edge_already_true` | `on: edge` already fired and the condition is still true; or, for `on: each`, this event id already fired | expected; for `on: edge`, add `repeat:` to re-fire while true |
 | `cooldown` | the event came inside the rule's cooldown | expected; shorten `cooldown:` if needed |
 | `fired` | it did fire, maybe as a duplicate (`on: each` fires once per `id`; an id that keeps coming back never fires again) | `siphon get audit --rule <rule>`; make `id:` unique per event |
 | `awaiting_approval` | it fired and is waiting for you | `siphon get approvals` |
@@ -1882,7 +1888,8 @@ siphon test <rule> - --header X-GitHub-Event=pull_request < event.json
 
 - **The daemon:** `journalctl -u siphon -f` (NixOS), or the container's
   logs.
-- **A run's units:** `journalctl -u 'siphon-action@*' -u 'siphon-action-open@*'` (runs with egress off, which includes cmd actions by default) and `journalctl -u 'siphon-mcp@*'` (MCP bridges).
+- **A run's units:** `journalctl -u 'siphon-action@*' -u 'siphon-action-open@*'` (runs with an open network,
+  which includes cmd actions by default) and `journalctl -u 'siphon-mcp@*'` (MCP bridges).
 - **Audit:** `siphon get audit --rule <rule> --since 1h` shows every fire,
   skip, approval and config change.
 - **History:** `siphon history` shows every portal or CLI change, with

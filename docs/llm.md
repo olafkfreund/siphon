@@ -102,7 +102,8 @@ offers these tools:
 - `inventory`, `get`, `explain`, `template`, `guide`;
 - `test`, `why`, `status`, `jobs`, `job`;
 - `draft` (never applies, even with `--allow-write`);
-- `apply`, `delete`, `notify_test` (dry only without `--allow-write`).
+- `apply`, `delete` (dry-run only without `--allow-write`);
+- `notify_test` (does nothing without `--allow-write`).
 
 Without `--allow-write`, `apply` and `delete` **only dry-run**, even when
 asked not to: the result says `"dry_run": true` with a note.
@@ -160,8 +161,8 @@ approval: otherwise nobody is told that a job is waiting.
   - AWS profiles or roles not in `server.aws`.
 - **Names:** `[A-Za-z0-9][A-Za-z0-9_.-]{0,63}`. A rule's `name:` must match
   its item name.
-- **`on: each` requires `id:`** (validation fails without it; schedule rules
-  default it to `event.scheduled_at`). Each id fires once. It can fire again
+- **`on: each` requires `id:`** (validation fails without it; a schedule rule
+  that leaves out `on:` gets `on: each` with `id: event.scheduled_at`). Each id fires once. It can fire again
   only after it has gone unseen for `server.retention.seen_events` (default
   7 days), counted against the rule's own activity.
 

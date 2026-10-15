@@ -31,4 +31,9 @@ routines:
 
 **Schedules:** use a `type: schedule` source (`at: "0 6 * * *"`, `timezone:`), as `nightly-report` does. See [Run a task on a schedule](schedule.md).
 
-**In the portal:** **Routines → New** starts from a starter, or from a recipe (any template with a routine, `/config/routines/new?recipe=nightly-report`). A recipe fills in only the routine; the banner lists the agents and sources it also needs. The **Reference** panel beside the editor lists every step field, and its tokens (`{{.steps.<id>.output}}` …) insert at the cursor.
+**In the portal:** **Routines → New** starts from a starter, or from a recipe
+(any template with a routine, `/config/routines/new?recipe=nightly-report`). A
+recipe fills in only the routine; the banner lists the template's other items
+(sources, agents, rules, …) to add separately. The **Reference** panel beside
+the editor lists every step field, and its tokens (`{{.steps.<id>.output}}` …)
+insert at the cursor.

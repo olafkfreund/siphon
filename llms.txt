@@ -33,7 +33,7 @@ Key facts for an assistant:
 - [Routines](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/routine.md): ordered steps, retries, steps.<id>.output, schedules via a `type: schedule` source.
 - [Single sign-on](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/sso.md): OIDC login, role mapping, taking access away.
 - [Behind a reverse proxy](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/reverse-proxy.md): TLS, client addresses, public URL.
-- [Connect an OAuth MCP server](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/connect-oauth-mcp.md): `siphon connect oauth <source>`.
+- [Connect an OAuth MCP server](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/connect-oauth-mcp.md): poll an MCP server or give an agent its tools when the server needs an OAuth login (Linear, Notion, Atlassian); `siphon connect oauth <source>`, refresh, logout.
 - [Demo](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/demo.md): a runnable walkthrough.
 - [Approvals](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/tasks/approvals.md): approve or deny from CLI or portal.
 - [Drafting tasks in plain language](https://raw.githubusercontent.com/olafkfreund/siphon/main/docs/drafting.md): `siphon draft` — a model connection writes the task, Siphon validates and repairs it, you review and apply.
