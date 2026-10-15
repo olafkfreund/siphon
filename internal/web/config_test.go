@@ -1,8 +1,10 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -579,5 +581,53 @@ func TestConfigValidateFragment(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(ce.dir, "secrets", "sources--s4+secret")); err == nil || ce.latest() != 0 {
 		t.Fatal("validate stored a secret")
+	}
+}
+
+// Plan step 5: the CLI reads the pending token over the admin API, uncached and unlogged.
+func TestNotionVerificationGet(t *testing.T) {
+	const tok = "secret_" + "getabcdefghijklmnopqrstuvwxyz0123456789"
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(old)
+	var pending atomic.Pointer[string]
+	ce := newCfgEnvFile(t, notionCfg)
+	ce.srv.NotionPending = func(string) (string, time.Time, bool) {
+		if p := pending.Load(); p != nil {
+			return *p, time.Now(), true
+		}
+		return "", time.Time{}, false
+	}
+	ce.srv.TakeNotionPending = func(string) (string, bool) { pending.Store(nil); return "", true }
+	if w := ce.api("GET", "/api/sources/n/notion-verification", ""); w.Code != 404 {
+		t.Fatalf("nothing pending: %d", w.Code)
+	}
+	v := tok
+	pending.Store(&v)
+	if w := ce.api("GET", "/api/sources/gh/notion-verification", ""); w.Code != 404 {
+		t.Fatalf("not notion: %d", w.Code)
+	}
+	if w := ce.api("GET", "/api/sources/nope/notion-verification", ""); w.Code != 404 {
+		t.Fatalf("no source: %d", w.Code)
+	}
+	w := ce.api("GET", "/api/sources/n/notion-verification", "")
+	if w.Code != 200 || w.Header().Get("Cache-Control") != "no-store" || !strings.Contains(w.Body.String(), tok) {
+		t.Fatalf("get: %d %v %s", w.Code, w.Header(), w.Body.String())
+	}
+	// no token: refused
+	r := httptest.NewRequest("GET", "/api/sources/n/notion-verification", nil)
+	r.RemoteAddr = "192.0.2.1:1234"
+	nw := httptest.NewRecorder()
+	ce.h.ServeHTTP(nw, r)
+	if nw.Code != 401 || strings.Contains(nw.Body.String(), tok) {
+		t.Fatalf("anonymous: %d", nw.Code)
+	}
+	// round trip: POST the token that was read
+	if w = ce.api("POST", "/api/sources/n/notion-verification", `{"token":"`+tok+`"}`); w.Code != 200 || pending.Load() != nil {
+		t.Fatalf("accept: %d %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(logs.String(), tok) {
+		t.Fatal("the token reached the log")
 	}
 }

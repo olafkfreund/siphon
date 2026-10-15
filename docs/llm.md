@@ -66,7 +66,7 @@ Always follow this order. Every step has `-o json`.
    - `azure-devops-build-failed` (Azure DevOps service hook, `signature: token` with `token_header: X-Siphon-Key`),
    - `azure-keyvault-secret-expiry` (Azure Event Grid, `signature: token` with `format: eventgrid`),
    - `gcp-cloud-build-failed` (Google Pub/Sub, `signature: google-oidc` with `format: pubsub`, no secret),
-   - `notion-page-summary` (Notion, `format: notion`: the source starts with no secret; accept the verification token it captures on the Sources page),
+   - `notion-page-summary` (Notion, `format: notion`: the source starts with no secret; accept the verification token it captures on the Sources page, or with `siphon connect notion <source>`),
    - `webhook-to-ntfy`, `local-summariser`, `nightly-report`,
      `aws-cloudwatch-alarm`.
 
@@ -100,11 +100,15 @@ claude mcp add siphon -- siphon mcp --allow-write       # also let it apply and 
 `siphon mcp` uses the same login as the CLI (`siphon login` first). It
 offers these tools:
 - `inventory`, `get`, `explain`, `template`, `guide`;
-- `test`, `why`, `status`, `jobs`, `job`;
-- `apply`, `delete`.
+- `test`, `why`, `status`, `jobs`, `job` (with `detail`: steps, prompt, hosts,
+  failure summary, notifications), `history`, `catalog`;
+- `get` also reads `egress` and `notifications`, and filters `audit` by
+  `rule`, `event`, `since` and `limit`;
+- `apply`, `delete`, `reset`, `enable`, `disable`, `restore`.
 
-Without `--allow-write`, `apply` and `delete` **only dry-run**, even when
-asked not to: the result says `"dry_run": true` with a note.
+Without `--allow-write`, `apply`, `delete` and `reset` **only dry-run**, and
+`enable` and `disable` change nothing, even when asked to: the result says so
+with a note. `restore` is refused. There are no approve, deny or connect tools.
 
 Even with `--allow-write`:
 - **Secrets:** secret values, and plain-text header values (which may be

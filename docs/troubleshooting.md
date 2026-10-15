@@ -40,6 +40,12 @@ siphon test <rule> event.json             # against a sample
 siphon test <rule> - --header X-GitHub-Event=pull_request < event.json
 ```
 
+## A job failed or is stuck
+
+- `siphon jobs show <id> --detail` shows the steps, the prompt, the hosts it
+  could reach, the failure summary and the notifications about it.
+- `siphon get egress` lists each allowlist and the hosts refused recently.
+
 ## Common errors
 
 - **`422` / exit 3 on apply:** every problem is listed. Fix them all, then

@@ -23,7 +23,7 @@ should also read `siphon guide`.
 | `--token-file` |  | file holding the API token (default: SIPHON_TOKEN_FILE, SIPHON_TOKEN, then client.yaml) |
 | `--url` |  | siphon URL (default: the saved login, else SIPHON_URL; needs -token-file or SIPHON_TOKEN* unless it is the saved login's) |
 
-Kinds for `get`: `sources`, `rules`, `agents`, `routines`, `credentials`, `notify`, `jobs`, `approvals`, `audit`, `connections`.
+Kinds for `get`: `sources`, `rules`, `agents`, `routines`, `credentials`, `notify`, `jobs`, `approvals`, `audit`, `connections`, `egress`.
 
 ## Exit codes
 
@@ -123,6 +123,20 @@ Example:
 
 ```sh
 siphon apply -f task.yaml --dry-run
+```
+
+### siphon config
+
+Print the effective YAML (file + portal edits) from the server; with -config: read it locally.
+
+```sh
+siphon config export [-config f]
+```
+
+Example:
+
+```sh
+siphon config export > siphon.effective.yaml
 ```
 
 ### siphon edit
@@ -240,11 +254,12 @@ siphon restore 12 --yes
 List jobs, or show one (with -config: the local `jobs ls`).
 
 ```sh
-siphon jobs [ls|show <id>] [-state s]
+siphon jobs [ls|show <id> [--detail]] [-state s]
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
+| `--detail` | `false` | show: steps, prompt, hosts, failure summary and notifications |
 | `--limit` | `0` | at most this many jobs |
 | `--state` |  | only jobs in this state |
 
@@ -287,7 +302,7 @@ siphon deny 42
 Connect a service (see `siphon catalog`) or model: a flag per field, prompts for the rest, secrets only via - or @file.
 
 ```sh
-siphon connect <service>|model|login [--<field> value ...]
+siphon connect <service>|model|login [--<field> value ...] | connect login --name n --logout [--yes] | connect notion <source> [--yes]
 ```
 
 | Flag | Default | Meaning |
@@ -306,7 +321,7 @@ siphon connect <service>|model|login [--<field> value ...]
 | `--homeserver-name` |  | Matrix: Homeserver name |
 | `--instance` |  | ServiceNow: Instance URL |
 | `--localpart` |  | Matrix: Bot user localpart |
-| `--logout` | `false` | oauth: delete the source's login |
+| `--logout` | `false` | oauth: delete the source's login; login: delete the stored login --name (asks, or --yes) |
 | `--mode` |  | GitHub: MCP server |
 | `--name` |  | name of the connection (default: the service or preset) |
 | `--no-test` | `false` | skip the connection test |
@@ -334,6 +349,7 @@ siphon connect <service>|model|login [--<field> value ...]
 | `--url` |  | model: endpoint URL (default: the preset's) |
 | `--value` |  | MCP server: Header value as - (stdin) or @file |
 | `--webhook` | `false` | GitHub: Also receive webhooks (pull requests, issues, pushes) |
+| `--yes` | `false` | login --logout, notion: do not ask |
 
 Example:
 
@@ -364,12 +380,13 @@ siphon catalog --category code -o json
 Dry-run a rule on an event, the last stored one, or (schedule rules) the event for a moment with --at; or check a service or model connection.
 
 ```sh
-siphon test <rule> [event.json|-] [--last] [--at <time>] | test service|model <name>
+siphon test <rule> [event.json|-] [--last] [--at <time>] | test -f rule.yaml [event.json|-] [--last] | test service|model <name>
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `--at` |  | schedule rules: test the event for this moment, like "2026-03-02 06:00" (in the source's zone) |
+| `-f` |  | test a rule from this apply file (not saved) instead of a saved rule: test -f rule.yaml [event.json|-] [--last] |
 | `--header` |  | an event header as name=value (repeatable) |
 | `--last` | `false` | use the last event the source produced |
 
@@ -590,24 +607,6 @@ Example:
 
 ```sh
 siphon validate -config siphon.yaml
-```
-
-### siphon config export
-
-Print the effective YAML (file + portal edits).
-
-```sh
-siphon config export [-config f]
-```
-
-| Flag | Default | Meaning |
-|---|---|---|
-| `--config` | `siphon.yaml` | config file (runs the command locally, without the API) |
-
-Example:
-
-```sh
-siphon config export -config siphon.yaml
 ```
 
 ### siphon rules test

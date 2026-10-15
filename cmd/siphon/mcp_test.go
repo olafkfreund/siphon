@@ -71,12 +71,12 @@ func TestMCPToolList(t *testing.T) {
 			t.Errorf("a deciding tool: %s", tool.Name)
 		}
 	}
-	for _, want := range []string{"inventory", "get", "explain", "template", "test", "why", "jobs", "job", "status", "apply", "delete", "guide", "draft", "notify_test"} {
+	for _, want := range []string{"inventory", "get", "explain", "template", "test", "why", "jobs", "job", "status", "apply", "delete", "guide", "draft", "notify_test", "enable", "disable", "reset", "history", "restore", "catalog"} {
 		if !have[want] {
 			t.Errorf("tool %s missing", want)
 		}
 	}
-	if len(res.Tools) != 14 {
+	if len(res.Tools) != 20 {
 		t.Errorf("%d tools: %v", len(res.Tools), have)
 	}
 }
@@ -253,5 +253,59 @@ func TestMCPGuards(t *testing.T) {
 	items, _ := parseApply([]byte(hdr + "agents:\n  ag: { kind: claude, approve: false }\n"))
 	if err := mcpGuard(&cli{}, items, true, true); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Plan step 8: the new tools exist, writes need --allow-write, and filters reach the query.
+func TestMCPParityTools(t *testing.T) {
+	m := newMCPEnv(t, false, false)
+	// without --allow-write: enable/disable/reset report and change nothing, restore is refused
+	if out, isErr := m.call(t, "disable", map[string]any{"rule": "r1"}); isErr || !strings.Contains(out, "writes are disabled") {
+		t.Fatalf("disable: %s", out)
+	}
+	if out := m.cliEnv.ok("status"); strings.Contains(out, "disabled:") {
+		t.Fatalf("rule changed without --allow-write: %s", out)
+	}
+	if out, isErr := m.call(t, "reset", map[string]any{"kind": "rules", "name": "r1"}); !strings.Contains(out, "writes are disabled") && !isErr {
+		t.Fatalf("reset: %s", out)
+	}
+	if out, isErr := m.call(t, "restore", map[string]any{"rev": 1}); !isErr || !strings.Contains(out, "writes are disabled") {
+		t.Fatalf("restore: %v %s", isErr, out)
+	}
+	if out, isErr := m.call(t, "history", nil); isErr || !strings.HasPrefix(strings.TrimSpace(out), "[") {
+		t.Fatalf("history: %s", out)
+	}
+	if out, isErr := m.call(t, "catalog", map[string]any{"category": "code"}); isErr || !strings.Contains(out, `"services"`) {
+		t.Fatalf("catalog: %.200s", out)
+	}
+	for _, kind := range []string{"egress", "notifications"} {
+		if out, isErr := m.call(t, "get", map[string]any{"kind": kind}); isErr {
+			t.Fatalf("get %s: %s", kind, out)
+		}
+	}
+	// the audit filters reach the API: a bad since is refused by it
+	if out, isErr := m.call(t, "get", map[string]any{"kind": "audit", "since": "nonsense", "rule": "r1", "limit": 5}); !isErr || !strings.Contains(out, "bad since") {
+		t.Fatalf("audit since: %s", out)
+	}
+	if out, isErr := m.call(t, "get", map[string]any{"kind": "audit", "event": "no-such-event"}); isErr || strings.TrimSpace(out) != "[]" {
+		t.Fatalf("audit event filter: %s", out)
+	}
+	if out, isErr := m.call(t, "job", map[string]any{"id": 1, "detail": true}); !isErr || !strings.Contains(out, "no such job") {
+		t.Fatalf("job detail 404: %s", out)
+	}
+
+	// with --allow-write they act
+	w := newMCPEnv(t, true, false)
+	if out, isErr := w.call(t, "disable", map[string]any{"rule": "r1"}); isErr || !strings.Contains(out, `"enabled": false`) {
+		t.Fatalf("disable: %s", out)
+	}
+	if out := w.cliEnv.ok("status"); !strings.Contains(out, "disabled: r1") {
+		t.Fatalf("not disabled: %s", out)
+	}
+	if out, isErr := w.call(t, "enable", map[string]any{"rule": "r1"}); isErr || !strings.Contains(out, `"enabled": true`) {
+		t.Fatalf("enable: %s", out)
+	}
+	if out, _ := w.call(t, "restore", map[string]any{"rev": 9999}); !strings.Contains(out, "error") {
+		t.Fatalf("restore missing rev: %s", out)
 	}
 }

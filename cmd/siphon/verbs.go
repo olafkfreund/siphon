@@ -24,7 +24,7 @@ import (
 // Config kinds the API edits, and the read-only listings `get` also takes.
 var (
 	configKinds = []string{"sources", "rules", "agents", "routines", "credentials", "notify"}
-	listKinds   = []string{"jobs", "approvals", "audit", "connections"}
+	listKinds   = []string{"jobs", "approvals", "audit", "connections", "egress"}
 )
 
 func usageErr(msg, hint string) error { return client.Usage(msg, hint) }
@@ -112,6 +112,7 @@ type statusData struct {
 	sources, rules, approvals, jobs []map[string]any
 	states                          map[string]int
 	disabled                        []string
+	last24                          map[string]any
 }
 
 func fetchStatus(call callFn) (*statusData, error) {
@@ -120,6 +121,9 @@ func fetchStatus(call callFn) (*statusData, error) {
 		if err := call("GET", path, nil, out); err != nil {
 			return nil, err
 		}
+	}
+	if err := call("GET", "/api/dashboard", nil, &d.last24); err != nil {
+		return nil, err
 	}
 	for _, j := range d.jobs {
 		d.states[str(j, "state")]++
@@ -136,7 +140,7 @@ func fetchStatus(call callFn) (*statusData, error) {
 // json is the -o json shape of `status`.
 func (d *statusData) json() map[string]any {
 	return map[string]any{"sources": d.sources, "rules": map[string]any{"total": len(d.rules), "disabled": nonNil(d.disabled)},
-		"approvals": len(d.approvals), "jobs": d.states}
+		"approvals": len(d.approvals), "jobs": d.states, "last_24h": d.last24}
 }
 
 func buildStatus(fs *flag.FlagSet) func(*cli, []string) error {
@@ -171,6 +175,8 @@ func buildStatus(fs *flag.FlagSet) func(*cli, []string) error {
 			fmt.Fprint(c.out, " none")
 		}
 		fmt.Fprintln(c.out)
+		l := d.last24
+		fmt.Fprintf(c.out, "last 24h: %s jobs (%s running, %s failed), agent runs %s/%s, success %s\n", str(l, "total"), str(l, "running"), str(l, "failed"), str(l, "agent_runs"), str(l, "agent_cap"), str(l, "success_rate"))
 		return nil
 	}
 }
@@ -213,7 +219,7 @@ func buildGet(fs *flag.FlagSet) func(*cli, []string) error {
 		case slices.Contains(configKinds, kind):
 			return c.getConfig(kind, name)
 		case kind == "jobs" && name != "":
-			return c.showJob(name)
+			return c.showJob(name, false)
 		case kind == "jobs":
 			return c.listJobs("/api/jobs" + qs)
 		case kind == "approvals" || kind == "audit":
@@ -225,9 +231,38 @@ func buildGet(fs *flag.FlagSet) func(*cli, []string) error {
 				return c.jsonOut(rows)
 			}
 			if kind == "approvals" {
-				return c.table([]string{"JOB", "RULE", "EXPIRES"}, mapRows(rows, "job_id", "rule", "expires_at"))
+				for _, r := range rows {
+					r["what"] = strings.TrimSpace(str(r, "kind") + " " + str(r, "target"))
+				}
+				return c.table([]string{"JOB", "RULE", "WHAT", "EXPIRES"}, mapRows(rows, "job_id", "rule", "what", "expires_at"))
 			}
 			return c.table([]string{"ID", "AT", "ACTOR", "EVENT", "JOB", "DETAIL"}, mapRows(rows, "id", "at", "actor", "event", "job_id", "detail"))
+		case kind == "egress":
+			var v map[string]any
+			if err := c.call("GET", "/api/egress", nil, &v); err != nil {
+				return err
+			}
+			if c.json() {
+				return c.jsonOut(v)
+			}
+			lists, _ := v["lists"].([]any)
+			rows := anyRows(lists, "owner", "name", "on", "hosts")
+			for i, l := range lists {
+				m, _ := l.(map[string]any)
+				hs, _ := m["hosts"].([]any)
+				var names []string
+				for _, h := range hs {
+					hm, _ := h.(map[string]any)
+					names = append(names, str(hm, "host")+":"+str(hm, "port"))
+				}
+				rows[i][3] = strings.Join(names, " ")
+			}
+			if err := c.table([]string{"OWNER", "NAME", "ON", "HOSTS"}, rows); err != nil {
+				return err
+			}
+			blocked, _ := v["blocked"].([]any)
+			fmt.Fprintln(c.out, "\nblocked recently:")
+			return c.table([]string{"HOST", "COUNT", "LAST", "JOB"}, anyRows(blocked, "host", "count", "last", "job_id"))
 		case kind == "connections":
 			var v map[string]any
 			if err := c.call("GET", "/api/connections", nil, &v); err != nil {
@@ -335,16 +370,23 @@ func (c *cli) listJobs(path string) error {
 	return c.table([]string{"ID", "RULE", "STATE", "ATTEMPT", "CREATED", "EXIT"}, mapRows(rows, "id", "rule", "state", "attempt", "created_at", "exit_code"))
 }
 
-func (c *cli) showJob(id string) error {
+func (c *cli) showJob(id string, detail bool) error {
 	if _, err := strconv.ParseInt(id, 10, 64); err != nil {
 		return usageErr("bad job id "+strconv.Quote(id), "ids come from `siphon jobs ls`")
 	}
 	var j map[string]any
-	if err := c.call("GET", "/api/jobs/"+id, nil, &j); err != nil {
+	path := "/api/jobs/" + id
+	if detail {
+		path += "?detail=1"
+	}
+	if err := c.call("GET", path, nil, &j); err != nil {
 		return err
 	}
 	if c.json() {
 		return c.jsonOut(j)
+	}
+	if detail {
+		return c.printJobDetail(j)
 	}
 	keys := make([]string, 0, len(j))
 	for k := range j {
@@ -362,15 +404,66 @@ func (c *cli) showJob(id string) error {
 	return nil
 }
 
+// printJobDetail is `jobs show --detail` in text: what the job runs, why, and what went wrong.
+func (c *cli) printJobDetail(j map[string]any) error {
+	w := c.out
+	fmt.Fprintf(w, "job %s: %s, rule %s, state %s, exit %s\n", str(j, "id"), str(j, "kind")+" "+str(j, "target"), str(j, "rule"), str(j, "state"), str(j, "exit_code"))
+	for _, k := range []string{"source", "source_type", "when", "on", "provider", "agent", "duration", "created_at"} {
+		if v := str(j, k); v != "" {
+			fmt.Fprintf(w, "%-12s %s\n", k+":", humanTime(v))
+		}
+	}
+	if v := str(j, "summary"); v != "" {
+		fmt.Fprintf(w, "failure:     %s\n", v)
+	}
+	if v := str(j, "connect"); v != "" {
+		fmt.Fprintf(w, "needs login: %s (siphon connect login ...)\n", v)
+	}
+	if steps, _ := j["steps"].([]any); len(steps) > 0 {
+		fmt.Fprintln(w, "steps:")
+		if err := c.table([]string{"ID", "KIND", "TARGET", "STATE"}, anyRows(steps, "id", "kind", "target", "state")); err != nil {
+			return err
+		}
+	}
+	if hosts, _ := j["can_reach"].([]any); len(hosts) > 0 {
+		fmt.Fprintln(w, "hosts it can reach:")
+		for _, h := range hosts {
+			m, _ := h.(map[string]any)
+			fmt.Fprintf(w, "  %s:%s\n", str(m, "host"), str(m, "port"))
+		}
+	}
+	if blocked, _ := j["blocked"].([]any); len(blocked) > 0 {
+		fmt.Fprintln(w, "blocked hosts:")
+		for _, h := range blocked {
+			m, _ := h.(map[string]any)
+			fmt.Fprintf(w, "  %s (%s)\n", str(m, "host"), str(m, "count"))
+		}
+	}
+	if v := str(j, "prompt"); v != "" {
+		fmt.Fprintf(w, "prompt:\n%s\n", v)
+	}
+	if notes, _ := j["notifications"].([]any); len(notes) > 0 {
+		fmt.Fprintln(w, "notifications:")
+		if err := c.table([]string{"CHANNEL", "EVENT", "STATE", "TITLE"}, anyRows(notes, "channel", "event", "state", "title")); err != nil {
+			return err
+		}
+	}
+	if o := str(j, "output"); o != "" {
+		fmt.Fprintf(w, "output:\n%s\n", o)
+	}
+	return nil
+}
+
 func buildJobs(fs *flag.FlagSet) func(*cli, []string) error {
+	detail := fs.Bool("detail", false, "show: steps, prompt, hosts, failure summary and notifications")
 	state := fs.String("state", "", "only jobs in this state")
 	limit := fs.Int("limit", 0, "at most this many jobs")
 	return func(c *cli, args []string) error {
 		if len(args) > 0 && args[0] == "show" {
-			if err := needArgs(args, 2, "jobs show <id>"); err != nil {
+			if err := needArgs(args, 2, "jobs show <id> [--detail]"); err != nil {
 				return err
 			}
-			return c.showJob(args[1])
+			return c.showJob(args[1], *detail)
 		}
 		if len(args) > 0 && args[0] != "ls" {
 			return usageErr("usage: siphon jobs [ls|show <id>]", "")
@@ -885,6 +978,26 @@ func buildRestore(fs *flag.FlagSet) func(*cli, []string) error {
 			return c.jsonOut(map[string]any{"ok": true, "restored": id})
 		}
 		c.say("restored revision %d as a new revision\n", id)
+		return nil
+	}
+}
+
+// buildConfig is `config export` against the server (with -config main.go runs it locally).
+func buildConfig(fs *flag.FlagSet) func(*cli, []string) error {
+	return func(c *cli, args []string) error {
+		if err := needArgs(args, 1, "config export [-config f]"); err != nil || args[0] != "export" {
+			return usageErr("usage: siphon config export [-config f]", "")
+		}
+		var res struct {
+			YAML string `json:"yaml"`
+		}
+		if err := c.call("GET", "/api/config/export", nil, &res); err != nil {
+			return err
+		}
+		if c.json() {
+			return c.jsonOut(res)
+		}
+		fmt.Fprint(c.out, res.YAML)
 		return nil
 	}
 }

@@ -64,6 +64,21 @@ func (s *server) acceptNotion(r *http.Request, actor, name, seen string) (any, i
 }
 
 func (s *server) notionRoutes(mux *http.ServeMux) {
+	// The pending token, for `siphon connect notion`: admin token only, never cached.
+	mux.HandleFunc("GET /api/sources/{name}/notion-verification", s.api(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		s.reply(w, r, func(r *http.Request) (any, int, error) {
+			src := s.Config().Sources[r.PathValue("name")]
+			if src == nil || src.Type != "webhook" || src.Format != "notion" || s.NotionPending == nil {
+				return nil, 404, errMsg("no such Notion source")
+			}
+			tok, at, ok := s.NotionPending(r.PathValue("name"))
+			if !ok {
+				return nil, 404, errMsg("no verification token pending")
+			}
+			return map[string]any{"token": tok, "at": at}, 200, nil
+		})
+	}))
 	mux.HandleFunc("POST /api/sources/{name}/notion-verification", s.api(func(w http.ResponseWriter, r *http.Request) {
 		s.reply(w, r, func(r *http.Request) (any, int, error) {
 			actor, err := apiActor(r)

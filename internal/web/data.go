@@ -319,16 +319,42 @@ type dashView struct {
 	SuccessRate, AgentBar                       string
 }
 
-func (s *server) dashboard(srcs []sourceView) (*dashView, error) {
-	now := s.Now()
-	d, err := store.GetDashboard(s.Store.DB, now.Add(-24*time.Hour))
+// dashStats is the dashboard's last-24-hours numbers, shared by the page and /api/dashboard.
+type dashStats struct {
+	Counts      map[string]int `json:"counts"`
+	Total       int            `json:"total"`
+	Running     int            `json:"running"`
+	Failed      int            `json:"failed"`
+	AgentRuns   int            `json:"agent_runs"`
+	AgentCap    int            `json:"agent_cap"`
+	SuccessRate string         `json:"success_rate"`
+	d           store.Dashboard
+}
+
+func (s *server) last24h() (dashStats, error) {
+	d, err := store.GetDashboard(s.Store.DB, s.Now().Add(-24*time.Hour))
 	if err != nil {
-		return nil, err
+		return dashStats{}, err
 	}
-	v := &dashView{Dashboard: d, AgentCap: s.Config().Limits.AgentRunsPerDay, Running: d.Counts["running"], Failed: d.Counts["failed"]}
+	v := dashStats{Counts: d.Counts, Running: d.Counts["running"], Failed: d.Counts["failed"], AgentRuns: d.AgentRuns, AgentCap: s.Config().Limits.AgentRunsPerDay, d: d}
 	for _, n := range d.Counts {
 		v.Total += n
 	}
+	v.SuccessRate = "—"
+	if fin := d.Counts["done"] + d.Counts["failed"]; fin > 0 {
+		v.SuccessRate = strconv.FormatFloat(100*float64(d.Counts["done"])/float64(fin), 'f', 1, 64) + "%"
+	}
+	return v, nil
+}
+
+func (s *server) dashboard(srcs []sourceView) (*dashView, error) {
+	now := s.Now()
+	st, err := s.last24h()
+	if err != nil {
+		return nil, err
+	}
+	d := st.d
+	v := &dashView{Dashboard: d, AgentCap: st.AgentCap, Running: st.Running, Failed: st.Failed, Total: st.Total, SuccessRate: st.SuccessRate}
 	switch h := now.Local().Hour(); {
 	case h < 5 || h >= 18:
 		v.Greeting = "Good evening"
@@ -336,10 +362,6 @@ func (s *server) dashboard(srcs []sourceView) (*dashView, error) {
 		v.Greeting = "Good morning"
 	default:
 		v.Greeting = "Good afternoon"
-	}
-	v.SuccessRate = "—"
-	if fin := d.Counts["done"] + d.Counts["failed"]; fin > 0 {
-		v.SuccessRate = strconv.FormatFloat(100*float64(d.Counts["done"])/float64(fin), 'f', 1, 64) + "%"
 	}
 	pct := 0
 	if v.AgentCap > 0 {
