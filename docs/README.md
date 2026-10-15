@@ -11,7 +11,7 @@ baseline in **`siphon.yaml`**.
    working agent task.
 2. **[Concepts](concepts.md):** source → rule → action, agents,
    connections, approvals, and what's sandboxed.
-3. **[Templates](templates/README.md):** about 30 ready-made tasks you can
+3. **[Templates](templates/README.md):** about 50 ready-made tasks you can
    apply as-is.
 4. **[Demo](demo.md):** a five-minute story in a VM: a bad deploy, an agent
    diagnosis you approve, a digest.
@@ -42,7 +42,8 @@ Home Assistant, Cloudflare, AWS, ServiceNow, …) ·
 [Models (Ollama and OpenAI-compatible)](connections/models.md) ·
 [Logins (Claude, Codex, agy)](connections/logins.md) ·
 [GitHub](connections/github.md) · [GitLab](connections/gitlab.md) ·
-[AWS](connections/aws.md) · [ServiceNow](connections/servicenow.md)
+[AWS](connections/aws.md) · [ServiceNow](connections/servicenow.md) ·
+[Azure DevOps](connections/azure-devops.md)
 
 ## When things go wrong
 

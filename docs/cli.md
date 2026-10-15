@@ -287,7 +287,7 @@ siphon deny 42
 Connect a service (see `siphon catalog`) or model: a flag per field, prompts for the rest, secrets only via - or @file.
 
 ```sh
-siphon connect <service>|model|login [--<field> value ...]
+siphon connect <service>|model|login|oauth <source> [--<field> value ...]
 ```
 
 | Flag | Default | Meaning |

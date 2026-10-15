@@ -176,7 +176,7 @@ siphon why digest
 ```text
 rule digest
  ✓ enabled
- ✓ source digest (webhook) is idle
+ ✓ source digest (webhook) is ok
  ✓ last event at 2026-10-07 15:41:03
  ✓ the last event satisfies the condition
  ✗ the last event was held back by the cooldown
