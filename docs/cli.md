@@ -302,7 +302,7 @@ siphon deny 42
 Connect a service (see `siphon catalog`) or model: a flag per field, prompts for the rest, secrets only via - or @file.
 
 ```sh
-siphon connect <service>|model|login [--<field> value ...] | connect login --name n --logout [--yes] | connect notion <source> [--yes]
+siphon connect <service>|model|login|oauth <source> [--<field> value ...] | connect login --name n --logout [--yes] | connect notion <source> [--yes]
 ```
 
 | Flag | Default | Meaning |
