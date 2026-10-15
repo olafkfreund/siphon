@@ -83,3 +83,48 @@ func TestConnectOAuth(t *testing.T) {
 		t.Fatalf("timeout: %d %s", code, er)
 	}
 }
+
+func TestConnectNotionVerification(t *testing.T) {
+	const tok = "secret_" + "clitoken0123456789"
+	var posted string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/sources/gone/notion-verification":
+			http.Error(w, `{"error":"no verification token pending"}`, 404)
+		case r.Method == "GET":
+			w.Write([]byte(`{"token":"` + tok + `","at":"2026-01-01T00:00:00Z"}`))
+		case r.Method == "POST":
+			b := new(bytes.Buffer)
+			b.ReadFrom(r.Body)
+			posted = b.String()
+			if !strings.Contains(posted, tok) {
+				http.Error(w, `{"error":"the pending token changed"}`, 409)
+				return
+			}
+			w.Write([]byte(`{"applied":true}`))
+		}
+	}))
+	defer api.Close()
+	tokf := filepath.Join(t.TempDir(), "token")
+	os.WriteFile(tokf, []byte("tok\n"), 0o600)
+	t.Setenv("SIPHON_URL", api.URL)
+	t.Setenv("SIPHON_TOKEN_FILE", tokf)
+	run := func(tty bool, stdin string, args ...string) (int, string, string) {
+		var o, er bytes.Buffer
+		c := &cli{in: strings.NewReader(stdin), out: &o, errw: &er, isTTY: tty, g: globals{output: "text"}}
+		code := c.run(args)
+		return code, o.String(), er.String()
+	}
+	if code, out, _ := run(false, "", "connect", "notion", "n"); code != 2 || !strings.Contains(out, tok) || posted != "" {
+		t.Fatalf("no terminal: %d %q", code, posted) // shown, but not stored without --yes
+	}
+	if code, _, _ := run(true, "n\n", "connect", "notion", "n"); code != 2 || posted != "" {
+		t.Fatalf("declined: %d %q", code, posted)
+	}
+	if code, out, er := run(false, "", "connect", "notion", "n", "--yes"); code != 0 || !strings.Contains(out, "stored") || !strings.Contains(posted, tok) {
+		t.Fatalf("yes: %d %s %s", code, out, er)
+	}
+	if code, _, _ := run(false, "", "connect", "notion", "gone", "--yes"); code != 4 {
+		t.Fatalf("404: %d", code)
+	}
+}

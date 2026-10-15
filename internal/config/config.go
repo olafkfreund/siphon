@@ -1933,10 +1933,10 @@ func implicitFor(c *Config, name string) bool {
 // HostPort is one egress allowlist entry. Host is an exact name or *.suffix
 // (subdomains only). The integrator maps it to the proxy's entry type.
 type HostPort struct {
-	Host         string
-	Port         int
-	AllowPrivate bool // from an allow_private MCP source or a listed private model endpoint
-	NoLinkLocal  bool // with AllowPrivate: still refuse link-local and metadata addresses
+	Host         string `json:"host"`
+	Port         int    `json:"port"`
+	AllowPrivate bool   `json:"allow_private,omitempty"` // from an allow_private MCP source or a listed private model endpoint
+	NoLinkLocal  bool   `json:"no_link_local,omitempty"` // with AllowPrivate: still refuse link-local and metadata addresses
 }
 
 func (h HostPort) String() string {

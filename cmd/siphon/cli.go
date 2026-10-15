@@ -20,7 +20,7 @@ import (
 // given -config). Client mode talks to a running siphon over its API.
 
 // localOnly never goes through the API.
-var localOnly = []string{"version", "exec-job", "agent-run", "mcp-bridge", "mcp-servicenow", "schema", "validate", "config", "rules", "run-once", "serve", "credentials", "backup"}
+var localOnly = []string{"version", "exec-job", "agent-run", "mcp-bridge", "mcp-servicenow", "schema", "validate", "rules", "run-once", "serve", "credentials", "backup"}
 
 // clientMode reports whether cmd runs against a server: not a local-only
 // command, and not one of the old local commands given -config.
@@ -28,7 +28,7 @@ func clientMode(cmd string, args []string) bool {
 	if slices.Contains(localOnly, cmd) {
 		return false
 	}
-	if cmd == "jobs" || cmd == "approve" || cmd == "deny" {
+	if cmd == "jobs" || cmd == "config" || cmd == "approve" || cmd == "deny" {
 		for _, a := range args {
 			if a == "-config" || a == "--config" || strings.HasPrefix(a, "-config=") || strings.HasPrefix(a, "--config=") {
 				return false
@@ -85,6 +85,7 @@ func commands() []command {
 		{Name: "status", Usage: "status", Mode: "client", build: buildStatus, Summary: "sources, rules, pending approvals and recent jobs at a glance", Example: "siphon status -o json"},
 		{Name: "get", Usage: "get <kind> [name]", Mode: "client", build: buildGet, Summary: "list or show config items (sources rules agents routines credentials notify) or jobs, approvals, audit, connections", Example: "siphon get rules disk-full"},
 		{Name: "apply", Usage: "apply -f <file|-> [--dry-run] [--secret k=@file|k=-] [--yes]", Mode: "client", build: buildApply, Summary: "create or update items from a siphon.yaml-shaped file, all or nothing", Example: "siphon apply -f task.yaml --dry-run"},
+		{Name: "config", Usage: "config export [-config f]", Mode: "client", build: buildConfig, Summary: "print the effective YAML (file + portal edits) from the server; with -config: read it locally", Example: "siphon config export > siphon.effective.yaml"},
 		{Name: "edit", Usage: "edit <kind> <name>", Mode: "client", build: buildEdit, Summary: "edit one item in $EDITOR, with a stale-edit check", Example: "siphon edit rules disk-full"},
 		{Name: "delete", Usage: "delete <kind> <name> [--dry-run]", Mode: "client", build: buildDelete, Summary: "delete an item (a file item is hidden, a portal item removed)", Example: "siphon delete rules disk-full --dry-run"},
 		{Name: "reset", Usage: "reset <kind> <name> [--dry-run]", Mode: "client", build: buildReset, Summary: "drop the portal's change to an item, back to siphon.yaml", Example: "siphon reset rules disk-full"},
@@ -92,12 +93,12 @@ func commands() []command {
 		{Name: "disable", Usage: "disable <rule>", Mode: "client", build: buildToggle("disable"), Summary: "turn a rule off (runtime override)", Example: "siphon disable disk-full"},
 		{Name: "history", Usage: "history [kind name | <rev>]", Mode: "client", build: buildHistory, Summary: "config revisions, newest first; a revision number shows its diff", Example: "siphon history rules disk-full"},
 		{Name: "restore", Usage: "restore <rev> [--yes]", Mode: "client", build: buildRestore, Summary: "put the config overlay back as it was at a revision", Example: "siphon restore 12 --yes"},
-		{Name: "jobs", Usage: "jobs [ls|show <id>] [-state s]", Mode: "client", build: buildJobs, Summary: "list jobs, or show one (with -config: the local `jobs ls`)", Example: "siphon jobs ls -state pending_approval"},
+		{Name: "jobs", Usage: "jobs [ls|show <id> [--detail]] [-state s]", Mode: "client", build: buildJobs, Summary: "list jobs, or show one (with -config: the local `jobs ls`)", Example: "siphon jobs ls -state pending_approval"},
 		{Name: "approve", Usage: "approve <job id>", Mode: "client", build: buildDecide("approve"), Summary: "approve a pending job (with -config: local)", Example: "siphon approve 42"},
 		{Name: "deny", Usage: "deny <job id>", Mode: "client", build: buildDecide("deny"), Summary: "deny a pending job (with -config: local)", Example: "siphon deny 42"},
-		{Name: "connect", Usage: "connect <service>|model|login|oauth <source> [--<field> value ...]", Mode: "client", build: buildConnect, ownURL: true, Summary: "connect a service (see `siphon catalog`) or model: a flag per field, prompts for the rest, secrets only via - or @file", Example: "siphon connect github --name gh --token @token.txt --webhook"},
+		{Name: "connect", Usage: "connect <service>|model|login|oauth <source> [--<field> value ...] | connect login --name n --logout [--yes] | connect notion <source> [--yes]", Mode: "client", build: buildConnect, ownURL: true, Summary: "connect a service (see `siphon catalog`) or model: a flag per field, prompts for the rest, secrets only via - or @file", Example: "siphon connect github --name gh --token @token.txt --webhook"},
 		{Name: "catalog", Usage: "catalog [--category c]", Mode: "client", build: buildCatalog, Summary: "the services you can connect, by category, with what each needs on this install", Example: "siphon catalog --category code -o json"},
-		{Name: "test", Usage: "test <rule> [event.json|-] [--last] [--at <time>] | test service|model <name>", Mode: "client", build: buildTest, Summary: "dry-run a rule on an event, the last stored one, or (schedule rules) the event for a moment with --at; or check a service or model connection", Example: "siphon test disk-full --last"},
+		{Name: "test", Usage: "test <rule> [event.json|-] [--last] [--at <time>] | test -f rule.yaml [event.json|-] [--last] | test service|model <name>", Mode: "client", build: buildTest, Summary: "dry-run a rule on an event, the last stored one, or (schedule rules) the event for a moment with --at; or check a service or model connection", Example: "siphon test disk-full --last"},
 		{Name: "why", Usage: "why <rule>", Mode: "client", build: buildWhy, Summary: "why a rule did or didn't fire: a checklist, the likely reason and what to run next", Example: "siphon why disk-full"},
 		{Name: "new", Usage: "new task [--name n --source s|--webhook w|--poll p --url u|--schedule at [--timezone Z] ...] [--print]", Mode: "client", build: buildNew, ownURL: true, Summary: "build a rule (and its source) with a wizard or flags, then dry-run, confirm and apply", Example: "siphon new task --name alert --webhook alerts --when 'event.sev == \"high\"' --cmd '[\"notify\"]' --print"},
 		{Name: "template", alias: "example", Usage: "template [name]  (alias: example)", Mode: "client", build: buildTemplate, Summary: "list the ready-made task templates, or print one to pipe into `apply -f -`", Example: "siphon template github-pr-review > pr.yaml"},
@@ -111,7 +112,6 @@ func commands() []command {
 
 		{Name: "validate", Usage: "validate [-config f] [-v] [-file-only]", Mode: "local", Summary: "check the config (file + portal edits; -file-only: file alone; -v: print egress allowlists)", Example: "siphon validate -config siphon.yaml",
 			extra: []flagDoc{cfgFlag(), {"v", "bool", "false", "print egress allowlists"}, {"file-only", "bool", "false", "ignore portal edits"}}},
-		{Name: "config export", Usage: "config export [-config f]", Mode: "local", Summary: "print the effective YAML (file + portal edits)", Example: "siphon config export -config siphon.yaml", extra: []flagDoc{cfgFlag()}},
 		{Name: "rules test", Usage: "rules test [-config f] <rule> <event>", Mode: "local", Summary: "dry-run a rule against a saved event (JSON file)", Example: "siphon rules test -config siphon.yaml disk-full event.json", extra: []flagDoc{cfgFlag()}},
 		{Name: "run-once", Usage: "run-once [-config f]", Mode: "local", Summary: "poll every source once and run matching actions", Example: "siphon run-once -config siphon.yaml", extra: []flagDoc{cfgFlag()}},
 		{Name: "serve", Usage: "serve [-config f]", Mode: "local", Summary: "run the daemon", Example: "siphon serve -config siphon.yaml", extra: []flagDoc{cfgFlag()}},
