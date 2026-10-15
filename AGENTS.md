@@ -14,9 +14,9 @@ only have the binary. The short version:
 
 ```sh
 siphon inventory -o json            # what exists: sources, agents, connections, allowlists
-siphon template                     # ~30 ready-made tasks by category
+siphon template                     # about 50 ready-made tasks by category
 siphon template github-pr-review    # print one; its header says what to connect and which secrets to pass
-siphon explain rule                 # every field of a rule (also: source, agent, routine, credential)
+siphon explain rule                 # every field of a rule (also: source, agent, routine, credential, notify)
 siphon apply -f task.yaml --dry-run -o json   # validate + diff; fix every item in "errors"
 siphon apply -f task.yaml --yes     # after the user has seen the diff
 siphon test <rule> --last           # does it match the last real event?
@@ -60,8 +60,8 @@ siphon notify add phone --type ntfy --url - --yes   # URL on stdin: get told abo
 ## 2. Working on Siphon's code
 
 **Stack:**
-- Go 1.26, stdlib first, with `go-sdk` (MCP), `expr-lang`, `modernc`
-  SQLite, `golang.org/x/term`;
+- Go 1.26, stdlib first (see `go.mod`), with `go-sdk` (MCP), `expr-lang`,
+  `modernc` SQLite, `golang.org/x/term`;
 - the portal: htmx plus `html/template`, under a strict CSP;
 - a NixOS module, a microVM, an OCI image;
 - devenv.
@@ -72,9 +72,18 @@ siphon notify add phone --type ntfy --url - --yes   # URL on stdin: get told abo
 |---|---|
 | `cmd/siphon` | the binary: local commands (`serve`, `validate`, …) and the API client (`apply`, `get`, …) |
 | `internal/config` | config structs, `Validate`, the portal/API overlay rules (`overlay.go`), the JSON schema |
-| `internal/web` | portal and HTTP API (`api.go`, `configapi.go`, `connapi.go`, `diagapi.go`), templates in `templates/` |
+| `internal/web` | portal and HTTP API (`api.go`, `configapi.go`, `connapi.go`, `diagapi.go`), portal editors, recipes and live validation (`configweb.go`, `editors.go`), templates in `templates/` |
 | `internal/job` | the pipeline: polling, webhooks, rules → jobs, routines, approvals |
-| `internal/action` | running actions: sandboxed units, agents, the MCP bridge |
+| `internal/action` | running actions: sandboxed units, agents, starting their MCP bridges |
+| `internal/mcpbridge` | the MCP bridge that agents reach their tools through |
+| `internal/agentloop` | the runner for `kind: model` agents |
+| `internal/catalog` | `services.yaml`, the `siphon connect` catalogue |
+| `internal/servicenow` | the built-in ServiceNow MCP server (`package: servicenow`) and the native action client |
+| `internal/source` | source kinds: polling, webhooks and their auth |
+| `internal/rule` | rule evaluation and dry runs |
+| `internal/notify` | notification channels and events |
+| `internal/draft` | `siphon draft`: model-written tasks |
+| `internal/mcpoauth` | OAuth login for MCP sources |
 | `internal/client` | the CLI's API client |
 | `internal/store` | SQLite and the migrations (`migrations/NNNN_*.sql`) |
 | `nix/` | the NixOS module, the VM test, the microVM, the image, packages |
@@ -88,6 +97,7 @@ devenv test                             # the same, in the devenv shell
 nix flake check                         # VM test, smoke checks, eval checks (needs KVM)
 nix build --rebuild .#siphon.goModules  # after any go.mod change: confirms vendorHash for real
 go run ./cmd/siphon schema > schema/siphon.schema.json   # or UPDATE_SCHEMA=1 go test ./internal/config
+go generate ./docs                     # after changing a command/flag, the catalog, or any docs page: cli.md, connections/README.md, llms-full.txt
 ```
 
 **Workflow** (the org policy, enforced in review):

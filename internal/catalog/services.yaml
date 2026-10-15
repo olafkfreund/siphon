@@ -972,6 +972,8 @@ services:
          Only if Notion accepts it is it the real one.
       4. Then press "Use this token" in Siphon. Until then the webhook accepts
          nothing else.
+      From a terminal, `siphon connect notion <source>` does steps 2 and 4: it
+      shows the token, waits while you paste it into Notion, then stores it.
       If the wrong token was accepted, edit the source as YAML, delete its
       secret: line, and use "Resend token" in Notion. A Siphon restart loses a
       token that was not accepted yet: use "Resend token" too.

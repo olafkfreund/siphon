@@ -186,10 +186,11 @@ func writeJob(runDir string, gid int, spec JobSpec) error {
 // runUnit starts the unit for a prepared run dir and reads back its results.
 func runUnit(ctx context.Context, unit, runDir string, spec JobSpec, captureLimit int) (int, []byte, []byte, map[int][]byte, error) {
 	runErr := startUnit(ctx, unit)
+	var stopErr error
 	if ctx.Err() != nil {
 		// Cancelled or timed out: make sure the unit doesn't outlive the job.
 		sctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		_ = stopUnits(sctx, unit)
+		stopErr = stopUnits(sctx, unit)
 		cancel()
 		resetFailed(unit)
 	}
@@ -197,6 +198,8 @@ func runUnit(ctx context.Context, unit, runDir string, spec JobSpec, captureLimi
 	stderr := readCapped(filepath.Join(runDir, "stderr"), captureLimit)
 	writeback := readWritebacks(runDir, spec.Writeback)
 	switch {
+	case stopErr != nil:
+		return -1, stdout, stderr, writeback, fmt.Errorf("unit %s may still be running: %w", unit, stopErr)
 	case ctx.Err() != nil:
 		return -1, stdout, stderr, writeback, nil
 	case runErr == nil:

@@ -57,6 +57,7 @@ func (s HTTP) Poll(ctx context.Context) (Event, error) {
 	if s.transport != nil {
 		client.Transport = s.transport
 	}
+	defer client.CloseIdleConnections() // each poll builds its own transport
 	resp, err := client.Do(req)
 	if err != nil {
 		return Event{}, err

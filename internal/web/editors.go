@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -165,6 +166,8 @@ func (s *server) editExtras(v *cfgView) error {
 					r.Kind, r.Target = "agent", st.Agent
 				case st.Unit != "":
 					r.Kind, r.Target = "unit", st.Unit
+				case st.ServiceNow != nil:
+					r.Kind, r.Target = "servicenow", st.ServiceNow.Op+" "+snTable(st.ServiceNow)
 				default:
 					r.Kind, r.Target = "cmd", strings.Join(st.Cmd, " ")
 				}
@@ -296,14 +299,9 @@ func (s *server) runRuleTest(r *http.Request) *testView {
 			return tv
 		}
 	}
-	var rl config.Rule
-	if err := yaml.Unmarshal([]byte(y), &rl); err != nil {
-		tv.Err = "rule: " + err.Error()
-		return tv
-	}
-	rl.Name = name
-	if rl.Source == "" || cfg.Sources[rl.Source] == nil {
-		tv.Err = "Pick a source."
+	rl, perr := parseRule(cfg, name, y)
+	if perr != nil {
+		tv.Err = perr.Error()
 		return tv
 	}
 	var data any
@@ -353,6 +351,19 @@ func (s *server) runRuleTest(r *http.Request) *testView {
 		}
 	}
 	return ruleTest(r.Context(), cfg, rl, data, headers)
+}
+
+// parseRule reads rule YAML that is not saved: it must parse and name a known source.
+func parseRule(cfg *config.Config, name, y string) (config.Rule, error) {
+	var rl config.Rule
+	if err := yaml.Unmarshal([]byte(y), &rl); err != nil {
+		return rl, errors.New("rule: " + err.Error())
+	}
+	rl.Name = name
+	if rl.Source == "" || cfg.Sources[rl.Source] == nil {
+		return rl, errors.New("Pick a source.")
+	}
+	return rl, nil
 }
 
 // ruleTest evaluates rl against one event on a throwaway store and renders

@@ -12,7 +12,7 @@ names every moving part once. The how-tos use these words.
 
 What you think of as one **task** ("when a PR is opened, have an agent
 review it") is these three linked parts. The portal's **Rules** page shows
-each rule as that flow, and `siphon new task` creates all three at once.
+each rule as that flow, and `siphon new task` creates the source and the rule in one go.
 
 ### Sources: where events come from
 
@@ -41,7 +41,7 @@ A rule has:
 
 `for_each:` splits one event into items (for example every failed task in a
 list), and the rule then sees each as `item`. `cooldown:` stops a rule
-firing again too soon. It's required when the action is an agent.
+firing again too soon. It's required when the action is an agent, a ServiceNow write, or a routine containing either.
 
 ### Actions: what to do
 
@@ -49,8 +49,9 @@ firing again too soon. It's required when the action is an agent.
 |---|---|---|
 | `cmd: [argv…]` | a command in a sandbox | an argv list, never a shell; `{{.event.x}}` filled in per element |
 | `agent: <name>` | an AI agent | approval required by default |
-| `routine: <name>` | ordered steps (`cmd` and `agent` steps, retries, `if:`) | one rule, several things |
+| `routine: <name>` | ordered steps (`cmd`, `agent`, `unit` and `servicenow` steps, retries, `if:`, `approve:`) | one rule, several things |
 | `unit: <name>` | an allowlisted systemd unit | privileged work you approved in `siphon.yaml` |
+| `servicenow: {connection, op, …}` | one ServiceNow API call made by the daemon, no LLM | writes need a `cooldown`; see [ServiceNow](connections/servicenow.md#writes-without-an-agent) |
 
 ## Agents and connections
 
@@ -64,10 +65,10 @@ It runs on a **connection**:
 | Connection | Agent `kind` | What it is |
 |---|---|---|
 | Subscription login | `claude`, `codex`, `agy` | your Claude, ChatGPT or Google subscription, used through its CLI |
-| API key | `claude`, `codex` | a pay-as-you-go key |
+| API key | `claude`, `codex`, `agy` | a pay-as-you-go key |
 | Model endpoint | `model` | Ollama or any OpenAI-compatible API, run by Siphon's own agent loop |
 
-**Services** (GitHub, GitLab, AWS) are presets. They create the right
+**Services** (GitHub, GitLab, AWS, ServiceNow, Azure DevOps, Slack, … see `siphon catalog`) are presets. They create the right
 sources, connections and webhooks in one go, with safe defaults.
 
 ## Approvals
@@ -99,8 +100,10 @@ ask for approval with `approve: true`.
 | | Best for |
 |---|---|
 | **CLI** (`siphon …`) | adding and changing things, scripting, AI assistants |
-| **Portal** (web) | seeing what's happening, verifying, approving, quick edits |
+| **Portal** (web) | seeing what's happening, verifying, approving, quick edits; every list page has search and filters |
 | **`siphon.yaml`** | the operator's baseline, kept in git |
+
+**Portal edits:** every item has **Edit as YAML**. It checks the YAML as you type (admins only) and marks the line of an error. **Review changes** shows the diff, and **Save & apply** applies it. Tab indents; press Esc, then Tab, to leave the editor.
 
 All three change the same items, and every change made through the portal
 or CLI shows in `siphon history` and on the portal's **History** page.

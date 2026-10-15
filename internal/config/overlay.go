@@ -318,8 +318,8 @@ func sameEndpoint(a, b string) bool {
 	return ua.Scheme == ub.Scheme && strings.EqualFold(ua.Host, ub.Host) && ua.Path == ub.Path && ua.RawQuery == ub.RawQuery
 }
 
-// CheckModelEndpoint is run when a portal save changes a credentials item
-// (never at load, so startup and validate do no DNS). It refuses an
+// CheckModelEndpoint is run when a portal check or save changes a credentials
+// item (never at load, so startup and `siphon validate` do no DNS). It refuses an
 // ollama/openai item whose host is (or does not provably stop being) private,
 // loopback or link-local, unless this config lists its host:port. Unresolvable
 // names fail closed. The runtime guard is the real control.

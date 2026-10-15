@@ -19,11 +19,8 @@ func (s *server) diagAPI(mux *http.ServeMux) {
 		mux.HandleFunc(pattern, s.api(func(w http.ResponseWriter, r *http.Request) { s.reply(w, r, f) }))
 	}
 	route("POST /api/rules/{name}/test", func(r *http.Request) (any, int, error) {
-		rl, ok := s.rule(r.PathValue("name"))
-		if !ok {
-			return nil, 404, errMsg("no such rule")
-		}
 		var body struct {
+			Rule    string            `json:"rule"` // unsaved rule YAML: test this instead of the saved rule
 			Event   json.RawMessage   `json:"event"`
 			Headers map[string]string `json:"headers"`
 			UseLast bool              `json:"use_last"`
@@ -31,6 +28,22 @@ func (s *server) diagAPI(mux *http.ServeMux) {
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(&body); err != nil {
 			return nil, 400, errMsg("bad JSON body")
+		}
+		var rl config.Rule
+		if body.Rule != "" {
+			var err error
+			if rl, err = parseRule(s.Config(), r.PathValue("name"), body.Rule); err != nil {
+				return nil, 0, errInvalid{err.Error()}
+			}
+			// the whole config must still be valid with this rule in it; nothing is saved
+			if _, err = s.dryRun(nil, putItem("rules", rl.Name, body.Rule), nil); err != nil {
+				return nil, 0, err
+			}
+		} else {
+			var ok bool
+			if rl, ok = s.rule(r.PathValue("name")); !ok {
+				return nil, 404, errMsg("no such rule")
+			}
 		}
 		var raw string
 		headers := map[string]string{}

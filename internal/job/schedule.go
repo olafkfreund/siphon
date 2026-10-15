@@ -156,7 +156,7 @@ func (p *Pipeline) scheduleFire(ctx context.Context, cfg *config.Config, name st
 		p.nudgeWorkers()
 	}
 	if ruleErr != nil {
-		slog.Warn("schedule rule failed", "source", name, "err", ruleErr)
+		slog.Warn("schedule rule failed", "source", name, "err", pollErrText(cfg, ruleErr))
 	}
 	return nil
 }

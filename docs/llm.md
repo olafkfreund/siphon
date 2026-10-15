@@ -40,7 +40,7 @@ For agents on ServiceNow, use the built-in tools (`package: servicenow`). Siphon
 - a model endpoint (`kind: model`, with an `ollama`/`openai` credential and
   a `model:`).
 
-**Services** (GitHub, GitLab, AWS) are presets that create sources and
+**Services** (GitHub, GitLab, AWS, ServiceNow, Azure DevOps, Slack, … see `siphon catalog`) are presets that create sources and
 connections for you.
 
 ## The workflow
@@ -54,7 +54,7 @@ Always follow this order. Every step has `-o json`.
 2. `siphon inventory -o json`: the names that exist (sources, agents,
    routines, connections, MCP packages, allowlists). Reuse them; never
    invent a connection or a secret.
-3. `siphon template`: list the ready-made templates (about 30, by
+3. `siphon template`: list the ready-made templates (about 50, by
    category), then `siphon template <name>` to start from the closest one,
    for example:
    - `github-pr-review`, `github-ci-failure`;
@@ -66,7 +66,7 @@ Always follow this order. Every step has `-o json`.
    - `azure-devops-build-failed` (Azure DevOps service hook, `signature: token` with `token_header: X-Siphon-Key`),
    - `azure-keyvault-secret-expiry` (Azure Event Grid, `signature: token` with `format: eventgrid`),
    - `gcp-cloud-build-failed` (Google Pub/Sub, `signature: google-oidc` with `format: pubsub`, no secret),
-   - `notion-page-summary` (Notion, `format: notion`: the source starts with no secret; accept the verification token it captures on the Sources page),
+   - `notion-page-summary` (Notion, `format: notion`: the source starts with no secret; accept the verification token it captures on the Sources page, or with `siphon connect notion <source>`),
    - `webhook-to-ntfy`, `local-summariser`, `nightly-report`,
      `aws-cloudwatch-alarm`.
 
@@ -74,7 +74,7 @@ Always follow this order. Every step has `-o json`.
    `--secret` flags to pass.
 
    `siphon explain <kind>` lists every field of a source, rule, agent,
-   routine or credential.
+   routine, credential or notify.
 4. **Write one apply file** (YAML shaped like `siphon.yaml`: `sources:`,
    `rules:`, `agents:`, `routines:`, `credentials:`).
 5. `siphon apply -f task.yaml --dry-run -o json` returns the diff, `errors`
@@ -100,11 +100,17 @@ claude mcp add siphon -- siphon mcp --allow-write       # also let it apply and 
 `siphon mcp` uses the same login as the CLI (`siphon login` first). It
 offers these tools:
 - `inventory`, `get`, `explain`, `template`, `guide`;
-- `test`, `why`, `status`, `jobs`, `job`;
-- `apply`, `delete`.
+- `test`, `why`, `status`, `jobs`, `job` (with `detail`: steps, prompt, hosts,
+  failure summary, notifications), `history`, `catalog`;
+- `get` also reads `egress` and `notifications`, and filters `audit` by
+  `rule`, `event`, `since` and `limit`;
+- `draft` (never applies, even with `--allow-write`);
+- `apply`, `delete`, `reset`, `enable`, `disable`, `restore`, `notify_test`.
 
-Without `--allow-write`, `apply` and `delete` **only dry-run**, even when
-asked not to: the result says `"dry_run": true` with a note.
+Without `--allow-write`, `apply`, `delete` and `reset` **only dry-run**, and
+`enable` and `disable` change nothing, even when asked to: the result says so
+with a note. `restore` is refused, and `notify_test` sends nothing. There are
+no approve, deny or connect tools.
 
 Even with `--allow-write`:
 - **Secrets:** secret values, and plain-text header values (which may be
@@ -159,8 +165,10 @@ approval: otherwise nobody is told that a job is waiting.
   - AWS profiles or roles not in `server.aws`.
 - **Names:** `[A-Za-z0-9][A-Za-z0-9_.-]{0,63}`. A rule's `name:` must match
   its item name.
-- **`on: each` needs a stable `id:`** (a delivery id, an item id).
-  Otherwise identical events are deduplicated for 7 days.
+- **`on: each` requires `id:`** (validation fails without it; a schedule rule
+  that leaves out `on:` gets `on: each` with `id: event.scheduled_at`). Each id fires once. It can fire again
+  only after it has gone unseen for `server.retention.seen_events` (default
+  7 days), counted against the rule's own activity.
 
 ## Exit codes
 
