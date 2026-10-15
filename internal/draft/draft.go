@@ -320,7 +320,8 @@ func chat(ctx context.Context, hc *http.Client, c Conn, msgs []Message) (string,
 // GuardedClient is an HTTP client for the model endpoint under the same rule
 // as listing models: public addresses only, unless the exact host:port is a
 // listed private endpoint (never link-local). It dials the checked address
-// and follows no redirects. Close the returned func when done.
+// and follows no redirects. Close the returned func when done. Use it only
+// for rawURL's host: the private allowance applies to whatever host a request names.
 func GuardedClient(ctx context.Context, cfg *config.Config, rawURL string) (*http.Client, func(), error) {
 	host, port, err := config.ModelURL(rawURL)
 	if err != nil {

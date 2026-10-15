@@ -21,7 +21,8 @@ const (
 // GuardedClient is the client a channel's messages go out on: public addresses
 // only, unless the url's host:port is in server.services.private_endpoints
 // (then private, never link-local). It dials the resolved, checked address and
-// follows no redirects. Close the returned func when done.
+// follows no redirects. Close the returned func when done. Use it only for
+// rawURL's host: the private allowance applies to whatever host a request names.
 func GuardedClient(ctx context.Context, cfg *config.Config, rawURL string) (*http.Client, func(), error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Hostname() == "" || !(u.Scheme == "https" || u.Scheme == "http" && cfg.ServiceEndpoint(rawURL)) {

@@ -149,6 +149,15 @@ Differences from the plan text:
   hold hunks from several steps, and splitting them by hand would risk
   mistakes.
 
+- **Review fixes:**
+  - **The job-detail notifications shape** (`job`, RFC 3339 times, no
+    `key`/`next_at`) is accepted. The field shipped in #136 the same day,
+    is unreleased, and step 5 asked for one shape.
+  - **Dial timeouts** grow from 5s to 10s or 30s. Callers keep their
+    overall 8s, 10s or 120s bounds.
+  - **The draft and notify `GuardedClient`** have a comment: use only for
+    rawURL's host.
+
 ## Audit findings (verbatim, ponytail-audit of main at 675db3a)
 
 Audit done. I changed no files. Most of what can be cut is duplicated code. Only three functions are actually dead (`deadcode` found 3, and `staticcheck -checks U1000` only flagged `emptyIfNil`). No dependency can be dropped.
