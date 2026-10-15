@@ -614,8 +614,6 @@ type Retry struct {
 
 const MaxRetryAttempts = 10
 
-// NeedsApproval reports whether a job from r waits for a person: the rule says
-// so, or its agent does.
 // StepNeedsApproval reports whether a routine step pauses for approval under
 // this config: its own approve, or an agent step whose agent approves (the
 // default). The job runner applies the same rule to the job's agent snapshot.
@@ -630,14 +628,17 @@ func (c *Config) StepNeedsApproval(st Step) bool {
 	return a == nil || a.Approve == nil || *a.Approve
 }
 
+// NeedsApproval reports whether a job from r waits for a person: the rule says
+// so, or its agent does (the default, and for an unknown agent).
 func (c *Config) NeedsApproval(r Rule) bool {
 	if r.Approve {
 		return true
 	}
-	if a := c.Agents[r.Action.Agent]; a != nil && a.Approve != nil {
-		return *a.Approve
+	if r.Action.Agent == "" {
+		return false
 	}
-	return false
+	a := c.Agents[r.Action.Agent]
+	return a == nil || a.Approve == nil || *a.Approve
 }
 
 // Load reads path, applies defaults and resolves secret refs. Unresolvable
