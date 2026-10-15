@@ -126,7 +126,7 @@ func (c *cli) secretValue(f secField) (string, error) {
 
 type connectOpts struct {
 	name, url, apiKey, file, setupToken string
-	noTest, noWait, logout              bool
+	noTest, noWait, logout, yes        bool
 }
 
 // flagName is a catalogue field key as a flag: role_arn becomes --role-arn.
@@ -141,7 +141,8 @@ func buildConnect(fs *flag.FlagSet) func(*cli, []string) error {
 	fs.StringVar(&o.setupToken, "setup-token", "", "login claude: a setup token as - (stdin) or @file (kind token)")
 	fs.BoolVar(&o.noTest, "no-test", false, "skip the connection test")
 	fs.BoolVar(&o.noWait, "no-wait", false, "oauth: print the login URL and return")
-	fs.BoolVar(&o.logout, "logout", false, "oauth: delete the source's login")
+	fs.BoolVar(&o.yes, "yes", false, "login --logout: delete without asking")
+	fs.BoolVar(&o.logout, "logout", false, "oauth: delete the source's login; login: delete the stored login --name (asks, or --yes)")
 	// One flag per catalogue field (the first service to use a key describes it).
 	for _, e := range catalog.All() {
 		for _, f := range e.Fields {
@@ -431,6 +432,9 @@ func (c *cli) connectModel(args []string, o *connectOpts) error {
 }
 
 func (c *cli) connectLogin(args []string, o *connectOpts) error {
+	if o.logout {
+		return c.logoutLogin(o)
+	}
 	if len(args) != 1 || !slices.Contains(loginProviders, args[0]) {
 		return usageErr("usage: siphon connect login claude|codex|agy (--file f | --setup-token - | --api-key -)", "")
 	}
@@ -801,4 +805,28 @@ func (c *cli) connectOAuth(args []string, o *connectOpts) error {
 		}
 	}
 	return fmt.Errorf("timed out waiting for the login of %s", args[0])
+}
+
+// logoutLogin deletes a stored login: `connect login --logout --name <n> [--yes]`.
+func (c *cli) logoutLogin(o *connectOpts) error {
+	if o.name == "" {
+		return usageErr("usage: siphon connect login --logout --name <name> [--yes]", "list the stored logins with `siphon get connections`")
+	}
+	if !o.yes {
+		ok, err := c.confirm("Delete the stored login " + o.name + "?")
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return usageErr("not deleted", "")
+		}
+	}
+	if err := c.call("DELETE", "/api/connections/logins/"+url.PathEscape(o.name), nil, nil); err != nil {
+		return err
+	}
+	if c.json() {
+		return c.jsonOut(map[string]string{"login": o.name, "status": "deleted"})
+	}
+	c.say("deleted login %s\n", o.name)
+	return nil
 }

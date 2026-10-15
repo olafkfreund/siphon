@@ -538,3 +538,31 @@ func TestNewTaskWizardSchedule(t *testing.T) {
 		t.Fatalf("wizard and flags differ:\n%s\n---\n%s", wiz, flag)
 	}
 }
+
+func TestConnectLoginLogout(t *testing.T) {
+	e := newCLIEnv(t)
+	e.write("k", "sk-x")
+	e.ok("connect", "login", "claude", "--name", "cl", "--api-key", "@"+filepath.Join(e.dir, "k"))
+	// no terminal and no --yes: usage error, and the login stays
+	if code, _, _ := e.do("connect", "login", "--name", "cl", "--logout"); code != 2 {
+		t.Fatalf("no yes: %d", code)
+	}
+	if code, _, _ := e.do("connect", "login", "--logout"); code != 2 {
+		t.Fatalf("no name: %d", code)
+	}
+	if out := e.ok("get", "connections"); !strings.Contains(out, "cl") {
+		t.Fatalf("login gone: %s", out)
+	}
+	// the credentials delete points at the right command
+	e.ok("connect", "login", "claude", "--name", "c2", "--api-key", "@"+filepath.Join(e.dir, "k"))
+	_, _, er := e.do("delete", "credentials", "c2")
+	if !strings.Contains(er, "connect login --name c2 --logout") {
+		t.Fatalf("hint: %s", er)
+	}
+	if out := e.ok("connect", "login", "--name", "cl", "--logout", "--yes"); !strings.Contains(out, "deleted login cl") {
+		t.Fatalf("logout: %s", out)
+	}
+	if code, _, _ := e.do("connect", "login", "--name", "cl", "--logout", "--yes"); code != 4 {
+		t.Fatalf("404: %d", code)
+	}
+}

@@ -756,6 +756,18 @@ func buildChange(fs *flag.FlagSet, verb string) func(*cli, []string) error {
 		if err := checkKind(args[0]); err != nil {
 			return err
 		}
+		if verb == "delete" && args[0] == "credentials" {
+			var conns struct {
+				Logins []map[string]any `json:"logins"`
+			}
+			if c.call("GET", "/api/connections", nil, &conns) == nil {
+				for _, l := range conns.Logins {
+					if str(l, "name") == args[1] {
+						fmt.Fprintf(c.errw, "hint: %s is a stored login; delete it with `siphon connect login --name %s --logout`\n", args[1], args[1])
+					}
+				}
+			}
+		}
 		method, path := "DELETE", "/api/config/"+args[0]+"/"+url.PathEscape(args[1])
 		if verb == "reset" {
 			method, path = "POST", path+"/reset"
