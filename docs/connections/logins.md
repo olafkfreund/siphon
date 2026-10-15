@@ -16,6 +16,9 @@ siphon connect login codex --name chatgpt --file ~/.codex/auth.json
 
 # Any of them with a pay-as-you-go API key instead of a subscription:
 siphon connect login claude --name claude-api --api-key @anthropic.key
+
+# Remove a login and its stored token or key (asks first; --yes skips the prompt):
+siphon connect login --name claude-max --logout
 ```
 
 Pass exactly one of `--setup-token`, `--file` or `--api-key`. Secrets are
